@@ -307,3 +307,36 @@ export function strata(cols: number[], bandH = 2, wobble = 0.6, seed = 0): Color
     return mulRGB(c, 1 + (hash3(x, y, z) - 0.5) * 0.12);
   };
 }
+
+/**
+ * Downsample a high-resolution model by an integer factor (LOD for distant
+ * instances). A coarse voxel is solid when enough of its block is filled; its
+ * color is the average of the block's colors; flags are OR-ed.
+ */
+export function downsampleModel(src: VoxelModel, factor = 2, fillThreshold = 0.3): VoxelModel {
+  const acc = new Map<number, { r: number; g: number; b: number; n: number; flags: number }>();
+  const f = factor;
+  src.forEach((x, y, z, rgbv, flags) => {
+    const cx = Math.floor(x / f),
+      cy = Math.floor(y / f),
+      cz = Math.floor(z / f);
+    const k = ((cx + 512) << 20) | ((cy + 512) << 10) | (cz + 512);
+    let a = acc.get(k);
+    if (!a) {
+      a = { r: 0, g: 0, b: 0, n: 0, flags: 0 };
+      acc.set(k, a);
+    }
+    a.r += (rgbv >> 16) & 255;
+    a.g += (rgbv >> 8) & 255;
+    a.b += rgbv & 255;
+    a.n++;
+    a.flags |= flags;
+  });
+  const out = new VoxelModel(src.name + `_lod${f}`);
+  const need = Math.max(1, Math.round(f * f * f * fillThreshold));
+  for (const [k, a] of acc) {
+    if (a.n < need && !(a.flags & (VF.EMISSIVE | VF.GLOW))) continue;
+    out.map.set(k, VoxelModel.pack(rgb(a.r / a.n, a.g / a.n, a.b / a.n), a.flags));
+  }
+  return out;
+}

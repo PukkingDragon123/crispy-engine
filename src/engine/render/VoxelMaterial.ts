@@ -35,7 +35,7 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
   }) as VoxelMaterial;
   const fx = { value: new THREE.Vector4(0, 0, 0, 0) }; // x flash, y dissolve, z emissive boost, w tintAmount
   const tint = { value: new THREE.Color(1, 1, 1) };
-  const emissiveStrength = { value: o.emissiveStrength ?? 2.2 };
+  const emissiveStrength = { value: o.emissiveStrength ?? 1.0 };
   const sway = o.sway ?? 0;
   m.userData = { fx, tint, emissiveStrength } as any;
   m.onBeforeCompile = (shader) => {
@@ -138,8 +138,8 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
         totalEmissiveRadiance += diffuseColor.rgb * (vMatx.x * uEmissiveStrength * (1.0 + vFx.z));
-        totalEmissiveRadiance += vec3(1.0, 0.95, 0.85) * clamp(vFx.x, 0.0, 1.0) * 1.5;
-        totalEmissiveRadiance += vec3(1.0, 0.55, 0.15) * dissolveEdge * 3.0;`
+        totalEmissiveRadiance += vec3(1.0, 0.95, 0.85) * clamp(vFx.x, 0.0, 1.0) * 0.6;
+        totalEmissiveRadiance += vec3(1.0, 0.55, 0.15) * dissolveEdge * 1.2;`
       );
   };
   m.customProgramCacheKey = () => 'voxel-mat-v1-' + sway.toFixed(3);

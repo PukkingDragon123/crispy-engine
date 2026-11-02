@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { CHARACTER_MODELS } from '../game/models/registryCharacters';
 import { PROP_MODELS } from '../game/models/registryProps';
 import { ENEMY_MODELS } from '../game/models/registryEnemies';
+import { VARIANT_MODELS } from '../game/models/registryVariants';
 import { buildRigGeo, RigInstance, RigSpec, voxelMesh } from '../engine/voxel/Rig';
 import { PostStack } from '../engine/render/Post';
 import { globalUniforms } from '../engine/render/VoxelMaterial';
@@ -54,7 +55,7 @@ const root = new THREE.Group();
 scene.add(root);
 let x = 0;
 const box = new THREE.Box3();
-const all = { ...CHARACTER_MODELS, ...ENEMY_MODELS, ...PROP_MODELS };
+const all = { ...CHARACTER_MODELS, ...ENEMY_MODELS, ...VARIANT_MODELS, ...PROP_MODELS };
 if (params.get('list')) { lbl.textContent = Object.keys(all).join(' '); }
 const labels: string[] = [];
 for (const n of names) {

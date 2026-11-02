@@ -53,10 +53,24 @@ export interface RigPartGeo {
   pivot: V3;
 }
 
+/**
+ * Facial expressions: spec.meta.expressions = {
+ *   [name]: { parts?: { [partName]: VoxelModel }, jaw?: number, brow?: [left, right] (radians, z-rotation of brow parts),
+ *             hide?: string[] }
+ * }  Part models must share the original part's pivot convention.
+ */
+export interface ExpressionSpec {
+  parts?: Record<string, VoxelModel>;
+  jaw?: number;
+  brow?: [number, number];
+  hide?: string[];
+}
+
 export interface RigGeo {
   spec: RigSpec;
   parts: RigPartGeo[];
   index: Record<string, number>;
+  exprGeos: Record<string, Record<number, THREE.BufferGeometry>>;
   /** socket local offsets (meters) relative to part pivot */
   sockets: Record<string, { part: number; offset: THREE.Vector3; rot: THREE.Euler }>;
 }
@@ -101,7 +115,17 @@ export function buildRigGeo(spec: RigSpec, cacheKey?: string): RigGeo {
       rot: new THREE.Euler(...(s.rot ?? [0, 0, 0])),
     };
   }
-  const rg: RigGeo = { spec, parts, index, sockets };
+  const exprGeos: RigGeo['exprGeos'] = {};
+  const exprs = (spec.meta?.expressions ?? {}) as Record<string, ExpressionSpec>;
+  for (const [ename, e] of Object.entries(exprs)) {
+    exprGeos[ename] = {};
+    for (const [pname, model] of Object.entries(e.parts ?? {})) {
+      const pi = index[pname];
+      if (pi === undefined) continue;
+      exprGeos[ename][pi] = buildVoxelGeometry(model, { voxelSize: vs, pivot: spec.parts[pi].pivot });
+    }
+  }
+  const rg: RigGeo = { spec, parts, index, sockets, exprGeos };
   rigCache.set(ck, rg);
   return rg;
 }
@@ -153,6 +177,46 @@ export class RigInstance {
       n.position.copy(p.offset);
     });
   }
+  expression = 'neutral';
+  /** target jaw/brow angles driven by the current expression (animation code may add to them) */
+  exprJaw = 0;
+  exprBrow: [number, number] = [0, 0];
+  /** swap eye/brow/mouth part geometry to a named expression (no-op if the rig has none) */
+  setExpression(name: string) {
+    if (name === this.expression) return;
+    const exprs = (this.geo.spec.meta?.expressions ?? {}) as Record<string, ExpressionSpec>;
+    const e = exprs[name];
+    if (!e && name !== 'neutral') return;
+    // restore defaults first
+    this.geo.parts.forEach((p, i) => {
+      const m = this.meshes[p.name];
+      if (m.geometry !== p.geo && !this.isExprGeo(m.geometry)) return;
+      m.geometry = p.geo;
+    });
+    for (const n of (exprs[this.expression]?.hide ?? [])) if (this.meshes[n]) this.meshes[n].visible = true;
+    this.expression = name;
+    if (!e) {
+      this.exprJaw = 0;
+      this.exprBrow = [0, 0];
+      return;
+    }
+    const geos = this.geo.exprGeos[name] ?? {};
+    for (const [pi, g] of Object.entries(geos)) {
+      const p = this.geo.parts[+pi];
+      this.meshes[p.name].geometry = g;
+    }
+    for (const n of e.hide ?? []) if (this.meshes[n]) this.meshes[n].visible = false;
+    this.exprJaw = e.jaw ?? 0;
+    this.exprBrow = e.brow ?? [0, 0];
+  }
+  private isExprGeo(g: THREE.BufferGeometry) {
+    for (const set of Object.values(this.geo.exprGeos)) for (const eg of Object.values(set)) if (eg === g) return true;
+    return false;
+  }
+  expressions() {
+    return Object.keys(this.geo.spec.meta?.expressions ?? {});
+  }
+
   /** hide/show a part (limb loss) */
   setPartVisible(name: string, v: boolean) {
     const m = this.meshes[name];
