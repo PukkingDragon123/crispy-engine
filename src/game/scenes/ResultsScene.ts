@@ -27,7 +27,7 @@ export interface RunResult {
 }
 
 const N = 88; // diorama columns per side
-const VS = 0.045; // diorama voxel size (m)
+const VS = 0.024; // diorama voxel size (m)
 
 function shade(c: number, f: number) {
   const r = Math.min(255, ((c >> 16) & 255) * f), g = Math.min(255, ((c >> 8) & 255) * f), b = Math.min(255, (c & 255) * f);
@@ -42,12 +42,24 @@ function buildDiorama(res: RunResult) {
   let hmin = Infinity, hmax = -Infinity;
   for (let j = 0; j < N; j++)
     for (let i = 0; i < N; i++) {
-      const h = res.heightAt(((i + 0.5) / N) * S, ((j + 0.5) / N) * S);
+      // box-filtered height: a smooth, readable miniature instead of spiky pillars
+      let h = 0;
+      for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) h += res.heightAt(((i + 0.17 + a * 0.33) / N) * S, ((j + 0.17 + b * 0.33) / N) * S);
+      h /= 9;
       hs.push(h);
       hmin = Math.min(hmin, h);
       hmax = Math.max(hmax, h);
     }
-  const levels = 14;
+  {
+    const src = hs.slice();
+    for (let j = 1; j < N - 1; j++)
+      for (let i = 1; i < N - 1; i++) {
+        let acc = 0;
+        for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) acc += src[(j + dj) * N + i + di];
+        hs[j * N + i] = acc / 9;
+      }
+  }
+  const levels = 9;
   const zoneOf = (x: number, z: number) => {
     let best = -1, bd = Infinity;
     for (const zn of sa.zones) {
@@ -353,9 +365,9 @@ export class ResultsScene implements GameScene {
     const k = Math.min(1, t / 6);
     const e = k * k * (3 - 2 * k);
     const a = 0.9 - e * 0.9 + Math.sin(t * 0.15) * 0.05;
-    const r = 1.4 + e * 1.6;
-    this.camera.position.set(Math.sin(a) * r, 0.55 + e * 0.75, 0.15 + Math.cos(a) * r);
-    const look = new THREE.Vector3(0, 0.15 + e * 0.75, 0.15 - e * 1.4);
+    const r = 1.15 + e * 1.5;
+    this.camera.position.set(Math.sin(a) * r, 0.5 + e * 0.8, 0.15 + Math.cos(a) * r);
+    const look = new THREE.Vector3(0, 0.08 + e * 0.8, 0.15 - e * 1.45);
     this.camera.lookAt(look);
     this.diorama.rotation.y = Math.sin(t * 0.2) * 0.06;
     void this.lines;

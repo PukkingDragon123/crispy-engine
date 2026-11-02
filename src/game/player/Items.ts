@@ -25,7 +25,7 @@ export const ITEMS: Record<ItemId, ItemDef> = {
   smoke: { id: 'smoke', name: 'Smoke Bomb', desc: 'Vanish in smoke: enemies lose you, +60% dodge for 4 s.', icon: 'smoke', rarity: 'uncommon', price: 35, stack: 2, model: 'smokeBomb' },
   shield: { id: 'shield', name: 'Tin Star Shield', desc: 'Gain a shield worth 40% max health for 10 s.', icon: 'shield', rarity: 'uncommon', price: 45, stack: 2, model: 'shieldCharm' },
   charm: { id: 'charm', name: "Serket's Charm", desc: 'Cleanse every status, 4 s invulnerable, heal 10%.', icon: 'charm', rarity: 'rare', price: 80, stack: 1, model: 'divineCharm' },
-  dynamite: { id: 'dynamite', name: 'Dynamite Bundle', desc: 'Throw a huge blast (6 m). Handle with care.', icon: 'bolt', rarity: 'uncommon', price: 40, stack: 2, model: 'tntCrate' },
+  dynamite: { id: 'dynamite', name: 'Dynamite Bundle', desc: 'Throw a huge blast (6 m). Handle with care.', icon: 'bolt', rarity: 'uncommon', price: 40, stack: 2, model: 'dynamite' },
   snakeoil: { id: 'snakeoil', name: 'Doc Hapi\'s Snake Oil', desc: '+30% speed and +25% fire rate for 10 s. Side effects: hiccups.', icon: 'bubble', rarity: 'common', price: 30, stack: 2, model: 'bottle' },
   whiskey: { id: 'whiskey', name: 'Cactus Whiskey', desc: '+25% crit chance and regeneration for 10 s. The desert sways.', icon: 'bullet', rarity: 'common', price: 30, stack: 2, model: 'bottle' },
 };
