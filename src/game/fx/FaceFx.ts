@@ -9,6 +9,8 @@ import type { RigInstance } from '../../engine/voxel/Rig';
 import { rnd } from '../../engine/math/rand';
 
 const MAX = 1600;
+/** 2D faces/emotes are disabled (user: "I hate 2D eyes", "don't make it cartoony") */
+export const FACE_2D = false;
 
 /** instanced face-aligned pixel sprites (orientation from the instance matrix) */
 export class FaceQuads {
@@ -167,6 +169,8 @@ export class EyeState {
   }
   /** write both eyes. eyeWorld: matrix of the eye part (pivot at eye center, oriented with head) */
   draw(q: FaceQuads, eyeL: THREE.Matrix4 | null, eyeR: THREE.Matrix4 | null, expr: string, gx = 0, gy = 0, emis = 1.4) {
+    // user direction: no 2D eyes anywhere — faces are fully voxel (realistic sockets / eyes)
+    if (!FACE_2D) return;
     const [sl, sr] = eyeShapes(expr, this.style);
     const blink = this.blinkT > 0 && !sl.includes('x') && !sl.includes('spiral');
     const flick = this.style === 'glow' ? 1 + Math.sin(this.flick * 23) * 0.06 + Math.sin(this.flick * 7.3) * 0.05 : 1;
@@ -207,7 +211,7 @@ export class RigEyes {
     this.r = rig.nodes['eye_r'] ?? rig.sockets['eye_r'] ?? null;
     let size = 0.1;
     const lm = rig.meshes['eye_l'];
-    if (lm) {
+    if (lm && FACE_2D) {
       lm.geometry.computeBoundingBox();
       const b = lm.geometry.boundingBox!;
       size = Math.max(0.04, Math.max(b.max.x - b.min.x, b.max.y - b.min.y) * 1.25);
@@ -225,7 +229,7 @@ export class RigEyes {
     this.gaze.set(Math.max(-1, Math.min(1, (local.x / l) * 2.2)), Math.max(-1, Math.min(1, (local.y / l) * 2.2)));
   }
   draw(q: FaceQuads, dt: number) {
-    if (!this.rig.root.visible) return;
+    if (!FACE_2D || !this.rig.root.visible) return;
     this.state.tick(dt);
     // hidden voxel eyes may have been re-shown by expression swaps
     this.rig.setPartVisible('eye_l', false);
@@ -239,6 +243,7 @@ export class RigEyes {
 export type EmoteKind = 'anger' | 'sweat' | 'q' | 'heart' | 'zzz' | 'note' | 'star' | 'drop' | 'exclaim';
 
 export function emote(p: Particles, at: { x: number; y: number; z: number }, kind: EmoteKind, scale = 1) {
+  if (!FACE_2D) return; // no cartoon emotes
   const sprite = kind === 'exclaim' ? 'dg_!' : 'fx_' + kind;
   const rise = kind === 'zzz' ? 0.6 : 1.2;
   p.emit({ pos: { x: at.x + (rnd.next() - 0.5) * 0.3, y: at.y, z: at.z }, count: 1, vel: { x: 0.2, y: rise, z: 0 }, life: [0.9, 1.1], size: [0.55 * scale, 0.7 * scale], sprite, color: 0xffffff, screen: true, sizeJitter: 0, drag: 1.5 });

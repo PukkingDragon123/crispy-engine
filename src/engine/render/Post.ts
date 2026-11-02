@@ -13,11 +13,11 @@ const GradeShader = {
     uVignette: { value: 0.32 },
     uCA: { value: 0.0 },
     uGrain: { value: 0.022 },
-    uSaturation: { value: 0.97 },
-    uContrast: { value: 1.05 },
+    uSaturation: { value: 1.14 },
+    uContrast: { value: 1.08 },
     uDesat: { value: 0.0 },
-    uTintShadows: { value: new THREE.Color(0.96, 0.96, 1.0) },
-    uTintHighlights: { value: new THREE.Color(1.04, 1.0, 0.93) },
+    uTintShadows: { value: new THREE.Color(0.985, 0.99, 1.01) },
+    uTintHighlights: { value: new THREE.Color(1.01, 1.0, 0.98) },
     uFlash: { value: new THREE.Vector4(1, 1, 1, 0) },
     uRadial: { value: 0.0 },
     uRadialCenter: { value: new THREE.Vector2(0.5, 0.5) },
@@ -110,7 +110,8 @@ export class PostStack {
     this.composer = new EffectComposer(renderer, rt);
     this.renderPass = new RenderPass(scene, camera);
     this.composer.addPass(this.renderPass);
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.16, 0.3, 1.25);
+    // bloom only catches the sun disk and true highlights (no glow haze)
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.07, 0.25, 1.8);
     this.composer.addPass(this.bloom);
     this.output = new OutputPass();
     this.composer.addPass(this.output);

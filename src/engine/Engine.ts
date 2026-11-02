@@ -67,8 +67,9 @@ export class Engine {
     r.setSize(this.width, this.height);
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFShadowMap;
-    r.toneMapping = THREE.ACESFilmicToneMapping;
-    r.toneMappingExposure = 1.0;
+    // filmic, physically plausible highlight roll-off (realistic look)
+    r.toneMapping = THREE.AgXToneMapping;
+    r.toneMappingExposure = 0.92;
     r.outputColorSpace = THREE.SRGBColorSpace;
     r.domElement.id = 'gl';
     container.appendChild(r.domElement);

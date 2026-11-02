@@ -81,8 +81,7 @@ export class RigBatch {
       const b = g.boundingBox!;
       const size = Math.max(0.04, Math.max(b.max.x - b.min.x, b.max.y - b.min.y) * 1.25);
       this.eyes = { l: el, r: er ?? -1, head: this.partIndex['head'] ?? this.geo.parts[el].parent, size };
-      this.skip[el] = 1;
-      if (er !== undefined) this.skip[er] = 1;
+      // voxel eye parts are drawn (no 2D eyes)
     }
   }
 

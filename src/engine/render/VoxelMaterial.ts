@@ -6,7 +6,7 @@ import * as THREE from 'three';
 
 export const globalUniforms = {
   uTime: { value: 0 },
-  uRim: { value: 0.55 },
+  uRim: { value: 0.1 },
   uSandColor: { value: new THREE.Color(0xe0b77a) },
 };
 
@@ -152,7 +152,7 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
       );
   };
   m.customProgramCacheKey = () => 'voxel-mat-v2-' + sway.toFixed(3);
-  m.envMapIntensity = 0.55;
+  m.envMapIntensity = 1.0;
   return m;
 }
 

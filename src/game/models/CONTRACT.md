@@ -54,6 +54,37 @@ Deviate only for a character's identity (jackal taller, mummy hunched, Anubis/Se
   exact numbers and is the source of truth). Boots/feet 6–7 long, 4 wide, 4 tall.
 - Total ≈ 52 voxels = 1.73 m (+ hat). `meta.height` etc. must match.
 
+## ★ STYLE v3 ADDENDUM (user, latest) — realistic creatures + Khonsu + ruined hideout ★
+Humanoid skeletons, outlaws and NPCs stay STYLE v2 cartoon. These are the exceptions:
+- **Husk (bring back the old design) and every bug: scarab, bomb scarab, golden scarab, giant scorpion, Big Bertha,
+  Sunroller.**
+  - Restore the earlier pre-v2 designs the user liked, then push them to **super detailed and realistic**.
+  - Use anatomically convincing segments, chitin plates, joints, hairs, mandibles and dried skin.
+  - Natural palettes. Tasteful per-voxel variation and texture are allowed again for these.
+  - Higher resolution: 1/40–1/48 for the husk and small bugs; 1/30–1/36 for giant ones.
+- **New creatures: the sand wolf (and its alpha) and dune worms (and their alpha).**
+  - Realistic and detailed.
+  - Rigged for super fluid procedural animation: many joints, see the part names below.
+- **The first boss is the Avatar of Khonsu:**
+  - A towering mummy (~3 m) with a crescent-moon scythe, a lunar crown and moon-silver and gold jewellery.
+  - In its last phase a giant hand of Khonsu descends from the sky.
+  - Epic, highly detailed, not chibi.
+- **The hideout is now a small ruined outpost:** messy, props everywhere, with a cinematic camera.
+
+**Part names for the new rigs**
+- **Wolf (quadruped):**
+  - `hips` (root) → `chest` → `neck` → `head` → `jaw`.
+  - Legs: `leg_fl` → `shin_fl` → `paw_fl` (same for fr, bl, br). Front legs parent to `chest`, back legs to `hips`.
+  - Tail: `tail1` → `tail2` → `tail3` (parent `hips`).
+  - Also `ear_l`/`ear_r`, `eye_l`/`eye_r`.
+  - Faces +Z. `meta.height`, `meta.radius`, `meta.length`.
+- **Dune worm:**
+  - `head` (root, with `jaw_t`/`jaw_b` mandibles or a petal maw) → `seg1` … `seg12`, each parented to the previous, with a
+    tapering tail.
+  - `meta.segLength` (m) and `meta.radius`.
+- **Khonsu hand:** `palm` (root, wrist at the origin, fingers pointing +Y). Fingers `f1_1`→`f1_2`→`f1_3` … `f4_*` and thumb
+  `t_1`→`t_2`→`t_3`, each pivot at its knuckle.
+
 ## Conventions
 - Rig origin = ground between feet. Y up. **Faces +Z.** Character LEFT = +X, RIGHT = -X.
 - `pivot` = joint center in the part's own voxel coords. `attach` = where that pivot

@@ -13,9 +13,10 @@ export interface CineShot {
 export class CameraRig {
   yaw = 0;
   pitch = -0.12;
-  dist = 4.1;
-  height = 1.35;
-  shoulder = 0.75;
+  // tight over-the-shoulder framing (hero big in the lower-left third)
+  dist = 2.65;
+  height = 1.22;
+  shoulder = 0.92;
   fov = 72;
   trauma = 0;
   recoil = 0;

@@ -6,6 +6,7 @@
 // pieces rise from the sand when their zone unlocks.
 import * as THREE from 'three';
 import * as PM from '../models/props';
+import { deadBush, dryGrass } from '../models/props/flora';
 import type { VoxelModel } from '../../engine/voxel/VoxelModel';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { sharedFoliageMaterial, sharedVoxelMaterial } from '../../engine/render/VoxelMaterial';
@@ -36,6 +37,8 @@ const KINDS: Record<string, KindDef> = {
   rock: { variants: 6, build: (v) => P.rock(v + 3, ((v % 3) + 1) as 1 | 2 | 3), solid: 'circle', radius: 0.8, destructible: undefined },
   boulder: { variants: 3, build: (v) => P.boulder(v), solid: 'circle', radius: 0.9 },
   bush: { variants: 4, build: (v) => P.dryBush(v), solid: 'none', foliage: true },
+  deadBush: { variants: 12, build: (v) => deadBush(v), solid: 'none', foliage: true },
+  dryGrass: { variants: 8, build: (v) => dryGrass(v), solid: 'none', foliage: true },
   reeds: { variants: 3, build: (v) => P.dryBush(v + 10), solid: 'none', foliage: true },
   palm: { variants: 4, build: (v) => P.palm(v), solid: 'circle', radius: 0.12, foliage: true },
   skull: { variants: 1, build: () => P.skull('cow'), solid: 'none' },

@@ -8,6 +8,8 @@ type V = { x: number; y: number; z: number };
 
 export type HitKind = 'flesh' | 'bone' | 'armor' | 'sand' | 'rock' | 'wood' | 'poison' | 'linen' | 'chitin' | 'spirit' | 'crystal';
 
+const COMIC_WORDS = false;
+
 export class Fx {
   lights: { l: THREE.PointLight; t: number; dur: number; i0: number }[] = [];
   private tmp = new THREE.Vector3();
@@ -207,6 +209,7 @@ export class Fx {
   private lastWord = 0;
   /** comic 2D onomatopoeia popping in 3D space (rate-limited so it stays special) */
   word(pos: V, sprite: string, scale = 1, force = false) {
+    if (!COMIC_WORDS) return; // no cartoon onomatopoeia (realistic direction)
     const now = performance.now();
     if (!force && now - this.lastWord < 650) return;
     this.lastWord = now;

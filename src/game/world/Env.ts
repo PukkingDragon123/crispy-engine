@@ -1,6 +1,7 @@
 // Atmosphere: gradient sky dome with sun glow + pixel stars, warm haze fog,
 // sun with player-following shadow frustum, hemisphere bounce, drifting voxel clouds.
 import * as THREE from 'three';
+import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { RNG } from '../../engine/math/rand';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { VoxelModel, vary } from '../../engine/voxel/VoxelModel';
@@ -63,8 +64,19 @@ void main(){
   #include <colorspace_fragment>
 }`;
 
+/** Preetham sky with an extra radiance gain (the stock shader is calibrated for exposure ~0.5) */
+export function makeSky(gain: number) {
+  const sky = new Sky();
+  const m = sky.material as THREE.ShaderMaterial;
+  m.uniforms.uGain = { value: gain };
+  m.fragmentShader = m.fragmentShader.replace('uniform float time;', 'uniform float time;\nuniform float uGain;').replace('gl_FragColor = vec4( texColor, 1.0 );', 'gl_FragColor = vec4( texColor * uGain, 1.0 );');
+  return sky;
+}
+
 export class Env {
   sky: THREE.Mesh;
+  /** physically based (Preetham) daytime sky — the realistic look; gradient dome is kept for night/underworld */
+  phys: Sky;
   sun: THREE.DirectionalLight;
   hemi: THREE.HemisphereLight;
   fog: THREE.Fog;
@@ -93,12 +105,19 @@ export class Env {
     this.sky.renderOrder = -10;
     this.sky.frustumCulled = false;
     scene.add(this.sky);
+    this.phys = makeSky(0.32);
+    this.phys.scale.setScalar(1000);
+    this.phys.frustumCulled = false;
+    this.phys.renderOrder = -11;
+    (this.phys.material as THREE.ShaderMaterial).depthWrite = false;
+    scene.add(this.phys);
     this.sun = new THREE.DirectionalLight(0xffffff, 3);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.bias = -0.0004;
-    this.sun.shadow.normalBias = 0.04;
-    (this.sun.shadow as any).radius = 2.5;
+    this.sun.shadow.bias = -0.00025;
+    this.sun.shadow.normalBias = 0.035;
+    (this.sun.shadow as any).radius = 3.2;
+    (this.sun.shadow as any).blurSamples = 12;
     const sc = this.sun.shadow.camera;
     sc.near = 1;
     sc.far = 260;
@@ -123,20 +142,31 @@ export class Env {
       az = THREE.MathUtils.degToRad(p.sunAzim);
     this.sunDir.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)).normalize();
     this.skyU.uSunDir.value.copy(this.sunDir);
-    this.sun.color.setHex(p.sunColor);
-    this.sun.intensity = p.sunIntensity;
+    // realistic: a strong white-warm sun, physically scattered sky, a weak warm ground bounce
+    const day = p.stars < 0.5;
+    this.phys.visible = day;
+    this.sky.visible = !day;
+    const su = (this.phys.material as THREE.ShaderMaterial).uniforms;
+    su.turbidity.value = p.sunElev < 20 ? 7 : 5.5; // desert dust
+    su.rayleigh.value = p.sunElev < 20 ? 2.6 : 1.6;
+    su.mieCoefficient.value = 0.006;
+    su.mieDirectionalG.value = 0.82;
+    su.sunPosition.value.copy(this.sunDir);
+    this.sun.color.setHex(p.sunColor).lerp(new THREE.Color(0xffffff), 0.35);
+    this.sun.intensity = p.sunIntensity * (day ? 1.4 : 1);
     this.hemi.color.setHex(p.hemiSky);
     this.hemi.groundColor.setHex(p.hemiGround);
-    this.hemi.intensity = p.hemiIntensity;
-    this.fog.color.setHex(p.fog);
-    this.fog.near = p.fogNear;
-    this.fog.far = p.fogFar;
+    this.hemi.intensity = p.hemiIntensity * (day ? 0.22 : 0.8);
+    // aerial perspective: dusty, slightly blue-shifted haze that thickens with distance
+    this.fog.color.setHex(p.fog).lerp(new THREE.Color(day ? 0xc9d2d8 : p.fog), day ? 0.25 : 0);
+    this.fog.near = p.fogNear * (day ? 0.8 : 1);
+    this.fog.far = p.fogFar * (day ? 1.35 : 1);
     this.clouds.visible = p.clouds > 0.01;
     this.clouds.children.forEach((c, i) => ((c as THREE.Mesh).visible = i / this.clouds.children.length < p.clouds));
     const cm = (this.clouds.children[0] as THREE.Mesh | undefined)?.material as THREE.MeshLambertMaterial | undefined;
     if (cm) {
-      cm.color.setHex(p.cloudColor).multiplyScalar(0.6);
-      cm.emissive.setHex(p.cloudColor);
+      cm.color.setHex(p.cloudColor).multiplyScalar(0.95);
+      cm.emissive.setHex(p.cloudColor).multiplyScalar(0.35);
     }
   }
 
@@ -167,7 +197,7 @@ export class Env {
 
   private buildClouds(seed: number) {
     const rng = new RNG(seed * 31 + 7);
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, fog: false, emissive: 0xffffff, emissiveIntensity: 0.55 });
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, fog: false, emissive: 0xffffff, emissiveIntensity: 0.4 });
     for (let c = 0; c < 14; c++) {
       const m = new VoxelModel('cloud');
       const blobs = rng.int(3, 6);
@@ -199,6 +229,27 @@ export class Env {
   /** prefiltered desert-sky environment for PBR reflections (metal, gold, wet) */
   applyEnvMap(renderer: THREE.WebGLRenderer) {
     const p = this.preset;
+    if (p.stars < 0.5) {
+      // image-based lighting straight from the physical sky + a warm sand ground for bounce light
+      const envScene = new THREE.Scene();
+      const sky = makeSky(0.32);
+      sky.scale.setScalar(100);
+      const su = (sky.material as THREE.ShaderMaterial).uniforms;
+      const src = (this.phys.material as THREE.ShaderMaterial).uniforms;
+      for (const k of ['turbidity', 'rayleigh', 'mieCoefficient', 'mieDirectionalG']) su[k].value = src[k].value;
+      su.sunPosition.value.copy(this.sunDir);
+      envScene.add(sky);
+      const ground = new THREE.Mesh(new THREE.CircleGeometry(60, 24), new THREE.MeshBasicMaterial({ color: new THREE.Color(p.hemiGround).multiplyScalar(0.55) }));
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.y = -2;
+      envScene.add(ground);
+      const pm = new THREE.PMREMGenerator(renderer);
+      const rt = pm.fromScene(envScene, 0.04);
+      this.scene.environment = rt.texture;
+      this.scene.environmentIntensity = 0.42;
+      pm.dispose();
+      return rt;
+    }
     const envScene = new THREE.Scene();
     const geo = new THREE.SphereGeometry(10, 32, 16);
     const col: number[] = [];
@@ -229,6 +280,7 @@ export class Env {
   update(focus: THREE.Vector3, dt: number, time: number) {
     this.skyU.uTime.value = time;
     this.sky.position.copy(focus);
+    this.phys.position.copy(focus);
     const ext = this.shadowExtent;
     const sc = this.sun.shadow.camera;
     if (sc.right !== ext) {

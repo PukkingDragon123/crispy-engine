@@ -456,7 +456,10 @@ function applyTheme(ctx: ThemeCtx, zn: ZoneDef) {
   const commonProps = (cact = 10, rocks = 8) => {
     scatter(ctx, zn, 'cactus', cact + 4, 10, R - 4, 7);
     scatter(ctx, zn, 'rock', Math.max(2, rocks - 3), 8, R - 2, 8);
-    scatter(ctx, zn, 'bush', 8, 6, R - 2, 5);
+    scatter(ctx, zn, 'bush', 6, 6, R - 2, 5);
+    // the desert is full of dead brush and dry grass
+    scatter(ctx, zn, 'deadBush', 34, 4, R + 6, 3.2);
+    scatter(ctx, zn, 'dryGrass', 46, 3, R + 6, 2.2);
     scatter(ctx, zn, 'tumbleweed', 5, 6, R - 8, 10);
     woodScatter(ctx, zn);
   };

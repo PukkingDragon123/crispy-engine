@@ -7,9 +7,10 @@ import { noise, hash2, clamp } from '../../engine/math/rand';
 import { globalUniforms } from '../../engine/render/VoxelMaterial';
 
 const CHUNK = 32;
-const LOD_CELL = [0.25, 0.5, 1, 2, 4];
-const LOD_STEP = [0.125, 0.25, 0.5, 1, 2];
-const LOD_DIST = [36, 76, 136, 224, 350];
+// near field: 12.5 cm sand columns (much higher voxel count), coarser rings outward
+const LOD_CELL = [0.125, 0.25, 0.5, 1, 2, 4];
+const LOD_STEP = [0.0625, 0.125, 0.25, 0.5, 1, 2];
+const LOD_DIST = [22, 46, 86, 146, 234, 360];
 
 // sRGB palette per material: [top A, top B, side]
 const MATCOL: Record<number, [number, number, number]> = {
@@ -81,6 +82,7 @@ export function makeTerrainMaterial(wind: { x: number; z: number }) {
         varying float vTM;
         varying vec3 vWP;
         varying vec3 vWN;
+        vec3 sandBump = vec3(0.0);
         float th(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }`
       )
       .replace(
@@ -97,6 +99,19 @@ export function makeTerrainMaterial(wind: { x: number; z: number }) {
           float m = floor(vTM + 0.5);
           if (m <= 2.0 || m == 6.0) {
             if (top) {
+              // wind ripples: asymmetric (gentle windward, steep lee) bands that catch the low sun
+              vec2 wd = normalize(uWind + vec2(1e-4));
+              vec2 pw = vec2(dot(vWP.xz, wd), dot(vWP.xz, vec2(-wd.y, wd.x)));
+              float ph = pw.x * 2.6 + sin(pw.y * 0.31 + th(floor(vWP.xz * 0.05)) * 6.0) * 1.3;
+              float rf = fract(ph);
+              float dh = rf < 0.72 ? 1.0 / 0.72 : -1.0 / 0.28;
+              float fade = smoothstep(42.0, 8.0, distance(vWP, cameraPosition));
+              vec2 g = wd * dh * 2.6 * 0.012 * fade;
+              sandBump = vec3(-g.x, 0.0, -g.y);
+              jit += (rf > 0.72 ? -0.05 : (rf < 0.12 ? 0.03 : 0.0)) * fade;
+              // grain: three-tone speckle at 32 px / m
+              float gr = th(floor(vWP.xz * 32.0));
+              jit += gr > 0.93 ? 0.06 : (gr < 0.07 ? -0.07 : 0.0);
               vec2 q = floor(vWP.xz * 16.0) / 16.0;
               float rp = fract(dot(q, uWind) * 1.25 + th(floor(vWP.xz * 0.35)) * 0.45 + sin(dot(q, vec2(-uWind.y, uWind.x)) * 0.6) * 0.25);
               jit += rp < 0.3 ? -0.055 : (rp < 0.42 ? 0.035 : 0.0);
@@ -128,12 +143,17 @@ export function makeTerrainMaterial(wind: { x: number; z: number }) {
         }`
       )
       .replace(
+        '#include <normal_fragment_maps>',
+        `#include <normal_fragment_maps>
+        normal = normalize(normal + (viewMatrix * vec4(sandBump, 0.0)).xyz);`
+      )
+      .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
         totalEmissiveRadiance += vec3(1.0, 0.92, 0.75) * sparkle * 0.45;`
       );
   };
-  m.customProgramCacheKey = () => 'terrain-v2';
+  m.customProgramCacheKey = () => 'terrain-v3';
   (m as any).userData = { uWind, uMarks, uMarkArea, uMarkClock };
   return m;
 }
@@ -307,7 +327,18 @@ function buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number)
   };
   const quadCols = new Array(12).fill(0);
   const AO = [0.62, 0.78, 0.9, 1.0];
+  let run: { x0: number; x1: number; z0: number; z1: number; h: number; m: number; hex: number; b: number } | null = null;
+  const flushRun = () => {
+    if (!run) return;
+    toLin(run.hex, run.b, quadCols, 0);
+    toLin(run.hex, run.b, quadCols, 3);
+    toLin(run.hex, run.b, quadCols, 6);
+    toLin(run.hex, run.b, quadCols, 9);
+    pushQuad(run.x0, run.h, run.z0, run.x0, run.h, run.z1, run.x1, run.h, run.z1, run.x1, run.h, run.z0, 0, 1, 0, quadCols, run.m, false);
+    run = null;
+  };
   for (let j = 0; j < N; j++) {
+    flushRun();
     for (let i = 0; i < N; i++) {
       const k = i + 1 + (j + 1) * W;
       const h = H[k];
@@ -321,9 +352,9 @@ function buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number)
       const pal = MATCOL[m] ?? MATCOL[0];
       // top color: large patches + per-cell jitter
       const patch = noise.n2(wx * 0.045, wz * 0.045) * 0.5 + 0.5;
-      const cj = hash2(Math.floor(wx * 2), Math.floor(wz * 2));
-      let topHex = patch + (cj - 0.5) * 0.35 > 0.5 ? pal[0] : pal[1];
-      let bright = 1 + (cj - 0.5) * 0.08;
+      const cj = hash2(Math.floor(wx * 0.5), Math.floor(wz * 0.5));
+      let topHex = patch + (cj - 0.5) * 0.18 > 0.5 ? pal[0] : pal[1];
+      let bright = 1;
       if (m === MAT.ROCK || m === MAT.DARK_ROCK) {
         topHex = STRATA[Math.floor(h * 0.9 + noise.n2(wx * 0.05, wz * 0.05) * 1.5 + 64) % STRATA.length];
         bright *= 1.04;
@@ -344,11 +375,20 @@ function buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number)
         a11 = ao(e_, s_, se),
         a01 = ao(w_, s_, sw);
       // vertices: (x0,z0) (x0,z1) (x1,z1) (x1,z0)  -> CCW from above
-      toLin(topHex, bright * AO[a00], quadCols, 0);
-      toLin(topHex, bright * AO[a01], quadCols, 3);
-      toLin(topHex, bright * AO[a11], quadCols, 6);
-      toLin(topHex, bright * AO[a10], quadCols, 9);
-      pushQuad(x0, h, z0, x0, h, z1, x1, h, z1, x1, h, z0, 0, 1, 0, quadCols, m, a00 + a11 < a01 + a10);
+      const open = a00 === 3 && a01 === 3 && a11 === 3 && a10 === 3;
+      if (open && run && run.h === h && run.m === m && run.hex === topHex && run.b === bright && run.z0 === z0) {
+        run.x1 = x1; // extend the merged strip
+      } else {
+        flushRun();
+        if (open) run = { x0, x1, z0, z1, h, m, hex: topHex, b: bright };
+        else {
+          toLin(topHex, bright * AO[a00], quadCols, 0);
+          toLin(topHex, bright * AO[a01], quadCols, 3);
+          toLin(topHex, bright * AO[a11], quadCols, 6);
+          toLin(topHex, bright * AO[a10], quadCols, 9);
+          pushQuad(x0, h, z0, x0, h, z1, x1, h, z1, x1, h, z0, 0, 1, 0, quadCols, m, a00 + a11 < a01 + a10);
+        }
+      }
       // sides toward lower neighbours (and border skirts)
       const sideHex = m === MAT.ROCK || m === MAT.DARK_ROCK ? -1 : pal[2];
       const border = (di: number, dj: number) => i + di < 0 || i + di >= N || j + dj < 0 || j + dj >= N;
@@ -393,6 +433,7 @@ function buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number)
       }
     }
   }
+  flushRun();
   void tmp;
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));

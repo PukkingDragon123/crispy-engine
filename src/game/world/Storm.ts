@@ -66,9 +66,9 @@ export class Storm {
     uTime: globalUniforms.uTime,
     uColor: { value: new THREE.Color(0xe8c48c) },
     uDark: { value: new THREE.Color(0xa87444) },
-    uOpacity: { value: 0.95 },
+    uOpacity: { value: 0.82 },
     uWidth: { value: 16 },
-    uHeight: { value: 85 },
+    uHeight: { value: 46 },
   };
   /** 0..1: storm intensity weakened by boss kills */
   strength = 1;
