@@ -1,8 +1,14 @@
-// Minimal pixel-art HUD drawn on a half-resolution canvas scaled up with
-// nearest-neighbour: revolver cylinder ammo, active-reload arc, bone health,
-// boost tail, bounty star, wave tally, boss poster bar, skill icons, toasts.
+// dustUP HUD — hand-composed pixel art (wood, iron, brass, parchment) on a
+// low-res canvas upscaled with nearest-neighbour. Everything animates:
+//  • revolver cylinder rotates per shot with motion-blur ghosts, swings out on
+//    reload, spits brass casings; Pinch crawls the rim loading rounds and IS
+//    the active-reload marker (press R while he's inside the brass arc)
+//  • bone-and-blood health with damage trail, shake + flash; boost tail bar
+//  • sheriff-star rank badge, coins fly from the world into the gold purse
+//  • wave sign swings on chains; boss wanted-banner; ribbon toasts slide in
 import { atlas } from '../fx/PixelArt';
 import { STATUS_INFO, StatusId } from '../combat/Status';
+import { UI, FONT, woodPanel, ironPlate, slot, parchment, ribbon, barFrame, drawBarFill, keycap, starBadge, chain, text, measure, px } from './PixelUI';
 
 export interface HudState {
   hp: number;
@@ -11,7 +17,7 @@ export interface HudState {
   ammo: number;
   maxAmmo: number;
   venom: number;
-  reload: { active: boolean; t: number; window: [number, number]; jam: number };
+  reload: { active: boolean; t: number; window: [number, number]; jam: number; phase: string };
   boost: number;
   speed: number;
   rank: number;
@@ -40,6 +46,20 @@ interface Toast {
   t: number;
   big: boolean;
 }
+interface HP {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  t: number;
+  life: number;
+  kind: 'casing' | 'coin' | 'chip' | 'spark' | 'smoke';
+  tx?: number;
+  ty?: number;
+  sx?: number;
+  sy?: number;
+  rot?: number;
+}
 
 export class Hud {
   canvas: HTMLCanvasElement;
@@ -47,11 +67,34 @@ export class Hud {
   scale = 2;
   toasts: Toast[] = [];
   visible = true;
+  suppressHint = false;
   private w = 0;
   private h = 0;
   private hint: HTMLDivElement;
   private t = 0;
-  private shownHp = 1;
+  private enter = 0; // slide-in transition 0..1
+  // cylinder anim
+  private cylRot = 0;
+  private cylVel = 0;
+  private lastAmmo = -1;
+  private cylOpen = 0;
+  private recoil = 0;
+  // health anim
+  private hpTrail = 1;
+  private hpShake = 0;
+  private hpFlash = 0;
+  private lastHp = -1;
+  // purse
+  private goldShown = 0;
+  private goldPop = 0;
+  private rankPop = 0;
+  private lastRank = 1;
+  private parts: HP[] = [];
+  private signSwing = 0;
+  private lastWave = 0;
+  private waveDrop = 1;
+  /** world -> screen (css px) projector, set by RunScene */
+  project: ((p: { x: number; y: number; z: number }) => { x: number; y: number; visible: boolean }) | null = null;
 
   constructor(parent: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -68,7 +111,7 @@ export class Hud {
   }
 
   resize() {
-    this.scale = window.innerWidth > 1700 ? 3 : 2;
+    this.scale = window.innerWidth > 1800 ? 3 : 2;
     this.w = Math.ceil(window.innerWidth / this.scale);
     this.h = Math.ceil(window.innerHeight / this.scale);
     this.canvas.width = this.w;
@@ -76,250 +119,454 @@ export class Hud {
     this.ctx.imageSmoothingEnabled = false;
   }
 
-  toast(text: string, color = '#fff3d6', sub?: string, big = false) {
-    // merge duplicates
-    const ex = this.toasts.find((t) => t.text === text && t.t < 0.4);
+  // ------------------------------------------------------------------ API
+  toast(t: string, color = UI.text, sub?: string, big = false) {
+    const ex = this.toasts.find((x) => x.text === t && x.t < 0.5);
     if (ex) {
-      ex.t = 0;
+      ex.t = 0.05;
       return;
     }
-    this.toasts.push({ text, color, sub, t: 0, big });
+    this.toasts.push({ text: t, color, sub, t: 0, big });
     if (this.toasts.length > 5) this.toasts.shift();
   }
+  onShot() {
+    this.cylVel = 14;
+    this.recoil = 1;
+    const cx = Math.round(this.w / 2), cy = this.h - 30;
+    for (let i = 0; i < 3; i++) this.parts.push({ kind: 'smoke', x: cx + (Math.random() - 0.5) * 6, y: cy - 22, vx: (Math.random() - 0.5) * 12, vy: -12 - Math.random() * 10, t: 0, life: 0.5 });
+  }
+  onHurt(amount: number) {
+    this.hpShake = Math.min(1, 0.3 + amount / 40);
+    this.hpFlash = 1;
+  }
+  /** a coin/chip flies from a world position into the purse/bounty bar */
+  fly(kind: 'coin' | 'chip', world: { x: number; y: number; z: number }) {
+    if (!this.project || this.parts.length > 160) return;
+    const s = this.project(world);
+    if (!s.visible) return;
+    const x = s.x / this.scale, y = s.y / this.scale;
+    const tx = kind === 'coin' ? 46 : 98, ty = kind === 'coin' ? 33 : 15;
+    this.parts.push({ kind, x, y, sx: x, sy: y, tx, ty, vx: (Math.random() - 0.5) * 60, vy: -40 - Math.random() * 40, t: 0, life: 0.55 + Math.random() * 0.2 });
+  }
+  setVisible(v: boolean) {
+    this.visible = v;
+  }
 
-  private spr(name: string, x: number, y: number, s = 1, alpha = 1) {
+  private spr(name: string, x: number, y: number, s = 1, alpha = 1, rot = 0) {
     const f = atlas().get(name);
-    const c = this.ctx;
     const img = atlas().canvas;
-    const sx = f.u0 * img.width - 0.5, sy = (1 - f.v1) * img.height - 0.5;
+    const c = this.ctx;
+    const sx = Math.round(f.u0 * img.width - 0.5), sy = Math.round((1 - f.v1) * img.height - 0.5);
     c.globalAlpha = alpha;
-    c.drawImage(img, Math.round(sx), Math.round(sy), f.w, f.h, Math.round(x), Math.round(y), f.w * s, f.h * s);
+    if (rot) {
+      c.save();
+      c.translate(Math.round(x), Math.round(y));
+      c.rotate(rot);
+      c.drawImage(img, sx, sy, f.w, f.h, Math.round((-f.w * s) / 2), Math.round((-f.h * s) / 2), f.w * s, f.h * s);
+      c.restore();
+    } else c.drawImage(img, sx, sy, f.w, f.h, Math.round(x), Math.round(y), f.w * s, f.h * s);
     c.globalAlpha = 1;
   }
-
-  private text(s: string, x: number, y: number, color = '#fff3d6', size = 8, align: CanvasTextAlign = 'left', font = 'Pixelify Sans', shadow = '#2a1810') {
-    const c = this.ctx;
-    c.font = `${size}px '${font}'`;
-    c.textAlign = align;
-    c.textBaseline = 'top';
-    c.fillStyle = shadow;
-    c.fillText(s, Math.round(x) + 1, Math.round(y) + 1);
-    c.fillStyle = color;
-    c.fillText(s, Math.round(x), Math.round(y));
+  private blit(cv: HTMLCanvasElement, x: number, y: number) {
+    this.ctx.drawImage(cv, Math.round(x), Math.round(y));
   }
 
+  // ------------------------------------------------------------------ cylinder
+  private cylCache = new Map<string, HTMLCanvasElement>();
+  private cylinderImage(n: number, loaded: boolean[], venom: boolean[], R: number) {
+    const key = `${n}:${loaded.map((b) => (b ? 1 : 0)).join('')}:${venom.map((b) => (b ? 1 : 0)).join('')}`;
+    let cv = this.cylCache.get(key);
+    if (cv) return cv;
+    const S = R * 2 + 4;
+    cv = document.createElement('canvas');
+    cv.width = cv.height = S;
+    const c = cv.getContext('2d')!;
+    const cx = S / 2 - 0.5, cy = S / 2 - 0.5;
+    const I = UI.iron, B = UI.brass;
+    for (let y = 0; y < S; y++)
+      for (let x = 0; x < S; x++) {
+        const dx = x - cx, dy = y - cy;
+        const d = Math.hypot(dx, dy);
+        if (d > R) continue;
+        // flutes between chambers
+        const a = Math.atan2(dy, dx) + Math.PI / 2;
+        const seg = ((a / (Math.PI * 2)) * n + n + 0.5) % 1;
+        const flute = d > R * 0.62 && Math.abs(seg - 0.5) < 0.09;
+        const lit = (-dx * 0.6 - dy * 0.8) / R;
+        let col = lit > 0.35 ? I.l : lit > -0.2 ? I.m : I.d;
+        if (d > R - 1.2) col = I.o;
+        else if (d > R - 2.2) col = lit > 0 ? I.h : I.d;
+        if (flute) col = d > R - 2 ? I.o : I.d;
+        px(c, x, y, 1, 1, col);
+      }
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 2 + (i / n) * Math.PI * 2;
+      const hx = cx + Math.cos(a) * R * 0.55, hy = cy + Math.sin(a) * R * 0.55;
+      const hr = R * 0.24;
+      for (let y = -4; y <= 4; y++)
+        for (let x = -4; x <= 4; x++) {
+          const d = Math.hypot(x, y);
+          if (d > hr + 0.3) continue;
+          let col = '#0c0a08';
+          if (loaded[i]) {
+            const ven = venom[i];
+            col = d > hr - 1 ? (ven ? UI.venom.d : B.d) : d > hr - 2 ? (ven ? UI.venom.l : B.l) : d < 1.3 ? (ven ? UI.venom.h : B.h) : ven ? UI.venom.m : B.m;
+          } else if (d > hr - 1) col = I.o;
+          px(c, Math.round(hx + x), Math.round(hy + y), 1, 1, col);
+        }
+    }
+    // center pin
+    px(c, Math.round(cx) - 1, Math.round(cy) - 1, 3, 3, I.o);
+    px(c, Math.round(cx), Math.round(cy), 1, 1, I.h);
+    this.cylCache.set(key, cv);
+    if (this.cylCache.size > 64) this.cylCache.delete(this.cylCache.keys().next().value!);
+    return cv;
+  }
+
+  private drawCylinder(dt: number, s: HudState, cx: number, cy: number) {
+    const c = this.ctx;
+    const R = 19;
+    const n = Math.max(6, s.maxAmmo);
+    const rel = s.reload;
+    // shot rotation: when ammo drops, rotate one chamber
+    if (this.lastAmmo >= 0 && s.ammo < this.lastAmmo) this.cylRot -= ((Math.PI * 2) / n) * (this.lastAmmo - s.ammo);
+    this.lastAmmo = s.ammo;
+    // spring rotation back to rest with velocity -> motion blur
+    const prev = this.cylRot;
+    this.cylRot += (0 - this.cylRot) * Math.min(1, dt * 16);
+    if (rel.active && (rel.phase === 'close' || rel.phase === 'open')) this.cylRot += dt * 30;
+    const angVel = Math.abs(this.cylRot - prev) / Math.max(dt, 1e-3);
+    this.cylOpen += ((rel.active ? 1 : 0) - this.cylOpen) * Math.min(1, dt * 10);
+    this.recoil = Math.max(0, this.recoil - dt * 6);
+    // loaded chambers
+    const loaded: boolean[] = [], venom: boolean[] = [];
+    let showAmmo = s.ammo;
+    if (rel.active) {
+      const k = rel.t;
+      showAmmo = rel.phase === 'open' ? s.ammo : rel.phase === 'eject' ? 0 : rel.phase === 'insert' ? Math.floor(((k - 0.3) / 0.56) * n) : n;
+    }
+    for (let i = 0; i < n; i++) {
+      loaded.push(i < showAmmo);
+      venom.push(i < s.venom);
+    }
+    const img = this.cylinderImage(n, loaded, venom, R);
+    const ox = cx - this.cylOpen * 16, oy = cy - this.cylOpen * 6 + this.recoil * 2;
+    // backing plaque
+    const plaque = woodPanel(64, 56, 3, { iron: true, dark: true });
+    this.blit(plaque, cx - 32, cy - 28);
+    // motion blur ghosts
+    const ghosts = Math.min(4, Math.floor(angVel / 4));
+    for (let g = ghosts; g >= 1; g--) {
+      c.save();
+      c.globalAlpha = 0.22;
+      c.translate(Math.round(ox), Math.round(oy));
+      c.rotate(this.cylRot + g * 0.09 * Math.sign(angVel));
+      c.drawImage(img, -img.width / 2, -img.height / 2);
+      c.restore();
+    }
+    c.save();
+    c.translate(Math.round(ox), Math.round(oy));
+    c.rotate(this.cylRot);
+    // fake swing-out: squash horizontally when open
+    c.scale(1 - this.cylOpen * 0.18, 1);
+    c.drawImage(img, -img.width / 2, -img.height / 2);
+    c.restore();
+    // reload: brass sweet-spot arc + Pinch crawling the rim
+    if (rel.active) {
+      const rr = R + 4;
+      const w0 = rel.window[0], w1 = rel.window[1];
+      for (let i = 0; i <= 60; i++) {
+        const t = i / 60;
+        const a = -Math.PI / 2 + t * Math.PI * 2;
+        const inWin = t >= w0 && t <= w1;
+        if (!inWin && i % 3) continue;
+        px(this.ctx, Math.round(ox + Math.cos(a) * rr), Math.round(oy + Math.sin(a) * rr), inWin ? 2 : 1, inWin ? 2 : 1, inWin ? (Math.sin(this.t * 14) > 0 ? UI.brass.h : UI.brass.l) : 'rgba(255,240,200,0.35)');
+      }
+      const pa = -Math.PI / 2 + rel.t * Math.PI * 2;
+      const pxp = ox + Math.cos(pa) * (rr + 3), pyp = oy + Math.sin(pa) * (rr + 3);
+      const frame = Math.floor(this.t * 14) % 2 ? 'pinchA' : 'pinchB';
+      this.spr(frame, pxp, pyp, 1, rel.jam > 0 ? 0.5 + 0.5 * Math.sin(this.t * 40) : 1, pa + Math.PI / 2);
+      const inside = rel.t >= w0 && rel.t <= w1;
+      const kc = keycap('R');
+      if (inside || rel.jam > 0) this.blit(kc, ox - kc.width / 2, oy + R + 8 + (inside ? Math.sin(this.t * 20) : 0));
+      if (rel.jam > 0) text(c, 'JAMMED', ox, oy - R - 22, UI.blood.h, 16, 'center');
+      // casings eject at start of eject phase
+      if (rel.phase === 'eject' && Math.random() < dt * 30) this.parts.push({ kind: 'casing', x: ox + (Math.random() - 0.5) * 10, y: oy, vx: (Math.random() - 0.5) * 50, vy: -30 - Math.random() * 30, t: 0, life: 1.2, rot: Math.random() * 6 });
+    }
+    // speed plaque
+    text(c, `${Math.round(s.speed)}`, cx + 38, cy - 6, s.speed > 30 ? UI.brass.h : UI.textDim, 16, 'left');
+    text(c, 'm/s', cx + 38, cy + 6, UI.textDim, 16, 'left');
+  }
+
+  // ------------------------------------------------------------------ frame
   update(dt: number, s: HudState) {
     this.t += dt;
     const c = this.ctx;
-    c.clearRect(0, 0, this.w, this.h);
-    this.hint.style.display = s.locked || !this.visible ? 'none' : 'block';
-    if (!this.visible) return;
     const W = this.w, H = this.h;
-    const cx = Math.round(W / 2), cy = Math.round(H / 2);
+    c.clearRect(0, 0, W, H);
+    this.hint.style.display = s.locked || !this.visible || this.suppressHint ? 'none' : 'block';
+    this.enter += ((this.visible ? 1 : 0) - this.enter) * Math.min(1, dt * 6);
+    if (this.enter < 0.01) return;
+    const e = this.enter;
+    const slide = (1 - e) * (1 - e);
+    const cx = Math.round(W / 2);
 
-    // ---------------------------------------------------- crosshair + reload arc
-    const hm = s.hitMarker, km = s.killMarker;
-    const gap = s.aiming ? 2 : 3;
-    c.fillStyle = km > 0 ? '#ff5a3a' : hm > 0 ? '#fff2a0' : 'rgba(255,246,226,0.9)';
-    c.fillRect(cx - gap - 3, cy, 3, 1);
-    c.fillRect(cx + gap + 1, cy, 3, 1);
-    c.fillRect(cx, cy - gap - 3, 1, 3);
-    c.fillRect(cx, cy + gap + 1, 1, 3);
-    c.fillRect(cx, cy, 1, 1);
-    if (hm > 0 || km > 0) {
-      const k = 4 + (km > 0 ? 2 : 0);
-      c.fillStyle = km > 0 ? '#ff5a3a' : '#ffffff';
-      for (let i = 2; i < k; i++) {
-        c.fillRect(cx - i - 1, cy - i - 1, 1, 1);
-        c.fillRect(cx + i + 1, cy - i - 1, 1, 1);
-        c.fillRect(cx - i - 1, cy + i + 1, 1, 1);
-        c.fillRect(cx + i + 1, cy + i + 1, 1, 1);
+    // ---------------------------------------------------------- crosshair
+    {
+      const cy = Math.round(H / 2);
+      const hm = s.hitMarker, km = s.killMarker;
+      const gap = s.aiming ? 2 : 4;
+      const col = km > 0 ? UI.blood.h : hm > 0 ? UI.brass.h : 'rgba(255,244,216,0.95)';
+      for (const [dx, dy, w, h] of [[-gap - 4, 0, 4, 1], [gap + 1, 0, 4, 1], [0, -gap - 4, 1, 4], [0, gap + 1, 1, 4]]) {
+        px(c, cx + dx + 1, cy + dy + 1, w, h, 'rgba(20,10,4,0.6)');
+        px(c, cx + dx, cy + dy, w, h, col);
+      }
+      px(c, cx, cy, 1, 1, col);
+      if (hm > 0 || km > 0) {
+        const k = km > 0 ? 7 : 5;
+        for (let i = 3; i < k; i++) for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) px(c, cx + sx * i, cy + sy * i, 1, 1, col);
       }
     }
-    if (s.reload.active) {
-      const R = 14;
-      const seg = 40;
-      for (let i = 0; i < seg; i++) {
-        const t = i / seg;
-        const a = -Math.PI / 2 + t * Math.PI * 2;
-        const inWin = t >= s.reload.window[0] && t <= s.reload.window[1];
-        const done = t <= s.reload.t;
-        c.fillStyle = inWin ? (done ? '#c8ff5a' : '#7ff03a') : done ? '#f1e2c2' : 'rgba(40,24,16,0.6)';
-        c.fillRect(Math.round(cx + Math.cos(a) * R), Math.round(cy + Math.sin(a) * R), inWin ? 2 : 1, inWin ? 2 : 1);
-      }
-      const a = -Math.PI / 2 + s.reload.t * Math.PI * 2;
-      c.fillStyle = s.reload.jam > 0 ? '#ff5a3a' : '#ffffff';
-      c.fillRect(Math.round(cx + Math.cos(a) * (R + 2)) - 1, Math.round(cy + Math.sin(a) * (R + 2)) - 1, 3, 3);
-      this.text(s.reload.jam > 0 ? 'JAMMED' : 'R', cx, cy + R + 5, s.reload.jam > 0 ? '#ff7a5a' : '#c8ff5a', 8, 'center');
-    }
 
-    // ------------------------------------------------------------ cylinder
-    const cylX = cx, cylY = H - 26;
-    c.fillStyle = 'rgba(30,20,14,0.55)';
-    c.beginPath();
-    c.arc(cylX, cylY, 15, 0, Math.PI * 2);
-    c.fill();
-    for (let i = 0; i < s.maxAmmo; i++) {
-      const a = -Math.PI / 2 + (i / s.maxAmmo) * Math.PI * 2;
-      const x = cylX + Math.cos(a) * 9, y = cylY + Math.sin(a) * 9;
-      const loaded = i < s.ammo;
-      c.fillStyle = '#1a1210';
-      c.fillRect(Math.round(x) - 3, Math.round(y) - 3, 6, 6);
-      if (loaded) {
-        c.fillStyle = i < s.venom ? '#7ff03a' : '#e0a050';
-        c.fillRect(Math.round(x) - 2, Math.round(y) - 2, 4, 4);
-        c.fillStyle = i < s.venom ? '#e0ffb0' : '#fff0a0';
-        c.fillRect(Math.round(x) - 2, Math.round(y) - 2, 2, 2);
-      }
-    }
-    c.fillStyle = '#b8c0c6';
-    c.fillRect(cylX - 1, cylY - 1, 3, 3);
-    this.text(`${Math.round(s.speed)} m/s`, cylX + 22, cylY - 4, s.speed > 30 ? '#ffd36b' : '#c9b79a', 8);
+    // ---------------------------------------------------------- cylinder (bottom center)
+    this.drawCylinder(dt, s, cx, H - 32 + slide * 70);
 
-    // ---------------------------------------------------------- health bones
-    const hx = 10, hy = H - 22;
-    this.shownHp += (s.hp / s.maxHp - this.shownHp) * Math.min(1, dt * 3);
-    const segs = 12;
-    const frac = s.hp / s.maxHp;
-    for (let i = 0; i < segs; i++) {
-      const x = hx + i * 9;
-      const f0 = i / segs, f1 = (i + 1) / segs;
-      const fill = Math.max(0, Math.min(1, (frac - f0) / (f1 - f0)));
-      const lag = Math.max(0, Math.min(1, (this.shownHp - f0) / (f1 - f0)));
-      c.fillStyle = '#2a1810';
-      c.fillRect(x - 1, hy - 1, 9, 7);
-      c.fillStyle = '#7e1410';
-      c.fillRect(x, hy, Math.round(7 * lag), 5);
-      c.fillStyle = frac < 0.3 && Math.sin(this.t * 10) > 0 ? '#ff5a3a' : '#f1e2c2';
-      c.fillRect(x, hy, Math.round(7 * fill), 5);
-      if (fill > 0.5) {
-        c.fillStyle = '#fff6e2';
-        c.fillRect(x, hy, Math.round(7 * fill), 1);
+    // ---------------------------------------------------------- health (bottom left)
+    {
+      const x = 8 - slide * 200, y = H - 28;
+      if (this.lastHp >= 0 && s.hp < this.lastHp - 0.5) this.onHurt(this.lastHp - s.hp);
+      this.lastHp = s.hp;
+      const frac = Math.max(0, s.hp / s.maxHp);
+      this.hpTrail = this.hpTrail > frac ? Math.max(frac, this.hpTrail - dt * 0.5) : frac;
+      this.hpShake = Math.max(0, this.hpShake - dt * 3);
+      this.hpFlash = Math.max(0, this.hpFlash - dt * 5);
+      const sx = Math.round((Math.random() - 0.5) * 6 * this.hpShake), sy = Math.round((Math.random() - 0.5) * 4 * this.hpShake);
+      const bw = 156, bh = 16;
+      this.blit(barFrame(bw, bh), x + 18 + sx, y + sy);
+      const low = frac < 0.3;
+      drawBarFill(c, x + 18 + sx, y + sy, bw, bh, frac, this.hpFlash > 0.5 ? { o: '#fff', d: '#fff', m: '#ffe0d0', l: '#fff', h: '#fff' } : low && Math.sin(this.t * 9) > 0 ? { ...UI.blood, m: '#ff5a3a' } : UI.blood, this.hpTrail);
+      if (s.shield > 0) drawBarFill(c, x + 18 + sx, y - 6 + sy, bw, 9, Math.min(1, s.shield / s.maxHp), UI.sky);
+      this.spr('skullIcon', x - 2 + sx, y - 1 + sy + (low ? Math.round(Math.sin(this.t * 9)) : 0));
+      text(c, `${Math.ceil(s.hp)}`, x + 26 + sx, y + 1 + sy, UI.text, 16);
+      text(c, `/${Math.round(s.maxHp)}`, x + 26 + measure(c, `${Math.ceil(s.hp)}`) + sx, y + 1 + sy, UI.textDim, 16);
+      // boost tail
+      const by = y + 18;
+      this.blit(barFrame(110, 10), x + 18, by);
+      drawBarFill(c, x + 18, by, 110, 10, s.boost, UI.sky);
+      this.spr('scorp', x + 130, by + 1);
+      // statuses
+      let stx = x + 182;
+      for (const st of s.status) {
+        if (st.stacks <= 0) continue;
+        const info = STATUS_INFO[st.id];
+        this.blit(slot(18, 2), stx, y - 2);
+        this.spr(info.icon, stx + 5, y + 3);
+        text(c, String(Math.round(st.stacks)), stx + 15, y + 6, info.css, 16);
+        stx += 30;
+      }
+      // consumables above
+      let ix = x + 18;
+      for (const it of s.items) {
+        this.blit(slot(22, 5), ix, y - 30);
+        if (it.icon) this.spr(it.icon, ix + 7, y - 24);
+        this.blit(keycap(it.key), ix + 3, y - 42);
+        if (it.count > 1) text(c, 'x' + it.count, ix + 14, y - 20, UI.text, 16);
+        ix += 28;
       }
     }
-    if (s.shield > 0) {
-      c.fillStyle = '#9fd2ff';
-      c.fillRect(hx, hy - 4, Math.min(segs * 9 - 2, Math.round((s.shield / s.maxHp) * segs * 9)), 2);
-    }
-    this.text(`${Math.ceil(s.hp)}/${Math.round(s.maxHp)}`, hx, hy - 13, '#f1e2c2', 8);
-    // boost meter (scorpion tail)
-    const bw = 70;
-    c.fillStyle = '#2a1810';
-    c.fillRect(hx - 1, hy + 8, bw + 2, 4);
-    c.fillStyle = s.boost > 0.25 ? '#6fe3cf' : '#3a8a80';
-    c.fillRect(hx, hy + 9, Math.round(bw * s.boost), 2);
-    this.spr('scorp', hx + bw + 4, hy + 6);
-    // statuses
-    let sx = hx + 120;
-    for (const st of s.status) {
-      if (st.stacks <= 0) continue;
-      const info = STATUS_INFO[st.id];
-      this.spr(info.icon, sx, hy - 2);
-      this.text(String(Math.round(st.stacks)), sx + 9, hy, info.css, 8);
-      sx += 22;
+
+    // ---------------------------------------------------------- rank + purse (top left)
+    {
+      const x = 6 - slide * 160, y = 6;
+      if (s.rank !== this.lastRank) {
+        this.rankPop = 1;
+        this.lastRank = s.rank;
+      }
+      this.rankPop = Math.max(0, this.rankPop - dt * 2.5);
+      const star = starBadge(15);
+      const bounce = Math.round(Math.sin(this.rankPop * Math.PI) * 4);
+      this.blit(star, x, y - bounce);
+      text(c, String(s.rank), x + star.width / 2, y + 8 - bounce, UI.wood.o, 16, 'center', false);
+      text(c, 'BOUNTY', x + 38, y + 1, UI.textDim, 16);
+      this.blit(barFrame(120, 11), x + 38, y + 15);
+      drawBarFill(c, x + 38, y + 15, 120, 11, s.bountyFrac, UI.venom);
+      // gold purse
+      this.goldShown += (s.gold - this.goldShown) * Math.min(1, dt * 8);
+      if (Math.abs(s.gold - this.goldShown) < 0.5) this.goldShown = s.gold;
+      this.goldPop = Math.max(0, this.goldPop - dt * 4);
+      const gy = y + 30;
+      this.spr('coinBig', x + 38, gy - Math.round(this.goldPop * 3));
+      text(c, String(Math.round(this.goldShown)), x + 54, gy - 1, UI.brass.l, 16);
+      if (s.combo > 2) text(c, `${s.combo} KILL STREAK`, x + 2, gy + 16, s.combo > 25 ? UI.blood.h : UI.brass.h, 16);
     }
 
-    // ---------------------------------------------------------- bounty + gold
-    this.spr('sheriff_x2', 8, 8);
-    this.text(String(s.rank), 17, 13, '#2a1810', 8, 'center', 'Pixelify Sans', 'transparent');
-    c.fillStyle = '#2a1810';
-    c.fillRect(30, 12, 82, 5);
-    c.fillStyle = '#7ff03a';
-    c.fillRect(31, 13, Math.round(80 * s.bountyFrac), 3);
-    this.text('BOUNTY RANK', 30, 19, '#c9b79a', 7);
-    this.spr('coin', 30, 29);
-    this.text(String(s.gold), 43, 29, '#f5c84a', 8);
-    if (s.combo > 2) this.text(`${s.combo} KILL STREAK`, 30, 41, '#ffd36b', 8);
-
-    // ---------------------------------------------------------- wave tally
+    // ---------------------------------------------------------- wave sign / boss banner (top center)
     if (!s.boss) {
-      this.text(s.waveLabel, cx, 7, '#fff3d6', 16, 'center', 'Rye');
-      const tl = Math.ceil(s.waveTime);
-      if (tl < 900) this.text(`${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}`, cx, 26, '#c9b79a', 8, 'center');
-      this.text(s.zone, cx, 36, 'rgba(240,220,180,0.7)', 7, 'center');
-    } else {
-      const bw2 = Math.min(260, W * 0.5);
-      const bx = cx - bw2 / 2;
-      this.text(s.boss.name.toUpperCase(), cx, 6, '#fff3d6', 13, 'center', 'Rye');
-      if (s.boss.title) this.text(s.boss.title, cx, 21, '#c9a97c', 7, 'center');
-      c.fillStyle = '#2a1810';
-      c.fillRect(bx - 2, 30, bw2 + 4, 8);
-      c.fillStyle = '#5a1410';
-      c.fillRect(bx, 32, bw2, 4);
-      c.fillStyle = '#d0402c';
-      c.fillRect(bx, 32, Math.round(bw2 * Math.max(0, s.boss.frac)), 4);
-      c.fillStyle = '#ff8a6a';
-      c.fillRect(bx, 32, Math.round(bw2 * Math.max(0, s.boss.frac)), 1);
-    }
-
-    // ---------------------------------------------------------- skills
-    let kx = W - 12;
-    const ky = H - 26;
-    // ultimate sun dial
-    const ur = 12;
-    const ux = W - 24, uy = H - 46;
-    c.fillStyle = 'rgba(30,20,14,0.6)';
-    c.beginPath();
-    c.arc(ux, uy, ur + 2, 0, Math.PI * 2);
-    c.fill();
-    c.strokeStyle = s.ult >= 1 ? (Math.sin(this.t * 8) > 0 ? '#ffd36b' : '#fff6c0') : '#d49a24';
-    c.lineWidth = 3;
-    c.beginPath();
-    c.arc(ux, uy, ur, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, s.ult));
-    c.stroke();
-    this.spr('scorp', ux - 4, uy - 4);
-    this.text('Z', ux, uy + ur + 3, s.ult >= 1 ? '#ffd36b' : '#8a7a60', 8, 'center');
-    kx = W - 48;
-    for (let i = s.skills.length - 1; i >= 0; i--) {
-      const sk = s.skills[i];
-      const x = kx - 20, y = ky - 2;
-      c.fillStyle = 'rgba(30,20,14,0.6)';
-      c.fillRect(x - 1, y - 1, 18, 18);
-      this.spr(sk.icon, x + 4, y + 3, 1, sk.cd > 0 ? 0.45 : 1);
-      if (sk.cd > 0) {
-        c.fillStyle = 'rgba(10,6,4,0.55)';
-        const hh = Math.round(16 * (sk.cd / sk.max));
-        c.fillRect(x, y + 16 - hh, 16, hh);
+      if (s.wave !== this.lastWave) {
+        this.lastWave = s.wave;
+        this.waveDrop = 0;
+        this.signSwing = 0.6;
       }
-      this.text(sk.key, x + 8, y + 18, '#c9b79a', 7, 'center');
-      if (sk.charges !== undefined && sk.charges > 1) this.text(String(sk.charges), x + 13, y - 2, '#fff3d6', 7);
-      kx -= 21;
-    }
-    // consumables
-    let ix = 10;
-    for (const it of s.items) {
-      const y = H - 52;
-      c.fillStyle = 'rgba(30,20,14,0.6)';
-      c.fillRect(ix - 1, y - 1, 18, 18);
-      if (it.icon) this.spr(it.icon, ix + 2, y + 3);
-      this.text(it.key, ix + 1, y + 10, '#c9b79a', 7);
-      if (it.count > 1) this.text('x' + it.count, ix + 10, y + 10, '#fff3d6', 7);
-      ix += 21;
+      this.waveDrop = Math.min(1, this.waveDrop + dt * 2);
+      this.signSwing *= Math.exp(-dt * 1.5);
+      const drop = Math.round((1 - easeOutBounce(this.waveDrop)) * -40) - slide * 60;
+      const sw = Math.round(Math.sin(this.t * 3) * this.signSwing * 4);
+      const sgW = 116, sgH = 26;
+      const sx = cx - sgW / 2 + sw, sy = 8 + drop;
+      chain(c, sx + 12, -2, sy + 1);
+      chain(c, sx + sgW - 12, -2, sy + 1);
+      this.blit(woodPanel(sgW, sgH, 11, { iron: true }), sx, sy);
+      text(c, s.waveLabel, cx + sw, sy + 5, UI.text, 16, 'center');
+      const tl = Math.ceil(s.waveTime);
+      if (tl < 900) {
+        const pw = 84;
+        this.blit(parchment(pw, 16, 4), cx - pw / 2 + sw, sy + sgH + 1);
+        text(c, `${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}`, cx + sw, sy + sgH + 2, UI.wood.o, 16, 'center', false);
+      }
+      text(c, s.zone, cx, sy + sgH + 20, 'rgba(240,220,180,0.85)', 16, 'center');
+    } else {
+      const bw = Math.min(300, Math.round(W * 0.55));
+      const bx = cx - bw / 2, by = 4 - slide * 60;
+      this.blit(parchment(bw, 44, 9), bx, by);
+      text(c, 'WANTED', cx, by + 3, UI.blood.d, 16, 'center', false);
+      text(c, s.boss.name.toUpperCase(), cx, by + 16, UI.wood.o, 16, 'center', false);
+      this.blit(barFrame(bw - 24, 12), bx + 12, by + 31);
+      drawBarFill(c, bx + 12, by + 31, bw - 24, 12, s.boss.frac, UI.blood);
     }
 
-    // ---------------------------------------------------------- toasts
+    // ---------------------------------------------------------- skills + ultimate (bottom right)
+    {
+      const ux = W - 26 + slide * 200, uy = H - 30;
+      // ultimate ring
+      const R = 19;
+      this.blit(ironPlate(46, 46, 7), ux - 23, uy - 23);
+      const ready = s.ult >= 1;
+      for (let i = 0; i < 64; i++) {
+        const t = i / 64;
+        if (t > s.ult) break;
+        const a = -Math.PI / 2 + t * Math.PI * 2;
+        px(c, Math.round(ux + Math.cos(a) * (R - 2)), Math.round(uy + Math.sin(a) * (R - 2)), 2, 2, ready ? (Math.sin(this.t * 8 + i * 0.3) > 0 ? UI.brass.h : UI.brass.l) : UI.brass.m);
+      }
+      this.spr('scorp_x2', ux - 8, uy - 8, 1, ready ? 1 : 0.5);
+      this.blit(keycap('Z'), ux - 7, uy + 20);
+      let kx = ux - 52;
+      for (let i = s.skills.length - 1; i >= 0; i--) {
+        const sk = s.skills[i];
+        const sz = 24;
+        const x = kx - sz / 2, y = uy - 14;
+        this.blit(slot(sz, i + 1), x, y);
+        this.spr(sk.icon, x + 8, y + 8, 1, sk.cd > 0 ? 0.45 : 1);
+        if (sk.cd > 0) {
+          const f = Math.max(0, Math.min(1, sk.cd / sk.max));
+          // clockwise sweep
+          c.save();
+          c.beginPath();
+          c.moveTo(x + sz / 2, y + sz / 2);
+          c.arc(x + sz / 2, y + sz / 2, sz, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2);
+          c.closePath();
+          c.clip();
+          px(c, x + 3, y + 3, sz - 6, sz - 6, 'rgba(10,6,3,0.6)');
+          c.restore();
+          if (sk.cd < 9.5) text(c, sk.cd < 1 ? sk.cd.toFixed(1) : String(Math.ceil(sk.cd)), x + sz / 2, y + 4, UI.text, 16, 'center');
+        } else if (Math.sin(this.t * 3 + i) > 0.97) px(c, x + 4, y + 4, 2, 2, UI.brass.h);
+        const kc = keycap(sk.key);
+        this.blit(kc, x + sz / 2 - kc.width / 2, y + sz + 1);
+        if (sk.charges !== undefined && sk.charges > 1) text(c, String(sk.charges), x + sz - 4, y - 6, UI.text, 16);
+        kx -= 30;
+      }
+    }
+
+    // ---------------------------------------------------------- HUD particles
+    for (let i = this.parts.length - 1; i >= 0; i--) {
+      const p = this.parts[i];
+      p.t += dt;
+      if (p.kind === 'coin' || p.kind === 'chip') {
+        const k = Math.min(1, p.t / p.life);
+        const e2 = k * k * (3 - 2 * k);
+        // curved path: start -> control (raised) -> target
+        const mx = (p.sx! + p.tx!) / 2 + p.vx * 0.3, my = Math.min(p.sy!, p.ty!) - 30 + p.vy * 0.2;
+        const x = (1 - e2) * (1 - e2) * p.sx! + 2 * (1 - e2) * e2 * mx + e2 * e2 * p.tx!;
+        const y = (1 - e2) * (1 - e2) * p.sy! + 2 * (1 - e2) * e2 * my + e2 * e2 * p.ty!;
+        this.spr(p.kind === 'coin' ? 'coinspin' + (Math.floor(p.t * 16) % 4) : 'chip', x - 4, y - 4);
+        if (k >= 1) {
+          if (p.kind === 'coin') this.goldPop = 1;
+          this.parts.splice(i, 1);
+        }
+        continue;
+      }
+      p.vy += (p.kind === 'smoke' ? -10 : 260) * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      if (p.kind === 'casing') {
+        if (p.y > H - 4) {
+          p.y = H - 4;
+          p.vy *= -0.35;
+          p.vx *= 0.6;
+        }
+        p.rot! += dt * 14;
+        px(c, p.x, p.y, 2, 3, UI.brass.l);
+        px(c, p.x, p.y, 2, 1, UI.brass.h);
+      } else if (p.kind === 'smoke') {
+        const a = 1 - p.t / p.life;
+        px(c, p.x, p.y, 3, 3, `rgba(220,210,190,${a * 0.6})`);
+      }
+      if (p.t > p.life) this.parts.splice(i, 1);
+    }
+
+    // ---------------------------------------------------------- toasts (ribbons)
     let ty = Math.round(H * 0.3);
     for (let i = this.toasts.length - 1; i >= 0; i--) {
       const tt = this.toasts[i];
       tt.t += dt;
-      const life = tt.big ? 2.6 : 1.5;
+      const life = tt.big ? 2.8 : 1.7;
       if (tt.t > life) {
         this.toasts.splice(i, 1);
         continue;
       }
-      const pop = tt.t < 0.12 ? 1 + (0.12 - tt.t) * 4 : 1;
-      const a = tt.t > life - 0.4 ? (life - tt.t) / 0.4 : 1;
-      c.globalAlpha = a;
-      const size = Math.round((tt.big ? 16 : 10) * pop);
-      this.text(tt.text, cx + Math.round(W * 0.14), ty - tt.t * 6, tt.color, size, 'left', tt.big ? 'Rye' : 'Pixelify Sans');
-      if (tt.sub) this.text(tt.sub, cx + Math.round(W * 0.14), ty + size + 1 - tt.t * 6, '#c9b79a', 7);
+      if (tt.big) {
+        // big title: drops in center with bounce, unfurls
+        const k = Math.min(1, tt.t / 0.5);
+        const out = tt.t > life - 0.4 ? (life - tt.t) / 0.4 : 1;
+        const tw = Math.ceil(measure(c, tt.text, 32)) + 24;
+        const yy = Math.round(H * 0.34 + (1 - easeOutBounce(k)) * -50);
+        c.globalAlpha = out;
+        const rb = ribbon(Math.round(tw * Math.min(1, k * 1.5)), { o: UI.wood.o, d: UI.leather.m, m: UI.leather.l, l: '#a06a3a' }, 2);
+        this.blit(rb, cx - rb.width / 2, yy - 2);
+        if (k > 0.4) text(c, tt.text, cx, yy - 10, tt.color, 32, 'center');
+        if (tt.sub && k > 0.6) text(c, tt.sub, cx, yy + 22, UI.textDim, 16, 'center');
+        c.globalAlpha = 1;
+        continue;
+      }
+      const inK = Math.min(1, tt.t / 0.25);
+      const out = tt.t > life - 0.3 ? (life - tt.t) / 0.3 : 1;
+      const tw = Math.ceil(measure(c, tt.text, 16)) + 14;
+      const xx = W - 10 - tw - Math.round((1 - easeOutBack(inK)) * -120);
+      c.globalAlpha = out;
+      this.blit(parchment(tw + 6, tt.sub ? 32 : 18, (tt.text.length * 7) % 13), xx - 3, ty - 1);
+      text(c, tt.text, xx + 4, ty + 1, darken(tt.color), 16, 'left', false);
+      if (tt.sub) text(c, tt.sub, xx + 4, ty + 15, UI.wood.d, 16, 'left', false);
       c.globalAlpha = 1;
-      ty += size + (tt.sub ? 12 : 4);
+      ty += tt.sub ? 36 : 22;
     }
+    void FONT;
   }
+}
 
-  setVisible(v: boolean) {
-    this.visible = v;
-    this.canvas.style.opacity = v ? '1' : '0';
-  }
+function easeOutBack(t: number) {
+  const c1 = 1.70158, c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
+function easeOutBounce(t: number) {
+  const n1 = 7.5625, d1 = 2.75;
+  if (t < 1 / d1) return n1 * t * t;
+  if (t < 2 / d1) return n1 * (t -= 1.5 / d1) * t + 0.75;
+  if (t < 2.5 / d1) return n1 * (t -= 2.25 / d1) * t + 0.9375;
+  return n1 * (t -= 2.625 / d1) * t + 0.984375;
+}
+/** toast text sits on parchment: use darker ink variants of bright colors */
+function darken(css: string) {
+  if (!css.startsWith('#')) return UI.wood.o;
+  const n = parseInt(css.slice(1), 16);
+  const r = ((n >> 16) & 255) * 0.42, g = ((n >> 8) & 255) * 0.42, b = (n & 255) * 0.42;
+  return `rgb(${r | 0},${g | 0},${b | 0})`;
 }

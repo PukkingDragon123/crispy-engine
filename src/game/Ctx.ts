@@ -72,7 +72,7 @@ export interface Ctx {
   shake(amount: number): void;
   /** world-space floating title text (cinematic floating words) */
   say?(text: string, opts?: any): void;
-  toast(text: string, color?: string, sub?: string): void;
+  toast(text: string, color?: string, sub?: string, big?: boolean): void;
   events: EventBus;
 }
 

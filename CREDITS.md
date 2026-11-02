@@ -85,3 +85,6 @@ Via https://github.com/Mcamento8/open-game-sfx-index and https://github.com/novi
 ## Rebuilding
 `python3 tools/build_audio.py` (needs numpy + ffmpeg with libmp3lame). The script's
 header documents where to clone each source; `--list` prints every recipe.
+
+## Font
+- **Alagard** by Hewett Tsoi — pixel font supplied by the project owner (`src/assets/fonts/alagard.ttf`); distributed by its author as free for personal and commercial use. Used for all UI text.

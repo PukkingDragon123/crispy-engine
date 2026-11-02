@@ -48,6 +48,26 @@ ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
+// match in-game lighting: desert sky environment for PBR reflections + rim light (material global)
+{
+  const envScene = new THREE.Scene();
+  const geo = new THREE.SphereGeometry(10, 32, 16);
+  const col: number[] = [];
+  const pos = geo.getAttribute('position');
+  const z = new THREE.Color(0x3f86d6), h = new THREE.Color(0xf3d6a4), g = new THREE.Color(0xd9ad74), c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i) / 10;
+    if (y > 0) c.copy(h).lerp(z, Math.pow(y, 0.6));
+    else c.copy(h).lerp(g, Math.min(1, -y * 3));
+    col.push(c.r, c.g, c.b);
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  envScene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+  const pm = new THREE.PMREMGenerator(renderer);
+  scene.environment = pm.fromScene(envScene, 0.02).texture;
+  scene.environmentIntensity = 0.6;
+  hemi.intensity = 0.8;
+}
 const post = new PostStack(renderer, scene, cam, innerWidth, innerHeight);
 post.setSize(innerWidth, innerHeight, 1);
 

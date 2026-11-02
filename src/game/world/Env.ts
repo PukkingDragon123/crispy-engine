@@ -196,6 +196,35 @@ export class Env {
     }
   }
 
+  /** prefiltered desert-sky environment for PBR reflections (metal, gold, wet) */
+  applyEnvMap(renderer: THREE.WebGLRenderer) {
+    const p = this.preset;
+    const envScene = new THREE.Scene();
+    const geo = new THREE.SphereGeometry(10, 32, 16);
+    const col: number[] = [];
+    const pos = geo.getAttribute('position');
+    const z = new THREE.Color(p.zenith), h = new THREE.Color(p.horizon), g = new THREE.Color(p.ground);
+    const c = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const y = pos.getY(i) / 10;
+      if (y > 0) c.copy(h).lerp(z, Math.pow(y, 0.6));
+      else c.copy(h).lerp(g, Math.min(1, -y * 3));
+      col.push(c.r, c.g, c.b);
+    }
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    envScene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+    const sunBall = new THREE.Mesh(new THREE.SphereGeometry(0.8, 12, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(p.sunColor).multiplyScalar(6) }));
+    sunBall.position.copy(this.sunDir).multiplyScalar(8);
+    envScene.add(sunBall);
+    const pm = new THREE.PMREMGenerator(renderer);
+    const rt = pm.fromScene(envScene, 0.02);
+    this.scene.environment = rt.texture;
+    this.scene.environmentIntensity = 0.6;
+    this.hemi.intensity = this.preset.hemiIntensity * 0.7;
+    pm.dispose();
+    return rt;
+  }
+
   /** keep sky + shadow frustum centered on focus */
   update(focus: THREE.Vector3, dt: number, time: number) {
     this.skyU.uTime.value = time;

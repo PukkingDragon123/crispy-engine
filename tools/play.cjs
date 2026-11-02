@@ -18,7 +18,8 @@ const { chromium } = require('playwright');
     if (step.up) await page.keyboard.up(step.up);
     if (step.press) await page.keyboard.press(step.press);
     if (step.click) await page.mouse.click(+w / 2, +h / 2);
-    if (step.mousedown) await page.mouse.down({ button: step.mousedown });
+    if (step.move) await page.mouse.move(step.move[0], step.move[1]);
+    if (step.mousedown) { await page.mouse.move(+w / 2, +h / 2); await page.mouse.down({ button: step.mousedown }); }
     if (step.mouseup) await page.mouse.up({ button: step.mouseup });
     if (step.eval) { try { const r = await page.evaluate(step.eval); if (r !== undefined) logs.push('[eval] ' + JSON.stringify(r)); } catch (e) { logs.push('[eval-error] ' + e.message); } }
     if (step.shot) await page.screenshot({ path: `${out}_${step.shot}.png`, timeout: 180000 });

@@ -6,6 +6,7 @@ import * as THREE from 'three';
 
 export const globalUniforms = {
   uTime: { value: 0 },
+  uRim: { value: 0.55 },
   uSandColor: { value: new THREE.Color(0xe0b77a) },
 };
 
@@ -43,6 +44,7 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
     shader.uniforms.uTint = tint;
     shader.uniforms.uEmissiveStrength = emissiveStrength;
     shader.uniforms.uTime = globalUniforms.uTime;
+    shader.uniforms.uRim = globalUniforms.uRim;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -104,6 +106,7 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
         varying vec3 vWPos;
         varying vec3 vInstTint;
         uniform float uEmissiveStrength;
+        uniform float uRim;
         uniform vec3 uTint;
         float vhash(vec3 p){ p = fract(p*0.3183099+0.1); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }`
       )
@@ -139,10 +142,17 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
         `#include <emissivemap_fragment>
         totalEmissiveRadiance += diffuseColor.rgb * (vMatx.x * uEmissiveStrength * (1.0 + vFx.z));
         totalEmissiveRadiance += vec3(1.0, 0.95, 0.85) * clamp(vFx.x, 0.0, 1.0) * 0.6;
-        totalEmissiveRadiance += vec3(1.0, 0.55, 0.15) * dissolveEdge * 1.2;`
+        totalEmissiveRadiance += vec3(1.0, 0.55, 0.15) * dissolveEdge * 1.2;
+        {
+          // pixel-art style warm rim light: separates silhouettes from the sand
+          vec3 vdir = normalize(vViewPosition);
+          float rim = pow(1.0 - clamp(dot(normal, vdir), 0.0, 1.0), 3.0);
+          totalEmissiveRadiance += diffuseColor.rgb * vec3(1.0, 0.82, 0.58) * rim * uRim;
+        }`
       );
   };
-  m.customProgramCacheKey = () => 'voxel-mat-v1-' + sway.toFixed(3);
+  m.customProgramCacheKey = () => 'voxel-mat-v2-' + sway.toFixed(3);
+  m.envMapIntensity = 0.55;
   return m;
 }
 

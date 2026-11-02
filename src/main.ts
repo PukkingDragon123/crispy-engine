@@ -7,6 +7,7 @@ import { Music } from './game/audio/Music';
 
 const params = new URLSearchParams(location.search);
 const engine = new Engine(document.getElementById('app')!);
+if (params.get('q') === 'low') engine.applyQuality({ shadows: false, pixelRatio: 0.5, bloom: false, shadowSize: 512 });
 (window as any).__engine = engine;
 export const music = new Music(engine.audio, 'audio/');
 (window as any).__music = music;

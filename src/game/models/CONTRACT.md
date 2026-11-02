@@ -169,3 +169,19 @@ User: "No no no — I mean HIGH resolution, keep it high resolution, higher, but
   then fine detail inside the planes.
 - **Polished**: deliberate color blocking, 2–3 tone shading per material (light top/edge highlights, mid, shadow),
   clean seams, crisp trims, no random noise speckle. Minimal glow. Realistic outlaw palette. Expressions.
+
+## ★★ FINAL SCALE + PIXEL-ART LOOK (latest user direction, overrides all scale notes) ★★
+User: "Make voxel art 1/38 instead" + "super super detailed realistic voxel art mixed with pixel art, custom parts,
+quirky design, never lazy simple shapes, professional pixel art, super high resolution polish" (refs: pixel-art ore
+icons, 128×128 pixel-art swords — rich hue-shifted ramps, crisp dark outlines, bright glints, texture inside shapes).
+- **Scale**: Sundown + looks, humanoid enemies, variants, merchant, scarab-size creatures: **1/38 m**.
+  Pinch & revolver 1/76. Boards 1/38. Camel 1/30. Giant scorpion, vulture, Dust Marshal, Pharaoh, Sethos 1–2: 1/28.
+  Anubis 1/19. Big Bertha, Sunroller, sandworm: 1/19. Avatar of Set 1/10. Props unchanged.
+- **Pixel-art shading inside the voxels** (every material):
+  - 4–5 step **hue-shifted ramps**: shadows shift cooler & more saturated (toward red-violet/blue), highlights
+    shift warmer & lighter (toward yellow); avoid pure value-only darkening.
+  - **Outline voxels**: 1-voxel darker rim on silhouette/part edges (like pixel-art outlines) — selective, not black.
+  - **Glints**: 1–2 voxel bright specular highlights on metal, gems, glass eyes, wet surfaces.
+  - **Material texture**: wood grain, leather pores/creases, fabric weave/stitching, bone cracks, rust patches,
+    painted chipping — readable patterns, not random speckle.
+  - **Custom parts everywhere**: buckles, rivets, straps, pouches, charms, patches, tools — quirky storytelling.

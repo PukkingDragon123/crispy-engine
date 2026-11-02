@@ -30,7 +30,7 @@ export class Pickups {
   batch = new SpriteBatch(1600);
   private pitchStep = 0;
   private pitchTimer = 0;
-  onCollect?: (k: PickupKind, v: number) => void;
+  onCollect?: (k: PickupKind, v: number, at: THREE.Vector3) => void;
 
   constructor(private ctx: Ctx, private getPlayer: () => { pos: THREE.Vector3; stats: { get(s: string): number }; alive: boolean }) {
     ctx.scene.add(this.batch.mesh);
@@ -129,7 +129,7 @@ export class Pickups {
         ctx.sfx('ult_ready', null, 0.4, 1.4);
         break;
     }
-    this.onCollect?.(p.kind, p.value);
+    this.onCollect?.(p.kind, p.value, p.pos);
   }
 
   clear() {
