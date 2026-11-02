@@ -694,13 +694,13 @@ export class Enemies implements EnemyApi {
       const be = e.batch.eyes;
       if (faces && be && lod < 2 && cd < 48 && !e.hidden[be.head]) {
         if (!e.eye) {
-          const look = EYE_LOOK[e.def.id] ?? ['glow', e.alpha ? 0xff3a20 : 0xff7a30];
+          const look = EYE_LOOK[e.def.id] ?? ['glow', e.alpha ? 0xff2a0a : 0xff5a14];
           e.eye = new EyeState(look[0], look[1], be.size);
         }
         e.eye.tick(dt);
         const st = e.state;
         const expr = e.status.stunned() || st === 'stagger' ? 'stunned' : e.flash > 0.35 ? 'hurt' : st === 'windup' || st === 'charge' || st === 'leap' || st === 'dive' ? 'angry' : st === 'spawn' ? 'surprised' : 'neutral';
-        e.eye.draw(faces, e.batch.partWorld(be.l), be.r >= 0 ? e.batch.partWorld(be.r) : null, expr, 0, 0, 1.5);
+        e.eye.draw(faces, e.batch.partWorld(be.l), be.r >= 0 ? e.batch.partWorld(be.r) : null, expr, 0, 0, 1.15);
       }
     }
     for (const r of this.rag) {

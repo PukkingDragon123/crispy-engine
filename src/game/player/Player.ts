@@ -109,7 +109,7 @@ export class Player {
     holder.rotation.x = Math.PI / 2;
     holder.add(this.gun.root);
     if (!this.rig.attach('hand_r', holder)) this.rig.nodes['fore_r']?.add(holder);
-    this.eyes = new RigEyes(this.rig, 'glow', 0x9dff3a);
+    this.eyes = new RigEyes(this.rig, 'glow', 0x6aff1a);
     ctx.scene.add(this.root);
     // grapple rope
     const lg = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);

@@ -177,7 +177,8 @@ export class EyeState {
     for (const [M, spr, side] of shapes) {
       if (!M) continue;
       M.decompose(_p, _q, _s);
-      const sc = this.size * Math.max(0.2, _s.x);
+      // glowing embers sit inside the dark socket (smaller than the socket); organic eyes fill it
+      const sc = this.size * Math.max(0.2, _s.x) * (this.style === 'glow' ? 0.72 : 1);
       // gaze shift in the face plane + nudge forward off the surface
       _m2.compose(new THREE.Vector3(gx * sc * 0.18, gy * sc * 0.18, sc * 0.08), new THREE.Quaternion(), new THREE.Vector3(1, 1, 1));
       _m.compose(_p, _q, new THREE.Vector3(1, 1, 1)).multiply(_m2);
