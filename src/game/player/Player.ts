@@ -753,7 +753,8 @@ export class Player {
     const pelvis = n['pelvis'];
     if (pelvis) {
       const rest = this.rig.geo.parts[0].offset;
-      pelvis.position.set(rest.x, rest.y - crouch * 0.22 - 0.04, rest.z);
+      const legScale = ((this.rig.geo.spec.meta?.legLen as number) ?? 0.9) / 0.9;
+      pelvis.position.set(rest.x, rest.y - (crouch * 0.22 + 0.04) * legScale, rest.z);
       pelvis.rotation.set(0.1 * crouch, 0, 0);
     }
     const spread = 0.24;
@@ -775,7 +776,7 @@ export class Player {
     const aimLocal = this.stance.worldToLocal(_v2.copy(this.aimPoint));
     const yawToAim = Math.atan2(aimLocal.x, aimLocal.z);
     const horiz = Math.hypot(aimLocal.x, aimLocal.z);
-    const pitchToAim = Math.atan2(aimLocal.y - 1.3, Math.max(0.5, horiz));
+    const pitchToAim = Math.atan2(aimLocal.y - ((this.rig.geo.spec.meta?.shoulderY as number) ?? 1.3), Math.max(0.5, horiz));
     if (torso) {
       torso.rotation.set(clamp(-pitchToAim * 0.25, -0.4, 0.4) + crouch * 0.25 - accF * 0.004, clamp(yawToAim * 0.55, -1.15, 1.15), clamp(accR * 0.003, -0.25, 0.25));
     }

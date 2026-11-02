@@ -237,10 +237,11 @@ export class Enemies implements EnemyApi {
       let part = 'torso';
       let head = false;
       if (e.skel === 'humanoid') {
-        if (rel > 0.8) {
+        // cartoon proportions: the big skull starts at ~70% of the height
+        if (rel > 0.7) {
           part = 'head';
           head = true;
-        } else if (rel < 0.45) part = lateral > 0 ? 'thigh_l' : 'thigh_r';
+        } else if (rel < 0.38) part = lateral > 0 ? 'thigh_l' : 'thigh_r';
         else if (Math.abs(lateral) > e.radius * 0.55) part = lateral > 0 ? 'arm_l' : 'arm_r';
       } else if (rel > 0.6 && e.skel !== 'bird') {
         part = 'head';

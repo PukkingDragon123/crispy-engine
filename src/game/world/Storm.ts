@@ -36,10 +36,10 @@ float fbm(vec2 p){ float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++){ s += a *
 void main(){
   vec2 uv = vUv;
   // pixelate for voxel-pixel coherence
-  vec2 pu = floor(uv * vec2(24.0, 96.0)) / vec2(24.0, 96.0);
+  vec2 pu = floor(uv * vec2(14.0, 34.0)) / vec2(14.0, 34.0);
   float t = uTime;
   float n = fbm(vec2(pu.x * 2.0 + vSeed * 7.0 - t * 0.35, pu.y * 6.0 - t * 0.9 + vSeed));
-  float n2 = fbm(vec2(pu.x * 5.0 + t * 0.6 + vSeed * 3.0, pu.y * 14.0 - t * 1.6));
+  float n2 = fbm(vec2(pu.x * 4.0 + t * 0.6 + vSeed * 3.0, pu.y * 6.0 - t * 1.1));
   float edge = smoothstep(0.0, 0.25, uv.x) * smoothstep(1.0, 0.75, uv.x);
   float vert = smoothstep(1.0, 0.35, uv.y) * (0.75 + 0.25 * smoothstep(0.0, 0.08, uv.y));
   float a = clamp((n * 1.25 + n2 * 0.45 - 0.25) * edge * vert, 0.0, 1.0) * uOpacity;

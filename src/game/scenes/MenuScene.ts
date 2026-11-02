@@ -218,16 +218,16 @@ export class MenuScene implements GameScene {
     }
     // logo
     const lm = logoModel('dustUP');
-    this.logo = new THREE.Mesh(buildVoxelGeometry(lm, { voxelSize: 0.06, pivot: 'center' }), makeVoxelMaterial());
-    this.logo.position.set(-3.6, 4.6, -2.5);
-    this.logo.rotation.y = 0.35;
+    this.logo = new THREE.Mesh(buildVoxelGeometry(lm, { voxelSize: 0.034, pivot: 'center' }), makeVoxelMaterial());
+    this.logo.position.set(-2.4, 3.9, -1.6);
+    this.logo.rotation.y = 0.18;
     this.logo.castShadow = true;
     s.add(this.logo);
     // camera
     this.camera.aspect = eng.width / eng.height;
     this.camera.updateProjectionMatrix();
-    this.camera.position.set(-1.2, 2.4, 9.5);
-    this.camera.lookAt(0.6, 2.1, 0);
+    this.camera.position.set(-0.4, 2.2, 7.6);
+    this.camera.lookAt(0.4, 2.0, 0);
     (window as any).__music?.setMood('menu');
     this.wind = eng.audio.loop('wind_loop', 0.35);
     eng.input.setWantLock(false);
@@ -397,14 +397,14 @@ export class MenuScene implements GameScene {
       this.heroEyes?.draw(this.faces, rdt);
       this.faces.end(this.scene.fog as THREE.Fog);
     }
-    this.logo.position.y = 4.6 + Math.sin(t * 1.2) * 0.06;
-    this.logo.rotation.y = 0.35 + Math.sin(t * 0.5) * 0.05;
+    this.logo.position.y = 3.9 + Math.sin(t * 1.2) * 0.05;
+    this.logo.rotation.y = 0.18 + Math.sin(t * 0.5) * 0.04;
     // gentle camera drift following the mouse
     if (!this.leaving) {
-      const tx = -1.2 + inp.ndcX * 0.5, ty = 2.4 + inp.ndcY * 0.25;
+      const tx = -0.4 + inp.ndcX * 0.45, ty = 2.2 + inp.ndcY * 0.2;
       this.camera.position.x = damp(this.camera.position.x, tx, 2, rdt);
       this.camera.position.y = damp(this.camera.position.y, ty, 2, rdt);
-      this.camera.lookAt(0.6, 2.1, 0);
+      this.camera.lookAt(0.4, 2.0, 0);
     }
   }
 }

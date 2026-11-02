@@ -13,9 +13,9 @@ export interface CineShot {
 export class CameraRig {
   yaw = 0;
   pitch = -0.12;
-  dist = 5.2;
-  height = 1.45;
-  shoulder = 0.9;
+  dist = 4.1;
+  height = 1.35;
+  shoulder = 0.75;
   fov = 72;
   trauma = 0;
   recoil = 0;

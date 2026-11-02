@@ -162,7 +162,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
   },
   bombScarab: {
     id: 'bombScarab', name: 'Tick-Tock Scarab', title: 'Running Late', rig: 'bomb_scarab', rigAlpha: 'bomb_scarab_alpha',
-    hp: 10, armor: 5, physRes: 0.1, magicRes: 0, statusRes: {}, speed: 10, radius: 0.38, height: 0.6,
+    hp: 10, armor: 5, physRes: 0.1, magicRes: 0, statusRes: {}, speed: 10, radius: 0.38, height: 0.85,
     ai: 'bomber', attacks: [{ kind: 'explode', range: 1.6, cooldown: 99, windup: 0.4, dmg: 16, radius: 3 }],
     contact: 0, bounty: 2, gold: [0, 1], hitKind: 'chitin', weakness: 'Fragile. Shoot before it reaches you.', special: 'chainExplode',
     firstWave: 15, weight: 2, group: [3, 5], lore: 'Someone strapped a clock to a scarab. It took the job very seriously.',

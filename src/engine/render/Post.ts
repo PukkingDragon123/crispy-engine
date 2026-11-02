@@ -12,7 +12,7 @@ const GradeShader = {
     uTime: { value: 0 },
     uVignette: { value: 0.32 },
     uCA: { value: 0.0 },
-    uGrain: { value: 0.045 },
+    uGrain: { value: 0.022 },
     uSaturation: { value: 0.97 },
     uContrast: { value: 1.05 },
     uDesat: { value: 0.0 },

@@ -154,7 +154,19 @@ export class HubScene implements GameScene {
     place('book', "Thoth's Codex", P.book?.(), -2.4, 2.3, 0.4, 0.82);
     place('gramophone', 'Gramophone', P.gramophone?.(), 2.6, -3.6, -0.3, 1.12);
     place('dart', 'Dartboard', P.dartboard?.(), 3.8, -4.85, 0, 1.6);
-    place('board', 'Notice Board — RIDE OUT', P.noticeBoard?.(0), 0, 4.6, Math.PI);
+    place('board', 'Notice Board — RIDE OUT', P.noticeBoard?.(0), 6.5, 3.0, -Math.PI / 2);
+    // ceiling: plank boards on heavy beams
+    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(14, 10), new THREE.MeshStandardMaterial({ color: 0x3a2414, roughness: 1 }));
+    ceil.rotation.x = Math.PI / 2;
+    ceil.position.y = 4.4;
+    s.add(ceil);
+    for (const z of [-3.6, 0, 3.6])
+      for (const x of [-4.8, 0, 4.8]) {
+        const b = staticMesh(P.roofBeam?.(), 'center');
+        if (!b) break;
+        b.position.set(x, 4.15, z);
+        s.add(b);
+      }
     for (const [x, z] of [[-0.8, -2.8], [0.6, -2.8], [-2, 1.4], [-2.9, 3.1]]) place('', '', P.stool?.(), x, z);
     // rubber duck on the bar
     const duck = modelEntry('rubber_duck')?.() as any;
