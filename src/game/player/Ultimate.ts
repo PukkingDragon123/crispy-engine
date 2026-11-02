@@ -66,6 +66,8 @@ export class Ultimate {
     ctx.sfx('quake_rumble', null, 1);
     ctx.shake(0.6);
     this.player.express('angry', 6);
+    this.player.playAction('ult', 1.6);
+    ctx.events.emit('cutin', ULT_INFO[this.variant].name.toUpperCase(), '#9dff3a', 'angry');
     if (this.variant === 'detonation') await this.detonation();
     else if (this.variant === 'plague') await this.plague();
     else await this.wrath();

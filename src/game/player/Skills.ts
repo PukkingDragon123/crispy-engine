@@ -168,6 +168,8 @@ export class Skills {
     this.ctx.sfx('scorpion_throw', o, 0.9);
     this.ctx.sfx('scorpion_chitter', o, 0.6);
     this.player.express('determined', 0.6);
+    this.player.playAction('throw', 0.5);
+    this.ctx.engine.tweens.after(0.18, () => this.player.smear(o.clone().add(new THREE.Vector3(0, 0.4, 0)), 1.3));
   }
 
   private updateBrood(dt: number) {
@@ -242,6 +244,8 @@ export class Skills {
     this.swarmBugs = [];
     for (let i = 0; i < count; i++) this.swarmBugs.push({ a: rnd.next() * Math.PI * 2, r: 1.5 + rnd.next() * 3, h: 0.5 + rnd.next() * 2, sp: (1.5 + rnd.next() * 2) * rnd.sign(), dive: 0, target: null, p: this.player.center(new THREE.Vector3()) });
     this.ctx.sfx('divine_power', this.player.pos, 0.6);
+    this.player.playAction('summon', 0.9);
+    this.player.express('laugh', 0.9);
     this.swarmLoop?.stop(0.2);
     this.swarmLoop = this.ctx.audio.loop('swarm_loop', 0.7);
     this.ctx.toast('LOCUST SWARM', '#c8d870');
@@ -297,6 +301,7 @@ export class Skills {
     this.bombs.push({ pos: o, vel: v, fuse: 1.5, spin: 0, bounces: 0 });
     this.ctx.sfx('whoosh', o, 0.7);
     this.ctx.sfx('dynamite_fuse', o, 0.5);
+    this.player.playAction('lob', 0.45);
   }
 
   private updateBombs(dt: number) {
@@ -337,6 +342,7 @@ export class Skills {
       if (b.fuse <= 0) {
         const r = 4.2 * this.stats.get('explosionRadius');
         ctx.fx.explosion(b.pos, r * 0.75);
+        ctx.fx.word(b.pos, r > 5 ? 'w_kaboom' : 'w_boom');
         ctx.sfx('explosion', b.pos, 1);
         ctx.shake(0.35);
         const dmg = 40;

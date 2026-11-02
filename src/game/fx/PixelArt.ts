@@ -169,6 +169,34 @@ const ART: Record<string, Art> = {
     ],
     pal: { o: '#3a2408', H: '#fff0a6', L: '#e2b24a', M: '#b88426' },
   },
+  // ---- 2D eyes (tintable glow eyes: W = core, w = halo) -------------------
+  e_round: { rows: ['.www.', 'wWWWw', 'wWWWw', 'wWWWw', '.www.'], pal: { W: '#ffffff', w: '#9a9a9a' } },
+  e_half: { rows: ['.....', '.....', 'wWWWw', 'wWWWw', '.www.'], pal: { W: '#ffffff', w: '#9a9a9a' } },
+  e_slit: { rows: ['.....', '.....', 'wWWWw', '.....', '.....'], pal: { W: '#ffffff', w: '#9a9a9a' } },
+  e_closed: { rows: ['.....', '.....', '.....', 'wwwww', '.....'], pal: { w: '#bdbdbd' } },
+  e_angry: { rows: ['W....', 'wW...', 'wWWw.', 'wWWWw', '.www.'], pal: { W: '#ffffff', w: '#9a9a9a' } },
+  e_sad: { rows: ['....W', '...Ww', '.wWWw', 'wWWWw', '.www.'], pal: { W: '#ffffff', w: '#9a9a9a' } },
+  e_happy: { rows: ['.....', '.www.', 'wW.Ww', 'W...W', '.....'], pal: { W: '#ffffff', w: '#9a9a9a' } },
+  e_wide: { rows: ['.www.', 'w...w', 'w.W.w', 'w...w', '.www.'], pal: { W: '#ffffff', w: '#d0d0d0' } },
+  e_x: { rows: ['W...W', '.W.W.', '..W..', '.W.W.', 'W...W'], pal: { W: '#ffffff' } },
+  e_spiral: { rows: ['wwww.', '...w.', '.W.w.', '.WWw.', '.....'], pal: { W: '#ffffff', w: '#c8c8c8' } },
+  e_heart: { rows: ['ww.ww', 'WWWWW', 'WWWWW', '.WWW.', '..W..'], pal: { W: '#ffffff', w: '#d0d0d0' } },
+  // organic eyes (sclera + pupil), pupil drawn separately for gaze
+  o_open: { rows: ['.oooo.', 'oSSSSo', 'oSSSSo', 'oSSSSo', '.oooo.'], pal: { o: '#2a1810', S: '#f4ecd8' } },
+  o_half: { rows: ['.oooo.', 'oooooo', 'oSSSSo', 'oSSSSo', '.oooo.'], pal: { o: '#2a1810', S: '#f4ecd8' } },
+  o_closed: { rows: ['......', '......', 'oooooo', '.oooo.', '......'], pal: { o: '#2a1810' } },
+  o_angry: { rows: ['oo....', 'oSoo..', 'oSSSoo', 'oSSSSo', '.oooo.'], pal: { o: '#2a1810', S: '#f4ecd8' } },
+  o_pupil: { rows: ['kk', 'kk'], pal: { k: '#140c08' } },
+  o_glint: { rows: ['w'], pal: { w: '#ffffff' } },
+  // ---- 2D emotes over heads ----------------------------------------------------
+  fx_anger: { rows: ['.r.r.', 'rr.rr', '.....', 'rr.rr', '.r.r.'], pal: { r: '#e0402c' } },
+  fx_sweat: { rows: ['..b.', '.bB.', 'bBBb', 'bBwb', '.bb.'], pal: { b: '#4f9fd9', B: '#9fd8ff', w: '#ffffff' } },
+  fx_q: { rows: ['.www.', 'w...w', '...w.', '..w..', '.....', '..w..'], pal: { w: '#fff3d6' } },
+  fx_heart: { rows: ['.r.r.', 'rRrRr', 'rRRRr', '.rRr.', '..r..'], pal: { r: '#9a1a10', R: '#e0402c' } },
+  fx_zzz: { rows: ['wwww', '..w.', '.w..', 'wwww'], pal: { w: '#e8f0ff' } },
+  fx_note: { rows: ['..ww', '..ww', '..w.', 'ww..', 'ww..'], pal: { w: '#ffd36b' } },
+  fx_star: { rows: ['..y..', '.yYy.', 'yYYYy', '.yYy.', '..y..'], pal: { y: '#e2b24a', Y: '#fff0a6' } },
+  fx_drop: { rows: ['.g.', 'gGg', 'gGg', '.g.'], pal: { g: '#4fa52a', G: '#c8ff7a' } },
   sheriff: {
     rows: ['....g....', '...gGg...', 'gggGGGggg', '.gGGkGGg.', '..gGGGg..', '.gGg.gGg.', 'gg.....gg'],
     pal: { g: '#9c6812', G: '#f5c84a', k: '#fff0a0' },
@@ -233,7 +261,6 @@ export class PixelAtlas {
     const x = col * CELL,
       y = row * CELL;
     this.slot = row * per + col + cw;
-    if (ch > 1) this.slot = (row + ch - 1) * per + col + cw; // crude: skip rows for tall cells
     this.ctx.save();
     draw(this.ctx, x, y);
     this.ctx.restore();
@@ -471,6 +498,37 @@ export class PixelAtlas {
       cx.fillStyle = '#bfae88';
       cx.fillRect(x + 1, y + 2, 4, 1);
     });
+    // pixel smear arcs (fast motion), drawn white for tinting
+    for (let f = 0; f < 3; f++) {
+      this.alloc('smear' + f, 32, 32, (cx, x, y) => {
+        for (let j = 0; j < 32; j++)
+          for (let i = 0; i < 32; i++) {
+            const dx = i - 16, dy = j - 22;
+            const d = Math.hypot(dx, dy);
+            const a = Math.atan2(dy, dx);
+            const inArc = a < -0.3 - f * 0.25 && a > -Math.PI + 0.3;
+            const thick = 2.5 + Math.sin(-a) * 3;
+            if (!inArc || Math.abs(d - 13) > thick) continue;
+            cx.fillStyle = Math.abs(d - 13) < thick * 0.45 ? '#ffffff' : 'rgba(255,255,255,0.55)';
+            cx.fillRect(x + i, y + j, 1, 1);
+          }
+      });
+    }
+    // western onomatopoeia (Alagard, outlined) — mixes 2D comic beats into the 3D action
+    const words: [string, string, string][] = [['w_bang', 'BANG!', '#ffd36b'], ['w_boom', 'BOOM!', '#ff8a3a'], ['w_pow', 'POW!', '#fff3d6'], ['w_crack', 'CRACK!', '#f1e2c2'], ['w_splat', 'SPLAT!', '#8fe03a'], ['w_yeehaw', 'YEEHAW!', '#ffd36b'], ['w_headshot', 'HEADSHOT', '#ff5a3a'], ['w_kaboom', 'KA-BOOM!', '#ff6a2a']];
+    for (const [k, t, col] of words) {
+      const c2 = this.ctx;
+      c2.font = "16px 'Alagard'";
+      const w = Math.min(96, Math.ceil(c2.measureText(t).width) + 6);
+      this.alloc(k, w, 20, (cx, x, y) => {
+        cx.font = "16px 'Alagard'";
+        cx.textBaseline = 'top';
+        cx.fillStyle = '#1a0e06';
+        for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [2, 2], [1, 2]]) cx.fillText(t, x + 3 + ox, y + 1 + oy);
+        cx.fillStyle = col;
+        cx.fillText(t, x + 3, y + 1);
+      });
+    }
     this.alloc('crystal', 5, 8, (cx, x, y) => {
       const rows = ['..w..', '.wPw.', '.PpP.', 'wPpPp', 'PpPpP', '.pPp.', '.pPp.', '..p..'];
       const pal: Record<string, string> = { w: '#ffd0fa', P: '#c63fdc', p: '#6d1c8f' };

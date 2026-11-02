@@ -30,6 +30,11 @@ import { UpgradeManager, UpgradeEffects } from '../run/Upgrades';
 import { CardPicker } from '../ui/CardPicker';
 import { Garments } from '../player/Garments';
 import { Props, PropInst } from '../world/Props';
+import { Hud3D, CutInOpts } from '../ui/Hud3D';
+import type { Boss } from '../bosses/Boss';
+import { makeBoss } from '../bosses/BossRoster';
+import { FaceQuads } from '../fx/FaceFx';
+import { ULT_INFO } from '../player/Ultimate';
 
 export interface RunOptions {
   area: 'A' | 'B' | 'C';
@@ -75,6 +80,10 @@ export class RunScene implements GameScene {
   pickups!: Pickups;
   director!: WaveDirector;
   hud!: Hud;
+  hud3d!: Hud3D;
+  faces = new FaceQuads();
+  bosses: Boss[] = [];
+  private lastRdt = 1 / 60;
   qte!: Qte;
   skills!: Skills;
   items!: Inventory;
@@ -121,6 +130,9 @@ export class RunScene implements GameScene {
     this.debris.groundAt = this.world.groundAt;
     this.camRig = new CameraRig(this.camera, this.world.groundAt);
     this.hud = new Hud(e.overlay);
+    this.hud3d = new Hud3D(this.hud);
+    this.hud3d.scene.environment = this.scene.environment;
+    this.scene.add(this.faces.mesh);
 
     const self = this;
     this.ctx = {
@@ -143,6 +155,7 @@ export class RunScene implements GameScene {
         self.hud.toast(text, color, sub, big);
       },
       events: this.events,
+      faces: this.faces,
     };
 
     // player visuals
@@ -153,6 +166,7 @@ export class RunScene implements GameScene {
       board: resolveStatic([`board_${look.board}`, 'board_driftwood'], placeholderBoard),
     };
     this.player = new Player(this.ctx, vis, this.camRig, e.input);
+    this.hud3d.setBust(vis.rig, vis.rig.name + ':player');
     this.enemies = new Enemies(this.ctx, this.player as any);
     this.ctx.enemies = this.enemies;
     this.qte = new Qte(e.overlay, e.input, e.audio);
@@ -161,6 +175,7 @@ export class RunScene implements GameScene {
     this.items.add('bandage', 2);
     this.items.add('dynamite', 1);
     this.ult = new Ultimate(this.ctx, this.player, this.qte, this.camRig);
+    void ULT_INFO;
     this.upgrades = new UpgradeManager(this.player.stats);
     this.upFx = new UpgradeEffects(this.ctx, this.upgrades, this.player, this.skills);
     this.picker = new CardPicker(this.ctx, this.upgrades, e.input, () => this.player.pos);
@@ -194,6 +209,7 @@ export class RunScene implements GameScene {
     this.windLoop?.stop(0.5);
     this.slideLoop?.stop(0.5);
     this.stormLoop?.stop(0.5);
+    this.hud3d.dispose();
     this.hud.canvas.remove();
     this.qte.dispose();
     this.engine.input.setWantLock(false);
@@ -218,6 +234,15 @@ export class RunScene implements GameScene {
       this.hud.onShot();
     });
     ev.on('rankUp', () => this.picker.request());
+    ev.on('cutin', (title: string, color?: string, expr?: string, opts?: CutInOpts) => this.hud3d.cutIn(title, color, expr, opts));
+    ev.on('bossIntro', (b: Boss) => this.hud3d.cutIn(b.name.toUpperCase(), '#ff6a3a', 'smug', { geo: b.rig.geo, eyes: [b.eyes.state.style, b.eyes.state.color], height: b.height / b.scale, flip: true }));
+    ev.on('bossPlow', (p: { x: number; z: number }, r: number) => {
+      this.world.colliders.query(p.x, p.z, r + 1, (c) => {
+        const pr = c.data?.prop as PropInst | undefined;
+        if (!pr || pr.broken || !c.data?.destructible) return;
+        if (Math.hypot(c.x - p.x, c.z - p.z) < r + c.r) this.props.breakProp(pr, 16, new THREE.Vector3(c.x - p.x, 0.5, c.z - p.z).normalize());
+      });
+    });
     ev.on('upgradePicked', (id: string) => {
       if (id === 'extraChamber' || id === 'bandolier') this.player.ammo = this.player.maxAmmo;
     });
@@ -272,7 +297,30 @@ export class RunScene implements GameScene {
     });
     ev.on('playerDeath', () => this.onPlayerDeath());
     this.director.onWaveStart = (s) => this.onWaveStart(s);
+    this.director.spawnBoss = (wave) => this.spawnBoss(wave);
     this.director.onWaveEnd = (s) => this.onWaveEnd(s);
+  }
+
+  private spawnBoss(wave: number) {
+    const b = makeBoss({ ctx: this.ctx, player: this.player, enemies: this.enemies, qte: this.qte, cam: this.camRig, cloth: this.cloth }, wave);
+    const p = this.director.spawnPoint(18, 26) ?? { x: this.player.pos.x + 20, z: this.player.pos.z };
+    b.place(p.x, p.z, Math.atan2(this.player.pos.x - p.x, this.player.pos.z - p.z));
+    this.enemies.registerExternal(b);
+    this.bosses.push(b);
+    (window as any).__music?.setMood('boss');
+    b.onDefeated = (bb, escaped) => {
+      const at = { x: bb.pos.x, y: bb.pos.y + 1, z: bb.pos.z };
+      const k = escaped ? 0.5 : 1;
+      this.pickups.dropBounty(bb.bounty * k * this.player.stats.get('bountyGain'), at);
+      this.pickups.drop('gold', 1, at, Math.min(40, Math.round((bb.gold * k) / 4)));
+      this.pickups.drop('heart', 40, at);
+      this.run.ultCharge = Math.min(1, this.run.ultCharge + 0.25);
+      if (!escaped) this.hud.toast(`${bb.name.toUpperCase()} — BOUNTY CLAIMED`, '#ffd36b', `+${Math.round(bb.bounty)} bounty`, true);
+      (window as any).__music?.setMood('explore');
+      this.events.emit('bossDefeated', bb, escaped);
+    };
+    void b.start();
+    return b;
   }
 
   addBounty(v: number) {
@@ -417,6 +465,7 @@ export class RunScene implements GameScene {
       this.updateHud(rdt);
       return;
     }
+    this.faces.begin();
     if (e.input.hit('ultimate') && this.run.ultCharge >= 1 && this.player.alive && !this.ult.active) this.ult.trigger();
     this.player.update(dt);
     this.skills.update(dt);
@@ -426,6 +475,11 @@ export class RunScene implements GameScene {
     this.enemies.update(dt, this.run.time);
     this.pickups.update(dt);
     this.director.update(dt);
+    for (let i = this.bosses.length - 1; i >= 0; i--) {
+      const b = this.bosses[i];
+      b.update(dt);
+      if (!b.alive && !b.root.parent) this.bosses.splice(i, 1);
+    }
     const pp = this.player.pos;
     this.world.update(dt, pp, e.realTime, this.fx);
     this.props.update(dt, pp, this.world.sa.wind, this.fx);
@@ -473,10 +527,18 @@ export class RunScene implements GameScene {
     if (this.run.comboTimer <= 0) this.run.combo = 0;
     this.hitMarker = Math.max(0, this.hitMarker - rdt);
     this.killMarker = Math.max(0, this.killMarker - rdt);
+    this.faces.end(this.world.env.fog);
     this.updateHud(rdt);
   }
 
+  postRender(renderer: THREE.WebGLRenderer) {
+    if (!this.ready) return;
+    this.hud3d.update(this.lastRdt);
+    this.hud3d.render(renderer);
+  }
+
   private updateHud(rdt: number) {
+    this.lastRdt = rdt;
     const p = this.player;
     const d = this.director;
     const st: HudState = {
@@ -495,7 +557,10 @@ export class RunScene implements GameScene {
       wave: d.wave,
       waveTime: d.timeLeft,
       waveLabel: `WAVE ${d.wave}`,
-      boss: null,
+      boss: (() => {
+        const b = this.bosses.find((x) => x.alive && !x.escaped);
+        return b ? { name: b.name, frac: Math.max(0, b.frac), title: b.title } : null;
+      })(),
       ult: this.run.ultCharge,
       skills: (() => {
         const cd = this.skills.cooldowns();
@@ -507,7 +572,7 @@ export class RunScene implements GameScene {
           { key: 'F', icon: 'bone', cd: Math.max(0, p.meleeCd), max: 0.55 },
         ];
       })(),
-      items: this.items.slots.map((sl, i) => ({ key: String(i + 1), icon: sl ? ITEMS[sl.id].icon : '', count: sl?.count ?? 0 })),
+      items: this.items.slots.map((sl, i) => ({ key: String(i + 1), icon: sl ? ITEMS[sl.id].icon : '', count: sl?.count ?? 0, model: sl ? ITEMS[sl.id].model : '' })),
       status: (['poison', 'bleed', 'burn', 'curse', 'slow'] as StatusId[]).map((id) => ({ id, stacks: p.status.stacks(id) })),
       hitMarker: this.hitMarker,
       killMarker: this.killMarker,

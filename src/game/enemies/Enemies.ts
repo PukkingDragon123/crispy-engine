@@ -12,6 +12,21 @@ import type { StatSheet } from '../combat/Stats';
 import { clamp, damp, dampAngle, rnd, wrapAngle } from '../../engine/math/rand';
 import { P } from '../../engine/voxel/palette';
 import { Spring } from '../../engine/Tween';
+import { EyeState, EyeStyle } from '../fx/FaceFx';
+
+/** 2D eye look per enemy type: organic (white + pupil) for critters & jackals, glowing embers for the undead */
+const EYE_LOOK: Record<string, [EyeStyle, number]> = {
+  scarab: ['organic', 0x1a1008],
+  bombScarab: ['organic', 0x1a1008],
+  goldenScarab: ['organic', 0x1a1008],
+  vulture: ['organic', 0x2a1408],
+  jackal: ['organic', 0xd8a020],
+  jackalArcher: ['organic', 0xd8a020],
+  giantScorpion: ['organic', 0x1a0808],
+  mummy: ['glow', 0x7fe0ff],
+  bandageWhipper: ['glow', 0x7fe0ff],
+  mariachi: ['glow', 0xffc040],
+};
 
 type Skel = 'humanoid' | 'beetle' | 'scorpion' | 'bird' | 'other';
 
@@ -74,6 +89,7 @@ export class Enemy implements EnemyLike {
   hitZ = 0;
   flash = 0;
   glow = 0;
+  eye: EyeState | null = null;
   jaw = 0;
   lean = 0;
   spawnT = 0;
@@ -658,10 +674,12 @@ export class Enemies implements EnemyApi {
     this.updateRag(dt);
     // render
     this.render.begin();
+    const faces = ctx.faces;
     const cam = ctx.camera.position;
     for (const e of this.list) {
       if (!e.alive) continue;
-      const lod: 0 | 1 = cam.distanceTo(e.pos) > 34 ? 1 : 0;
+      const cd = cam.distanceTo(e.pos);
+      const lod: 0 | 1 | 2 = cd > 58 ? 2 : cd > 26 ? 1 : 0;
       const sq = e.squash.x;
       _q.setFromAxisAngle(UP, e.yaw);
       let tilt = 0;
@@ -672,6 +690,17 @@ export class Enemies implements EnemyApi {
       _m.compose(_v.set(e.pos.x, e.pos.y - spawnSink + (tilt ? e.height * 0.4 : 0), e.pos.z), _q, _s);
       const fx: [number, number, number, number] = [e.flash * 0.85, 0, e.glow, 0];
       e.batch.push(_m, e.rot, e.hidden, lod, fx, e.tint, e.posOff);
+      const be = e.batch.eyes;
+      if (faces && be && lod < 2 && cd < 48 && !e.hidden[be.head]) {
+        if (!e.eye) {
+          const look = EYE_LOOK[e.def.id] ?? ['glow', e.alpha ? 0xff3a20 : 0xff7a30];
+          e.eye = new EyeState(look[0], look[1], be.size);
+        }
+        e.eye.tick(dt);
+        const st = e.state;
+        const expr = e.status.stunned() || st === 'stagger' ? 'stunned' : e.flash > 0.35 ? 'hurt' : st === 'windup' || st === 'charge' || st === 'leap' || st === 'dive' ? 'angry' : st === 'spawn' ? 'surprised' : 'neutral';
+        e.eye.draw(faces, e.batch.partWorld(be.l), be.r >= 0 ? e.batch.partWorld(be.r) : null, expr, 0, 0, 1.5);
+      }
     }
     for (const r of this.rag) {
       _s.set(r.scale, r.scale, r.scale);

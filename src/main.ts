@@ -20,6 +20,8 @@ const msg = document.getElementById('boot-msg')!;
 const LINES = ['Saddling up…', 'Polishing the revolver…', 'Waking Pinch…', 'Counting bounties…', 'Sweeping sand off the dunes…', 'Consulting Serket…'];
 
 async function bootAssets() {
+  // the pixel atlas renders onomatopoeia with Alagard: make sure it is decoded first
+  await Promise.race([document.fonts.load('16px Alagard'), new Promise((r) => setTimeout(r, 2500))]).catch(() => {});
   let i = 0;
   const tick = setInterval(() => (msg.textContent = LINES[i++ % LINES.length]), 900);
   const noAudio = params.get('mute') === '1';

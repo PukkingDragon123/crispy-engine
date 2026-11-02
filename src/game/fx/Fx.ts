@@ -204,6 +204,15 @@ export class Fx {
     }
   }
 
+  private lastWord = 0;
+  /** comic 2D onomatopoeia popping in 3D space (rate-limited so it stays special) */
+  word(pos: V, sprite: string, scale = 1, force = false) {
+    const now = performance.now();
+    if (!force && now - this.lastWord < 650) return;
+    this.lastWord = now;
+    this.p.emit({ pos: { x: pos.x, y: pos.y + 1.2, z: pos.z }, count: 1, vel: { x: 0, y: 1.4, z: 0 }, life: [0.7, 0.7], size: [1.4 * scale, 1.15 * scale], sprite, color: 0xffffff, screen: true, sizeJitter: 0, drag: 2.5, rot: (Math.random() - 0.5) * 0.35 });
+  }
+
   speedLines(cam: THREE.Camera, intensity: number) {
     if (intensity <= 0.05 || !rnd.chance(intensity)) return;
     const fwd = this.tmp.set(0, 0, -1).applyQuaternion(cam.quaternion);

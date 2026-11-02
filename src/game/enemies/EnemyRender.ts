@@ -26,9 +26,9 @@ const material = makeVoxelMaterial();
 
 export class RigBatch {
   geo: RigGeo;
-  meshes: THREE.InstancedMesh[][] = [[], []]; // [lod][part]
-  fx: THREE.InstancedBufferAttribute[][] = [[], []];
-  counts: number[][] = [[], []];
+  meshes: THREE.InstancedMesh[][] = [[], [], []]; // [lod][part]
+  fx: THREE.InstancedBufferAttribute[][] = [[], [], []];
+  counts: number[][] = [[], [], []];
   cap: number;
   private world: THREE.Matrix4[] = [];
   private local = new THREE.Matrix4();
@@ -38,6 +38,9 @@ export class RigBatch {
   partIndex: Record<string, number>;
   nParts: number;
   meta: Record<string, any>;
+  /** 2D eyes: eye part indices (voxel eye parts are not drawn), head index, eye size (m) */
+  eyes: { l: number; r: number; head: number; size: number } | null = null;
+  private skip: Uint8Array;
 
   constructor(public key: string, scene: THREE.Scene, cap = 96) {
     const spec = resolveRig(key);
@@ -46,13 +49,14 @@ export class RigBatch {
     this.partIndex = this.geo.index;
     this.nParts = this.geo.parts.length;
     this.meta = spec.meta ?? {};
-    for (let lod = 0; lod < 2; lod++) {
+    for (let lod = 0; lod < 3; lod++) {
       this.geo.parts.forEach((p, i) => {
         let g: THREE.BufferGeometry;
         if (lod === 0) g = p.geo.clone();
         else {
-          const ds = downsampleModel(p.model, 2);
-          g = ds.count > 0 ? buildVoxelGeometry(ds, { voxelSize: spec.voxelSize * 2, pivot: [p.pivot[0] / 2, p.pivot[1] / 2, p.pivot[2] / 2] }) : p.geo.clone();
+          const f = lod === 1 ? 2 : 4;
+          const ds = downsampleModel(p.model, f, lod === 2 ? 0.2 : 0.3);
+          g = ds.count > 0 ? buildVoxelGeometry(ds, { voxelSize: spec.voxelSize * f, pivot: [p.pivot[0] / f, p.pivot[1] / f, p.pivot[2] / f] }) : p.geo.clone();
         }
         const m = new THREE.InstancedMesh(g, material, cap);
         m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -69,10 +73,21 @@ export class RigBatch {
       });
     }
     for (let i = 0; i < this.nParts; i++) this.world.push(new THREE.Matrix4());
+    this.skip = new Uint8Array(this.nParts);
+    const el = this.partIndex['eye_l'], er = this.partIndex['eye_r'];
+    if (el !== undefined) {
+      const g = this.geo.parts[el].geo;
+      g.computeBoundingBox();
+      const b = g.boundingBox!;
+      const size = Math.max(0.04, Math.max(b.max.x - b.min.x, b.max.y - b.min.y) * 1.25);
+      this.eyes = { l: el, r: er ?? -1, head: this.partIndex['head'] ?? this.geo.parts[el].parent, size };
+      this.skip[el] = 1;
+      if (er !== undefined) this.skip[er] = 1;
+    }
   }
 
   begin() {
-    for (let l = 0; l < 2; l++) for (let i = 0; i < this.nParts; i++) this.counts[l][i] = 0;
+    for (let l = 0; l < 3; l++) for (let i = 0; i < this.nParts; i++) this.counts[l][i] = 0;
   }
 
   /**
@@ -80,7 +95,7 @@ export class RigBatch {
    * pos: optional extra per-part position offsets (meters, parent space) Float32Array(nParts*3).
    * hidden: bitmask array of hidden parts.
    */
-  push(root: THREE.Matrix4, rot: Float32Array, hidden: Uint8Array | null, lod: 0 | 1, fx: [number, number, number, number], tint: THREE.Color, posOff?: Float32Array | null) {
+  push(root: THREE.Matrix4, rot: Float32Array, hidden: Uint8Array | null, lod: 0 | 1 | 2, fx: [number, number, number, number], tint: THREE.Color, posOff?: Float32Array | null) {
     const parts = this.geo.parts;
     for (let i = 0; i < parts.length; i++) {
       const p = parts[i];
@@ -92,7 +107,7 @@ export class RigBatch {
       const W = this.world[i];
       if (p.parent >= 0) W.multiplyMatrices(this.world[p.parent], this.local);
       else W.multiplyMatrices(root, this.local);
-      if (hidden && hidden[i]) continue;
+      if ((hidden && hidden[i]) || this.skip[i]) continue;
       this.write(i, W, lod, fx, tint);
     }
   }
@@ -102,7 +117,7 @@ export class RigBatch {
     return this.world[i];
   }
 
-  write(i: number, M: THREE.Matrix4, lod: 0 | 1, fx: [number, number, number, number], tint: THREE.Color) {
+  write(i: number, M: THREE.Matrix4, lod: 0 | 1 | 2, fx: [number, number, number, number], tint: THREE.Color) {
     const c = this.counts[lod][i];
     if (c >= this.cap) return;
     const mesh = this.meshes[lod][i];
@@ -114,7 +129,7 @@ export class RigBatch {
   }
 
   end() {
-    for (let l = 0; l < 2; l++)
+    for (let l = 0; l < 3; l++)
       for (let i = 0; i < this.nParts; i++) {
         const m = this.meshes[l][i];
         const c = this.counts[l][i];
@@ -132,7 +147,7 @@ export class RigBatch {
   }
 
   dispose() {
-    for (let l = 0; l < 2; l++) for (const m of this.meshes[l]) {
+    for (let l = 0; l < 3; l++) for (const m of this.meshes[l]) {
       m.removeFromParent();
       m.geometry.dispose();
     }

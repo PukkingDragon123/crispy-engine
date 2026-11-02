@@ -29,7 +29,7 @@ export interface HudState {
   boss: { name: string; frac: number; title?: string } | null;
   ult: number;
   skills: { key: string; icon: string; cd: number; max: number; charges?: number }[];
-  items: { key: string; icon: string; count: number }[];
+  items: { key: string; icon: string; count: number; model?: string }[];
   status: { id: StatusId; stacks: number }[];
   hitMarker: number;
   killMarker: number;
@@ -37,6 +37,15 @@ export interface HudState {
   locked: boolean;
   aiming: boolean;
   zone: string;
+}
+
+/** where the 3D HUD layer (Hud3D) should place its models, in HUD pixels */
+export interface HudAnchors {
+  cyl: { x: number; y: number; R: number; rot: number; angVel: number; open: number; recoil: number; shown: number; n: number; venom: number; phase: string; active: boolean };
+  coin: { x: number; y: number; pop: number };
+  items: { x: number; y: number; size: number; model: string; count: number }[];
+  ult: { x: number; y: number; frac: number; ready: boolean };
+  slide: number;
 }
 
 interface Toast {
@@ -93,6 +102,17 @@ export class Hud {
   private signSwing = 0;
   private lastWave = 0;
   private waveDrop = 1;
+  /** 3D layer draws the cylinder, coin, item models and Pinch idol; 2D skips those */
+  use3D = false;
+  /** item slots the 3D layer could fill (model exists) — 2D icon is skipped for these */
+  items3D: boolean[] = [];
+  anchors: HudAnchors = {
+    cyl: { x: 0, y: 0, R: 19, rot: 0, angVel: 0, open: 0, recoil: 0, shown: 6, n: 6, venom: 0, phase: '', active: false },
+    coin: { x: 0, y: 0, pop: 0 },
+    items: [],
+    ult: { x: 0, y: 0, frac: 0, ready: false },
+    slide: 0,
+  };
   /** world -> screen (css px) projector, set by RunScene */
   project: ((p: { x: number; y: number; z: number }) => { x: number; y: number; visible: boolean }) | null = null;
 
@@ -255,7 +275,9 @@ export class Hud {
     const plaque = woodPanel(64, 56, 3, { iron: true, dark: true });
     this.blit(plaque, cx - 32, cy - 28);
     // motion blur ghosts
-    const ghosts = Math.min(4, Math.floor(angVel / 4));
+    const signedVel = (this.cylRot - prev) / Math.max(dt, 1e-3);
+    this.anchors.cyl = { x: ox, y: oy, R, rot: this.cylRot, angVel: signedVel, open: this.cylOpen, recoil: this.recoil, shown: showAmmo, n, venom: s.venom, phase: rel.active ? rel.phase : '', active: rel.active };
+    const ghosts = this.use3D ? 0 : Math.min(4, Math.floor(angVel / 4));
     for (let g = ghosts; g >= 1; g--) {
       c.save();
       c.globalAlpha = 0.22;
@@ -264,13 +286,15 @@ export class Hud {
       c.drawImage(img, -img.width / 2, -img.height / 2);
       c.restore();
     }
-    c.save();
-    c.translate(Math.round(ox), Math.round(oy));
-    c.rotate(this.cylRot);
-    // fake swing-out: squash horizontally when open
-    c.scale(1 - this.cylOpen * 0.18, 1);
-    c.drawImage(img, -img.width / 2, -img.height / 2);
-    c.restore();
+    if (!this.use3D) {
+      c.save();
+      c.translate(Math.round(ox), Math.round(oy));
+      c.rotate(this.cylRot);
+      // fake swing-out: squash horizontally when open
+      c.scale(1 - this.cylOpen * 0.18, 1);
+      c.drawImage(img, -img.width / 2, -img.height / 2);
+      c.restore();
+    }
     // reload: brass sweet-spot arc + Pinch crawling the rim
     if (rel.active) {
       const rr = R + 4;
@@ -291,7 +315,7 @@ export class Hud {
       if (inside || rel.jam > 0) this.blit(kc, ox - kc.width / 2, oy + R + 8 + (inside ? Math.sin(this.t * 20) : 0));
       if (rel.jam > 0) text(c, 'JAMMED', ox, oy - R - 22, UI.blood.h, 16, 'center');
       // casings eject at start of eject phase
-      if (rel.phase === 'eject' && Math.random() < dt * 30) this.parts.push({ kind: 'casing', x: ox + (Math.random() - 0.5) * 10, y: oy, vx: (Math.random() - 0.5) * 50, vy: -30 - Math.random() * 30, t: 0, life: 1.2, rot: Math.random() * 6 });
+      if (!this.use3D && rel.phase === 'eject' && Math.random() < dt * 30) this.parts.push({ kind: 'casing', x: ox + (Math.random() - 0.5) * 10, y: oy, vx: (Math.random() - 0.5) * 50, vy: -30 - Math.random() * 30, t: 0, life: 1.2, rot: Math.random() * 6 });
     }
     // speed plaque
     text(c, `${Math.round(s.speed)}`, cx + 38, cy - 6, s.speed > 30 ? UI.brass.h : UI.textDim, 16, 'left');
@@ -309,6 +333,7 @@ export class Hud {
     if (this.enter < 0.01) return;
     const e = this.enter;
     const slide = (1 - e) * (1 - e);
+    this.anchors.slide = slide;
     const cx = Math.round(W / 2);
 
     // ---------------------------------------------------------- crosshair
@@ -366,9 +391,12 @@ export class Hud {
       }
       // consumables above
       let ix = x + 18;
-      for (const it of s.items) {
+      this.anchors.items.length = 0;
+      for (let ii = 0; ii < s.items.length; ii++) {
+        const it = s.items[ii];
         this.blit(slot(22, 5), ix, y - 30);
-        if (it.icon) this.spr(it.icon, ix + 7, y - 24);
+        this.anchors.items.push({ x: ix + 11, y: y - 19, size: 22, model: it.count > 0 ? it.model ?? '' : '', count: it.count });
+        if (it.icon && !(this.use3D && this.items3D[ii])) this.spr(it.icon, ix + 7, y - 24);
         this.blit(keycap(it.key), ix + 3, y - 42);
         if (it.count > 1) text(c, 'x' + it.count, ix + 14, y - 20, UI.text, 16);
         ix += 28;
@@ -395,7 +423,8 @@ export class Hud {
       if (Math.abs(s.gold - this.goldShown) < 0.5) this.goldShown = s.gold;
       this.goldPop = Math.max(0, this.goldPop - dt * 4);
       const gy = y + 30;
-      this.spr('coinBig', x + 38, gy - Math.round(this.goldPop * 3));
+      this.anchors.coin = { x: x + 44, y: gy + 6, pop: this.goldPop };
+      if (!this.use3D) this.spr('coinBig', x + 38, gy - Math.round(this.goldPop * 3));
       text(c, String(Math.round(this.goldShown)), x + 54, gy - 1, UI.brass.l, 16);
       if (s.combo > 2) text(c, `${s.combo} KILL STREAK`, x + 2, gy + 16, s.combo > 25 ? UI.blood.h : UI.brass.h, 16);
     }
@@ -447,7 +476,8 @@ export class Hud {
         const a = -Math.PI / 2 + t * Math.PI * 2;
         px(c, Math.round(ux + Math.cos(a) * (R - 2)), Math.round(uy + Math.sin(a) * (R - 2)), 2, 2, ready ? (Math.sin(this.t * 8 + i * 0.3) > 0 ? UI.brass.h : UI.brass.l) : UI.brass.m);
       }
-      this.spr('scorp_x2', ux - 8, uy - 8, 1, ready ? 1 : 0.5);
+      this.anchors.ult = { x: ux, y: uy, frac: s.ult, ready };
+      if (!this.use3D) this.spr('scorp_x2', ux - 8, uy - 8, 1, ready ? 1 : 0.5);
       this.blit(keycap('Z'), ux - 7, uy + 20);
       let kx = ux - 52;
       for (let i = s.skills.length - 1; i >= 0; i--) {

@@ -74,6 +74,8 @@ export interface Ctx {
   say?(text: string, opts?: any): void;
   toast(text: string, color?: string, sub?: string, big?: boolean): void;
   events: EventBus;
+  /** 2D pixel eyes drawn on 3D heads (begin/end per frame by the scene) */
+  faces?: import('./fx/FaceFx').FaceQuads;
 }
 
 type Handler = (...a: any[]) => void;

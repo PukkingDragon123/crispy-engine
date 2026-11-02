@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { Board, BoardInput, LandingInfo } from './Board';
 import { CameraRig } from './CameraRig';
 import { buildRigGeo, RigInstance, RigSpec, voxelMesh } from '../../engine/voxel/Rig';
+import { RigEyes } from '../fx/FaceFx';
 import type { VoxelModel } from '../../engine/voxel/VoxelModel';
 import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { StatSheet } from '../combat/Stats';
@@ -84,6 +85,10 @@ export class Player {
   baseGunDamage = 18;
   fireInterval = 0.17;
   fanInterval = 0.085;
+  // pose layer (skill / item actions)
+  action: { name: string; t: number; dur: number } | null = null;
+  /** 2D pixel eyes in the skull sockets (Serket-green embers) */
+  eyes: RigEyes;
   // callbacks
   onShot?: (hit: RayHit | null) => void;
 
@@ -104,6 +109,7 @@ export class Player {
     holder.rotation.x = Math.PI / 2;
     holder.add(this.gun.root);
     if (!this.rig.attach('hand_r', holder)) this.rig.nodes['fore_r']?.add(holder);
+    this.eyes = new RigEyes(this.rig, 'glow', 0x9dff3a);
     ctx.scene.add(this.root);
     // grapple rope
     const lg = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
@@ -188,6 +194,17 @@ export class Player {
       this.ctx.events.emit('trick', l);
       this.express(l.score > 500 ? 'laugh' : 'smug', 1.2);
     }
+  }
+
+  /** play a full-body pose action layered over the riding animation */
+  playAction(name: string, dur: number) {
+    this.action = { name, t: 0, dur };
+  }
+
+  /** 2D pixel smear at a world point (mixes comic 2D beats into 3D motion) */
+  smear(at: THREE.Vector3, size = 0.9, rot = 0) {
+    this.ctx.particles.emit({ pos: at, count: 1, life: [0.12, 0.14], size: [size, size * 1.15], sprite: ['smear0', 'smear1', 'smear2'], animate: true, color: 0xfff6e0, rot: 0, sizeJitter: 0 });
+    void rot;
   }
 
   express(name: string, dur = 1) {
@@ -279,6 +296,10 @@ export class Player {
       this.updateGrapple(dt);
     }
     this.animate(dt);
+    if (this.ctx.faces) {
+      this.eyes.lookAt(this.aimPoint);
+      this.eyes.draw(this.ctx.faces, dt);
+    }
     // board fx
     this.boardFx(dt);
     // expressions
@@ -429,6 +450,7 @@ export class Player {
       this.ctx.toast('PERFECT RELOAD', '#9dff3a', 'Venom rounds +35% dmg');
       this.ctx.fx.sparkle(this.muzzleWorld, P.serket, 10, 0.3);
       this.express('smug', 0.9);
+      this.playAction('twirl', 0.55);
       this.ctx.events.emit('perfectReload');
     } else this.ctx.sfx('rev_spin', this.pos, 0.5);
   }
@@ -546,6 +568,9 @@ export class Player {
     if (inp.hit('melee') && this.meleeCd <= 0) {
       this.meleeCd = 0.55;
       this.meleeAnim = 1;
+      this.playAction('kick', 0.42);
+      const f = this.ctx.camera.getWorldDirection(new THREE.Vector3());
+      this.ctx.engine.tweens.after(0.08, () => this.smear(this.center(new THREE.Vector3()).addScaledVector(f.setY(0).normalize(), 1.1), 1.4));
       this.ctx.events.emit('melee', this);
     }
   }
@@ -618,6 +643,7 @@ export class Player {
     this.grappleT = 0;
     this.grappleCd = 2.2 * (1 - this.stats.get('cdr'));
     ctx.sfx('grapple_fire', this.pos, 0.9);
+    this.playAction('grapple', 0.5);
     ctx.sfx('grapple_hit', b, 0.8);
     ctx.fx.hit(b, { x: 0, y: 1, z: 0 }, 'chitin', 0.6);
     this.express('determined', 0.5);
@@ -809,6 +835,7 @@ export class Player {
       this.hatZ.update(clamp(accR * 0.004, -0.3, 0.3), dt);
       hat.rotation.set(this.hatX.x, 0, this.hatZ.x);
     }
+    this.applyAction(dt);
     // hurt flash decay
     const fxu = this.material.userData.fx.value;
     fxu.x = damp(fxu.x, 0, 12, dt);
@@ -821,6 +848,91 @@ export class Player {
       const piv = this.gun.geo.spec.parts[0].pivot;
       frame.localToWorld(this.muzzleWorld.set((mz[0] - piv[0]) * vs, (mz[1] - piv[1]) * vs, (mz[2] - piv[2]) * vs));
     } else this.muzzleWorld.copy(this.center());
+  }
+
+  private applyAction(dt: number) {
+    const a = this.action;
+    if (!a) return;
+    a.t += dt;
+    const k = Math.min(1, a.t / a.dur);
+    if (k >= 1) {
+      this.action = null;
+      const g = this.gun.root;
+      g.rotation.set(0, 0, 0);
+      return;
+    }
+    // envelope: quick in, hold, ease out
+    const w = Math.min(1, k / 0.15) * Math.min(1, (1 - k) / 0.2);
+    const n = this.rig.nodes;
+    const set = (name: string, x: number, y: number, z: number) => {
+      const node = n[name];
+      if (!node) return;
+      node.rotation.x += (x - node.rotation.x) * w;
+      node.rotation.y += (y - node.rotation.y) * w;
+      node.rotation.z += (z - node.rotation.z) * w;
+    };
+    const ease = (t: number) => t * t * (3 - 2 * t);
+    switch (a.name) {
+      case 'throw': {
+        // wind back, whip forward, follow through
+        const arm = k < 0.35 ? ease(k / 0.35) * 1.9 : 1.9 - ease((k - 0.35) / 0.25) * 3.9;
+        set('arm_l', Math.max(-2, arm), 0.3, 0.2);
+        set('fore_l', -0.4 - Math.max(0, 0.35 - k) * 2, 0, 0);
+        set('torso', -0.15 + (k > 0.35 ? 0.35 : -0.2), k < 0.35 ? 0.7 : -0.5, 0);
+        set('head', 0.1, k < 0.35 ? -0.3 : 0.2, 0);
+        break;
+      }
+      case 'summon':
+        set('arm_l', -2.85, 0.2, 0.35);
+        set('arm_r', -2.6, -0.2, -0.35);
+        set('fore_l', -0.3, 0, 0);
+        set('torso', -0.35, 0, 0);
+        set('head', -0.45, 0, 0);
+        break;
+      case 'lob': {
+        const arm = k < 0.4 ? ease(k / 0.4) * 0.9 : 0.9 - ease((k - 0.4) / 0.3) * 2.4;
+        set('arm_l', arm, 0.1, 0.25);
+        set('torso', 0.35 * (1 - k), 0.3, 0);
+        break;
+      }
+      case 'kick':
+        set('torso', -0.25, -0.6 + k * 0.4, 0.1);
+        set('arm_l', -0.3, 0, 1.4);
+        set('thigh_r', -1.9 * Math.sin(k * Math.PI), 0, -0.2);
+        set('shin_r', 0.2, 0, 0);
+        break;
+      case 'twirl': {
+        set('arm_r', -0.6, 0, -1.2);
+        set('fore_r', -0.5, 0, 0);
+        const g = this.gun.root;
+        g.rotation.x = -ease(k) * Math.PI * 4; // spin twice around the trigger finger
+        break;
+      }
+      case 'grapple':
+        set('arm_l', -1.6, 0.2, 0.1);
+        set('fore_l', -0.1, 0, 0);
+        set('torso', -0.1, 0.4, 0);
+        break;
+      case 'drink':
+        set('arm_l', -2.3, 0.4, 0.6);
+        set('fore_l', -1.6, 0, 0);
+        set('head', -0.6, 0, 0);
+        break;
+      case 'wrap':
+        set('arm_l', -1.2, 0.8, -0.2);
+        set('arm_r', -1.2, -0.8, 0.2);
+        set('fore_l', -1.5, 0, 0);
+        set('fore_r', -1.5, 0, 0);
+        set('head', 0.35, 0, 0);
+        break;
+      case 'ult':
+        set('arm_r', -3.0, 0, -0.25);
+        set('arm_l', -1.0, 0.9, 0.2);
+        set('fore_l', -1.4, 0, 0);
+        set('head', k < 0.5 ? 0.5 : -0.35, 0, 0);
+        set('torso', -0.2, 0, 0);
+        break;
+    }
   }
 
   dispose() {

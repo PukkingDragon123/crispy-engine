@@ -78,6 +78,7 @@ export class Inventory {
     switch (s.id) {
       case 'bandage':
         pl.heal(pl.maxHp * 0.35);
+        pl.playAction('wrap', 0.7);
         ctx.sfx('bandage', c, 0.9);
         ctx.particles.emit({ pos: c, count: 10, spread: 1.5, up: 1.5, life: [0.5, 1], size: [0.1, 0.06], sprite: 'linen', color: 0xffffff, drag: 2 });
         break;
@@ -139,6 +140,7 @@ export class Inventory {
       case 'whiskey':
         this.buff('item:whiskey', [{ stat: 'critChance', type: 'flat', value: 0.25 }, { stat: 'regen', type: 'flat', value: 4 }], 10);
         this.drunk = 10;
+        pl.playAction('drink', 0.8);
         ctx.sfx('glass_break', c, 0.4, 1.3);
         pl.express('laugh', 1.2);
         break;
