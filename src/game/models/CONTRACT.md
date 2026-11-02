@@ -50,7 +50,8 @@ Every old note about resolution, the pixel-art pass, ramps, outlines, textures, 
 Deviate only for a character's identity (jackal taller, mummy hunched, Anubis/Sethos scaled up):
 - sole y=0, ankle 3, knee 12, hip joints y=20 at x=±3, pelvis 18–23, waist 24, chest 25–34, shoulders y=32 at x=±7.
 - neck 34–36, head 36–52 (16 tall, 15 wide, 14 deep).
-- Elbow y=24. Wrist y=17. Fist ~5×5×5 reaching y≈12–13. Boots/feet 6–7 long, 4 wide, 4 tall.
+- Elbow y=25, fists at y≈14–18 (shorter cartoon arms; `JOINT` in `src/game/models/toon/humanoid.ts` holds the
+  exact numbers and is the source of truth). Boots/feet 6–7 long, 4 wide, 4 tall.
 - Total ≈ 52 voxels = 1.73 m (+ hat). `meta.height` etc. must match.
 
 ## Conventions

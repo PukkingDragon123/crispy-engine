@@ -3,6 +3,9 @@ import { Engine } from './engine/Engine';
 import { DebugTerrainScene } from './game/scenes/DebugTerrainScene';
 import { RunScene } from './game/scenes/RunScene';
 import { MenuScene } from './game/scenes/MenuScene';
+import { HubScene } from './game/scenes/HubScene';
+import { nav } from './game/Nav';
+import { loadSave, writeSave } from './game/meta/Save';
 import { SOUNDS } from './game/audio/manifest';
 import { Music } from './game/audio/Music';
 
@@ -44,23 +47,34 @@ async function main() {
     return;
   }
   await bootAssets();
-  const ride = (intro: boolean) =>
-    engine.setScene(
+  nav.ride = (intro = false) => {
+    const d = loadSave();
+    if (intro) {
+      d.seenIntro = true;
+      writeSave(d);
+    }
+    void engine.setScene(
       new RunScene(engine, {
         area: (params.get('area') as 'A' | 'B' | 'C') ?? 'A',
-        seed: +(params.get('seed') ?? 7),
+        seed: params.get('seed') ? +params.get('seed')! : Math.floor(Math.random() * 99999),
         startWave: +(params.get('wave') ?? 1),
         intro,
+        look: d.look,
+        gun: d.gun,
       }),
       0.6
     );
+  };
+  nav.menu = () => void engine.setScene(new MenuScene(engine, () => nav.ride(!loadSave().seenIntro)), 0.6);
+  nav.hub = () => void engine.setScene(new HubScene(engine, () => nav.ride(false), () => nav.menu()), 0.6);
   if (debug === 'run') {
     music.setMood('explore');
-    await ride(params.get('intro') === '1');
-    (window as any).__ready = true;
-  } else {
-    await engine.setScene(new MenuScene(engine, () => void ride(true)), 0.6);
-    (window as any).__ready = true;
-  }
+    nav.ride(params.get('intro') === '1');
+  } else if (debug === 'hub') nav.hub();
+  else nav.menu();
+  // ready once the first scene has finished building
+  while (!engine.current || (engine.current as any).ready === false) await new Promise((r) => setTimeout(r, 100));
+  await new Promise((r) => setTimeout(r, 300));
+  (window as any).__ready = true;
 }
 main();

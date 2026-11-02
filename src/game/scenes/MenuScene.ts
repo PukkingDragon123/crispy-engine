@@ -15,6 +15,7 @@ import { Particles } from '../fx/Particles';
 import { FaceQuads, RigEyes, emote } from '../fx/FaceFx';
 import { Ease } from '../../engine/Tween';
 import { damp, noise } from '../../engine/math/rand';
+import { nav } from '../Nav';
 
 function duneModel() {
   const m = new VoxelModel('menu_dunes');
@@ -275,10 +276,13 @@ export class MenuScene implements GameScene {
         this.openSettings();
         break;
       case 'HIDEOUT':
-        this.say('The hideout saloon is still being swept out. Soon, partner.');
+        if (this.leaving) return;
+        this.leaving = true;
+        eng.audio.play('door_creak', { volume: 0.8 });
+        nav.hub();
         break;
       case 'CODEX':
-        this.say("Thoth's codex is gathering dust… and stories.");
+        this.say("Thoth's codex lies on the hideout table. Head to the HIDEOUT.");
         break;
     }
   }

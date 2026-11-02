@@ -42,7 +42,9 @@ import type { ZoneDef } from '../world/RegionGen';
 import { AnubisTrial } from './AnubisTrial';
 import { ResultsScene } from './ResultsScene';
 import { playIntro } from './IntroCine';
-import { MenuScene } from './MenuScene';
+import { nav } from '../Nav';
+import { awardRun, loadSave, GunLoadout, gunMods } from '../meta/Save';
+import * as CH from '../models/characters';
 import { FaceQuads } from '../fx/FaceFx';
 import { ULT_INFO } from '../player/Ultimate';
 
@@ -53,6 +55,7 @@ export interface RunOptions {
   look?: { hat: string; outfit: string; board: string };
   /** play the Serket opening cinematic */
   intro?: boolean;
+  gun?: GunLoadout;
 }
 
 function resolveRig(keys: string[], fallback: () => RigSpec): RigSpec {
@@ -106,6 +109,7 @@ export class RunScene implements GameScene {
   private trail: { x: number; z: number }[] = [];
   private trailT = 0;
   private bossNames: string[] = [];
+  private codexKills: Record<string, number> = {};
   private lastRdt = 1 / 60;
   qte!: Qte;
   skills!: Skills;
@@ -182,14 +186,23 @@ export class RunScene implements GameScene {
     };
 
     // player visuals
-    const look = this.opts.look ?? { hat: 'stetson', outfit: 'duster', board: 'driftwood' };
+    const look = this.opts.look ?? loadSave().look;
     const vis: PlayerVisuals = {
       rig: resolveRig([`cowboy_${look.hat}_${look.outfit}`, 'cowboy_stetson_duster'], () => placeholderHumanoid()),
-      gun: resolveRig(['revolver_standard', 'revolver'], placeholderRevolver),
+      gun: (() => {
+        try {
+          const g = this.opts.gun ? ((CH as any).revolverRig?.(this.opts.gun) as RigSpec | undefined) : undefined;
+          if (g?.parts) return g;
+        } catch (err) {
+          console.warn('gun build failed', err);
+        }
+        return resolveRig(['revolver_standard', 'revolver'], placeholderRevolver);
+      })(),
       board: resolveStatic([`board_${look.board}`, 'board_driftwood'], placeholderBoard),
     };
     this.player = new Player(this.ctx, vis, this.camRig, e.input);
     this.hud3d.setBust(vis.rig, vis.rig.name + ':player');
+    if (this.opts.gun) this.player.stats.add(gunMods(this.opts.gun) as any);
     this.enemies = new Enemies(this.ctx, this.player as any);
     this.ctx.enemies = this.enemies;
     this.qte = new Qte(e.overlay, e.input, e.audio);
@@ -293,6 +306,7 @@ export class RunScene implements GameScene {
     ev.on('enemyKilled', (en: Enemy) => {
       this.killMarker = 0.2;
       this.run.kills++;
+      this.codexKills[en.def.id] = (this.codexKills[en.def.id] ?? 0) + 1;
       this.run.combo++;
       this.run.comboTimer = 3;
       const bountyMul = this.player.stats.get('bountyGain');
@@ -585,7 +599,7 @@ export class RunScene implements GameScene {
       { label: 'MAIN MENU', fn: () => {
         this.setPaused(false);
         const eng = this.engine;
-        void eng.setScene(new MenuScene(eng, () => void eng.setScene(new RunScene(eng, { ...this.opts, intro: false, startWave: 1 }), 0.6)), 0.6);
+        nav.menu();
       } },
     ]);
   }
@@ -605,6 +619,7 @@ export class RunScene implements GameScene {
       deathAt: won ? null : { x: p.x, z: p.z },
       bosses: this.bossNames,
       heightAt: this.world.groundAt,
+      banked: awardRun(this.run, this.codexKills),
     };
     eng.tweens.after(2.6, () => {
       void eng.setScene(

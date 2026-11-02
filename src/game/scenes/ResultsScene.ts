@@ -12,6 +12,7 @@ import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { TOON, bevelBox } from '../models/style';
 import { Ease } from '../../engine/Tween';
+import { nav } from '../Nav';
 
 export interface RunResult {
   run: RunState;
@@ -22,6 +23,7 @@ export interface RunResult {
   deathAt: { x: number; z: number } | null;
   bosses: string[];
   heightAt(x: number, z: number): number;
+  banked?: number;
 }
 
 const N = 88; // diorama columns per side
@@ -315,6 +317,13 @@ export class ResultsScene implements GameScene {
       this.ui.appendChild(b);
     };
     btn('RIDE AGAIN', () => this.onAgain());
+    btn('HIDEOUT', () => nav.hub());
+    if (this.res.banked) {
+      const b = document.createElement('div');
+      b.style.cssText = "font-family:'Alagard';font-size:20px;color:#ffd36b;text-shadow:0 3px 0 #2a1408;align-self:center";
+      b.textContent = `+${this.res.banked} gold banked`;
+      this.ui.appendChild(b);
+    }
     eng.overlay.appendChild(this.ui);
     eng.input.setWantLock(false);
     // poster fills in line by line
