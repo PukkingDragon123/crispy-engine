@@ -879,7 +879,7 @@ export class RunScene implements GameScene {
       hitMarker: this.hitMarker,
       killMarker: this.killMarker,
       combo: this.run.combo,
-      locked: this.engine.input.locked,
+      locked: this.engine.input.lookActive,
       aiming: p.aiming,
       zone: this.world.zone.name,
       prompt: this.picker.active || this.choice.active || this.shop.active ? null : this.inter.prompt(),

@@ -45,6 +45,11 @@ export class Input {
   ndcX = 0;
   ndcY = 0;
   locked = false;
+  /** pointer lock refused (e.g. sandboxed iframe): mouse movement still steers the camera */
+  lockFailed = false;
+  get lookActive() {
+    return this.locked || (this.lockFailed && this.wantLock);
+  }
   sensitivity = 1;
   invertY = false;
   /** when false, all gameplay actions read as idle (cinematics) */
@@ -82,7 +87,7 @@ export class Input {
     });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('mousemove', (e) => {
-      if (this.locked) {
+      if (this.locked || (this.lockFailed && this.wantLock)) {
         this.mouseDX += e.movementX;
         this.mouseDY += e.movementY;
       }
@@ -100,19 +105,38 @@ export class Input {
     );
     document.addEventListener('pointerlockchange', () => {
       this.locked = document.pointerLockElement === this.el;
+      if (this.locked) this.lockFailed = false;
+    });
+    document.addEventListener('pointerlockerror', () => {
+      this.lockFailed = true;
+      if (this.wantLock) this.locked = true; // pseudo-lock: raw mouse movement steers
     });
   }
 
   /** gameplay wants pointer lock (re-acquired on click) */
   setWantLock(v: boolean) {
     this.wantLock = v;
+    if (this.lockFailed) {
+      this.locked = v;
+      return;
+    }
     if (v) this.requestLock();
     else if (this.locked) document.exitPointerLock();
   }
   requestLock() {
     try {
-      const p = (this.el as any).requestPointerLock?.({ unadjustedMovement: false });
-      if (p && p.catch) p.catch(() => {});
+      const fn = (this.el as any).requestPointerLock;
+      if (!fn) {
+        this.lockFailed = true;
+        if (this.wantLock) this.locked = true;
+        return;
+      }
+      const p = fn.call(this.el, { unadjustedMovement: false });
+      if (p && p.catch)
+        p.catch(() => {
+          this.lockFailed = true;
+          if (this.wantLock) this.locked = true;
+        });
     } catch {
       /* ignore */
     }
