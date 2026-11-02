@@ -39,6 +39,7 @@ import { Missions } from '../run/Missions';
 import { Choice } from '../ui/Choice';
 import { Shop } from '../ui/Shop';
 import type { ZoneDef } from '../world/RegionGen';
+import { SUBAREAS } from '../world/RegionGen';
 import { AnubisTrial } from './AnubisTrial';
 import { Ledger } from '../ui/Ledger';
 import { TrailEvents } from '../run/TrailEvents';
@@ -58,6 +59,19 @@ export interface RunOptions {
   /** play the Serket opening cinematic */
   intro?: boolean;
   gun?: GunLoadout;
+  /** state carried across sub-area travel (waves 50 → 51, 75 → 76) */
+  carry?: RunCarry;
+}
+
+export interface RunCarry {
+  run: RunState;
+  history: string[];
+  items: ({ id: any; count: number } | null)[];
+  hpFrac: number;
+  mods: any[];
+  codex: Record<string, number>;
+  bosses: string[];
+  ult: string;
 }
 
 function resolveRig(keys: string[], fallback: () => RigSpec): RigSpec {
@@ -231,6 +245,21 @@ export class RunScene implements GameScene {
     this.populateZone(this.world.sa.zones[0]);
     if (this.world.sa.zones[1]) this.populateZone(this.world.sa.zones[1]);
     this.ledger = new Ledger(e.overlay, this.player.stats);
+    // arriving from another sub-area: restore the run
+    const cy = this.opts.carry;
+    if (cy) {
+      Object.assign(this.run, cy.run);
+      this.ctx.run = this.run;
+      for (const id of cy.history) this.upgrades.apply(id);
+      this.player.stats.add(cy.mods);
+      this.items.slots = cy.items.map((s) => (s ? { ...s } : null)) as any;
+      this.player.hp = this.player.maxHp * Math.max(0.3, cy.hpFrac);
+      this.player.ammo = this.player.maxAmmo;
+      this.codexKills = { ...cy.codex };
+      this.bossNames = [...cy.bosses];
+      this.ult.variant = cy.ult as any;
+      e.tweens.after(1.6, () => this.hud3d.cutIn(SUBAREAS[this.opts.area].name.toUpperCase(), '#ffd36b', 'determined'), true);
+    }
     this.trailEvents = new TrailEvents({
       ctx: this.ctx, player: this.player, choice: this.choice,
       card: () => this.picker.request(),
@@ -507,6 +536,12 @@ export class RunScene implements GameScene {
   }
 
   private onWaveEnd(s: WaveSpec) {
+    // the storm parts after Sethos falls: ride on to the next sub-area
+    if ((s.n === 50 && this.opts.area === 'A') || (s.n === 75 && this.opts.area === 'B')) {
+      this.pickups.vacuum();
+      void this.travel(this.opts.area === 'A' ? 'B' : 'C', s.n + 1);
+      return;
+    }
     if (s.n >= 100) {
       this.hud.toast('THE STORM BREAKS', '#ffd36b', 'Serket\'s Reach is free.', true);
       this.engine.tweens.after(3, () => this.endRun(true));
@@ -603,6 +638,38 @@ export class RunScene implements GameScene {
     this.fx.ring({ x: p.x, y: p.y + 0.3, z: p.z }, 0x7ff0ff, 22, 0.8);
     this.events.emit('groundMark', p.x, p.z, 7, 2);
     this.enemies.inRadius(p, 14, (en) => this.enemies.damage(en, { base: 160, kind: 'magic', source: 'divine', knock: 18, canCrit: false }));
+  }
+
+  private async travel(next: 'A' | 'B' | 'C', wave: number) {
+    const eng = this.engine;
+    const info = SUBAREAS[next];
+    this.hud.toast('THE STORM PARTS', '#ffd36b', `On to ${info.name}…`, true);
+    this.ctx.sfx('wave_clear', null, 0.8);
+    await eng.tweens.wait(2.5, true);
+    eng.letterbox(true, 0.5);
+    eng.input.enabled = false;
+    // crane up into the sandstorm
+    const p = this.player.pos.clone();
+    const c0 = this.camera.position.clone();
+    this.ctx.sfx('storm_loop', null, 1);
+    await eng.tweens.tween(2.6, (k) => {
+      this.camRig.setCine({ pos: c0.clone().lerp(p.clone().add(new THREE.Vector3(0, 60, 0)), k), look: p.clone().add(new THREE.Vector3(Math.sin(this.camRig.yaw) * 30 * k, 0, Math.cos(this.camRig.yaw) * 30 * k)), fov: 60 + k * 20 });
+      if (Math.random() < 0.5) this.fx.dust({ x: p.x + (Math.random() - 0.5) * 30, y: p.y + k * 40, z: p.z + (Math.random() - 0.5) * 30 }, 4, 0xe6c08a, 6);
+    }, Ease.inQuad, true);
+    await eng.fadeOut(0.9, '#e6c08a');
+    const carry: RunCarry = {
+      run: { ...this.run, wave: wave - 1 },
+      history: [...this.upgrades.history],
+      items: this.items.slots.map((x) => (x ? { ...x } : null)),
+      hpFrac: this.player.hp / this.player.maxHp,
+      mods: this.player.stats.mods.filter((m) => !m.source.startsWith('up:') && m.source !== 'gun' && !m.source.startsWith('item:')),
+      codex: { ...this.codexKills },
+      bosses: [...this.bossNames],
+      ult: this.ult.variant,
+    };
+    eng.input.enabled = true;
+    eng.letterbox(false, 0.1);
+    void eng.setScene(new RunScene(eng, { ...this.opts, area: next, startWave: wave, intro: false, carry, seed: (this.opts.seed * 17 + 3) % 100000 }), 0.9);
   }
 
   private pausedByUser = false;
