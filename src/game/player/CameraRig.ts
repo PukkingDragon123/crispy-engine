@@ -14,8 +14,8 @@ export class CameraRig {
   yaw = 0;
   pitch = -0.12;
   dist = 5.2;
-  height = 1.25;
-  shoulder = 0.8;
+  height = 1.45;
+  shoulder = 0.9;
   fov = 72;
   trauma = 0;
   recoil = 0;

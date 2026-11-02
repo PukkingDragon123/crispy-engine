@@ -30,9 +30,19 @@ import { UpgradeManager, UpgradeEffects } from '../run/Upgrades';
 import { CardPicker } from '../ui/CardPicker';
 import { Garments } from '../player/Garments';
 import { Props, PropInst } from '../world/Props';
+import { Ease } from '../../engine/Tween';
 import { Hud3D, CutInOpts } from '../ui/Hud3D';
 import type { Boss } from '../bosses/Boss';
 import { makeBoss } from '../bosses/BossRoster';
+import { Interactions, Chest, DumbScarab } from '../run/Interact';
+import { Missions } from '../run/Missions';
+import { Choice } from '../ui/Choice';
+import { Shop } from '../ui/Shop';
+import type { ZoneDef } from '../world/RegionGen';
+import { AnubisTrial } from './AnubisTrial';
+import { ResultsScene } from './ResultsScene';
+import { playIntro } from './IntroCine';
+import { MenuScene } from './MenuScene';
 import { FaceQuads } from '../fx/FaceFx';
 import { ULT_INFO } from '../player/Ultimate';
 
@@ -41,6 +51,8 @@ export interface RunOptions {
   seed: number;
   startWave?: number;
   look?: { hat: string; outfit: string; board: string };
+  /** play the Serket opening cinematic */
+  intro?: boolean;
 }
 
 function resolveRig(keys: string[], fallback: () => RigSpec): RigSpec {
@@ -83,6 +95,17 @@ export class RunScene implements GameScene {
   hud3d!: Hud3D;
   faces = new FaceQuads();
   bosses: Boss[] = [];
+  inter!: Interactions;
+  choice!: Choice;
+  shop!: Shop;
+  missions!: Missions;
+  chests: Chest[] = [];
+  scarabs: DumbScarab[] = [];
+  private populated = new Set<number>();
+  private trial: AnubisTrial | null = null;
+  private trail: { x: number; z: number }[] = [];
+  private trailT = 0;
+  private bossNames: string[] = [];
   private lastRdt = 1 / 60;
   qte!: Qte;
   skills!: Skills;
@@ -179,6 +202,17 @@ export class RunScene implements GameScene {
     this.upgrades = new UpgradeManager(this.player.stats);
     this.upFx = new UpgradeEffects(this.ctx, this.upgrades, this.player, this.skills);
     this.picker = new CardPicker(this.ctx, this.upgrades, e.input, () => this.player.pos);
+    this.inter = new Interactions(this.player);
+    this.choice = new Choice(this.ctx, e.input);
+    this.shop = new Shop(this.ctx, e.input, this.camRig);
+    this.missions = new Missions({
+      ctx: this.ctx, player: this.player, enemies: this.enemies, props: this.props, inter: this.inter, choice: this.choice, shop: this.shop, qte: this.qte, cam: this.camRig, items: this.items,
+      card: () => this.picker.request(),
+      chest: (x, z, tier) => this.spawnChest(x, z, tier),
+      addBounty: (v) => this.addBounty(v),
+    });
+    this.populateZone(this.world.sa.zones[0]);
+    if (this.world.sa.zones[1]) this.populateZone(this.world.sa.zones[1]);
     this.garments = new Garments(this.player.rig, this.cloth, this.world.groundAt);
     const v3 = new THREE.Vector3();
     this.hud.project = (p) => {
@@ -202,7 +236,9 @@ export class RunScene implements GameScene {
     this.stormLoop = e.audio.loop('storm_loop', 0);
     e.input.setWantLock(true);
     this.ready = true;
-    this.director.start(this.opts.startWave ?? 1);
+    if (this.opts.intro) {
+      void playIntro({ engine: e, cam: this.camRig, player: this.player, fx: this.fx, particles: this.particles, world: this.world, scene: this.scene, cutIn: (t, c, x) => this.hud3d.cutIn(t, c, x) }).then(() => this.director.start(this.opts.startWave ?? 1));
+    } else this.director.start(this.opts.startWave ?? 1);
   }
 
   exit() {
@@ -210,7 +246,12 @@ export class RunScene implements GameScene {
     this.slideLoop?.stop(0.5);
     this.stormLoop?.stop(0.5);
     this.hud3d.dispose();
-    this.hud.canvas.remove();
+    this.hud.dispose();
+    this.choice?.dispose();
+    this.shop?.dispose();
+    this.picker?.dispose();
+    this.engine.paused = false;
+    this.engine.post.u.uDesat.value = 0;
     this.qte.dispose();
     this.engine.input.setWantLock(false);
     this.events.clear();
@@ -234,6 +275,9 @@ export class RunScene implements GameScene {
       this.hud.onShot();
     });
     ev.on('rankUp', () => this.picker.request());
+    ev.on('melee', () => {
+      for (const s of this.scarabs) s.onMelee(this.player);
+    });
     ev.on('cutin', (title: string, color?: string, expr?: string, opts?: CutInOpts) => this.hud3d.cutIn(title, color, expr, opts));
     ev.on('bossIntro', (b: Boss) => this.hud3d.cutIn(b.name.toUpperCase(), '#ff6a3a', 'smug', { geo: b.rig.geo, eyes: [b.eyes.state.style, b.eyes.state.color], height: b.height / b.scale, flip: true }));
     ev.on('bossPlow', (p: { x: number; z: number }, r: number) => {
@@ -317,10 +361,41 @@ export class RunScene implements GameScene {
       this.run.ultCharge = Math.min(1, this.run.ultCharge + 0.25);
       if (!escaped) this.hud.toast(`${bb.name.toUpperCase()} — BOUNTY CLAIMED`, '#ffd36b', `+${Math.round(bb.bounty)} bounty`, true);
       (window as any).__music?.setMood('explore');
+      if (!escaped) this.bossNames.push(bb.name);
       this.events.emit('bossDefeated', bb, escaped);
     };
     void b.start();
     return b;
+  }
+
+  /** chests and the dumb scarab live outside the prop batches */
+  private populateZone(z: ZoneDef) {
+    if (this.populated.has(z.index)) return;
+    this.populated.add(z.index);
+    for (const a of z.anchors) {
+      if (a.kind === 'chest') {
+        const tier = z.index >= 4 && rnd.chance(0.3) ? 'gold' : z.index >= 2 && rnd.chance(0.4) ? 'silver' : 'wood';
+        this.spawnChest(a.x, a.z, tier, a.rot);
+      } else if (a.kind === 'dumbScarab' && this.scarabs.length < 3) {
+        this.scarabs.push(new DumbScarab(this.ctx, this.enemies, new THREE.Vector3(a.x, 0, a.z)));
+      }
+    }
+  }
+
+  spawnChest(x: number, z: number, tier: 'wood' | 'silver' | 'gold' | 'divine', rot = rnd.next() * 6.28) {
+    const c = new Chest(this.ctx, x, z, rot, tier, (ch) => {
+      const l = ch.loot();
+      const at = { x: ch.root.position.x, y: ch.root.position.y + 0.8, z: ch.root.position.z };
+      this.pickups.drop('gold', 1, at, Math.min(30, Math.ceil(l.gold / 3)));
+      if (l.item) {
+        if (this.items.add(l.item)) this.hud.toast(ITEMS[l.item].name.toUpperCase(), '#9dff3a', 'Found in the chest');
+        else this.hud.toast('POCKETS FULL', '#ff8a6a', ITEMS[l.item].name + ' left behind');
+      }
+      if (l.card) this.engine.tweens.after(0.7, () => this.picker.request());
+    });
+    this.chests.push(c);
+    this.inter.add(c.inter);
+    return c;
   }
 
   addBounty(v: number) {
@@ -397,6 +472,11 @@ export class RunScene implements GameScene {
   }
 
   private onWaveEnd(s: WaveSpec) {
+    if (s.n >= 100) {
+      this.hud.toast('THE STORM BREAKS', '#ffd36b', 'Serket\'s Reach is free.', true);
+      this.engine.tweens.after(3, () => this.endRun(true));
+      return;
+    }
     this.pickups.vacuum();
     this.hud.toast('WAVE CLEARED', '#9dff3a', `+${10 + s.n * 2} gold`);
     this.run.gold += 10 + s.n * 2;
@@ -417,7 +497,10 @@ export class RunScene implements GameScene {
     this.ctx.shake(0.6);
     this.world.openStormFor(zone);
     const nextZ = this.world.sa.zones[zone.index + 1];
-    if (nextZ) this.engine.tweens.after(0.2, () => this.props.buildZone(nextZ));
+    if (nextZ) this.engine.tweens.after(0.2, () => {
+      this.props.buildZone(nextZ);
+      this.populateZone(nextZ);
+    });
     const prev = this.world.activeZone;
     this.engine.tweens.run(4, (k) => this.world.setTransform(zone, k), (t) => t * t * (3 - 2 * t));
     if (zone.corridor) {
@@ -437,12 +520,98 @@ export class RunScene implements GameScene {
     this.engine.tweens.after(40, () => this.world.closeBehind(prev));
   }
 
-  private onPlayerDeath() {
-    this.gameOver = true;
-    this.hud.toast('YOU DIED', '#ff5a3a', 'The desert keeps your bones…', true);
+  private async onPlayerDeath() {
+    const eng = this.engine;
+    this.hud.toast('YOU DIED', '#ff5a3a', this.run.revived ? 'The desert keeps your bones…' : 'Your soul sinks through the sand…', true);
     this.ctx.sfx('sting_negative', null, 0.8);
-    this.engine.slowMo(0.2, 3);
-    this.events.emit('runOver', this.run);
+    this.ctx.sfx('soul_leave', null, 0.9);
+    eng.slowMo(0.15, 6);
+    const pu = eng.post.u;
+    void eng.tweens.tween(1.4, (k) => (pu.uDesat.value = k * 0.85), Ease.inOutQuad, true);
+    if (this.run.revived) return this.endRun(false);
+    // once per run: the Weighing of the Heart
+    this.run.revived = true;
+    await eng.tweens.wait(1.8, true);
+    await eng.fadeOut(0.9);
+    const trial = new AnubisTrial(eng, this.qte, this.player.rig.geo);
+    this.trial = trial;
+    eng.post.setSceneCamera(trial.scene, trial.camera);
+    (window as any).__music?.setMood('underworld');
+    eng.slowMo(1, 50);
+    eng.paused = true;
+    this.hud.setVisible(false);
+    const ok = await trial.run({ kills: this.run.kills, wave: this.run.wave });
+    eng.post.setSceneCamera(this.scene, this.camera);
+    this.trial = null;
+    trial.dispose();
+    pu.uDesat.value = 0;
+    eng.paused = false;
+    this.hud.setVisible(true);
+    if (!ok) {
+      eng.fadeIn(0.6);
+      return this.endRun(false);
+    }
+    // resurrection: rise out of the sand in a shockwave
+    (window as any).__music?.setMood('combat');
+    this.player.revive();
+    this.player.hp = this.player.maxHp * 0.6;
+    this.player.invuln = 4;
+    const p = this.player.pos.clone();
+    eng.fadeIn(0.5);
+    this.events.emit('cutin', 'RETURNED FROM THE DUAT', '#7ff0ff', 'determined');
+    this.ctx.sfx('resurrect', p, 1);
+    this.ctx.shake(0.8);
+    this.fx.explosion({ x: p.x, y: p.y + 0.5, z: p.z }, 6, 'divine');
+    this.fx.ring({ x: p.x, y: p.y + 0.3, z: p.z }, 0x7ff0ff, 22, 0.8);
+    this.events.emit('groundMark', p.x, p.z, 7, 2);
+    this.enemies.inRadius(p, 14, (en) => this.enemies.damage(en, { base: 160, kind: 'magic', source: 'divine', knock: 18, canCrit: false }));
+  }
+
+  private pausedByUser = false;
+  setPaused(p: boolean) {
+    const e = this.engine;
+    if (p === this.pausedByUser) return;
+    this.pausedByUser = p;
+    e.paused = p;
+    e.input.setWantLock(!p);
+    e.audio.setMuffle(p ? 0.6 : 0);
+    e.audio.play(p ? 'paper_flutter' : 'ui_close', { volume: 0.7 });
+    this.hud3d.showPause(p, [
+      { label: 'RESUME', fn: () => this.setPaused(false) },
+      { label: 'GIVE UP THE HUNT', fn: () => {
+        this.setPaused(false);
+        this.endRun(false);
+      } },
+      { label: 'MAIN MENU', fn: () => {
+        this.setPaused(false);
+        const eng = this.engine;
+        void eng.setScene(new MenuScene(eng, () => void eng.setScene(new RunScene(eng, { ...this.opts, intro: false, startWave: 1 }), 0.6)), 0.6);
+      } },
+    ]);
+  }
+
+  private endRun(won: boolean) {
+    if (this.gameOver) return;
+    this.gameOver = true;
+    this.events.emit('runOver', this.run, won);
+    const eng = this.engine;
+    const p = this.player.pos;
+    const res = {
+      run: { ...this.run },
+      won,
+      sa: this.world.sa,
+      reached: this.world.activeZone,
+      trail: [...this.trail, { x: p.x, z: p.z }],
+      deathAt: won ? null : { x: p.x, z: p.z },
+      bosses: this.bossNames,
+      heightAt: this.world.groundAt,
+    };
+    eng.tweens.after(2.6, () => {
+      void eng.setScene(
+        new ResultsScene(eng, res, () => void eng.setScene(new RunScene(eng, { ...this.opts, seed: (this.opts.seed * 31 + 7) % 100000, startWave: 1 }), 0.8)),
+        1.0
+      );
+    }, true);
   }
 
   // ------------------------------------------------------------------ update
@@ -451,15 +620,24 @@ export class RunScene implements GameScene {
     const e = this.engine;
     this.run.time += dt;
     // pause toggle (simple until poster scene)
-    if (e.input.hit('pause')) {
-      e.paused = !e.paused;
-      e.input.setWantLock(!e.paused);
-      e.audio.setMuffle(e.paused ? 0.6 : 0);
-      this.hud.toast(e.paused ? 'PAUSED' : 'RESUMED', '#fff3d6');
+    if (this.trial) {
+      this.qte.update(rdt);
+      this.trial.update(rdt);
+      return;
     }
+    const modal = this.choice.active || this.shop.active;
+    if (!modal && !this.picker.active && e.input.hit('pause')) this.setPaused(!this.pausedByUser);
     this.qte.update(rdt);
     this.picker.update(rdt);
-    this.hud.suppressHint = this.picker.active || this.ult.active;
+    this.choice.update(rdt);
+    this.shop.update(rdt);
+    this.hud.suppressHint = this.picker.active || this.ult.active || modal || this.pausedByUser;
+    if (modal) {
+      this.cloth.update(rdt * 0.2, e.realTime);
+      this.camRig.update(rdt, this.player.pos, 0, false, 0);
+      this.updateHud(rdt);
+      return;
+    }
     if (this.picker.active) {
       this.cloth.update(rdt * 0.2, e.realTime);
       this.updateHud(rdt);
@@ -475,6 +653,14 @@ export class RunScene implements GameScene {
     this.enemies.update(dt, this.run.time);
     this.pickups.update(dt);
     this.director.update(dt);
+    this.trailT -= dt;
+    if (this.trailT <= 0) {
+      this.trailT = 1.5;
+      this.trail.push({ x: this.player.pos.x, z: this.player.pos.z });
+    }
+    this.inter.update(e.input);
+    this.missions.update(dt);
+    for (const s of this.scarabs) s.update(dt, this.player);
     for (let i = this.bosses.length - 1; i >= 0; i--) {
       const b = this.bosses[i];
       b.update(dt);
@@ -532,7 +718,7 @@ export class RunScene implements GameScene {
   }
 
   postRender(renderer: THREE.WebGLRenderer) {
-    if (!this.ready) return;
+    if (!this.ready || this.trial) return;
     this.hud3d.update(this.lastRdt);
     this.hud3d.render(renderer);
   }
@@ -580,6 +766,8 @@ export class RunScene implements GameScene {
       locked: this.engine.input.locked,
       aiming: p.aiming,
       zone: this.world.zone.name,
+      prompt: this.picker.active || this.choice.active || this.shop.active ? null : this.inter.prompt(),
+      ...this.missions.hud(),
     };
     this.hud.update(rdt, st);
   }

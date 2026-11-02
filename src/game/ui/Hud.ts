@@ -37,6 +37,12 @@ export interface HudState {
   locked: boolean;
   aiming: boolean;
   zone: string;
+  /** [T] prompt over an interactable */
+  prompt?: { world: { x: number; y: number; z: number }; key: string; text: string } | null;
+  /** active mission objective */
+  objective?: { text: string; sub: string } | null;
+  /** world-space objective marker */
+  marker?: { x: number; y: number; z: number } | null;
 }
 
 /** where the 3D HUD layer (Hud3D) should place its models, in HUD pixels */
@@ -146,6 +152,8 @@ export class Hud {
       ex.t = 0.05;
       return;
     }
+    // a new title card replaces the previous one instead of stacking on it
+    if (big) this.toasts = this.toasts.filter((x) => !x.big);
     this.toasts.push({ text: t, color, sub, t: 0, big });
     if (this.toasts.length > 5) this.toasts.shift();
   }
@@ -167,6 +175,10 @@ export class Hud {
     const x = s.x / this.scale, y = s.y / this.scale;
     const tx = kind === 'coin' ? 46 : 98, ty = kind === 'coin' ? 33 : 15;
     this.parts.push({ kind, x, y, sx: x, sy: y, tx, ty, vx: (Math.random() - 0.5) * 60, vy: -40 - Math.random() * 40, t: 0, life: 0.55 + Math.random() * 0.2 });
+  }
+  dispose() {
+    this.canvas.remove();
+    this.hint.remove();
   }
   setVisible(v: boolean) {
     this.visible = v;
@@ -543,6 +555,45 @@ export class Hud {
       if (p.t > p.life) this.parts.splice(i, 1);
     }
 
+    // ---------------------------------------------------------- interaction prompt
+    if (s.prompt && this.project) {
+      const p = this.project(s.prompt.world);
+      if (p.visible) {
+        const x = Math.round(p.x / this.scale), y = Math.round(p.y / this.scale) + Math.round(Math.sin(this.t * 4) * 2);
+        const kc = keycap(s.prompt.key);
+        const tw = Math.ceil(measure(c, s.prompt.text, 16)) + 14;
+        const bw = tw + kc.width + 6;
+        this.blit(parchment(bw, 20, 3), x - bw / 2, y - 10);
+        this.blit(kc, x - bw / 2 + 4, y - 7);
+        text(c, s.prompt.text, x - bw / 2 + kc.width + 9, y - 7, UI.wood.o, 16, 'left', false);
+      }
+    }
+    // ---------------------------------------------------------- objective + marker
+    if (s.objective) {
+      const ow = Math.max(150, Math.ceil(Math.max(measure(c, s.objective.text, 16), measure(c, s.objective.sub, 16))) + 20);
+      const ox = W - ow - 8 + slide * 200, oy = 8;
+      this.blit(parchment(ow, 38, 7), ox, oy);
+      text(c, s.objective.text.toUpperCase(), ox + 8, oy + 3, UI.blood.d, 16, 'left', false);
+      text(c, s.objective.sub, ox + 8, oy + 19, UI.wood.d, 16, 'left', false);
+    }
+    if (s.marker && this.project) {
+      const p = this.project(s.marker);
+      let mx = p.x / this.scale, my = p.y / this.scale;
+      const off = !p.visible;
+      if (off) {
+        // clamp to the screen edge, pointing toward the target
+        const dx = mx - W / 2, dy = my - H / 2;
+        const k = Math.min((W / 2 - 16) / Math.max(1, Math.abs(dx)), (H / 2 - 16) / Math.max(1, Math.abs(dy)));
+        mx = W / 2 + dx * Math.min(1, k);
+        my = H / 2 + dy * Math.min(1, k);
+      }
+      const bob = Math.round(Math.sin(this.t * 5) * 2);
+      const col = Math.sin(this.t * 6) > 0 ? UI.brass.h : UI.brass.l;
+      for (let i = 0; i < 6; i++) px(c, Math.round(mx) - 5 + i, Math.round(my) - 10 + bob + i, 11 - i * 2, 1, i === 0 ? UI.wood.o : col);
+      px(c, Math.round(mx) - 1, Math.round(my) - 18 + bob, 3, 7, col);
+      px(c, Math.round(mx) - 1, Math.round(my) - 8 + bob, 3, 2, col);
+    }
+
     // ---------------------------------------------------------- toasts (ribbons)
     let ty = Math.round(H * 0.3);
     for (let i = this.toasts.length - 1; i >= 0; i--) {
@@ -569,7 +620,7 @@ export class Hud {
       }
       const inK = Math.min(1, tt.t / 0.25);
       const out = tt.t > life - 0.3 ? (life - tt.t) / 0.3 : 1;
-      const tw = Math.ceil(measure(c, tt.text, 16)) + 14;
+      const tw = Math.ceil(Math.max(measure(c, tt.text, 16), tt.sub ? measure(c, tt.sub, 16) : 0)) + 14;
       const xx = W - 10 - tw - Math.round((1 - easeOutBack(inK)) * -120);
       c.globalAlpha = out;
       this.blit(parchment(tw + 6, tt.sub ? 32 : 18, (tt.text.length * 7) % 13), xx - 3, ty - 1);

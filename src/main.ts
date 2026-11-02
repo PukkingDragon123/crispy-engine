@@ -2,6 +2,7 @@ import './style.css';
 import { Engine } from './engine/Engine';
 import { DebugTerrainScene } from './game/scenes/DebugTerrainScene';
 import { RunScene } from './game/scenes/RunScene';
+import { MenuScene } from './game/scenes/MenuScene';
 import { SOUNDS } from './game/audio/manifest';
 import { Music } from './game/audio/Music';
 
@@ -43,16 +44,22 @@ async function main() {
     return;
   }
   await bootAssets();
-  if (debug === 'run' || !debug) {
-    music.setMood('explore');
-    await engine.setScene(
+  const ride = (intro: boolean) =>
+    engine.setScene(
       new RunScene(engine, {
         area: (params.get('area') as 'A' | 'B' | 'C') ?? 'A',
         seed: +(params.get('seed') ?? 7),
         startWave: +(params.get('wave') ?? 1),
+        intro,
       }),
       0.6
     );
+  if (debug === 'run') {
+    music.setMood('explore');
+    await ride(params.get('intro') === '1');
+    (window as any).__ready = true;
+  } else {
+    await engine.setScene(new MenuScene(engine, () => void ride(true)), 0.6);
     (window as any).__ready = true;
   }
 }

@@ -14,6 +14,7 @@ import { buildRigGeo, RigGeo, RigInstance, RigSpec } from '../../engine/voxel/Ri
 import { modelEntry } from '../models/lookup';
 import { TOON } from '../models/style';
 import { FaceQuads, RigEyes, EyeStyle } from '../fx/FaceFx';
+import { paintNotice } from './Choice';
 
 export interface CutInOpts {
   /** rig to show as the bust (default: the player) */
@@ -198,6 +199,12 @@ export class Hud3D {
   } | null = null;
   private bandMat: THREE.ShaderMaterial;
   private bustSpec: RigSpec | null = null;
+  // pause poster
+  private poster: THREE.Mesh | null = null;
+  private posterK = 0;
+  private posterOpen = false;
+  private posterUi: HTMLDivElement | null = null;
+  private posterMat: THREE.ShaderMaterial | null = null;
   private keyLight: THREE.DirectionalLight;
 
   constructor(private hud: Hud) {
@@ -290,6 +297,73 @@ export class Hud3D {
   }
 
   private bustKey = '';
+  /** the pause screen: a wanted poster blows in and flutters; DOM buttons ride on it */
+  showPause(open: boolean, actions?: { label: string; fn: () => void }[]) {
+    this.posterOpen = open;
+    if (open && !this.poster) {
+      const tex = paintNotice({ title: 'Paused', body: 'The outlaws hold their breath. The sand does not.\n\nWASD ride · SPACE jump · SHIFT drift · MOUSE aim & shoot · R reload · F kick · Q grapple · E scorpions · C swarm · G dung bomb · Z ultimate · 1/2 items · T interact', footer: 'Reward: a breather', stamp: 'ON HOLD' }, 300, 430);
+      this.posterMat = new THREE.ShaderMaterial({
+        uniforms: { map: { value: tex }, uT: { value: 0 }, uAmp: { value: 1 } },
+        vertexShader: `uniform float uT, uAmp; varying vec2 vUv; void main(){ vUv = uv; vec3 p = position;
+          float w = sin(p.y * 0.012 + uT * 7.0) * (1.0 - uv.y) * 6.0 * uAmp + sin(p.x * 0.02 + uT * 5.0) * (1.0 - uv.y) * 4.0 * uAmp;
+          p.x += w; p.y += sin(p.x * 0.015 + uT * 6.0) * 3.0 * uAmp * (1.0 - uv.y);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0); }`,
+        fragmentShader: `uniform sampler2D map; varying vec2 vUv; void main(){ vec4 t = texture2D(map, vUv); if (t.a < 0.5) discard; gl_FragColor = vec4(t.rgb, 1.0);
+          #include <colorspace_fragment>
+        }`,
+        depthTest: false,
+        depthWrite: false,
+      });
+      this.poster = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 12, 16), this.posterMat);
+      this.poster.renderOrder = 20;
+      this.poster.frustumCulled = false;
+      this.scene.add(this.poster);
+    }
+    if (open && actions) {
+      this.posterUi?.remove();
+      const ui = document.createElement('div');
+      ui.style.cssText = 'position:absolute;z-index:9;display:flex;flex-direction:column;gap:10px;align-items:center;transform:translate(-50%,0);pointer-events:auto';
+      for (const a of actions) {
+        const b = document.createElement('button');
+        b.textContent = a.label;
+        b.style.cssText = "font-family:'Alagard';font-size:22px;min-width:220px;padding:8px 18px;background:#7a4a28;color:#fff3d6;border:4px solid #2a1408;box-shadow:0 4px 0 #2a1408;cursor:pointer;letter-spacing:1px";
+        b.onmouseenter = () => (b.style.background = '#9a5a30');
+        b.onmouseleave = () => (b.style.background = '#7a4a28');
+        b.onclick = (ev) => {
+          ev.stopPropagation();
+          a.fn();
+        };
+        ui.appendChild(b);
+      }
+      document.getElementById('overlay')?.appendChild(ui);
+      this.posterUi = ui;
+    }
+    if (!open) {
+      this.posterUi?.remove();
+      this.posterUi = null;
+    }
+  }
+
+  private updatePoster(dt: number, W: number, H: number) {
+    this.posterK = Math.max(0, Math.min(1, this.posterK + (this.posterOpen ? dt * 3 : -dt * 4)));
+    if (!this.poster) return;
+    const k = this.posterK;
+    this.poster.visible = k > 0.001;
+    if (!this.poster.visible) return;
+    const e = 1 - Math.pow(1 - k, 3);
+    const ph = Math.min(H * 0.86, 640), pw = ph * (300 / 430);
+    this.poster.scale.set(pw, ph, 1);
+    this.poster.position.set(W / 2 + (1 - e) * W * 0.8, -H / 2 + (1 - e) * 120, 400);
+    this.poster.rotation.z = (1 - e) * -0.9 + Math.sin(this.t * 1.3) * 0.015;
+    this.posterMat!.uniforms.uT.value = this.t;
+    this.posterMat!.uniforms.uAmp.value = 0.35 + (1 - e) * 3;
+    if (this.posterUi) {
+      this.posterUi.style.left = `${W / 2 + (1 - e) * W * 0.8}px`;
+      this.posterUi.style.top = `${H / 2 + ph * 0.06}px`;
+      this.posterUi.style.opacity = String(e);
+    }
+  }
+
   /** player rig spec (and its geometry cache key) used for the cut-in bust */
   setBust(spec: RigSpec, cacheKey: string) {
     this.bustSpec = spec;
@@ -608,6 +682,7 @@ export class Hud3D {
     }
 
     if (this.cut) this.updateCut(dt, W, H);
+    this.updatePoster(dt, W, H);
     this.faces.end(null);
   }
 
@@ -630,6 +705,7 @@ export class Hud3D {
 
   dispose() {
     this.endCut();
+    this.posterUi?.remove();
     this.hud.canvas.style.display = '';
     this.hud.use3D = false;
     this.tex.dispose();

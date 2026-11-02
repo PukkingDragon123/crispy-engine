@@ -44,6 +44,10 @@ export class CardPicker {
     ctx.engine.overlay.appendChild(this.hint);
   }
 
+  dispose() {
+    this.hint.remove();
+  }
+
   /** queue a pick (multiple rank-ups) */
   request() {
     this.queue++;

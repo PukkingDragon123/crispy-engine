@@ -889,7 +889,7 @@ function applyTheme(ctx: ThemeCtx, zn: ZoneDef) {
   }
   // treasure, ore and secrets in every zone
   scatter(ctx, zn, 'ore', 3, 10, R - 6, 14, (a) => (a.data = { type: rng.pick(['copper', 'silver', 'gold', 'turquoise', 'amethyst']) }));
-  scatter(ctx, zn, 'chest', 1, R * 0.3, R - 8, 20);
+  scatter(ctx, zn, 'chest', 2, R * 0.25, R - 6, 8);
   scatter(ctx, zn, 'pot', 4, 6, R - 6, 6);
   // one big landmark encounter per zone (tall wooden building, walk-in cinematic + mission)
   const lmTypes: LandmarkType[] = ['tradingPost', 'outlawFort', 'mineHeadframe', 'ranchBarn', 'sheriffOffice', 'saloon'];
