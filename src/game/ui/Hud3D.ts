@@ -531,8 +531,13 @@ export class Hud3D {
       if (nd['head']) nd['head'].rotation.set(0.12 + Math.sin(c.t * 9) * 0.02, -0.25, 0.08);
       if (nd['jaw']) nd['jaw'].rotation.x = 0.25 + Math.abs(Math.sin(c.t * 11)) * 0.12;
       r.root.updateMatrixWorld(true);
-      c.eyes?.lookAt(new THREE.Vector3(bx + 400, cy, 900));
-      c.eyes?.draw(this.faces, dt);
+      // the bust is clipped to the band; skip the 2D eyes when the head is outside it
+      const head = r.nodes['eye_l'] ?? r.nodes['head'];
+      const hp = head ? head.getWorldPosition(new THREE.Vector3()) : null;
+      if (hp && c.planes[0].distanceToPoint(hp) > 0 && c.planes[1].distanceToPoint(hp) > 0) {
+        c.eyes?.lookAt(new THREE.Vector3(bx + 400, cy, 900));
+        c.eyes?.draw(this.faces, dt);
+      }
     }
   }
 
