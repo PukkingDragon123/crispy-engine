@@ -40,6 +40,8 @@ import { Choice } from '../ui/Choice';
 import { Shop } from '../ui/Shop';
 import type { ZoneDef } from '../world/RegionGen';
 import { AnubisTrial } from './AnubisTrial';
+import { Ledger } from '../ui/Ledger';
+import { TrailEvents } from '../run/TrailEvents';
 import { ResultsScene } from './ResultsScene';
 import { playIntro } from './IntroCine';
 import { nav } from '../Nav';
@@ -102,6 +104,8 @@ export class RunScene implements GameScene {
   choice!: Choice;
   shop!: Shop;
   missions!: Missions;
+  ledger!: Ledger;
+  trailEvents!: TrailEvents;
   chests: Chest[] = [];
   scarabs: DumbScarab[] = [];
   private populated = new Set<number>();
@@ -226,6 +230,22 @@ export class RunScene implements GameScene {
     });
     this.populateZone(this.world.sa.zones[0]);
     if (this.world.sa.zones[1]) this.populateZone(this.world.sa.zones[1]);
+    this.ledger = new Ledger(e.overlay, this.player.stats);
+    this.trailEvents = new TrailEvents({
+      ctx: this.ctx, player: this.player, choice: this.choice,
+      card: () => this.picker.request(),
+      chest: (tier) => {
+        const p = this.player.pos, a = this.camRig.yaw;
+        this.spawnChest(p.x + Math.sin(a) * 4, p.z + Math.cos(a) * 4, tier);
+      },
+      ambush: (kind, n) => {
+        for (let i = 0; i < n; i++) {
+          const sp = this.director.spawnPoint(8, 16);
+          if (sp) this.enemies.spawn(kind, sp.x, sp.z, { emerge: 'sand' });
+        }
+      },
+      addBounty: (v) => this.addBounty(v),
+    });
     this.garments = new Garments(this.player.rig, this.cloth, this.world.groundAt);
     const v3 = new THREE.Vector3();
     this.hud.project = (p) => {
@@ -261,6 +281,7 @@ export class RunScene implements GameScene {
     this.hud3d.dispose();
     this.hud.dispose();
     this.choice?.dispose();
+    this.ledger?.dispose();
     this.shop?.dispose();
     this.picker?.dispose();
     this.engine.paused = false;
@@ -495,6 +516,9 @@ export class RunScene implements GameScene {
     this.hud.toast('WAVE CLEARED', '#9dff3a', `+${10 + s.n * 2} gold`);
     this.run.gold += 10 + s.n * 2;
     this.ctx.sfx('wave_clear', null, 0.7);
+    this.engine.tweens.after(1.4, () => {
+      if (!this.gameOver && this.player.alive) void this.trailEvents.maybe(s.n);
+    });
     // zone transformation after each 5th wave
     if (s.n % 5 === 0) this.engine.tweens.after(1.5, () => this.unlockZone());
     this.engine.tweens.after(s.n % 5 === 0 ? 9 : 3.5, () => {
@@ -640,7 +664,17 @@ export class RunScene implements GameScene {
       this.trial.update(rdt);
       return;
     }
-    const modal = this.choice.active || this.shop.active;
+    if (this.ledger.open && (e.input.hit('stats') || e.input.wasPressed('Escape'))) {
+      this.ledger.toggle(false);
+      e.paused = false;
+      e.input.setWantLock(true);
+    } else if (!this.ledger.open && !this.choice.active && !this.shop.active && !this.picker.active && e.input.hit('stats')) {
+      this.ledger.toggle(true);
+      e.paused = true;
+      e.input.setWantLock(false);
+      e.audio.play('book_open', { volume: 0.6 });
+    }
+    const modal = this.choice.active || this.shop.active || this.ledger.open;
     if (!modal && !this.picker.active && e.input.hit('pause')) this.setPaused(!this.pausedByUser);
     this.qte.update(rdt);
     this.picker.update(rdt);
