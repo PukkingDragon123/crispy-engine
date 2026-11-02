@@ -16,6 +16,7 @@ export class Sethos extends Boss {
       title: form === 1 ? 'Hand of Set' : form === 2 ? 'Voice of the Storm' : 'The Red God Walks',
       hp: form === 1 ? 9000 : form === 2 ? 15000 : 26000,
       eyes: ['glow', 0xff3a1a],
+      scale: form === 3 ? 1.4 : 1,
     });
     this.phases = [0.66, 0.33];
     this.armor = 40 + form * 15;
