@@ -939,7 +939,9 @@ class Turtle {
     const p = inside ? this.meta.counter : this.meta.porch;
     if (p) this.rPos.set(p[0], p[1], p[2]);
     this.rPath = null;
+    this.rDone = null;
     this.rYaw = this.rTurn = Math.PI / 2;
+    this.poseRider(0);
   }
   get riderWalking() {
     return !!this.rPath;
@@ -3397,8 +3399,10 @@ export class Shop {
         b.p.x = Math.sign(b.p.x) * lx;
         b.v.x *= -0.3;
       }
-      if (Math.abs(b.p.z) > lz) {
-        b.p.z = Math.sign(b.p.z) * lz;
+      // (indoors the lens is low in the doorway: keep them back from its near edge, in shot)
+      const zMin = this.indoor ? -0.05 : -lz;
+      if (b.p.z > lz || b.p.z < zMin) {
+        b.p.z = clamp(b.p.z, zMin, lz);
         b.v.z *= -0.3;
       }
     }
