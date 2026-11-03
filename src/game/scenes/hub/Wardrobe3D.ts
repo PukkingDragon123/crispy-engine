@@ -14,7 +14,7 @@ import * as CH from '../../models/characters';
 import * as WS from '../../models/props/workshop';
 import * as HX from '../../models/props/hideout';
 import { loadSave, writeSave, owns, HATS, OUTFITS, PRICES } from '../../meta/Save';
-import { BuildKit, HubHost, HubStation, HeroBubble, PriceLock, safe, geoOf, meshOf, reach, joint, ease, clamp01, sstep } from './HubKit';
+import { BuildKit, HubHost, HubStation, HeroBubble, PriceLock, safe, geoOf, meshOf, reach, joint, ease, clamp01, sstep, stepJob } from './HubKit';
 import type { Mode, Pick, View } from './HouseExtras';
 
 const IN = HX.CABIN_IN;
@@ -322,18 +322,7 @@ export class Wardrobe3D implements Mode {
 
   // ======================================================================= per frame
   tick(t: number, rdt: number) {
-    if (this.job) {
-      const t0 = performance.now();
-      try {
-        while (performance.now() - t0 < 10) if (this.job.next().done) {
-          this.job = null;
-          break;
-        }
-      } catch (e) {
-        console.warn('[hub+] wardrobe', e);
-        this.job = null;
-      }
-    }
+    this.job = stepJob(this.job, 'wardrobe');
     if (!this.placed && !this.job) this.placed = this.placeMirrorThings();
     const d = loadSave();
     for (const it of this.items) {

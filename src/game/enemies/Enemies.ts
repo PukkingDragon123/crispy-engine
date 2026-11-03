@@ -832,7 +832,7 @@ export class Enemies implements EnemyApi {
     const s = e.state;
     if (s === 'down') return;
     // committed moves ride through hits, except a counter or a blast swatting a pounce / charge
-    if (s === 'charge' || s === 'leap' || s === 'dive' || s === 'wrap' || s === 'burrow' || s === 'hidden' || s === 'spawn' || s === 'erupt') {
+    if (s === 'charge' || s === 'leap' || s === 'dive' || s === 'wrap' || s === 'snatch' || s === 'burrow' || s === 'hidden' || s === 'spawn' || s === 'erupt') {
       if (!((s === 'leap' || s === 'charge') && (src === 'counter' || src === 'explosion' || src === 'grapple'))) return;
     }
     const small = e.def.hp <= 60 && e.def.ai !== 'tank';
@@ -2805,6 +2805,11 @@ export class Enemies implements EnemyApi {
     const pl = this.player;
     if (!e.alive || !pl.alive || e.state !== 'snatch') {
       this.releaseSnatch(e, false, 1, false);
+      return;
+    }
+    // stunned (a status, a counter): the talons open
+    if (e.status.stunned()) {
+      this.releaseSnatch(e, true, 1, false);
       return;
     }
     // drift the haul a little and keep it out of the storm

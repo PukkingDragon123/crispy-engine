@@ -477,12 +477,16 @@ export class BulletCam {
   desat = 0;
   /** seconds since the trigger of the beat */
   t = 0;
+  /** freeze the beat where it is (debug / capture) */
+  hold = false;
   private P: Plan = FULL;
   private short = false;
   private host: BulletCamHost | null = null;
   private tg: Target | null = null;
   private p = new Particles();
   private mat: VoxelMaterial;
+  /** the round: polished copper and lead */
+  private metal: VoxelMaterial;
   private bulletGeo: THREE.BufferGeometry | null = null;
   private bullet: THREE.Mesh | null = null;
   private bulletSpin = new THREE.Group();
@@ -547,7 +551,8 @@ export class BulletCam {
   constructor(private ctx: Ctx) {
     this.p.groundAt = ctx.world.groundAt;
     ctx.scene.add(this.p.group);
-    this.mat = makeVoxelMaterial({ roughness: 0.55 });
+    this.mat = makeVoxelMaterial();
+    this.metal = makeVoxelMaterial({ roughness: 0.42 });
     this.ripples = new Ripples(ctx.scene);
     this.wake = new HeatWake(ctx.scene);
     this.pieces = new Pieces(ctx.scene, ctx.world.groundAt);
@@ -795,9 +800,10 @@ export class BulletCam {
       return;
     }
     const sh = this.host!.shooter;
-    const held = !!this.host!.held?.();
+    const held = this.hold || !!this.host!.held?.();
     if (!held) this.t += rdt;
-    if ((skip || this.skipReq) && !held) {
+    // (a short grace so the clicks of the fight that earned the rank do not skip it by accident)
+    if ((skip || this.skipReq) && !held && this.t > 0.2) {
       this.skipReq = false;
       this.skipNow();
       return;
@@ -837,6 +843,8 @@ export class BulletCam {
     // ---- camera + grade
     this.camera(t, T, rdt);
     this.grade(t, T, rdt);
+    this.clearLens(this.p as any, 0.14, 1.2);
+    this.clearLens(ctx.particles as any, 0.3, 1.6);
     if (t >= T.end) this.finish();
   }
 
@@ -865,7 +873,7 @@ export class BulletCam {
     if (this.bullet) return this.bullet;
     const r = bulletRound();
     this.bulletGeo = buildVoxelGeometry(r.model, { voxelSize: r.voxelSize, pivot: 'center' });
-    this.bullet = new THREE.Mesh(this.bulletGeo, this.mat);
+    this.bullet = new THREE.Mesh(this.bulletGeo, this.metal);
     this.bullet.castShadow = false;
     this.bullet.frustumCulled = false;
     this.bulletSpin.add(this.bullet);
@@ -937,7 +945,7 @@ export class BulletCam {
       const x = M.x + D.x * s + (R.x * Math.cos(a) + U.x * Math.sin(a)) * r;
       const y = M.y + D.y * s + (R.y * Math.cos(a) + U.y * Math.sin(a)) * r;
       const z = M.z + D.z * s + (R.z * Math.cos(a) + U.z * Math.sin(a)) * r;
-      p.emit({ pos: { x, y, z }, count: 1, spread: 0.05, life: [2.2, 3.2], size: [0.012, 0.01], sprite: ['dot2', 'dot3'], color: [0xf3e2bc, 0xe6cf9f, 0xfff4dc], alpha: 0.8, drag: 0.5, fadeIn: 0.1 });
+      p.emit({ pos: { x, y, z }, count: 1, spread: 0.05, life: [2.2, 3.2], size: [0.016, 0.012], sprite: 'glow8', additive: true, color: [0xf3e2bc, 0xe6cf9f, 0xfff4dc], alpha: 0.55, drag: 0.5, fadeIn: 0.1 });
     }
     this.holdLight(M, 0xffb24a, 16);
     ctx.engine.flash(0xfff0c8, 0.16, 0.14);
@@ -1062,7 +1070,7 @@ export class BulletCam {
     const spr = tg.kind === 'skull' ? GRAIN : F.sprite;
     p.emit({ pos: X, count: 70, vel: { x: D.x * 5, y: D.y * 5 + 0.6, z: D.z * 5 }, spread: 3.0, gravity: F.gravity, drag: 0.5, life: [0.5, 1.2], size: [0.045, 0.022], sprite: spr, color: wet, stretch: 0.03, ground: true });
     p.emit({ pos: X, count: 34, vel: { x: D.x * 2.2, y: D.y * 2.2, z: D.z * 2.2 }, spread: 2.2, life: [0.6, 1.4], size: [0.018, 0.01], sprite: ['dot2', 'dot3'], color: wet, drag: 1.2, gravity: 2 });
-    p.emit({ pos: _v.copy(X).addScaledVector(D, 0.08), count: 9, vel: { x: D.x * 1.5, y: D.y * 1.5, z: D.z * 1.5 }, spread: 1.0, life: [1.1, 2.0], size: [0.1, 0.55 + tg.r], sprite: PUFF, color: tg.kind === 'skull' ? [0xeadcc0, 0xf3e8cf] : F.mist, alpha: 0.5, drag: 1.8, rot: 6, rotSpeed: 0.4, jitter: 0.06 });
+    p.emit({ pos: _v.copy(X).addScaledVector(D, 0.08), count: 7, vel: { x: D.x * 1.5, y: D.y * 1.5, z: D.z * 1.5 }, spread: 1.0, life: [1.1, 2.0], size: [0.08, 0.4 + tg.r * 0.6], sprite: PUFF, color: tg.kind === 'skull' ? [0xeadcc0, 0xf3e8cf] : F.mist, alpha: 0.5, drag: 1.8, rot: 6, rotSpeed: 0.4, jitter: 0.06 });
     p.emit({ pos: X, count: 20, vel: { x: D.x * 4, y: D.y * 4 + 0.5, z: D.z * 4 }, spread: 3.2, life: [0.6, 1.2], size: [0.03, 0.026], sprite: ['bone', 'pebble'], color: BONE, gravity: 13, ground: true, bounce: 0.3, rot: 6, rotSpeed: 12 });
     p.emit({ pos: X, count: 1, life: [0.12, 0.12], size: [0.3, 0.7], sprite: ['flash0', 'flash2'], additive: true, color: tg.kind === 'skull' ? 0xfff2d0 : 0xffd8c8, alpha: 0.7, sizeJitter: 0 });
     this.ripples.spawn(X, D, tg.r * 2.6, 0.5, 1.8, 1);
@@ -1094,16 +1102,32 @@ export class BulletCam {
     if (!e?.alive) return;
     const X = _v3.copy(tg.head).addScaledVector(D, tg.r * 0.85);
     const hi = typeof e.part === 'function' ? e.part('head') : -1;
+    const H = this.horde;
+    // the head stays whole, holed through, and comes off on the snap (the round is seen to go
+    // through it): the horde's own sever (stump cap, neck fountain, the body stands a beat and drops)
+    const canDecap = hi >= 0 && !e.hidden?.[hi] && e.batch?.geo?.parts?.[hi]?.parent >= 0 && typeof H.decapitate === 'function';
+    if (canDecap) {
+      try {
+        H.gore?.exitWound?.(X, D, tg.fluid, 1.7);
+        H.decapitate(e, D.x, D.z);
+        this.ctx.sfx('headshot', X, 1, 0.8);
+        this.ctx.sfx('gore_splat', X, 0.8, 0.8);
+      } catch (err) {
+        console.warn('bullet cam: decapitate failed', err);
+      }
+      if (!e.alive) return;
+    }
+    // no severable head (worms, scorpions): a clean killing shot through the normal damage path
     const hit = {
       base: Math.max(60, e.hp * 4 + 40),
       kind: 'true' as const,
       source: 'gun' as const,
-      forceCrit: true,
-      headshot: hi >= 0,
+      canCrit: false,
+      headshot: false,
       knock: 4,
       dirX: D.x,
       dirZ: D.z,
-      tags: [hi >= 0 ? 'head' : 'torso'],
+      tags: ['torso'],
     };
     try {
       this.ctx.enemies.damage(e, hit, X.clone(), D.clone());
@@ -1111,7 +1135,7 @@ export class BulletCam {
       console.warn('bullet cam: damage failed', err);
     }
     // anything that soaked it (shields, a sand-form) still goes down: it was the rank-up shot
-    if (e.alive && typeof this.horde.kill === 'function') this.horde.kill(e, hit, D.x, D.z, true, false);
+    if (e.alive && typeof this.horde.kill === 'function') this.horde.kill(e, hit, D.x, D.z, false, true);
   }
 
   private shardGeos(kind: ShardKind) {
@@ -1359,8 +1383,8 @@ export class BulletCam {
       const u = sat((t - T.fire) / P.flight);
       const th = (0.12 + 0.95 * Math.pow(u, 1.5)) * this.side;
       const chase = this.shotB;
-      const back = lerp(0.42, 0.3, u);
-      const off = _v2.copy(U).multiplyScalar(Math.cos(th)).addScaledVector(R, Math.sin(th)).multiplyScalar(0.085);
+      const back = lerp(0.46, 0.34, u);
+      const off = _v2.copy(U).multiplyScalar(Math.cos(th)).addScaledVector(R, Math.sin(th)).multiplyScalar(0.12);
       const tail = Math.min(this.dist, back);
       chase.pos.copy(this.M0).addScaledVector(D, Math.max(0, this.dist - tail - BULLET_LEN * 0.5)).add(off);
       chase.look.copy(this.B).addScaledVector(D, 2.4).addScaledVector(off, -0.6);
@@ -1369,9 +1393,9 @@ export class BulletCam {
       // the witness: off the side of the head, the round coming in across the frame
       const wsc = Math.max(1, tg.r / 0.13);
       const wit = this.witness;
-      wit.pos.copy(tg.head).addScaledVector(D, -0.62 * wsc).addScaledVector(R, 0.78 * wsc * this.side).addScaledVector(U, 0.14 * wsc);
-      wit.look.copy(tg.head).addScaledVector(D, -0.12 * wsc);
-      wit.fov = 40;
+      wit.pos.copy(tg.head).addScaledVector(D, -0.4 * wsc).addScaledVector(R, 1.3 * wsc * this.side).addScaledVector(U, 0.12 * wsc);
+      wit.look.copy(tg.head).addScaledVector(D, -0.3 * wsc);
+      wit.fov = 38;
       wit.roll = 0;
       if (!this.short && t < T.cut) {
         // full cut: hard cut to the muzzle in profile as the flash blooms
@@ -1412,6 +1436,19 @@ export class BulletCam {
     cam.fov = out.fov + this.fovKick;
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld();
+  }
+
+  /** dust and spray the riding camera would pass through read as big blocky smears: retire them */
+  private clearLens(P: { n: number; px: Float32Array; py: Float32Array; pz: Float32Array; s0: Float32Array; s1: Float32Array; life: Float32Array; maxLife: Float32Array; flags: Uint8Array }, base: number, per: number) {
+    if (!P || !P.px) return;
+    const eye = this.ctx.camera.position;
+    for (let i = 0; i < P.n; i++) {
+      if (P.flags[i] & 4) continue; // screen-space digits
+      const s = Math.max(P.s0[i], P.s1[i]);
+      const dx = P.px[i] - eye.x, dy = P.py[i] - eye.y, dz = P.pz[i] - eye.z;
+      const r = base + s * per;
+      if (dx * dx + dy * dy + dz * dz < r * r) P.life[i] = P.maxLife[i];
+    }
   }
 
   /** bullet-time grade: drained colour, a vignette, speed blur round the round, a fringe on the hit */
@@ -1558,5 +1595,6 @@ export class BulletCam {
       this.stakeModel.skullGeo.dispose();
     }
     this.mat.dispose();
+    this.metal.dispose();
   }
 }

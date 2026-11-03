@@ -18,7 +18,7 @@ import { Codex, F_SEEN, F_CLAIM } from '../../meta/Codex';
 import { Blueprints, RELICS } from '../../meta/Blueprints';
 import * as PM from '../../models/props';
 import { damp } from '../../../engine/math/rand';
-import { BuildKit, HubHost, HubStation, HeroBubble, SM, safe, geoOf, meshOf, engrave, clamp01, ease } from './HubKit';
+import { BuildKit, HubHost, HubStation, HeroBubble, SM, safe, geoOf, meshOf, engrave, clamp01, ease, stepJob } from './HubKit';
 
 const IN = HX.CABIN_IN;
 /** the trophy wall: the front wall between the two front windows */
@@ -227,7 +227,7 @@ export class HouseDecor {
         tank.updateMatrixWorld(true);
         this.tankAt.copy(tank.position);
         // the heat lamp's glow on the sand
-        k.lamp(0xffb070, 0.55, 0.9, 2, new THREE.Vector3(...(ts.meta.lamp as number[])).applyMatrix4(tank.matrixWorld).add(new THREE.Vector3(0, -0.06, 0)), 0.04);
+        if (this.h.engine.quality.shadows) k.lamp(0xffb070, 0.55, 0.9, 2, new THREE.Vector3(...(ts.meta.lamp as number[])).applyMatrix4(tank.matrixWorld).add(new THREE.Vector3(0, -0.06, 0)), 0.04);
         this.petHalf = ts.meta.half;
         this.petHold.position.set(0, ts.meta.floor, 0);
         tank.add(this.petHold);
@@ -246,7 +246,7 @@ export class HouseDecor {
       if (g) g.position.z = WALL_Z - (g ? new THREE.Box3().setFromObject(g).getSize(this.v).z / 2 : 0);
     }
     k.lamp(0xffc888, 2.4, 3.2, 1.5, new THREE.Vector3(0.9, 2.05, WALL_Z - 0.75), 0.02);
-    k.lamp(0xffb070, 0.8, 2.0, 1.6, new THREE.Vector3(0.6, 1.2, WALL_Z - 0.6));
+    if (this.h.engine.quality.shadows) k.lamp(0xffb070, 0.8, 2.0, 1.6, new THREE.Vector3(0.6, 1.2, WALL_Z - 0.6));
     this.bosses.forEach((b, i) => {
       const row = i < 6 ? 0 : 1;
       const col = row === 0 ? i : i - 6;
@@ -480,19 +480,10 @@ export class HouseDecor {
   update(t: number, rdt: number) {
     // the bake runs a slice each frame
     if (this.job) {
-      const t0 = performance.now();
-      try {
-        do {
-          if (this.job.next().done) {
-            this.job = null;
-            this.icons?.dispose();
-            this.icons = null;
-            break;
-          }
-        } while (performance.now() - t0 < 8);
-      } catch (e) {
-        console.warn('[hub+] bake', e);
-        this.job = null;
+      this.job = stepJob(this.job, 'bake');
+      if (!this.job) {
+        this.icons?.dispose();
+        this.icons = null;
       }
     }
     if (this.focus) {

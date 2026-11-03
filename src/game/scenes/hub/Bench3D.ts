@@ -23,7 +23,7 @@ import { Blueprints, GUNS, ATTACHMENTS, WEAPON_UPGRADES, blueprint } from '../..
 import { buildWeaponDisplay, buildWeaponRig } from '../../player/Weapons';
 import { blueprintPhoto } from '../../ui/BlueprintReveal';
 import { loadSave, writeSave, owns, PRICES, GUN_PARTS, GUN_PERKS, GunLoadout } from '../../meta/Save';
-import { BuildKit, HubHost, HubStation, HeroBubble, PriceLock, safe, geoOf, meshOf, reach, ease, clamp01, sstep } from './HubKit';
+import { BuildKit, HubHost, HubStation, HeroBubble, PriceLock, safe, geoOf, meshOf, reach, ease, clamp01, sstep, stepJob } from './HubKit';
 import type { Mode, Pick, View } from './HouseExtras';
 
 const IN = HX.CABIN_IN;
@@ -131,7 +131,8 @@ export class Bench3D implements Mode {
   private trayY = 0;
   private papers: { id: string; mesh: THREE.Mesh; at: THREE.Vector3; ready: boolean }[] = [];
   private paperJob: Generator<void, void, void> | null = null;
-  private paperDelay = 7;
+  /** the blueprint photographs wait until you first open the bench */
+  private paperDelay = Infinity;
   private cartridges = new THREE.Group();
   private laser: THREE.Mesh | null = null;
   private clip: THREE.Object3D | null = null;
@@ -394,7 +395,6 @@ export class Bench3D implements Mode {
 
   // ======================================================================= blueprints you haven't found: pinned over the board rack
   private *makePapers(): Generator<void, void, void> {
-    while (this.paperDelay > 0) yield;
     const locked = Blueprints.list().filter((b) => !b.owned && b.kind !== 'gear');
     const nailG = new THREE.BoxGeometry(0.012, 0.012, 0.02);
     const nailM = new THREE.MeshStandardMaterial({ color: 0x3a3430, metalness: 0.5, roughness: 0.5 });
@@ -427,7 +427,6 @@ export class Bench3D implements Mode {
         this.papers.push({ id: b.id, mesh, at, ready: true });
       }
       yield;
-      for (let k = 0; k < 8; k++) yield; // a breath between photographs
     }
   }
 
@@ -560,20 +559,8 @@ export class Bench3D implements Mode {
   // ======================================================================= per frame
   tick(_t: number, rdt: number) {
     this.paperDelay -= rdt;
-    for (const job of ['pieceJob', 'paperJob'] as const) {
-      const j = this[job];
-      if (!j) continue;
-      const t0 = performance.now();
-      try {
-        while (performance.now() - t0 < 9) if (j.next().done) {
-          this[job] = null;
-          break;
-        }
-      } catch (e) {
-        console.warn('[hub+] bench', e);
-        this[job] = null;
-      }
-    }
+    this.pieceJob = stepJob(this.pieceJob, 'bench parts');
+    if (this.paperDelay <= 0) this.paperJob = stepJob(this.paperJob, 'bench papers');
     for (const p of this.parts) {
       p.lock?.update(rdt);
       p.lock?.show(p.grp.visible);

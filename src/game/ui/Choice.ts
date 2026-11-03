@@ -250,13 +250,6 @@ function noticeGeometry() {
   return g;
 }
 
-function disposeCard(m: THREE.Mesh) {
-  const mat = m.material as THREE.ShaderMaterial;
-  (mat.uniforms.map.value as THREE.Texture | null)?.dispose();
-  if (mat.uniforms.uStampMap.value !== blankTex) (mat.uniforms.uStampMap.value as THREE.Texture | null)?.dispose();
-  mat.dispose();
-  m.geometry.dispose();
-}
 
 /** a paper notice as a mesh (the stage nails it to a board or lays it on a table) */
 export function noticeMesh(o: ChoiceOption) {
@@ -264,7 +257,6 @@ export function noticeMesh(o: ChoiceOption) {
   m.castShadow = true;
   return m;
 }
-void disposeCard;
 
 export class Choice {
   /** a choice is on screen (the world is paused) */

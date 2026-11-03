@@ -11,6 +11,7 @@ import type { Player } from './Player';
 import type { Enemies, Enemy } from '../enemies/Enemies';
 import type { CameraRig, CineShot } from './CameraRig';
 import { isUnlocked } from './Techniques';
+import { Cinema } from '../cine/Cinema';
 
 /** ring closing time and the FIRE window (real seconds since the ring locked on) */
 const RING_T = 0.62;
@@ -300,7 +301,12 @@ export class NeckSlicer {
     const b = p.board;
     this.active = false;
     this.d.hud(true);
-    if (this.slain) this.d.cutIn('NECK SLICER', '#ffd36b');
+    // an in-world voxel title stamp that rides along with him (cine/Cinema.ts), no screen band
+    if (this.slain) {
+      const cine = Cinema.get();
+      if (cine) cine.stamp('NECK SLICER', '#ffd36b', { follow: true, hold: 1.3 });
+      else this.d.cutIn('NECK SLICER', '#ffd36b');
+    }
     this.slain = false;
     this.victim = null;
     this.cool = 1.4;

@@ -88,7 +88,8 @@ interface OptObj {
   kind: 'notice' | 'item' | 'mark' | 'card';
   word?: VoxelWord;
   notice?: THREE.Mesh;
-  appear: number;
+  /** null until the choice; then counts up from minus its delay, revealed at 0 */
+  appear: number | null;
 }
 
 interface Actor {
@@ -327,7 +328,7 @@ export class ChoiceStage {
 
   /** a wanted board with each option shot to it as a paper notice */
   private buildPost(beside: boolean) {
-    const sm = staticModel('wanted_board_0', this.mat);
+    const sm = staticModel('wanted_board_1', this.mat);
     const pos = beside ? this.at(1.9, 1.2) : this.at(0, 0.4);
     const faceH = Math.atan2(this.toH.x, this.toH.z) + (beside ? -0.35 : 0);
     // board face: the frontmost planks between the posts
@@ -382,7 +383,7 @@ export class ChoiceStage {
 
   /** face-down cards on a crate table */
   private buildCards() {
-    const sm = staticModel('crate_table_0', this.mat) ?? staticModel('table_bare', this.mat);
+    const sm = staticModel('crate_table_1', this.mat) ?? staticModel('table_bare', this.mat);
     const pos = this.at(0, 0.9);
     let top = 0.8;
     if (sm) {
@@ -462,7 +463,7 @@ export class ChoiceStage {
     }
     a.root.visible = false;
     if (a.root.userData.x) a.root.userData.x.visible = false;
-    this.opts.push({ root: a.root, pick: a.pick, label, detail, focus: a.focus, base: a.root.position.clone(), baseQ: a.root.quaternion.clone(), hover: 0, kind: a.kind, word: a.word, notice: a.notice, appear: -1 });
+    this.opts.push({ root: a.root, pick: a.pick, label, detail, focus: a.focus, base: a.root.position.clone(), baseQ: a.root.quaternion.clone(), hover: 0, kind: a.kind, word: a.word, notice: a.notice, appear: null });
   }
 
   // ------------------------------------------------------------------ camera
@@ -493,15 +494,17 @@ export class ChoiceStage {
     const c = this.presenterAt;
     const base = c.clone().addScaledVector(this.toH, 3.3).addScaledVector(this.right, 0.7).add(new THREE.Vector3(0, 1.45, 0));
     const look = c.clone().lerp(this.anchor.clone().add(new THREE.Vector3(0, 1.1, 0)), this.actors.length ? 0.3 : 0).add(new THREE.Vector3(0, 0.25, 0));
+    // hovering leans the lens toward a thing (gently: a full push would slide the
+    // others out from under the cursor); picking pushes all the way in on it
     const want = this.picked >= 0 ? this.picked : this.hovered;
     if (want >= 0) this.focusIdx = want;
-    this.focusW += ((want >= 0 ? 1 : 0) - this.focusW) * Math.min(1, rdt * (this.picked >= 0 ? 5 : 3.2));
+    const goal = this.picked >= 0 ? 1 : this.hovered >= 0 ? 0.3 : 0;
+    this.focusW += (goal - this.focusW) * Math.min(1, rdt * (this.picked >= 0 ? 5 : 2.6));
     if (this.focusIdx >= 0 && this.focusW > 0.001) {
       const o = this.opts[this.focusIdx];
-      const nrm = o.kind === 'notice' ? this.toH.clone().lerp(new THREE.Vector3(0, 0, 0), 0) : this.toH;
-      const near = o.focus.clone().addScaledVector(nrm, o.kind === 'notice' ? 1.05 : 1.35).add(new THREE.Vector3(0, o.kind === 'notice' ? 0.12 : 0.75, 0));
+      const near = o.focus.clone().addScaledVector(this.toH, o.kind === 'notice' ? 1.05 : 1.35).add(new THREE.Vector3(0, o.kind === 'notice' ? 0.12 : 0.75, 0));
       const e = ease(this.focusW);
-      base.lerp(near, e * 0.85);
+      base.lerp(near, e * 0.9);
       look.lerp(o.focus, e);
     }
     this.ccam.set(base, look, 46 - this.focusW * 6, 0);
@@ -537,6 +540,7 @@ export class ChoiceStage {
     this.line?.update(rdt, cam, (c, i, s) => this.speakingVoice && Voice.syllable(this.speakingVoice, c, { index: i, text: s, pos: this.speakingPos }));
   }
   private speakingVoice: VoiceId | null = null;
+  private speaker: number | 'sundown' = 0;
   private speakingPos = new THREE.Vector3();
 
   private next(p: ChoiceStage['phase']) {
@@ -546,7 +550,7 @@ export class ChoiceStage {
       const n = this.options.length;
       this.hint.innerHTML = `${escapeHtml(this.heading)}<div style="font-size:15px;opacity:.8;margin-top:6px">press 1-${n}, click or tap${this.canCancel ? '  ·  ESC to walk away' : ''}</div>`;
       this.hint.style.display = 'block';
-      this.opts.forEach((o, i) => (o.appear = 0.12 + i * 0.14));
+      this.opts.forEach((o, i) => (o.appear = -(0.12 + i * 0.14)));
       this.ctx.engine.audio.play('paper_flutter', { volume: 0.45 });
     }
   }
@@ -559,6 +563,7 @@ export class ChoiceStage {
     (t.mesh.material as THREE.MeshBasicMaterial).fog = false;
     this.ctx.scene.add(t.mesh);
     this.line = t;
+    this.speaker = who;
     this.speakingVoice = who === 'sundown' ? 'sundown' : (this.actors[who as number]?.voice ?? 'outlaw');
     this.speakingPos.copy(head);
     const a = typeof who === 'number' ? this.actors[who] : null;
@@ -576,7 +581,7 @@ export class ChoiceStage {
     }
     const l = this.line!;
     // camera on whoever speaks, over the listener's shoulder
-    const who = this.speakingVoice === 'sundown' ? 'sundown' : 0;
+    const who = this.speaker;
     const head = this.headOf(who);
     const other = who === 'sundown' ? this.headOf(0) : this.headOf('sundown');
     const dir = head.clone().sub(other).setY(0).normalize();
@@ -592,8 +597,7 @@ export class ChoiceStage {
       this.lineHold -= rdt;
       if (this.lineHold <= 0) {
         l.show(false);
-        const old = l;
-        setTimeout(() => old.dispose(), 400);
+        this.texts.push(l); // keeps fading out, disposed with the stage
         this.line = null;
       }
     }
@@ -604,10 +608,10 @@ export class ChoiceStage {
     const n = this.opts.length;
     // the options appear one by one
     this.opts.forEach((o, i) => {
-      if (o.appear < 0) return;
+      if (o.appear === null) return;
       const k0 = o.appear;
       o.appear += rdt;
-      if (k0 < 0.12 + i * 0.14 + 0.001 && o.appear >= 0.12 + i * 0.14) {
+      if (k0 < 0 && o.appear >= 0) {
         o.root.visible = true;
         if (o.root.userData.x) o.root.userData.x.visible = true;
         o.label.show(true);
@@ -900,6 +904,7 @@ export class ChoiceStage {
       if (o.notice) {
         const m = o.notice.material as THREE.ShaderMaterial;
         (m.uniforms?.map?.value as THREE.Texture | undefined)?.dispose();
+        if (m.uniforms?.uHasStamp?.value > 0.5) (m.uniforms.uStampMap.value as THREE.Texture | undefined)?.dispose();
         m.dispose();
         o.notice.geometry.dispose();
       }

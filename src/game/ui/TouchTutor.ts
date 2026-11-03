@@ -132,10 +132,10 @@ export class TouchTutor {
 
   constructor(private scene: THREE.Scene, geo: RigGeo, private fx: PixelFx, caption: HTMLDivElement) {
     this.title = caption;
-    this.mat = makeVoxelMaterial({ fog: false, transparent: true, opacity: 0.62 });
+    this.mat = makeVoxelMaterial({ fog: false, transparent: true, opacity: 0.86 });
     this.mat.emissive = new THREE.Color(0x2fdc8a);
-    this.mat.emissiveIntensity = 0.3;
-    (this.mat.userData as any).tint.value.setRGB(0.8, 1.08, 0.96);
+    this.mat.emissiveIntensity = 0.5;
+    (this.mat.userData as any).tint.value.setRGB(0.86, 1.12, 1.0);
     const pi = geo?.index?.['fore_l'];
     const part = pi !== undefined ? geo.parts[pi] : null;
     if (part) {
@@ -214,9 +214,9 @@ export class TouchTutor {
       this.title.dataset.k = String(this.step);
       this.title.innerHTML = text;
     }
-    const cx = Math.min(W - 170, Math.max(170, p.x));
-    this.title.style.left = cx + 'px';
-    this.title.style.top = Math.max(8, p.y - H * 0.36 - 64) + 'px';
+    const half = this.title.offsetWidth / 2 + 10;
+    this.title.style.left = Math.min(W - half, Math.max(half, p.x)) + 'px';
+    this.title.style.top = Math.max(8, p.y - 104) + 'px';
     // soul motes off the fingertip, a puff of light where it meets the glass
     if (this.fade > 0.3) {
       if (Math.random() < dt * 22)
@@ -230,15 +230,15 @@ export class TouchTutor {
 
   /** place the hand: fingertip on (x, y); lifted hands hover up and back */
   private pose(p: Pose, H: number) {
-    const k = (H * 0.34) / this.len;
+    const k = (H * 0.44) / this.len;
     const lift = 1 - p.press;
     this.root.position.set(p.x + lift * 14 * (p.right ? 1 : -1), -(p.y - lift * 22), 2200);
     this.root.scale.set(k * (p.right ? -1 : 1) * (1 + lift * 0.08), k * (1 + lift * 0.08), k);
     // the forearm comes in from the lower outside corner
     this.lean.rotation.z = -0.42 + Math.sin(performance.now() * 0.0013) * 0.03;
     this.tip.rotation.x = -0.75 + lift * 0.25;
-    this.mat.opacity = 0.62 * this.fade;
-    this.mat.emissiveIntensity = 0.26 + p.press * 0.12;
+    this.mat.opacity = 0.86 * this.fade;
+    this.mat.emissiveIntensity = 0.42 + p.press * 0.18;
   }
 
   private burst(p: Pose, n: number) {

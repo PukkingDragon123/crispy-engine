@@ -45,6 +45,8 @@ export interface OlmOpts {
   ripple?: (x: number, z: number, k: number) => void;
   /** ceiling height for falling stalactites */
   ceilingAt?: (x: number, z: number) => number;
+  /** a pre-allocated light that keeps the pale hide readable in the dark */
+  light?: THREE.PointLight;
 }
 
 let stalGeo: THREE.BufferGeometry[] | null = null;
@@ -112,6 +114,8 @@ export class Olm extends Boss {
     this.heard.set(o.lake.x, 0, o.lake.z);
     this.root.visible = false;
     this.invulnerable = true;
+    // translucent albino hide: a faint glow of its own under the skin
+    this.rig.material.emissive.setRGB(0.07, 0.05, 0.055);
   }
 
   protected hitKind() {
@@ -144,7 +148,7 @@ export class Olm extends Boss {
     this.ctx.events.emit('enemySkill', { title, enemy: this, pos, tier: 'boss' });
   }
   private surfY(x: number, z: number) {
-    return Math.max(this.ctx.world.groundAt(x, z), this.o.water - 0.55) - 0.25;
+    return Math.max(this.ctx.world.groundAt(x, z), this.o.water - 0.2) - 0.2;
   }
 
   // ------------------------------------------------------------- damage
@@ -529,6 +533,15 @@ export class Olm extends Boss {
     this.invulnerable = this.invulnerable || (this.sub > 0.75 && this.deadT < 0);
     if (this.sub < 0.6 && this.deadT < 0 && this.alive && this.running && this.root.visible) this.invulnerable = false;
     super.update(dt);
+    // a cold light hangs over its head so the pale hide reads in the dark
+    const lt = this.o.light;
+    if (lt) {
+      const on = this.root.visible && this.sub < 0.7 ? 1 : 0;
+      lt.intensity = damp(lt.intensity, on * 34, 3, dt);
+      if (on) {
+        this.rig.nodes['head'].localToWorld(lt.position.set(0, 2.2, 0.6));
+      }
+    }
     // the swell it pushes through the sand while tunnelling; the wake in the lake
     const sp = Math.hypot(this.vel.x, this.vel.z);
     this.trailT -= dt;

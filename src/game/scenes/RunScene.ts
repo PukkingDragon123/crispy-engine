@@ -540,6 +540,9 @@ export class RunScene implements GameScene {
     this.director.onWaveStart = (s) => this.onWaveStart(s);
     this.director.spawnBoss = (wave) => this.spawnBoss(wave);
     this.director.onWaveEnd = (s) => this.onWaveEnd(s);
+    this.enemies.qte = this.qte;
+    this.director.cam = this.camRig;
+    this.director.bellBlocked = () => !!this.inter.current || this.shop.active || this.choice.active;
   }
 
   private spawnBoss(wave: number) {

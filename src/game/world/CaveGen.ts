@@ -299,7 +299,7 @@ export function generateCave(seed = 1): CaveLayout {
 // ============================================================================ runtime
 const CAVE_PRESET: EnvPreset = {
   zenith: 0x5b8ad6, horizon: 0x24384a, ground: 0x0c0a10, sunColor: 0xffe0b0, sunIntensity: 2.4, sunElev: SUN_ELEV, sunAzim: SUN_AZIM,
-  hemiSky: 0x4a6aa8, hemiGround: 0x2a1e2c, hemiIntensity: 1.25, fog: 0x091219, fogNear: 8, fogFar: 135, exposure: 1, stars: 0, clouds: 0, cloudColor: 0x203040,
+  hemiSky: 0x4a6aa8, hemiGround: 0x2a1e2c, hemiIntensity: 1.5, fog: 0x091219, fogNear: 8, fogFar: 135, exposure: 1, stars: 0, clouds: 0, cloudColor: 0x203040,
 };
 
 const lakeVert = /* glsl */ `
@@ -428,6 +428,8 @@ export class CaveWorld {
   unlockedZone = 0;
   storm: any;
   lights: THREE.PointLight[] = [];
+  /** a light reserved for the boss (dark until the Olm surfaces; allocated up front so the light count never changes) */
+  bossLight = new THREE.PointLight(0xdce8ff, 0, 24, 1.6);
   crystalLights: { light: THREE.PointLight; base: number; phase: number }[] = [];
   shafts: { mesh: THREE.Mesh; O: THREE.Vector3; U: THREE.Vector3; V: THREE.Vector3; L: THREE.Vector3; exit: boolean }[] = [];
   /** the lake: drip ripples (x, z, start time, strength) and how stirred it is (the Olm) */
@@ -718,9 +720,11 @@ export class CaveWorld {
 
   private makeLights() {
     const L = this.layout;
+    this.bossLight.position.set(L.lake.x, 4, L.lake.z);
+    this.group.add(this.bossLight);
     const toneCol = { cyan: 0x58e6ff, violet: 0xb576ff, teal: 0x5cf0c8 };
     // the big clusters each light their part of the cave (a couple of medium ones by the lake too)
-    const lit = [...L.crystals.filter((c) => c.key?.endsWith('_l')).slice(0, 7), ...L.crystals.filter((c) => c.key?.endsWith('_m')).slice(-2)];
+    const lit = L.crystals.filter((c) => c.key?.endsWith('_l')).slice(0, 4);
     for (const c of lit) {
       const big = c.key!.endsWith('_l');
       const light = new THREE.PointLight(toneCol[c.tone ?? 'cyan'], big ? 60 : 26, big ? 30 : 18, 1.7);
@@ -728,9 +732,9 @@ export class CaveWorld {
       this.group.add(light);
       this.crystalLights.push({ light, base: light.intensity, phase: Math.random() * 6.28 });
     }
-    for (const a of [0, 2.1, 4.2]) {
-      const light = new THREE.PointLight(0x40d8e8, 34, 30, 1.6);
-      light.position.set(L.lake.x + Math.cos(a) * L.lake.r * 0.45, CAVE_WATER + 1.2, L.lake.z + Math.sin(a) * L.lake.r * 0.45);
+    for (const a of [0.6]) {
+      const light = new THREE.PointLight(0x40d8e8, 70, 42, 1.5);
+      light.position.set(L.lake.x + Math.cos(a) * L.lake.r * 0.2, CAVE_WATER + 2.2, L.lake.z + Math.sin(a) * L.lake.r * 0.2);
       this.group.add(light);
       this.lights.push(light);
     }

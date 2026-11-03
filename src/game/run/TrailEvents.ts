@@ -75,7 +75,7 @@ const EVENTS: TrailEvent[] = [
     heading: "Doc Hapi's Traveling Tonics",
     stage: (d) => ({
       actors: [{ rig: npcLook(d.player, ['cowboy_tophat_vest', 'cowboy_tophat_duster', 'cowboy_tophat_punk']), mode: 'idle', voice: 'peddler' }],
-      props: [{ key: 'crate_stack_0', at: [-1.8, -0.7], yaw: 0.4 }, { key: 'barrel_1', at: [1.6, -0.8] }],
+      props: [{ key: 'crate_stack_1', at: [-1.8, -0.7], yaw: 0.4 }, { key: 'barrel_1', at: [1.6, -0.8] }],
       presenter: 'items',
       lines: [{ text: "Step right up! Doc Hapi's Tonics cure the gout, the grippe and the Curse of Set!" }, { who: 'sundown', text: "I'm mostly bones, Doc." }, { text: 'Then you need it twice as bad!' }],
       replies: [{ text: 'A wise investment, sir! Strictly no refunds.' }, { text: "Now, now, officer! There's been a terrible misunderstanding!" }, { text: 'Good day! Tell your friends. Tell your bones.' }],
@@ -139,7 +139,7 @@ const EVENTS: TrailEvent[] = [
     heading: 'The Coin-Flip Kid',
     stage: (d) => ({
       actors: [{ rig: npcLook(d.player, ['cowboy_bandit_punk', 'cowboy_sombrero_punk', 'cowboy_bandit_vest']), mode: 'idle', voice: 'outlaw' }],
-      props: [{ key: 'crate_table_0', at: [-1.7, -0.5], yaw: 0.3 }, { key: 'whiskey_barrel_0', at: [1.7, -0.9] }],
+      props: [{ key: 'crate_table_1', at: [-1.7, -0.5], yaw: 0.3 }, { key: 'whiskey_barrel_1', at: [1.7, -0.9] }],
       presenter: 'items',
       lines: [{ text: 'Heads or tails, bone man? Double or nothing. I never lose. Almost never.' }],
       replies: [{ text: "Let's see what the coin says..." }, { text: "Whoa! Nice shootin', mister!" }, { text: 'Chicken bones!' }],

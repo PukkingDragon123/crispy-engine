@@ -1,4 +1,9 @@
-// Opening cinematic (NEW RUN, about 70 s; SPACE / ESC / the SKIP label skips):
+// Opening cinematic (NEW RUN, about 80 s; SPACE / ESC / the SKIP label skips):
+//   0. COLD OPEN (cine/ColdOpen.ts, ~10 s) - Sundown walks out of a saloon toward
+//      the lens in slow motion while it blows up behind him (voxel fireball,
+//      shattered building, burning debris raining, a shock ring through the
+//      sand), the wagon goes up too, and "dustUP" bursts out of the sand in
+//      voxel-cast gold. Cut to black, then the approved opening below.
 //   1. SHOW YOUR BOUNTY - a weathered WANTED poster nailed to a signpost snaps in
 //      the golden-hour wind: SETHOS, THE HAND OF SET, $1,000,000. The portrait is
 //      the real Sethos rig photographed (IconFactory) and printed in sepia on a
@@ -33,6 +38,7 @@ import { PARCHMENT_GLSL } from '../ui/Choice';
 import { GlyphRings, LightSigil, SandVortex, SerketSpirit, spiritMotes, guideSpot } from '../fx/SerketSpirit';
 import { Skills } from '../player/Skills';
 import * as CH from '../models/characters';
+import { playColdOpen } from '../cine/ColdOpen';
 
 export interface IntroDeps {
   engine: Engine;
@@ -754,6 +760,10 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
   eng.letterbox(true, 0.01);
   (window as any).__music?.setMood('intro');
   try {
+    // ================================================================ 0. COLD OPEN
+    phase('coldopen');
+    await playColdOpen({ engine: eng, cam, world, scene: d.scene, player, skipped: () => skipped, dtCap });
+    last = performance.now();
     // ================================================================ 1. SHOW YOUR BOUNTY
     phase('poster');
     const pc = posterTop.clone().addScaledVector(UP, -PH * 0.5);

@@ -32,6 +32,8 @@ import { resolveGamble, GambleOutcome } from '../run/UpgradesExtra';
 import { GlyphRings } from '../fx/SerketSpirit';
 import type { CameraRig } from '../player/CameraRig';
 import { BulletCam, type BulletCamHost } from '../fx/BulletCam';
+import { Cinema } from '../cine/Cinema';
+import { cineFlags } from '../cine/CineKit';
 
 type Entrance = 'pop' | 'spin' | 'pillar';
 
@@ -153,6 +155,7 @@ export class CardPicker {
   private bulletOn = false;
   private bulletN = 0;
   private bulletHost: BulletCamHost | null = null;
+  private bulletWait = 0;
 
   constructor(private ctx: Ctx, private up: UpgradeManager, private input: Input, private getHero: () => THREE.Vector3, private opts: PickerOpts = {}) {
     ctx.scene.add(this.group, this.hitGroup);
@@ -210,11 +213,19 @@ export class CardPicker {
 
   // ---------------------------------------------------------------- flow
 
+  /** another cinematic holds the lens (a boss arrival, an area title, the zone flyover): the rank-up waits for it */
+  private lensBusy() {
+    const cur = this.ctx.engine.current as any;
+    if (!this.ctx.engine.input.enabled) return true;
+    if (cur?.zoneCine?.active || cur?.intro?.active || cineFlags.zone || cineFlags.choice) return true;
+    return Cinema.busy() || !!(Cinema as any).inst?.ccam?.on;
+  }
+
   /** something else owns the screen right now (a shop, a choice, another cinematic): no bullet-cam */
   private sceneBusy() {
     const cur = this.ctx.engine.current as any;
     if (!cur) return true;
-    if (cur.pausedByUser || cur.trial || cur.gameOver) return true;
+    if (cur.pausedByUser || cur.trial || cur.gameOver || this.lensBusy()) return true;
     if (cur.choice?.active || cur.shop?.active || cur.ledger?.open || cur.gearLoot?.active || cur.ult?.active || cur.slicer?.active) return true;
     if (cur.colony?.modal || cur.jerboa?.modal) return true;
     const rig = this.camRig();
@@ -558,6 +569,12 @@ export class CardPicker {
     // the bullet-cam plays first (driven from the late hook, after the world has moved)
     if (this.bulletOn) return;
     if (!this.busy && this.queue > 0) {
+      // a rank-up never cuts into another cinematic: it waits (a few seconds at most) for the lens
+      if (!this.active && this.ranks.length && this.bulletWait < 6 && this.lensBusy()) {
+        this.bulletWait += rdt;
+        return;
+      }
+      this.bulletWait = 0;
       if (this.startBullet()) return;
       this.begin();
     }

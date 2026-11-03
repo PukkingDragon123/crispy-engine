@@ -212,7 +212,9 @@ export class Cinema {
     }
     const up = title.toUpperCase();
     if (AREA_NAMES.has(up)) return this.area(title, undefined, color);
-    this.stamp(title, color, { at: opts.at });
+    // inside someone else's shot (a landmark crane, the cave arrival) it stands in the shot as a title;
+    // in play it is a small stamp riding along in front of the hunter
+    this.stamp(title, color, { at: opts.at, title: !!this.cam.cine && !opts.at });
   }
 
   // ------------------------------------------------------------------ boss arrival
@@ -434,17 +436,25 @@ export class Cinema {
 
   // ------------------------------------------------------------------ small beats
   /** a voxel title stamp that punches into the world and crumbles away (no camera takeover) */
-  stamp(title: string, color?: string, o: { at?: THREE.Vector3; title?: boolean; hold?: number } = {}) {
+  stamp(title: string, color?: string, o: { at?: THREE.Vector3; title?: boolean; hold?: number; follow?: boolean } = {}) {
     // one at a time
     for (const b of this.beats) if (!b.word.leaving) b.word.leave('crumble');
     const style = styleForColor(color);
     const cine = this.cam.cine;
     const big = !!o.title;
     const text = splitTitle(title.toUpperCase(), big ? 14 : 16);
-    const word = new VoxelWord(text, { height: big ? 0.9 : 0.4, style, fog: false, castShadow: big });
-    const beat: Beat = { word, t: 0, hold: o.hold ?? (big ? 2.6 : 1.5), follow: !o.at && !cine && !big, out: big ? 'sink' : 'crumble' };
+    // a title standing in someone else's shot is sized to that shot
+    let lh = big ? 0.9 : 0.4;
+    if (big && cine && !o.at) {
+      const dist = cine.look.distanceTo(cine.pos) * 0.55;
+      const longest = Math.max(...text.split('\n').map((l) => l.length));
+      lh = Math.min(THREE.MathUtils.clamp(dist * 0.16, 0.25, 1.8), (dist * 0.85) / Math.max(4, longest * 0.68));
+    }
+    const word = new VoxelWord(text, { height: lh, style, fog: false, castShadow: big });
+    const beat: Beat = { word, t: 0, hold: o.hold ?? (big ? 2.6 : 1.5), follow: o.follow ?? (!o.at && !cine && !big), out: big ? 'sink' : 'crumble' };
     const cam = this.ctx.camera;
-    if (o.at) word.group.position.copy(o.at);
+    if (beat.follow) this.placeBeat(beat);
+    else if (o.at) word.group.position.copy(o.at);
     else if (big && !cine) {
       const P = this.player.pos, yaw = this.cam.yaw;
       const at = new THREE.Vector3(P.x + Math.sin(yaw) * 9, 0, P.z + Math.cos(yaw) * 9);

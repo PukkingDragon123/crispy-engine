@@ -150,7 +150,7 @@ export class TwentyOne implements Mode {
     const yaw = Math.atan2(SEAT.x - TABLE.x, SEAT.y - TABLE.z);
     this.table = k.put(ts, TABLE.x, TABLE.z, yaw, 0, 1, true);
     if (ts) this.top = ts.meta.top;
-    if (this.table && ts) k.lamp(0xffc070, 0.7, 1.4, 2, new THREE.Vector3(...(ts.meta.candle as number[])).applyMatrix4(this.table.matrixWorld), 0.12);
+    if (this.table && ts && this.h.engine.quality.shadows) k.lamp(0xffc070, 0.7, 1.4, 2, new THREE.Vector3(...(ts.meta.candle as number[])).applyMatrix4(this.table.matrixWorld), 0.12);
     const stool = k.put(safe(() => WS.milkStool()), SEAT.x - Math.sin(yaw) * 0.08, SEAT.y - Math.cos(yaw) * 0.08, yaw + 0.3, 0, 1, false);
     // the deck on Mama's side, a stack of backs
     const back = cardGeo('A', 'spades');

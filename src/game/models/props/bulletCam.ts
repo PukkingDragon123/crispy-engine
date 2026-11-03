@@ -66,8 +66,8 @@ export function bulletRound(): StaticModel {
         if (z === 0) {
           // the heel, still hot from the powder burn: an ember core cooling to a sooty rim
           const k = d / (R - 1.15);
-          c = k < 0.35 ? 0xffe0a0 : k < 0.62 ? 0xffa24a : k < 0.85 ? 0xd8602a : 0x5a3424;
-          f = k < 0.85 ? VF.EMISSIVE | VF.GLOW : VF.METAL;
+          c = k < 0.24 ? 0xffc47a : k < 0.48 ? 0xd86a30 : k < 0.8 ? COPPER.deep : 0x4a2c20;
+          f = k < 0.48 ? VF.EMISSIVE : VF.METAL;
         } else if (zc >= mouth) {
           // exposed lead: soft, darker where the jacket bites, bright at the very tip
           c = zc < mouth + 1 ? LEAD.shade : zc > L - 1.6 ? LEAD.hi : LEAD.base;

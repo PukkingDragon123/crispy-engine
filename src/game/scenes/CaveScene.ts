@@ -309,6 +309,12 @@ export class CaveScene implements GameScene {
     this.loops.wind = e.audio.loop('wind_loop', 0.08);
     (window as any).__music?.setMood('underworld');
     (window as any).__cave = this;
+    // compile every program the cave needs while the screen is still black (many lights: slow first frame otherwise)
+    try {
+      await e.renderer.compileAsync(this.scene, this.camera);
+    } catch (err) {
+      console.warn('[cave] precompile failed', err);
+    }
     e.input.setWantLock(true);
     this.ready = true;
     if (this.opts.skipIntro) {
@@ -645,6 +651,7 @@ export class CaveScene implements GameScene {
       stir: (k) => (this.world.stir = Math.max(this.world.stir, k)),
       ripple: (x, z, k) => this.world.ripple(x, z, k),
       ceilingAt: (x, z) => this.world.ceilingAt(x, z),
+      light: this.world.bossLight,
     });
     o.place(L.lake.x, L.lake.z, 0);
     this.olm = o;

@@ -424,3 +424,34 @@ export class PriceLock {
     this.grp.removeFromParent();
   }
 }
+
+// ------------------------------------------------------------------ heavy work, one step a frame
+// Building rigs, photographing bosses and blueprints is done in generator steps.
+// Only one step runs per frame across all the extras, and none in the first
+// seconds of the visit (the walk in stays smooth).
+let slots = 0;
+let age = 0;
+export function newFrame(rdt: number) {
+  age += rdt;
+  slots = age > 4 ? 1 : 0;
+}
+export function resetJobs() {
+  age = 0;
+  slots = 0;
+}
+/** may this job take its step now? */
+export function jobSlot() {
+  if (slots <= 0) return false;
+  slots--;
+  return true;
+}
+/** one step of a job if the frame has room; returns the job (null when it finished or failed) */
+export function stepJob<T extends Generator<void, void, void>>(job: T | null, tag: string): T | null {
+  if (!job || !jobSlot()) return job;
+  try {
+    return job.next().done ? null : job;
+  } catch (e) {
+    console.warn('[hub+] ' + tag, e);
+    return null;
+  }
+}

@@ -429,7 +429,7 @@ export class Player {
       pushLead: inp.pushLead,
       fwdTap: !stunned && inp.hit('forward'),
       // auto-push (touch, or the desktop opt-in): kick on his own while a direction is held, never while braking
-      autoPush: !stunned && inp.autoPush && (st.active ? fz > -0.25 : fz > 0 || fx !== 0),
+      autoPush: !stunned && !this.weapons?.dig && inp.autoPush && (st.active ? fz > -0.25 : fz > 0 || fx !== 0),
       fx,
       fz,
     };
@@ -619,10 +619,8 @@ export class Player {
     const can = this.alive && inp.enabled && !w.dig && !w.swap && !this.reload.active && this.ammo > 0;
     const on = can && this.autoTarget();
     const hold = on && w.current === 'tommy';
-    if (hold !== this.autoHold) {
-      inp.touchHold('fire', hold);
-      this.autoHold = hold;
-    }
+    if (hold || this.autoHold) inp.touchHold('fire', hold);
+    this.autoHold = hold;
     if (on && !hold && this.fireCd <= 0.02 && !inp.held('fire')) inp.touchTap('fire');
     const b = this.board;
     const idle = performance.now() - inp.touchAimAt;

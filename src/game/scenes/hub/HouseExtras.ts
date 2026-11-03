@@ -9,7 +9,7 @@
 // them in Alagard), the hero's pose, and Esc to step back to the carousel.
 import * as THREE from 'three';
 import { damp } from '../../../engine/math/rand';
-import { BuildKit, HubHost, HubStation, HeroBubble, HUD_CSS, hubStats, saveHubStats, ease, clamp01 } from './HubKit';
+import { BuildKit, HubHost, HubStation, HeroBubble, HUD_CSS, hubStats, saveHubStats, ease, clamp01, newFrame, resetJobs } from './HubKit';
 import { HouseDecor } from './HouseDecor';
 import { Wardrobe3D } from './Wardrobe3D';
 import { Bench3D } from './Bench3D';
@@ -94,6 +94,7 @@ export class HouseExtras {
     this.range = new ShootingRange(h, this.bubble);
     this.cards = new TwentyOne(h, this.bubble);
     this.juke = new Jukebox(h);
+    resetJobs();
     this.tip.style.cssText = HUD_CSS + ';display:none;font-size:17px;z-index:9';
     this.hintEl.style.cssText = HUD_CSS + ';left:50%;bottom:24px;transform:translateX(-50%);font-size:16px;opacity:0;transition:opacity .4s';
     h.engine.overlay.append(this.tip, this.hintEl);
@@ -205,6 +206,7 @@ export class HouseExtras {
   update(t: number, rdt: number) {
     const eng = this.h.engine;
     const inp = eng.input;
+    newFrame(rdt);
     for (const p of [this.decor, this.range, this.cards, this.juke, this.wardrobe, this.bench, this.garage] as { update?(t: number, rdt: number): void; tick?(t: number, rdt: number): void }[]) p.tick?.(t, rdt);
     this.decor.update(t, rdt);
     this.bubble.update(rdt);

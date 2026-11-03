@@ -110,8 +110,8 @@ const FLICK_PX = 34;
 const LOOK_K = 2.1;
 const CARD_RATIO = 80 / 130; // tarot frame width / height (props/tarot CARD)
 
-const SAND = [0xf3dcaa, 0xe8c88e, 0xd9b077, 0xc99c62];
-const DUST = [0xd8bf96, 0xbfa27a];
+const SAND = [0xfff1d0, 0xf3dcaa, 0x9a6a3a, 0x6b4426];
+const DUST = [0xe8d2a8, 0x7a5434];
 const GOLD = [0xfff1c0, 0xffd36b, 0xffb040];
 const JADE = [0xc4ffe0, 0x5cf0a8, 0x2fbf7e];
 
@@ -862,14 +862,14 @@ export class TouchControls {
       const vx = sf.x - sf.ax, vy = sf.y - sf.ay;
       const dl = Math.hypot(vx, vy) / STICK_R;
       const brake = -vy / STICK_R < -0.38;
-      const n = Math.min(8, Math.floor(dt * 70 + Math.random()));
+      const n = Math.min(12, Math.floor(dt * 150 + Math.random()));
       for (let i = 0; i < n; i++) {
-        const th = Math.random() * TAU, r = 9 + Math.random() * 6, dth = 1.6 + Math.random() * 1.2;
+        const th = Math.random() * TAU, r = 8 + Math.random() * 9, dth = 1.6 + Math.random() * 1.4;
         const ex = ax + Math.cos(th + dth) * r * 0.55, ey = ay + Math.sin(th + dth) * r * 0.55;
         const sx = ax + Math.cos(th) * r, sy = ay + Math.sin(th) * r;
         const mx = ax + Math.cos(th + dth / 2) * r * 1.35, my = ay + Math.sin(th + dth / 2) * r * 1.35;
         const cols = brake ? [0xd9935a, 0xb86a3a] : SAND;
-        sand.emit({ x: sx, y: sy, tx: ex, ty: ey, vx: mx - (sx + ex) / 2, vy: my - (sy + ey) / 2, life: 0.55 + Math.random() * 0.35, size: Math.random() < 0.18 ? 2 : 1, c0: cols[i % cols.length], c1: DUST[i % 2], alpha: 0.9 });
+        sand.emit({ x: sx, y: sy, tx: ex, ty: ey, vx: mx - (sx + ex) / 2, vy: my - (sy + ey) / 2, life: 0.6 + Math.random() * 0.4, size: Math.random() < 0.3 ? 2 : 1, c0: cols[(i + (Math.random() * 4) | 0) % cols.length], c1: DUST[i % 2], alpha: 0.95 });
       }
       if (Math.random() < dt * 6) sand.emit({ x: ax + (Math.random() - 0.5) * 10, y: ay + (Math.random() - 0.5) * 6, vx: (Math.random() - 0.5) * 6, vy: -4, life: 0.9, size: 2, size1: 4, c0: DUST[0], c1: DUST[1], alpha: 0.28, curl: 4 });
       // grains run from the anchor out to the thumb: the lean you are holding

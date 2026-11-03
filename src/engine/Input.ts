@@ -210,9 +210,8 @@ export class Input {
   }
   /** a one-frame press and release of an action (a tap) */
   touchTap(a: Action) {
-    this.tHeld.delete(a);
     this.tHit.add(a);
-    this.tUp.add(a);
+    if (!this.tHeld.has(a)) this.tUp.add(a);
     this.anyKeyPressed = true;
   }
   /** is the touch layer holding this action */
