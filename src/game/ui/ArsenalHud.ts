@@ -144,8 +144,7 @@ function beltModel(n: number) {
     const lit = s.nx * -0.45 + s.ny * 0.6 + s.nz * 0.66;
     if (z / DV > 1.75 && s.nz > 0.2 && s.exp > 0.35) return [lit > 0.7 ? 0xffe9a0 : 0xc79236, METAL];
     const X = x / DV, Y = y / DV;
-    const hw = (n * SLOT) / 2 + 3;
-    const gd = Math.abs(sdRoundBox2(X, Y, hw, 6.5, 2.2) + 0.25 * KNZ.n2(X * 0.3, Y * 0.3) + 1.8);
+    const gd = Math.abs(sdRoundBox2(X, Y, hw, hh, 2.2) + 0.25 * KNZ.n2(X * 0.3, Y * 0.3) + 1.8);
     if (gd < 0.45 && z / DV > 1.15) return [lit > 0.4 ? 0xead6a8 : 0xb8a07a, VF.SOLID]; // saddle stitching
     let c = lit > 0.7 ? 0x9c6238 : lit > 0.3 ? 0x6e3e20 : 0x4a2612;
     const n = fbm3(x * 0.1, y * 0.2, 2);

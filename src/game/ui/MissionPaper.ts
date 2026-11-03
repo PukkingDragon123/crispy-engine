@@ -33,7 +33,7 @@ const REWARDS: [RegExp, string][] = [
   [/^escort/i, 'Reward: bounty & snake oil'],
   [/wagon/i, 'Reward: bounty & gold'],
   [/rain frog/i, "Reward: a mother's thanks"],
-  [/clear the fort/i, 'Reward: a gold strongbox'],
+  [/clear the fort/i, 'Reward: gold strongbox'],
   [/strike it rich/i, 'Reward: bounty for the ore'],
   [/camel rustlers/i, "Reward: Humphrey's swift legs"],
   [/^wanted/i, 'Reward: bounty & a strongbox'],
@@ -377,7 +377,7 @@ class Note {
   setQuest(q: PaperQuest, compact: boolean, q2: number, force = false) {
     this.q = q;
     const title = q.title;
-    const maxW = compact ? 140 : 204;
+    const maxW = compact ? 140 : 214;
     const obj = wrapInk(q.objective, maxW - PAD * 2, 16, compact ? 1 : 2);
     const prog = q.progress ? wrapInk(q.progress, maxW - PAD * 2 - 11, 16, 1)[0] : '';
     const reward = compact || !q.reward ? '' : wrapInk(q.reward, maxW - PAD * 2, 16, 1)[0];
