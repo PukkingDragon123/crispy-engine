@@ -1797,3 +1797,170 @@ export function pictureLight(): StaticModel & { meta: { bulb: V3 } } {
   for (let x = -10; x <= 10; x++) m.set(x, 4, 12, 0xfff0c8, VF.GLOW);
   return { model: m, voxelSize: DV, meta: { bulb: pivotOf(m, DV, [0, 4, 12]) } };
 }
+
+// ---------------------------------------------------------------------
+// the dressing corner and the gunsmith's extras (3D interactive screens)
+// ---------------------------------------------------------------------
+/** real oval links along a polyline, each turned 90° from the last — the voxel chain every lock hangs on */
+function chainAlong(m: VoxelModel, pts: V3[], link = 2.2, r = 0.45, col: (i: number) => number = (i) => (i % 2 ? 0x4a4642 : 0x5e5a54)) {
+  let acc = 0, i = 0;
+  for (let p = 0; p < pts.length - 1; p++) {
+    const a = pts[p], b = pts[p + 1];
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    const U = nrm([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
+    let side = crs(U, [0, 0, 1]);
+    if (Math.hypot(...side) < 1e-3) side = crs(U, [1, 0, 0]);
+    side = nrm(side);
+    const side2 = crs(U, side);
+    for (; acc < L; acc += link * 0.78, i++) {
+      const c: V3 = [a[0] + U[0] * acc, a[1] + U[1] * acc, a[2] + U[2] * acc];
+      const sv = i % 2 ? side : side2;
+      for (let t = 0; t < Math.PI * 2; t += 0.35) {
+        const ca = Math.cos(t) * link * 0.6, sa = Math.sin(t) * link * 0.32;
+        const q: V3 = [c[0] + U[0] * ca + sv[0] * sa, c[1] + U[1] * ca + sv[1] * sa, c[2] + U[2] * ca + sv[2] * sa];
+        rod(m, q, q, r, r, col(i), VF.METAL);
+      }
+    }
+    acc -= L;
+  }
+}
+
+/** a Shaker peg rail for hats — 1/48, front +Z: a moulded pine board with a beaded edge, `n` turned walnut pegs
+ *  angled up, two square nails at each end. meta.pegs: the peg tips (m, bottom-centre pivot), where a hat's crown sits. */
+export function hatPegRail(n = 4, seed = 41): StaticModel & { meta: { pegs: V3[] } } {
+  const m = new VoxelModel('hat_rail');
+  const SP = 15, HL = (n * SP) / 2 + 3;
+  fill(m, (x, y, z) => dRBox(x + 0.5, y + 0.5, z + 0.5, 0, 4, 1, HL, 4, 1.2, 0.6) + lump(x, y, z, 0.3, seed) * 0.15, [[-HL - 1, 0, -1], [HL + 1, 9, 3]], 1, (x, y, z, d) => {
+    if (y === 7 && d > -0.8) return 0xb88a54; // the bead
+    if (y === 6) return 0x7a5232;
+    return mul(0x9a6a3a, 0.92 + h01(Math.floor((x + 60) / 8), y >> 2, seed) * 0.14);
+  });
+  for (const sx of [-1, 1]) for (const ny of [2, 6]) egg(m, [sx * (HL - 2), ny, 2.4], [0.7, 0.7, 0.5], IRON, VF.METAL);
+  const pegs: V3[] = [];
+  for (let i = 0; i < n; i++) {
+    const px = -HL + 3 + SP / 2 + i * SP;
+    rod(m, [px, 4, 2], [px, 6.2, 8.5], 1.3, 0.9, (x, y, z) => mul(WALNUT, 0.95 + h01(x, y, z) * 0.12));
+    egg(m, [px, 6.6, 9.2], [1.6, 1.4, 1.4], 0x6a4024); // the knob
+    pegs.push([px, 7.5, 9]);
+  }
+  return { model: m, voxelSize: FV, meta: { pegs: pegs.map((p) => pivotOf(m, FV, p)) } };
+}
+
+/** a clothes rail — 1/48, 1.5 m: two A-frame ends of forged pipe on oak feet, a top pipe with a sag and a rust bloom,
+ *  a crossbar shelf low down with a pair of boots on it. meta: bar (m: y, half length). */
+export function clothesRail(seed = 42): StaticModel & { meta: { bar: [number, number] } } {
+  const m = new VoxelModel('clothes_rail');
+  const HL = 36, TOP = 78;
+  for (const sx of [-1, 1]) {
+    const x = sx * HL;
+    plank(m, [x, 1.5, -11], [x, 1.5, 11], 4, 3, OAK_DK, seed + sx, { up: [0, 1, 0], r: 1.2, lumpy: 0.3 });
+    for (const sz of [-1, 1]) rod(m, [x, 3, sz * 8], [x, TOP - 1, 0], 1.1, 1, (xx, y, z) => (h01(xx, y >> 2, z) > 0.85 ? IRON_RUST : 0x3a3634), VF.METAL);
+    egg(m, [x, TOP, 0], [1.8, 1.8, 1.8], 0x2a2826, VF.METAL);
+  }
+  tubeP(m, spline([[-HL, TOP, 0], [0, TOP - 0.6, 0], [HL, TOP, 0]], 8), [1.0], (x) => (Math.abs(x - 9) < 3 ? IRON_RUST : mod(x, 7) === 0 ? 0x4a4642 : 0x3a3634), VF.METAL);
+  plank(m, [-HL, 10, 0], [HL, 10, 0], 14, 1.6, 0x9a6a3a, seed + 4, { r: 0.6, knots: true });
+  // a pair of boots on the shelf
+  for (const bx of [-20, -13]) {
+    fill(m, (x, y, z) => smin(dRBox(x + 0.5, y + 0.5, z + 0.5, bx, 17, -1, 2.6, 6, 2.8, 1.4), dRBox(x + 0.5, y + 0.5, z + 0.5, bx, 12.4, 2.2, 2.4, 1.6, 5, 1.2), 1.5), [[bx - 4, 10, -5], [bx + 4, 24, 8]], 1, (x, y, z, d) => (y < 12 ? 0x2a1a10 : d > -0.8 && y > 21 ? 0x8a5a30 : h01(x, y, z) > 0.85 ? 0x5a3418 : 0x6a3e1e));
+  }
+  return { model: m, voxelSize: FV, meta: { bar: [pivotOf(m, FV, [0, TOP, 0])[1], HL * FV] } };
+}
+
+/** a carved wooden coat hanger — 1/64: a curved shoulder bar with rounded ends, a forged hook with a turned-up tip.
+ *  Pivot hint: meta.hook (m) is the inside of the hook's bend, where it rides the rail. */
+export function coatHanger(seed = 43): StaticModel & { meta: { hook: V3; shoulder: number } } {
+  const m = new VoxelModel('coat_hanger');
+  const W = 13;
+  tubeP(m, spline([[-W, 0, 0], [-W / 2, 2.6, 0], [0, 3.6, 0], [W / 2, 2.6, 0], [W, 0, 0]], 6), [1.4, 1.2, 1.3, 1.2, 1.4], (x, y) => mul(0xa87444, 0.92 + h01(x >> 2, y, seed) * 0.12));
+  for (const sx of [-1, 1]) egg(m, [sx * W, 0, 0], [1.7, 1.6, 1.6], 0x8a5a30);
+  const hook: V3[] = [[0, 4, 0], [0, 8, 0], [0, 10.5, 0.4], [1.6, 12.2, 0.3], [3.2, 10.8, 0], [3.0, 9.6, 0]];
+  tubeP(m, spline(hook, 4), [0.55], (x, y) => (h01(x, y, 2) > 0.7 ? 0x6a6660 : 0x8a8680), VF.METAL);
+  return { model: m, voxelSize: DV, meta: { hook: pivotOf(m, DV, [1.6, 11.4, 0.3]), shoulder: pivotOf(m, DV, [0, 2.6, 0])[1] } };
+}
+
+/** a padlocked chain for whatever you can't have yet — 1/96, centre pivot: a sagging run of oval links with a fat
+ *  brass padlock hanging off the middle (shackle, keyhole, a scuffed face). */
+export function lockChain(span = 26, seed = 44): StaticModel {
+  const m = new VoxelModel('lock_chain');
+  const sag = span * 0.28;
+  const pts: V3[] = [];
+  for (let i = 0; i <= 10; i++) {
+    const t = i / 10;
+    pts.push([-span / 2 + t * span, -Math.sin(t * Math.PI) * sag, Math.sin(t * 7 + seed) * 0.4]);
+  }
+  chainAlong(m, pts);
+  const ly = -sag - 4.2;
+  for (let a = 0; a <= Math.PI; a += 0.15) m.set(Math.round(Math.cos(a) * 2.4), Math.round(ly + 3 + Math.sin(a) * 3), 0, 0x9a9690, VF.METAL);
+  fill(m, (x, y, z) => dRBox(x + 0.5, y + 0.5, z + 0.5, 0, ly, 0, 4, 3.6, 1.6, 1.2), [[-5, ly - 5, -3], [5, ly + 4, 3]], 1, (x, y, z, d) => {
+    if (Math.abs(x + 0.5) < 0.6 && y < ly && y > ly - 2.5 && z > 0) return 0x1a120a; // keyhole
+    return d > -0.8 && y > ly + 2 ? BRASS_HI : h01(x, y, z) > 0.85 ? mul(BRASS, 0.75) : BRASS;
+  }, VF.METAL);
+  return S(m, TV);
+}
+
+/** a manila price tag on a string — 1/96: a card with clipped corners, a brass-ringed hole, a loop of twine; the
+ *  scene prints the price on it (Alagard). meta.face: the printable face centre (m) and size [w, h] (m), facing +Z. */
+export function priceTag(): StaticModel & { meta: { face: V3; size: [number, number]; top: V3 } } {
+  const m = new VoxelModel('price_tag');
+  const W = 9, H = 6;
+  for (let x = -W; x <= W; x++)
+    for (let y = -H; y <= H; y++) {
+      if (x < -W + 3 && Math.abs(y) > H - (x + W)) continue; // clipped corners at the hole end
+      m.set(x, y, 0, h01(x, y, 3) > 0.9 ? 0xc8a878 : 0xd8bc88, VF.SOFTAO);
+    }
+  for (let a = 0; a < Math.PI * 2; a += 0.4) m.set(Math.round(-W + 3 + Math.cos(a) * 1.4), Math.round(Math.sin(a) * 1.4), 1, BRASS, VF.METAL);
+  m.del(-W + 3, 0, 0);
+  tubeP(m, spline([[-W + 3, 0, 1], [-W - 2, 3, 1.4], [-W - 4, 8, 1], [-W - 3, 12, 0.5]], 4), [0.4], 0xc8b07a, VF.SOFTAO);
+  return { model: m, voxelSize: TV, meta: { face: pivotOf(m, TV, [1.5, 0, 0.5]), size: [(2 * W - 4) * TV, (2 * H - 2) * TV], top: pivotOf(m, TV, [-W - 3, 12, 0.5]) } };
+}
+
+/** a gunsmith's parts tray — 1/48: a shallow walnut tray with finger-jointed corners, green felt and three dividers,
+ *  meant to sit at the front edge of the bench with the loose parts in it. meta.top (m, the felt). */
+export function partsTray(len = 60, seed = 45): StaticModel & { meta: { top: number } } {
+  const m = new VoxelModel('parts_tray');
+  const HL = len / 2, HZ = 7;
+  for (let x = -HL; x <= HL; x++)
+    for (let z = -HZ; z <= HZ; z++) {
+      const wall = Math.abs(x) >= HL - 0.5 || Math.abs(z) >= HZ - 0.5;
+      const div = !wall && mod(x + HL, Math.round(len / 4)) === 0 && Math.abs(z) < HZ - 1;
+      m.set(x, 0, z, WALNUT);
+      if (wall || div) for (let y = 1; y <= (div ? 2 : 3); y++) m.set(x, y, z, (Math.abs(x) >= HL - 0.5 && Math.abs(z) >= HZ - 0.5 && y % 2) ? 0x4e2e16 : mul(WALNUT, 1.1 + h01(x >> 2, y, seed) * 0.1));
+      else m.set(x, 1, z, h01(x >> 1, 3, z >> 1) > 0.75 ? 0x2e5a3a : 0x2a5234, VF.SOFTAO);
+    }
+  return { model: m, voxelSize: FV, meta: { top: 2 * FV } };
+}
+
+/** two forged J-hooks screwed to a backing block — 1/48, a pair per long gun on the wall over the bench. Front +Z. */
+export function gunHook(seed = 46): StaticModel {
+  const m = new VoxelModel('gun_hook');
+  fill(m, (x, y, z) => dRBox(x + 0.5, y + 0.5, z + 0.5, 0, 0, 0.5, 2.4, 3.4, 1, 0.6), [[-4, -5, -1], [4, 5, 3]], 1, (x, y) => mul(0x7a5232, 0.9 + h01(x, y, seed) * 0.16));
+  tubeP(m, spline([[0, 1, 1.5], [0, 0, 4.5], [0, -1.6, 7], [0, 0.4, 8.6], [0, 2.4, 8.4]], 4), [0.9, 0.85, 0.8, 0.75, 0.7], (x, y, z) => (h01(x, y, z) > 0.75 ? IRON_RUST : IRON), VF.METAL);
+  egg(m, [0, 2.4, 2.2], [0.8, 0.8, 0.4], 0x8a8680, VF.METAL);
+  return S(m, FV);
+}
+
+/** a moon-clip speedloader — 1/64: the six-pointed steel clip holding six brass cartridges, nose up, one with a
+ *  dented case. Centre-bottom pivot. */
+export function moonClip(): StaticModel {
+  const m = new VoxelModel('moon_clip');
+  for (let x = -6; x <= 6; x++)
+    for (let z = -6; z <= 6; z++) {
+      const a = Math.atan2(z, x), r = Math.hypot(x, z);
+      const star = 4.2 + Math.cos(a * 6) * 1.2;
+      if (r < star && r > 1.2) m.set(x, 0, z, mod(Math.round(a * 3), 2) ? 0x8a8c90 : 0x6a6c70, VF.METAL);
+    }
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2, cx = Math.cos(a) * 3.6, cz = Math.sin(a) * 3.6;
+    lathe(m, Math.round(cx), Math.round(cz), 1, 7, (t) => (t > 0.7 ? 1.2 - (t - 0.7) * 2.2 : 1.25), (x, y, z, outer, ang, t) => (t > 0.72 ? 0x9a8a80 : outer && Math.abs(ang - 1) < 0.35 ? 0xf0d080 : i === 2 && y === 3 && ang > 2 ? 0xa07a30 : 0xd8a848), {}, VF.METAL);
+  }
+  return S(m, DV);
+}
+
+/** an adjustable wrench for the bench animation — 1/64, handle along +X, jaws at +X end. Centre pivot. */
+export function benchWrench(): StaticModel {
+  const m = new VoxelModel('bench_wrench');
+  rod(m, [-10, 0, 0], [6, 0, 0], 1.3, 1.1, (x) => (x < -6 ? 0xa83a2a : STEEL), VF.METAL);
+  fill(m, (x, y, z) => Math.max(dRBox(x + 0.5, y + 0.5, z + 0.5, 9, 1, 0, 3.4, 3.4, 1.1, 1), -dRBox(x + 0.5, y + 0.5, z + 0.5, 11, 2.6, 0, 2, 1.4, 3, 0.4)), [[5, -3, -2], [13, 5, 2]], 1, (_x, y) => (y > 3 ? STEEL_HI : STEEL), VF.METAL);
+  rod(m, [7.5, -0.8, 1.2], [10.5, -0.8, 1.2], 0.7, 0.7, (x) => (mod(x, 2) ? 0x9a9ca0 : 0x6a6c70), VF.METAL);
+  return S(m, DV);
+}

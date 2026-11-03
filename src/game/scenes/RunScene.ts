@@ -59,6 +59,7 @@ import { NeckSlicer } from '../player/NeckSlicer';
 import { ZoneCine } from './ZoneCine';
 import { Tutorial } from '../run/Tutorial';
 import { RuinNests } from '../run/RuinNests';
+import { Wildlife } from '../run/Wildlife';
 import { Barks } from '../audio/Barks';
 import { DeathCine, deathCineFromRun } from './DeathCine';
 import { CodexRun } from '../ui/codex/CodexRun';
@@ -187,6 +188,7 @@ export class RunScene implements GameScene {
   private zoneCine: ZoneCine | null = null;
   tutorial: Tutorial | null = null;
   ruins: RuinNests | null = null;
+  wildlife: Wildlife | null = null;
   private codexRun: CodexRun | null = null;
   equipment!: Equipment;
   gearLoot!: GearPickups;
@@ -313,6 +315,7 @@ export class RunScene implements GameScene {
       addBounty: (v) => this.addBounty(v),
     });
     this.ruins = new RuinNests({ ctx: this.ctx, player: this.player, enemies: this.enemies, props: this.props, inter: this.inter, chest: (x, z, t, r) => this.spawnChest(x, z, t, r) });
+    this.wildlife = new Wildlife({ ctx: this.ctx, player: this.player, enemies: this.enemies, inter: this.inter });
     this.populateZone(this.world.sa.zones[0]);
     if (this.world.sa.zones[1]) this.populateZone(this.world.sa.zones[1]);
     this.spawnQuests();
@@ -412,6 +415,7 @@ export class RunScene implements GameScene {
     this.zoneCine?.dispose();
     this.tutorial?.dispose();
     this.ruins?.dispose();
+    this.wildlife?.dispose();
     this.codexRun?.dispose();
     this.engine.paused = false;
     this.engine.post.u.uDesat.value = 0;
@@ -620,6 +624,7 @@ export class RunScene implements GameScene {
     }
     // ruins: chests, webs, nests and egg sacs; outposts; oasis drinking
     this.ruins?.populateZone(z);
+    this.wildlife?.populateZone(z);
   }
 
   spawnChest(x: number, z: number, tier: 'wood' | 'silver' | 'gold' | 'divine', rot = rnd.next() * 6.28) {
@@ -1011,6 +1016,7 @@ export class RunScene implements GameScene {
     }
     this.missions.update(dt);
     this.ruins?.update(dt);
+    this.wildlife?.update(dt);
     for (const s of this.scarabs) s.update(dt, this.player);
     for (let i = this.bosses.length - 1; i >= 0; i--) {
       const b = this.bosses[i];

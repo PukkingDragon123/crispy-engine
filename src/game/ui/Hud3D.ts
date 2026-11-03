@@ -1,9 +1,8 @@
 // 3D HUD layer: the 2D pixel-art HUD canvas is composited in WebGL and real
 // voxel models sit on top of it — the revolver cylinder (rounds in chambers,
 // spins per shot with motion ghosts, swings out on reload, spits brass that
-// tumbles off the screen), a spinning gold coin by the purse, the consumables
-// as little turntable models in their slots, and Pinch as an idol inside the
-// ultimate ring. Also hosts the ultimate cut-in: a 2D speed-line band with a
+// tumbles off the screen), a spinning gold coin by the purse and the consumables
+// as little turntable models in their slots. Also hosts the ultimate cut-in: a 2D speed-line band with a
 // lit 3D bust of Sundown (2D eyes) and an Alagard title.
 // Also hosts: the SOUL BAR (Serket's soul jar above the heart, Pinch guarding
 // its lid — SoulBar.ts), the MISSION PAPER stack (MissionPaper.ts) and the
