@@ -50,6 +50,8 @@ import { playIntro } from './IntroCine';
 import { nav } from '../Nav';
 import { awardRun, loadSave, writeSave, GunLoadout, gunMods } from '../meta/Save';
 import * as CH from '../models/characters';
+import { Cinema } from '../cine/Cinema';
+import { cineFlags } from '../cine/CineKit';
 import { FaceQuads } from '../fx/FaceFx';
 import { MeerkatColony, findClearSpot } from '../run/MeerkatColony';
 import { JerboaDance } from '../run/JerboaDance';
@@ -298,6 +300,7 @@ export class RunScene implements GameScene {
     };
     this.player = new Player(this.ctx, vis, this.camRig, e.input);
     this.hud3d.setBust(vis.rig, vis.rig.name + ':player', vis.gun);
+    Cinema.attach({ ctx: this.ctx, player: this.player, hud: this.hud });
     if (this.opts.gun) this.player.stats.add(gunMods(this.opts.gun) as any);
     this.enemies = new Enemies(this.ctx, this.player as any);
     this.slicer = new NeckSlicer({
@@ -1009,7 +1012,8 @@ export class RunScene implements GameScene {
       this.cavePit.stageUpdate(dt, rdt);
       return;
     }
-    if (!this.picker.cinematic) this.codexRun?.update(rdt);
+    // codex discoveries wait until cutscenes, staged encounters and the rank-up are over
+    if (!this.picker.cinematic && !Cinema.busy() && !cineFlags.choice) this.codexRun?.update(rdt);
     const e = this.engine;
     this.run.time += dt;
     // pause toggle (simple until poster scene)

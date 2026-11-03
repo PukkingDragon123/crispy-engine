@@ -308,6 +308,7 @@ export class Cinema {
             entered = true;
             ctx.scene.add(word.group);
             word.enter('rise', 0.065, 0.1);
+            kit.billows.thin(L, 7);
             kit.sfx('quake_rumble', L, 0.7, 1.2);
           }
           if (!sub && t > T2 + 0.6 && b.title) {

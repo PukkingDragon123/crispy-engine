@@ -54,6 +54,7 @@ import { GearHud } from '../ui/GearHud';
 import { TouchControls, isTouchDevice } from '../ui/TouchControls';
 import { loadSave, GunLoadout, gunMods } from '../meta/Save';
 import * as CH from '../models/characters';
+import { Cinema } from '../cine/Cinema';
 import { FaceQuads } from '../fx/FaceFx';
 import { CaveBestiary } from '../run/CaveBestiary';
 import { Olm } from '../bosses/Olm';
@@ -249,6 +250,7 @@ export class CaveScene implements GameScene {
     };
     this.player = new Player(this.ctx, vis, this.camRig, e.input);
     this.hud3d.setBust(vis.rig, vis.rig.name + ':player', vis.gun);
+    Cinema.attach({ ctx: this.ctx, player: this.player, hud: this.hud });
     this.hud3d.scene.environment = this.scene.environment;
     if (gun) this.player.stats.add(gunMods(gun) as any);
     this.enemies = new Enemies(this.ctx, this.player as any);

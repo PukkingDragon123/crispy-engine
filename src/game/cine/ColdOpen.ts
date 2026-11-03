@@ -331,6 +331,9 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
         own.push(word.group);
         word.enter('rise', 0.1, 0.05);
         kit.shock(L.x, L.z, { power: 0.5, speed: 9, life: 1.4 });
+        // the dust settles out of the street so the name reads
+        kit.billows.thin(L, 10);
+        kit.billows.thin(ap, 8);
         eng.audio.play('quake_rumble', { volume: 0.8, pitch: 0.9 });
       }
       if (wordIn) word.update(dt);

@@ -119,6 +119,8 @@ interface Puff {
   q: THREE.Quaternion;
   axis: THREE.Vector3;
   spin: number;
+  /** settling early (thin()): seconds since */
+  thinT: number;
 }
 
 const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _q = new THREE.Quaternion(), _o = new THREE.Vector3();
@@ -165,6 +167,7 @@ export class Billows {
       dust: !!o.dust, soot: o.soot ?? 0.5,
       tpl: T[Math.floor(Math.random() * T.length)],
       q, axis, spin: o.spin ?? 0.35 + Math.random() * 0.4,
+      thinT: -1,
     });
   }
 
@@ -216,6 +219,15 @@ export class Billows {
       this.spawn({ pos: { x: at.x + (Math.random() - 0.5) * r * 0.6, y: at.y + r * 0.5, z: at.z + (Math.random() - 0.5) * r * 0.6 }, vel: { x: 0.6, y: 2.2, z: 0.3 }, r0: r * 0.2, r1: r * (0.5 + Math.random() * 0.3), grow: 1, life: 4 + Math.random() * 2, heat: 0.22, cool: 2, buoy: 0.5, drag: 0.6, soot: 0.8 });
   }
 
+  /** the cold dust and smoke within r of a point settles away over ~0.7 s (clears a shot) */
+  thin(at: { x: number; y: number; z: number }, r: number) {
+    for (const p of this.puffs) {
+      if (p.thinT >= 0 || p.age < 0) continue;
+      if (p.heat * Math.exp(-p.age * p.cool) > 0.25) continue;
+      if (Math.hypot(p.x - at.x, p.z - at.z) < r) p.thinT = 0;
+    }
+  }
+
   update(dt: number) {
     const P = this.puffs;
     let i = 0;
@@ -224,7 +236,8 @@ export class Billows {
     for (let k = P.length - 1; k >= 0; k--) {
       const p = P[k];
       p.age += dt;
-      if (p.age >= p.life) P.splice(k, 1);
+      if (p.thinT >= 0) p.thinT += dt;
+      if (p.age >= p.life || p.thinT > 0.75) P.splice(k, 1);
     }
     for (let pi = P.length - 1; pi >= 0; pi--) {
       const p = P[pi];
@@ -252,7 +265,7 @@ export class Billows {
       const cell = (R / p.tpl.grid) * 1.12;
       const T = p.tpl;
       // the cold puff crumbles away voxel by voxel over the last part of its life
-      const van = lk > 0.5 ? (lk - 0.5) / 0.5 : 0;
+      const van = Math.max(lk > 0.5 ? (lk - 0.5) / 0.5 : 0, p.thinT >= 0 ? p.thinT / 0.7 : 0);
       for (let j = 0; j < T.count && i < MAX; j++) {
         const nv = T.n[j];
         const keep = nv - van * 1.1;
