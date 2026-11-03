@@ -36,6 +36,9 @@ export interface RunResult {
   hero?: RigSpec | null;
 }
 
+/** what the WANTED poster needs (the hideout nails one up after a death) */
+export type PosterData = Pick<RunResult, 'run' | 'won' | 'bosses' | 'hero' | 'banked'>;
+
 const N = 88; // diorama columns per side
 const VS = 0.024; // diorama voxel size (m)
 
@@ -183,7 +186,7 @@ const INK = '#2a1a10';
 const STAMP_Y = 905; // stamp centre on the ink canvas (px)
 
 /** the player's own Sundown rig (passed in by the run, else the saved look) */
-function heroSpec(res: RunResult): RigSpec | null {
+function heroSpec(res: PosterData): RigSpec | null {
   if (res.hero?.parts) return res.hero;
   try {
     const look = loadSave().look;
@@ -198,7 +201,7 @@ function heroSpec(res: RunResult): RigSpec | null {
 }
 
 /** Sundown photographed from his own 3D rig (IconFactory), printed in sepia */
-function capturePortrait(renderer: THREE.WebGLRenderer, res: RunResult): HTMLCanvasElement | null {
+function capturePortrait(renderer: THREE.WebGLRenderer, res: PosterData): HTMLCanvasElement | null {
   const spec = heroSpec(res);
   if (!spec) return null;
   const mat = makeVoxelMaterial({ fog: false });
@@ -242,7 +245,7 @@ function capturePortrait(renderer: THREE.WebGLRenderer, res: RunResult): HTMLCan
  * The poster's ink: typography (Alagard) and the photographed portrait, on a
  * transparent canvas. The paper, the stamp and the bullet holes are the shader.
  */
-export function paintPoster(res: RunResult, lines: number, portrait: HTMLCanvasElement | null, cv = document.createElement('canvas')) {
+export function paintPoster(res: PosterData, lines: number, portrait: HTMLCanvasElement | null, cv = document.createElement('canvas')) {
   const W = CW, H = CH;
   cv.width = W;
   cv.height = H;
@@ -371,10 +374,12 @@ function posterGeometry() {
   return g;
 }
 
-export class ResultsScene implements GameScene {
-  scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(42, 1, 0.05, 200);
-  private poster!: THREE.Mesh;
+/**
+ * The WANTED sheet: shader paper on a curled, lit sheet + the ink canvas. `fill()` writes it in line by
+ * line and slams the rubber stamp. Used by the results table and nailed to the hideout wall.
+ */
+export class WantedPoster {
+  mesh: THREE.Mesh;
   private inkCanvas = document.createElement('canvas');
   private ink: THREE.CanvasTexture | null = null;
   private stampTex: THREE.CanvasTexture | null = null;
@@ -388,7 +393,78 @@ export class ResultsScene implements GameScene {
     uStampCol: { value: new THREE.Color('#b02a1a') },
     uStampMap: { value: null as THREE.Texture | null },
   };
-  private lines = 0;
+  lines = 0;
+  /** full size of the sheet (m) */
+  static readonly W = PW;
+  static readonly H = PH;
+
+  constructor(private engine: Engine, private res: PosterData) {
+    this.portrait = capturePortrait(engine.renderer, res);
+    paintPoster(res, 0, this.portrait, this.inkCanvas);
+    this.ink = inkTexture(this.inkCanvas);
+    const word = res.won ? 'LEGEND' : 'CLAIMED';
+    const sc = paintStampWord(word);
+    this.stampTex = inkTexture(sc);
+    this.stampTex.minFilter = THREE.LinearFilter;
+    this.stampTex.generateMipmaps = false;
+    const u = this.paperU;
+    u.uStampMap.value = this.stampTex;
+    u.uStampRect.value.z = sc.width / 2 / CH;
+    u.uStampRect.value.w = sc.height / 2 / CH;
+    u.uStampCol.value.set(res.won ? '#2a7a1a' : '#b02a1a');
+    const mat = new THREE.MeshStandardMaterial({ map: this.ink, roughness: 0.93, metalness: 0 });
+    mat.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, u);
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float uAspect, uStamp, uStampAng;\nuniform vec4 uStampRect;\nuniform vec3 uStampCol;\nuniform sampler2D uStampMap;\n' + PARCHMENT_GLSL)
+        .replace('#include <map_fragment>', POSTER_PAPER);
+    };
+    mat.customProgramCacheKey = () => 'dustup-wanted-poster';
+    this.mesh = new THREE.Mesh(posterGeometry(), mat);
+    this.mesh.castShadow = true;
+    this.mesh.receiveShadow = true;
+  }
+
+  /** fill it in now (no animation) */
+  complete() {
+    this.lines = 8;
+    paintPoster(this.res, 7, this.portrait, this.inkCanvas);
+    if (this.ink) this.ink.needsUpdate = true;
+    this.paperU.uStamp.value = 1;
+  }
+
+  /** the lines write themselves in, then the stamp slams down (real time; `skip()` returns true to finish at once) */
+  async fill(skip: () => boolean = () => false) {
+    const eng = this.engine;
+    for (let i = this.lines + 1; i <= 8; i++) {
+      if (skip()) return this.complete();
+      this.lines = i;
+      if (i <= 7) {
+        paintPoster(this.res, i, this.portrait, this.inkCanvas);
+        if (this.ink) this.ink.needsUpdate = true;
+      } else this.paperU.uStamp.value = 1; // the rubber stamp slams down
+      eng.audio.play(i === 8 ? 'poster_slam' : 'page_turn', { volume: i === 8 ? 1 : 0.4 });
+      if (i === 8) {
+        const s0 = this.mesh.scale.x;
+        eng.tweens.run(0.25, (k) => this.mesh.scale.setScalar(s0 * (1 + Math.sin(k * Math.PI) * 0.06)), Ease.outQuad, { real: true });
+      }
+      await eng.tweens.wait(i === 7 ? 0.7 : 0.32, true);
+    }
+  }
+
+  dispose() {
+    this.mesh.removeFromParent();
+    this.ink?.dispose();
+    this.stampTex?.dispose();
+    (this.mesh.material as THREE.Material).dispose();
+    this.mesh.geometry.dispose();
+  }
+}
+
+export class ResultsScene implements GameScene {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(42, 1, 0.05, 200);
+  private poster!: WantedPoster;
   private t = 0;
   private ui: HTMLDivElement;
   private diorama = new THREE.Group();
@@ -426,10 +502,10 @@ export class ResultsScene implements GameScene {
     const wall = new THREE.Mesh(new THREE.PlaneGeometry(14, 6), new THREE.MeshStandardMaterial({ color: 0x3a2414, roughness: 1 }));
     wall.position.set(0, 2, -2.2);
     s.add(wall);
-    this.poster = this.buildPoster();
-    this.poster.position.set(0, 1.55, -2.15);
-    this.poster.rotation.z = 0.03;
-    s.add(this.poster);
+    this.poster = new WantedPoster(eng, this.res);
+    this.poster.mesh.position.set(0, 1.55, -2.15);
+    this.poster.mesh.rotation.z = 0.03;
+    s.add(this.poster.mesh);
     this.camera.aspect = eng.width / eng.height;
     this.camera.updateProjectionMatrix();
     this.camera.position.set(0.6, 0.9, 2.2);
@@ -465,52 +541,14 @@ export class ResultsScene implements GameScene {
     // poster fills in line by line
     void (async () => {
       await eng.tweens.wait(2.2, true);
-      for (let i = 1; i <= 8; i++) {
-        this.lines = i;
-        if (i <= 7) {
-          paintPoster(this.res, i, this.portrait, this.inkCanvas);
-          if (this.ink) this.ink.needsUpdate = true;
-        } else this.paperU.uStamp.value = 1; // the rubber stamp slams down
-        eng.audio.play(i === 8 ? 'poster_slam' : 'page_turn', { volume: i === 8 ? 1 : 0.4 });
-        if (i === 8) eng.tweens.run(0.25, (k) => (this.poster.scale.setScalar(1 + Math.sin(k * Math.PI) * 0.06)), Ease.outQuad, { real: true });
-        await eng.tweens.wait(i === 7 ? 0.7 : 0.32, true);
-      }
+      await this.poster.fill();
       this.ui.style.opacity = '1';
     })();
   }
 
-  /** the WANTED sheet: shader paper on a curled, lit sheet + the ink canvas */
-  private buildPoster() {
-    this.portrait = capturePortrait(this.engine.renderer, this.res);
-    paintPoster(this.res, 0, this.portrait, this.inkCanvas);
-    this.ink = inkTexture(this.inkCanvas);
-    const word = this.res.won ? 'LEGEND' : 'CLAIMED';
-    const sc = paintStampWord(word);
-    this.stampTex = inkTexture(sc);
-    this.stampTex.minFilter = THREE.LinearFilter;
-    this.stampTex.generateMipmaps = false;
-    const u = this.paperU;
-    u.uStampMap.value = this.stampTex;
-    u.uStampRect.value.z = sc.width / 2 / CH;
-    u.uStampRect.value.w = sc.height / 2 / CH;
-    u.uStampCol.value.set(this.res.won ? '#2a7a1a' : '#b02a1a');
-    const mat = new THREE.MeshStandardMaterial({ map: this.ink, roughness: 0.93, metalness: 0 });
-    mat.onBeforeCompile = (sh) => {
-      Object.assign(sh.uniforms, u);
-      sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform float uAspect, uStamp, uStampAng;\nuniform vec4 uStampRect;\nuniform vec3 uStampCol;\nuniform sampler2D uStampMap;\n' + PARCHMENT_GLSL)
-        .replace('#include <map_fragment>', POSTER_PAPER);
-    };
-    mat.customProgramCacheKey = () => 'dustup-wanted-poster';
-    return new THREE.Mesh(posterGeometry(), mat);
-  }
-
   exit() {
     this.ui.remove();
-    this.ink?.dispose();
-    this.stampTex?.dispose();
-    (this.poster?.material as THREE.Material | undefined)?.dispose();
-    this.poster?.geometry.dispose();
+    this.poster?.dispose();
   }
 
   update(_dt: number, rdt: number) {
@@ -525,6 +563,5 @@ export class ResultsScene implements GameScene {
     const look = new THREE.Vector3(0, 0.08 + e * 0.8, 0.15 - e * 1.45);
     this.camera.lookAt(look);
     this.diorama.rotation.y = Math.sin(t * 0.2) * 0.06;
-    void this.lines;
   }
 }

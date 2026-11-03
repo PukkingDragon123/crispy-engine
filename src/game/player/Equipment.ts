@@ -96,6 +96,12 @@ export const GEAR: Record<GearId, GearDef> = {
 };
 
 export const GEAR_IDS = Object.keys(GEAR) as GearId[];
+/**
+ * The starter kit: these pieces can drop from the first run on. Every other piece
+ * only enters the loot tables (chests, alphas, bosses, the trading post) once its
+ * blueprint has been found (meta/Blueprints.ts, gearUnlocked()).
+ */
+export const STARTER_GEAR: GearId[] = ['duneStriders', 'rustyRails', 'mummyWrap', 'gunslingerGloves', 'respirator', 'nitroCan', 'canvasGlider'];
 export const GEAR_RARITY_ORDER: GearRarity[] = ['common', 'uncommon', 'rare', 'epic', 'legendary'];
 export const gearColor = (id: GearId) => RARITY[GEAR[id].rarity].color;
 export const gearHex = (id: GearId) => RARITY[GEAR[id].rarity].hex;

@@ -7,15 +7,20 @@
 // pips fill one by one. A hinged ledger (a walnut board with a parchment inset
 // and a rarity-metal rim) folds out from behind the card with the full details:
 // stat changes, levels, the next level, evolution path, synergies and flavour.
+// Rarity reads at a glance: the frame metal is tinted per tier (worn bronze,
+// polished bronze, silver, rose gold, gold, white gold), a sculpted cloth banner
+// ribbon names the rarity across the top, and the outline glows in the rarity
+// colour (mythic runs through the spectrum). Trade-offs, curses and gambles print
+// green PROS and red CONS rows on the card and in the ledger.
 import * as THREE from 'three';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { VoxelModel, VF } from '../../engine/voxel/VoxelModel';
 import { hash3, noise } from '../../engine/math/rand';
 import { SKILL_CARD, skillFrame, levelGem, SkillRarity, mixc } from '../models/props/tarot';
-import { RARITY, Offer, UPGRADES, UPGRADE_BY_ID, UpgradeDef } from '../run/Upgrades';
+import { RARITY, Offer, UPGRADES, UPGRADE_BY_ID, UpgradeDef, prosCons, perLevelText, kindLabel, isTrade } from '../run/Upgrades';
 import { fmtStat, DERIVED_INFO, CORE_INFO, StatId } from '../combat/Stats';
-import { paintCardFront, paintCardBack, canvasTex, TEXT_PPV } from './CardArt';
+import { paintCardBack, canvasTex, TEXT_PPV } from './CardArt';
 import { skillFamily } from './SkillArt';
 
 const VS = SKILL_CARD.voxelSize;
@@ -72,7 +77,9 @@ const FOIL: Record<SkillRarity, { foil: number; sheen: number }> = {
   mythic: { foil: 1.15, sheen: 0xfff6dc },
 };
 
-type CardMat = VoxelMaterial & { foil: { uFoil: { value: number }; uSheen: { value: number }; uSheenCol: { value: THREE.Color } } };
+type CardMat = VoxelMaterial & {
+  foil: { uFoil: { value: number }; uSheen: { value: number }; uSheenCol: { value: THREE.Color }; uMetalTint: { value: THREE.Color }; uGlowCol: { value: THREE.Color }; uGlow: { value: number }; uHalf: { value: THREE.Vector2 } };
+};
 
 /**
  * The game's voxel material plus holographic foil and a sheen band. One program
@@ -81,7 +88,15 @@ type CardMat = VoxelMaterial & { foil: { uFoil: { value: number }; uSheen: { val
  */
 function cardMaterial(emissiveStrength = 1): CardMat {
   const m = makeVoxelMaterial({ fog: false, emissiveStrength }) as CardMat;
-  const u = { uFoil: { value: 0 }, uSheen: { value: -9 }, uSheenCol: { value: new THREE.Color(1, 0.85, 0.5) } };
+  const u = {
+    uFoil: { value: 0 },
+    uSheen: { value: -9 },
+    uSheenCol: { value: new THREE.Color(1, 0.85, 0.5) },
+    uMetalTint: { value: new THREE.Color(1, 1, 1) },
+    uGlowCol: { value: new THREE.Color(1, 1, 1) },
+    uGlow: { value: 0 },
+    uHalf: { value: new THREE.Vector2((SKILL_CARD.W * VS) / 2, (SKILL_CARD.H * VS) / 2) },
+  };
   m.foil = u;
   const base = m.onBeforeCompile;
   m.onBeforeCompile = (sh, r) => {
@@ -94,7 +109,7 @@ function cardMaterial(emissiveStrength = 1): CardMat {
         `#include <begin_vertex>\nvCardP = position; vCardX = normalize(normalMatrix * vec3(1.0, 0.0, 0.0)); vCardY = normalize(normalMatrix * vec3(0.0, 1.0, 0.0));`
       );
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>\nuniform float uFoil, uSheen; uniform vec3 uSheenCol;\nvarying vec3 vCardP; varying vec3 vCardX; varying vec3 vCardY;`)
+      .replace('#include <common>', `#include <common>\nuniform float uFoil, uSheen, uGlow; uniform vec3 uSheenCol, uMetalTint, uGlowCol; uniform vec2 uHalf;\nvarying vec3 vCardP; varying vec3 vCardX; varying vec3 vCardY;`)
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
@@ -103,6 +118,15 @@ function cardMaterial(emissiveStrength = 1): CardMat {
           vec2 va = vec2(dot(fvd, normalize(vCardX)), dot(fvd, normalize(vCardY)));
           vec2 cp = vCardP.xy;
           float metal = vMatx.y;
+          // the tier's metal: worn bronze, polished bronze, silver, rose gold, gold, white gold
+          diffuseColor.rgb *= mix(vec3(1.0), uMetalTint, metal);
+          // the rarity glow hugging the outline
+          if (uGlow > 0.001) {
+            vec2 q = abs(cp);
+            float de = min(uHalf.x - q.x, uHalf.y - q.y);
+            float band = exp(-max(de, 0.0) * 75.0) * step(0.0, de + 0.004);
+            totalEmissiveRadiance += uGlowCol * band * uGlow * (0.35 + 0.65 * metal);
+          }
           if (uFoil > 0.001) {
             // thin-film rainbow sliding with the view angle and across the card
             float ph = va.x * 2.8 + va.y * 2.1 + cp.x * 1.7 + cp.y * 1.2;
@@ -120,7 +144,7 @@ function cardMaterial(emissiveStrength = 1): CardMat {
         }`
       );
   };
-  m.customProgramCacheKey = () => 'skill-card-foil-v1';
+  m.customProgramCacheKey = () => 'skill-card-foil-v2';
   return m;
 }
 
@@ -158,6 +182,199 @@ void main(){
   c += vec3(1.0, 0.55, 0.15) * rim * 1.4;
   gl_FragColor = vec4(c, 1.0);
 }`;
+
+// ------------------------------------------------------------------ the rarity ribbon
+
+/** the banner (voxels, card space): the band across the top, the tails hanging out past the edges */
+const RIB = { x0: 7, x1: 64, y0: 96, y1: 106, flat0: 15, flat1: 56, text: { x0: 13, y0: 97, x1: 58, y1: 105 } };
+const ribbons = new Map<SkillRarity, THREE.BufferGeometry>();
+
+/**
+ * A cloth banner draped over the top of the card: a flat band (where the rarity is
+ * lettered) that curls back toward the frame at its ends, folds under, and drops two
+ * swallow-tailed ends past the card's edges. Edge rows catch the light, a stitched
+ * thread runs along both borders, the tails hang in the band's shadow.
+ */
+function ribbonModel(r: SkillRarity) {
+  const R = RARITY[r].ribbon;
+  const m = new VoxelModel('rarity_ribbon_' + r);
+  const metal = r !== 'common';
+  const TH = metal ? VF.SOLID | VF.METAL : VF.SOLID;
+  const CL = VF.SOLID | VF.SOFTAO;
+  const W = SKILL_CARD.W;
+  for (const mirror of [false, true]) {
+    const X = (x: number) => (mirror ? W - 1 - x : x);
+    // the tail: hanging lower, behind the band, rippling, with a swallowtail notch
+    for (let x = -8; x <= 11; x++) {
+      const y0 = Math.round(89 + (x + 8) * 0.22), y1 = y0 + 9;
+      const z = 5 + Math.round(Math.sin((x + 8) * 0.55) * 0.9);
+      for (let y = y0; y <= y1; y++) {
+        const mid = (y0 + y1) / 2;
+        if (x < -3 && Math.abs(y - mid) < (-3 - x) * 1.05) continue; // the notch
+        const edge = y === y0 || y === y1;
+        const stitch = (y === y0 + 1 || y === y1 - 1) && (x & 1) === 0;
+        const c = stitch ? R.thread : y === y1 ? mixc(R.shade, R.hi, 0.45) : edge ? mixc(R.shade, 0x000000, 0.25) : mixc(R.base, R.shade, 0.55 + 0.15 * Math.sin(x * 0.7));
+        m.set(X(x), y, z, c, stitch ? TH : CL);
+        m.set(X(x), y, z - 1, mixc(R.shade, 0x000000, 0.3), CL);
+      }
+    }
+    // the fold where the band turns under into the tail
+    for (let x = 5; x <= 10; x++)
+      for (let y = 92 + (x - 5); y <= 99; y++) m.set(X(x), y, 6, mixc(R.shade, 0x000000, 0.35 + (10 - x) * 0.03), CL);
+  }
+  // the band
+  for (let x = RIB.x0; x <= RIB.x1; x++) {
+    const u = x < RIB.flat0 ? (RIB.flat0 - x) / (RIB.flat0 - RIB.x0) : x > RIB.flat1 ? (x - RIB.flat1) / (RIB.x1 - RIB.flat1) : 0;
+    const zf = 7 - Math.round(u * u * 1.6);
+    const lift = Math.round(u * u * -1.2);
+    for (let y = RIB.y0 + lift; y <= RIB.y1 + lift; y++) {
+      const yy = y - lift;
+      const stitch = (yy === RIB.y0 + 1 || yy === RIB.y1 - 1) && x % 3 !== 1;
+      // soft cloth shading: the top edge catches the light, the curl darkens toward the ends
+      let c = yy === RIB.y1 ? R.hi : yy === RIB.y0 ? R.shade : mixc(R.base, R.hi, yy >= RIB.y1 - 2 ? 0.25 : 0);
+      c = mixc(c, R.shade, u * 0.55);
+      if (stitch) c = R.thread;
+      m.set(x, y, zf, c, stitch ? TH : CL);
+      m.set(x, y, zf - 1, R.shade, CL);
+    }
+  }
+  return m;
+}
+
+function ribbonGeo(r: SkillRarity) {
+  let g = ribbons.get(r);
+  if (!g) {
+    g = buildVoxelGeometry(ribbonModel(r), { voxelSize: VS, pivot: [SKILL_CARD.W / 2, SKILL_CARD.H / 2, 0] });
+    ribbons.set(r, g);
+  }
+  return g;
+}
+
+/** the rarity, lettered on the ribbon's flat */
+function paintRibbon(r: SkillRarity) {
+  const T = RIB.text;
+  const cv = document.createElement('canvas');
+  cv.width = (T.x1 - T.x0 + 1) * TEXT_PPV * 2;
+  cv.height = (T.y1 - T.y0 + 1) * TEXT_PPV * 2;
+  const c = cv.getContext('2d')!;
+  const R = RARITY[r];
+  const text = R.name.toUpperCase().split('').join(String.fromCharCode(8202));
+  c.font = font(100);
+  const cap = (c.measureText('HMX').actualBoundingBoxAscent || 70) / 100;
+  let px = (cv.height * 0.6) / cap;
+  c.font = font(px);
+  const w = c.measureText(text).width;
+  if (w > cv.width * 0.92) {
+    px *= (cv.width * 0.92) / w;
+    c.font = font(px);
+  }
+  c.textAlign = 'center';
+  c.textBaseline = 'alphabetic';
+  const y = cv.height / 2 + (px * cap) / 2;
+  const light = R.ribbon.ink.startsWith('#f') || R.ribbon.ink.startsWith('#e');
+  // woven-in lettering: a shadow under the thread, then the thread
+  c.fillStyle = light ? 'rgba(0,0,0,0.45)' : 'rgba(255,248,226,0.45)';
+  c.fillText(text, cv.width / 2, y + px * 0.07);
+  c.fillStyle = R.ribbon.ink;
+  c.fillText(text, cv.width / 2, y);
+  return cv;
+}
+
+// ------------------------------------------------------------------ the front typography
+
+const GREEN = '#2c6410';
+const RED = '#8e1e10';
+
+/** a plaque-sized transparent canvas */
+function surface(r: { x0: number; y0: number; x1: number; y1: number }) {
+  const cv = document.createElement('canvas');
+  cv.width = (r.x1 - r.x0 + 1) * TEXT_PPV;
+  cv.height = (r.y1 - r.y0 + 1) * TEXT_PPV;
+  const c = cv.getContext('2d')!;
+  c.textBaseline = 'alphabetic';
+  return { cv, c };
+}
+
+function capOf(c: CanvasRenderingContext2D) {
+  c.font = font(100);
+  return (c.measureText('HMX').actualBoundingBoxAscent || 70) / 100;
+}
+
+/**
+ * The front: the name on its plaque; on the description panel either the effect
+ * (exact numbers, then how it grows per level) or, for trade-offs, curses and
+ * gambles, a kind line and green "+" / red "−" rows; a line of flavour when it
+ * fits; and a footer with the category, the level step and the god.
+ */
+function paintFront(o: Offer) {
+  const C = SKILL_CARD;
+  const def = o.def;
+  const name = surface(C.name);
+  {
+    const c = name.c, cv = name.cv;
+    const cap = capOf(c);
+    let px = (cv.height * 0.56) / cap;
+    c.font = font(px);
+    const w = c.measureText(def.name.toUpperCase()).width;
+    if (w > cv.width * 0.94) px *= (cv.width * 0.94) / w;
+    c.font = font(px);
+    c.textAlign = 'center';
+    engrave(c, def.name.toUpperCase(), cv.width / 2, cv.height / 2 + (px * cap) / 2, INK);
+  }
+  const d = surface(C.desc);
+  const c = d.c, W = d.cv.width, H = d.cv.height;
+  const lv = Math.max(1, o.toLv);
+  const split = !!(def.pros || def.cons);
+  const pc = split ? prosCons(def, lv) : null;
+  const per = def.gamble ? '' : perLevelText(def);
+  const fl = def.lore ?? FLAVOUR[skillFamily(def)] ?? '';
+  const foot = def.learn ? `TAROT SKILL  ·  KEY [${def.learn}]` : `${kindLabel(def)}  ·  ${def.gamble && def.maxLv > 5 ? 'A GAME OF CHANCE' : o.fromLv === 0 ? (def.cat === 'evolution' ? 'EVOLVED' : 'NEW') : `LV ${o.fromLv} → ${o.toLv}`}${def.god ? '  ·  ' + def.god.toUpperCase() : ''}`;
+  const kindCol = def.gamble ? '#7a4a00' : def.curse ? '#5c1a5a' : '#6a3a14';
+  const kind = def.gamble ? (def.odds ? def.odds(lv).split('  ·  ')[0].toUpperCase() : 'A GAMBLE') : def.curse ? 'A CURSED BARGAIN' : 'A TRADE-OFF';
+  const build = (s: number, withPer: boolean, withFl: boolean) => {
+    const ops: Op[] = [];
+    const para = (text: string, px: number, color: string, lip = 0.5) => {
+      c.font = font(px * s);
+      const ls = wrap(c, text, W * 0.9);
+      const lh = px * s * 1.12;
+      ops.push({ h: ls.length * lh, draw: (y) => ls.forEach((l, i) => ((c.font = font(px * s)), (c.textAlign = 'center'), engrave(c, l, W / 2, y + px * s * 0.84 + i * lh, color, lip))) });
+    };
+    if (split) {
+      para(kind, 24, kindCol, 0.35);
+      ops.push({ h: 4 * s, draw: () => {} });
+      for (const t of pc!.pros) para('+ ' + t, 33, GREEN);
+      for (const t of pc!.cons) para('− ' + t, 33, RED);
+    } else para(def.desc(lv), 34, INK);
+    if (withPer && per) para(`Per level: ${per}`, 24, INK_SOFT, 0.35);
+    if (withFl && fl) {
+      ops.push({ h: 5 * s, draw: () => {} });
+      para(`"${fl}"`, 23, INK_SOFT, 0.3);
+    }
+    return ops;
+  };
+  const footPx = H * 0.11;
+  const room = H - footPx * 1.9 - H * 0.05;
+  let s = 1, withPer = true, withFl = true;
+  let ops = build(s, withPer, withFl);
+  const total = () => ops.reduce((a, b) => a + b.h, 0);
+  for (let i = 0; i < 24 && total() > room; i++) {
+    if (s < 0.74 && withFl) withFl = false;
+    else if (s < 0.66 && withPer) withPer = false;
+    else s *= 0.95;
+    ops = build(s, withPer, withFl);
+  }
+  let y = H * 0.035 + Math.max(0, (room - total()) / 2);
+  for (const op of ops) {
+    op.draw(y);
+    y += op.h;
+  }
+  c.font = font(footPx);
+  c.textAlign = 'center';
+  let fw = c.measureText(foot).width;
+  if (fw > W * 0.94) c.font = font((footPx * W * 0.94) / fw);
+  engrave(c, foot, W / 2, H - footPx * 0.62, INK_SOFT, 0.35);
+  return { name: name.cv, desc: d.cv };
+}
 
 // ------------------------------------------------------------------ public card
 
@@ -197,6 +414,10 @@ export function makeSkillCard(o: Offer, rows: { stat: StatId; before: number; af
   const frameMat = cardMaterial();
   frameMat.foil.uFoil.value = FOIL[rarity].foil;
   frameMat.foil.uSheenCol.value.setHex(FOIL[rarity].sheen);
+  const RI = RARITY[rarity];
+  frameMat.foil.uMetalTint.value.setRGB(...RI.metal);
+  frameMat.foil.uGlowCol.value.setHex(RI.glow);
+  const glowBase = [0.35, 0.6, 0.85, 1.05, 1.3, 1.5][RI.rank];
   const gemMat = makeVoxelMaterial({ fog: false, emissiveStrength: 1.6 });
   const group = new THREE.Group();
   const frame = new THREE.Mesh(frameGeo(rarity), frameMat);
@@ -208,6 +429,14 @@ export function makeSkillCard(o: Offer, rows: { stat: StatId; before: number; af
   core.position.z = -0.005;
   group.add(core);
   const owned: { dispose(): void }[] = [frameMat, gemMat];
+  // the rarity banner, in the same cloth-and-foil material so it shimmers, dissolves and flashes with the card
+  const ribMat = cardMaterial();
+  ribMat.foil.uFoil.value = FOIL[rarity].foil * 0.7;
+  ribMat.foil.uSheenCol.value.setHex(FOIL[rarity].sheen);
+  const ribbon = new THREE.Mesh(ribbonGeo(rarity), ribMat);
+  ribbon.castShadow = true;
+  group.add(ribbon);
+  owned.push(ribMat);
   // the photograph in the window
   const C = SKILL_CARD;
   const wr = rect(C.win);
@@ -246,17 +475,18 @@ export function makeSkillCard(o: Offer, rows: { stat: StatId; before: number; af
     owned.push(tex, mat, geo);
     plaqueMats.push(mat);
   };
-  const ft = paintCardFront(o);
-  plaque(ft.crest, C.crest, 3 * VS + 0.0005);
+  const ft = paintFront(o);
   plaque(ft.name, C.name, 3 * VS + 0.0005);
   plaque(ft.desc, C.desc, 2 * VS + 0.0005);
+  plaque(paintRibbon(rarity), RIB.text, 8 * VS + 0.0006);
   const bt = paintCardBack(o, rows);
   plaque(bt.plaque, C.back.plaque, -4 * VS - 0.0005, true);
   plaque(bt.panel, C.back.panel, -3 * VS - 0.0005, true);
   // level gems: lit up to the current level; the new ones fill (fillPips) and pulse
   const gemCol = RARITY[o.def.rarity].hex;
   const pips: { dark: THREE.Mesh | null; lit: THREE.Mesh | null; fresh: boolean; t: number }[] = [];
-  const total = Math.min(5, o.def.maxLv);
+  // repeatable games keep no level gems
+  const total = o.def.gamble && o.def.maxLv > 5 ? 0 : Math.min(5, o.def.maxLv);
   const first = Math.floor((5 - total) / 2);
   for (let i = 0; i < total; i++) {
     const [gx, gy] = C.gems[first + i];
@@ -310,6 +540,9 @@ export function makeSkillCard(o: Offer, rows: { stat: StatId; before: number; af
       // hovered: the gems kindle and breathe
       gemMat.userData.emissiveStrength.value = 1.6 + hover * (2.4 + 1.1 * Math.sin(t * 4.2));
       frameMat.userData.fx.value.z = hover * 0.6;
+      // the rarity glow breathes (stronger when hovered); mythic runs through the spectrum
+      frameMat.foil.uGlow.value = glowBase * (0.75 + 0.25 * Math.sin(t * 2.3)) * (1 + hover * 0.8);
+      if (RI.rank === 5) frameMat.foil.uGlowCol.value.setHSL((t * 0.12) % 1, 0.85, 0.66);
       // pips filling one after another
       if (filling >= 0) {
         filling += dt;
@@ -340,6 +573,7 @@ export function makeSkillCard(o: Offer, rows: { stat: StatId; before: number; af
       dis = k;
       frameMat.userData.fx.value.y = k;
       gemMat.userData.fx.value.y = k;
+      ribMat.userData.fx.value.y = k;
       artMat.uniforms.uDis.value = k;
       const a = 1 - Math.min(1, k * 2.2);
       for (const m of plaqueMats) m.opacity = a;
@@ -349,10 +583,12 @@ export function makeSkillCard(o: Offer, rows: { stat: StatId; before: number; af
     setFlash(k) {
       frameMat.userData.fx.value.x = k;
       gemMat.userData.fx.value.x = k;
+      ribMat.userData.fx.value.x = k;
       artMat.uniforms.uFlash.value = k * 0.8;
     },
     setSheen(x) {
       frameMat.foil.uSheen.value = x;
+      ribMat.foil.uSheen.value = x;
       artMat.uniforms.uSheen.value = x;
     },
     fillPips() {
@@ -504,7 +740,6 @@ const DOWN = '#8e1e10';
 const TAGC = '#18566a';
 /** rarity names in an ink that reads on parchment */
 const RAR_INK: Record<string, string> = { common: '#5e4a2c', uncommon: '#3a6418', rare: '#17607a', epic: '#8e2c12', legendary: '#8a5e00', mythic: '#7a5410' };
-const CAT_LABEL: Record<string, string> = { gun: 'IRON', insect: 'BROOD', passive: 'GRIT', gear: 'GEAR', relic: 'RELIC', evolution: 'EVOLUTION' };
 /** stats where smaller is better */
 const LOWER_BETTER = new Set<string>(['spread']);
 
@@ -539,6 +774,9 @@ const FLAVOUR: Record<string, string> = {
   sekhmet: 'The lioness never puts a fire out.',
   moon: 'Hang in the air long enough and the moon notices.',
   bastet: 'A purr is just a growl with manners.',
+  dice: 'The bones always land. Where is their business.',
+  deadman: 'Never sit across from a man who has nothing left to lose.',
+  roulette: 'Six chambers, one prayer.',
 };
 
 const TAG_RULES: [RegExp, string][] = [
@@ -556,6 +794,7 @@ const TAG_RULES: [RegExp, string][] = [
   [/gold|coin|bounty|luck/i, 'LOOT'],
   [/slows? (the world|time)|bullet time/i, 'TIME'],
   [/counter|melee|whip|kick|slam/i, 'MELEE'],
+  [/dice|coin|roll|heads|gamble|chamber|luck/i, 'LUCK'],
 ];
 
 /** synergy keywords for a card (at most five) */
@@ -639,7 +878,7 @@ function paintDetail(o: Offer, d: CardDetail) {
         },
       });
     };
-    const label = (text: string) => {
+    const label = (text: string, color = INK_SOFT) => {
       const px = 24 * s;
       ops.push({
         h: px * 1.35,
@@ -647,7 +886,7 @@ function paintDetail(o: Offer, d: CardDetail) {
           c.font = font(px);
           c.textAlign = 'center';
           const sp = text.split('').join(String.fromCharCode(8202));
-          engrave(c, `- ${sp} -`, W / 2, y + px, INK_SOFT, 0.35);
+          engrave(c, `- ${sp} -`, W / 2, y + px, color, 0.35);
         },
       });
     };
@@ -664,18 +903,42 @@ function paintDetail(o: Offer, d: CardDetail) {
         },
       });
     };
-    // header: rarity · category · god
+    // header: rarity · kind · god
     if (def.learn) centre(`NEW SKILL  ·  KEY [${def.learn}]${def.god ? '  ·  ' + def.god.toUpperCase() : ''}`, 32, '#16664a');
-    else centre(`${rar.name.toUpperCase()}  ·  ${CAT_LABEL[def.cat] ?? ''}${def.god ? '  ·  ' + def.god.toUpperCase() : ''}`, 30, RAR_INK[def.rarity] ?? INK);
+    else centre(`${rar.name.toUpperCase()}  ·  ${kindLabel(def)}${def.god ? '  ·  ' + def.god.toUpperCase() : ''}`, 30, RAR_INK[def.rarity] ?? INK);
     gap(4);
     centre(def.name.toUpperCase(), 54, INK);
     // levels: a line, then a row of real gems (3D, placed by the panel)
-    const lvText = def.learn ? 'A TAROT SKILL  ·  YOURS FOR GOOD' : def.cat === 'evolution' ? 'EVOLUTION  ·  ONE OF A KIND' : def.maxLv === 1 ? 'SINGLE LEVEL' : o.fromLv === 0 ? `NEW  ·  LEVEL 1 OF ${def.maxLv}` : `LEVEL ${o.fromLv} → ${o.toLv}  OF ${def.maxLv}`;
+    const game = !!def.gamble && def.maxLv > 5;
+    const lvText = def.learn ? 'A TAROT SKILL  ·  YOURS FOR GOOD' : game ? (o.fromLv ? `A GAME OF CHANCE  ·  PLAYED ${o.fromLv}×` : 'A GAME OF CHANCE') : def.cat === 'evolution' ? 'EVOLUTION  ·  ONE OF A KIND' : def.maxLv === 1 ? 'SINGLE LEVEL' : o.fromLv === 0 ? `NEW  ·  LEVEL 1 OF ${def.maxLv}` : `LEVEL ${o.fromLv} → ${o.toLv}  OF ${def.maxLv}`;
     centre(lvText, 30, INK_SOFT);
-    ops.push({ h: 66 * s, draw: (y) => (pipY = (y + 36 * s) / H) });
+    if (!game) ops.push({ h: 66 * s, draw: (y) => (pipY = (y + 36 * s) / H) });
+    else gap(8);
+    // what it does, in full
+    label(def.gamble ? 'THE GAME' : 'EFFECT');
+    para(def.desc(Math.max(1, o.toLv)), 27, INK);
+    gap(4);
+    // wins and losses
+    const pc = prosCons(def, o.toLv);
+    if (def.pros || def.cons || isTrade(def)) {
+      if (pc.pros.length) {
+        label(def.gamble ? 'WIN' : 'PROS', UP);
+        for (const t of pc.pros) para('+ ' + t, 28, UP);
+      }
+      if (pc.cons.length) {
+        label(def.gamble ? 'LOSE' : 'CONS', DOWN);
+        for (const t of pc.cons) para('− ' + t, 28, DOWN);
+      }
+    }
+    if (def.odds) {
+      gap(4);
+      label('ODDS');
+      para(def.odds(Math.max(1, o.toLv)), 27, INK);
+    }
     // the stat changes, current → new, coloured by whether it helps
     if (d.rows.length) {
-      label('CHANGES');
+      gap(4);
+      label('YOUR STATS');
       for (const r of d.rows) {
         const nm = (DERIVED_INFO as any)[r.stat]?.name ?? (CORE_INFO as any)[r.stat]?.name ?? r.stat;
         const fmt = (DERIVED_INFO as any)[r.stat]?.fmt ?? 'int';
@@ -707,15 +970,22 @@ function paintDetail(o: Offer, d: CardDetail) {
           },
         });
       }
-    } else {
-      label(o.fromLv > 0 ? 'NOW' : 'EFFECT');
-      para(o.fromLv > 0 ? def.desc(o.fromLv) : def.desc(o.toLv), 28, INK);
+    } else if (o.fromLv > 0 && !game) {
+      label('NOW');
+      para(def.desc(o.fromLv), 26, INK_SOFT);
     }
     gap(6);
-    // what the next level would add
-    label('NEXT LEVEL');
-    if (o.toLv < def.maxLv) para(`Lv ${o.toLv + 1}: ${def.desc(o.toLv + 1)}`, 27, INK);
-    else para(def.maxLv > 1 ? 'Fully honed: this takes it to the top.' : 'Nothing more to learn: it is whole.', 27, INK_SOFT);
+    // how it grows, and what the next level would add
+    const per = perLevelText(def);
+    if (per && !game) {
+      label('PER LEVEL');
+      para(per, 26, INK);
+    }
+    if (!game) {
+      label('NEXT LEVEL');
+      if (o.toLv < def.maxLv) para(`Lv ${o.toLv + 1}: ${def.desc(o.toLv + 1)}`, 26, INK);
+      else para(def.maxLv > 1 ? 'Fully honed: this takes it to the top.' : 'Nothing more to learn: it is whole.', 26, INK_SOFT);
+    }
     // evolution path
     const evo = evolutionText(def, d.lv);
     if (evo) {
@@ -785,7 +1055,7 @@ export class DetailPanel {
     this.group.add(txt);
     this.owned.push(this.mat, this.gemMat, this.textMat, tex, geo);
     // the level pips as real cut gems, set into the parchment under the level line
-    const n = Math.min(8, o.def.maxLv);
+    const n = o.def.gamble && o.def.maxLv > 5 ? 0 : Math.min(8, o.def.maxLv);
     const col = RARITY[o.def.rarity].hex;
     const gy = iy + ih / 2 - pipY * ih;
     const step = 0.06;

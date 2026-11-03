@@ -3,7 +3,11 @@
 // bone beak). Modelled in flight pose: broad wings with fingered primaries and a
 // sawtooth trailing edge, fanned tail, talons tucked under.
 // Bird convention: body (root), head, jaw (lower beak), wing_l/wing_r, tail, eye_l/r.
-import { TRig, EnemyOpts, TOON, Ramp, RigSpec, V3, rbox, ell, seg, chain, paint, toonShade, eyeSocket, pick, VF } from './tk';
+// Extra joints: each wing is split at the elbow (wing_l → wing2_l, the hand with
+// the fingered primaries) so it can fold into a stoop, and the legs are rigged:
+// leg_l (feathered thigh + scaly bare shank) → foot_l (three hooked talons and a
+// hind claw) — tucked under the tail in flight, thrown forward for the strike.
+import { TRig, EnemyOpts, TOON, Ramp, RigSpec, V3, rbox, ell, seg, chain, paint, toonShade, eyeSocket, pick, VF, VoxelModel } from './tk';
 
 const FEATHER: Ramp[] = [
   { base: 0x5a3e2c, shade: 0x45301f, hi: 0x76543c, dark: 0x2c1d12 },
@@ -26,11 +30,23 @@ export function vultureRig(o: EnemyOpts = {}): RigSpec {
   // fluffy ruff collar: a clean chunky donut at the front of the body
   ell(body, 0, 12.5, 6.5, 5.6, 5.2, 2.2, RUFF.base);
   for (let x = -6; x <= 6; x++) for (let y = 6; y <= 19; y++) for (let z = 4; z <= 9; z++) if (((x) / 3.2) ** 2 + ((y - 13) / 3) ** 2 <= 1 && z >= 6) body.del(x, y, z);
-  // talons tucked back under the belly
-  for (const s of [1, -1]) {
-    seg(body, [s * 2, 8, 1], [s * 2, 6, -2], 1.1, TOON.husk.shade);
-    for (const dz of [-1, 0, 1]) seg(body, [s * 2, 6, -2], [s * 2 + dz, 5, -4], 0.6, TOON.black.base);
+  // ------------------------------------------------------------ legs (left; mirrored): tucked back under the belly
+  const SHANK: Ramp = { base: 0x9c8c82, shade: 0x7e6e66, hi: 0xb8aaa0, dark: 0x564a44 };
+  const leg = rig.part('leg_l', 'body', [2.5, 8.5, 1.5]);
+  seg(leg, [2, 9, 1], [2, 7, -1], 1.5, F.shade, undefined, 1.2); // feathered 'trousers'
+  for (const [y, z] of [[7, -2], [6, -1]] as [number, number][]) leg.set(3, y, z, F.base).set(1, y, z, F.base); // ragged feather fringe
+  seg(leg, [2, 7, -1], [2, 5.4, -3], 0.75, SHANK.base, undefined, 0.6); // bare scaly shank
+  leg.set(2, 6, -2, SHANK.shade).set(2, 5, -3, SHANK.dark);
+  const foot = rig.part('foot_l', 'leg_l', [2.5, 5.5, -2.5]);
+  for (const [dx, len] of [[-1, 3.0], [0, 3.8], [1, 3.0]] as [number, number][]) {
+    const knuckle: V3 = [2 + dx * 1.1, 4.6, -3 - len * 0.6];
+    const tip: V3 = [2 + dx * 1.5, 4.0, -3.2 - len];
+    seg(foot, [2, 5, -3], knuckle, 0.85, SHANK.shade, undefined, 0.7);
+    foot.set(Math.round(knuckle[0]), 5, Math.round(knuckle[2]), SHANK.hi); // scaly knuckle pad
+    chain(foot, [knuckle, tip, [tip[0], 2.8, tip[2] + 0.9]], [0.75, 0.6, 0.38], TOON.black.base); // hooked talon
+    foot.set(Math.round(tip[0]), 4, Math.round(tip[2]), TOON.black.hi);
   }
+  chain(foot, [[2, 5, -3], [2, 4.6, -1.4], [2, 3.6, -0.8]], [0.7, 0.55, 0.38], TOON.black.base); // hind claw
 
   // ------------------------------------------------------------ head: pink neck + bird skull
   const head = rig.part('head', 'body', [0.5, 14, 7]);
@@ -51,8 +67,10 @@ export function vultureRig(o: EnemyOpts = {}): RigSpec {
   chain(jaw, [[0, 13.5, 15], [0, 13, 18]], [1.1, 0.8], BN.shade);
 
   // ------------------------------------------------------------ wing (left; mirrored)
-  const wing = rig.part('wing_l', 'body', [5.5, 13.5, 2]);
+  // built whole, then cut at the elbow: x <= ELB stays on wing_l, the hand goes to wing2_l
+  const wing = new VoxelModel('wing_tmp');
   const span = alpha ? 32 : 30;
+  const ELB = 15;
   for (let x = 5; x <= span - 6; x++) {
     const t = (x - 5) / (span - 11);
     const lead = Math.round(4 - t * 3);
@@ -73,6 +91,11 @@ export function vultureRig(o: EnemyOpts = {}): RigSpec {
   }
   // bony wrist knuckle on the leading edge
   rbox(wing, span - 8, 13, 2, span - 6, 15, 4, BN.base, 1);
+  const wIn = rig.part('wing_l', 'body', [5.5, 13.5, 2]);
+  const wOut = rig.part('wing2_l', 'wing_l', [ELB + 0.5, 13.5, 1.5]);
+  wing.forEach((x, y, z, c, f) => (x <= ELB ? wIn : wOut).set(x, y, z, c, f));
+  // a covert ridge over the elbow joint so the fold never opens a gap
+  for (let z = -2; z <= 2; z++) wOut.set(ELB + 1, 14, z, F.hi).set(ELB, 15, z, F.base);
 
   // ------------------------------------------------------------ tail fan
   const tail = rig.part('tail', 'body', [0.5, 12.5, -7]);
@@ -84,9 +107,10 @@ export function vultureRig(o: EnemyOpts = {}): RigSpec {
     }
   }
 
-  for (const p of rig.parts) if (p.name !== 'wing_l' && p.name !== 'tail') toonShade(p.model, [F, RUFF, NECK, BN]);
+  for (const p of rig.parts) if (p.name !== 'wing_l' && p.name !== 'wing2_l' && p.name !== 'tail' && p.name !== 'foot_l') toonShade(p.model, [F, RUFF, NECK, BN]);
   rig.mirrorLR();
   rig.socket('beak', 'jaw', [0.5, 13, 18]);
   rig.socket('talons', 'body', [0.5, 5, -3]);
+  rig.socket('talon_l', 'foot_l', [2.5, 4, -4.5]);
   return rig.build({ height: 20 / 24, radius: 0.35, wingspan: (span * 2 + 2) / 24, kind: 'vulture', flying: true, headY: 17 / 24 });
 }

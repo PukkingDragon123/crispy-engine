@@ -44,6 +44,24 @@ import { leg } from '../anim/gait';
 import { legIK, LegPose, armIK } from '../anim/playerAnim';
 import { FloatText3D } from '../fx/FloatText3D';
 import { damp, rnd } from '../../engine/math/rand';
+import { Codex } from '../meta/Codex';
+import { CodexBook } from '../ui/CodexBook';
+import { WantedPoster, PosterData } from './ResultsScene';
+
+/** how he gets home: normally he walks in from the street; after a death he wakes up on the couch */
+export interface HubArrival {
+  wake?: { days: number; result: PosterData };
+}
+/** the last WANTED poster stays nailed to the wall for the rest of the session */
+let lastPoster: PosterData | null = null;
+type WakeKey = { p: THREE.Vector3; q: THREE.Quaternion; j: Record<string, [number, number, number]> };
+/** the wake-up: asleep on the couch → bolt upright → legs over the edge → on his feet (offsets on the rest pose) */
+const W_SLEEP: Record<string, [number, number, number]> = { arm_l: [0.95, 0, 1.15], fore_l: [-0.25, 0, 0], arm_r: [-0.75, 0, 0.55], fore_r: [-1.45, 0, 0], thigh_l: [0.05, 0, 0.7], shin_l: [1.3, 0, 0], thigh_r: [-0.4, 0, -0.04], shin_r: [0.6, 0, 0], head: [-0.12, 0.55, 0.06], hat: [0.55, 0, 0.1], jaw: [0.12, 0, 0] };
+const W_SIT: Record<string, [number, number, number]> = { thigh_l: [-1.5, 0, 0.1], shin_l: [0.12, 0, 0], thigh_r: [-1.42, 0, -0.06], shin_r: [0.35, 0, 0], torso: [0.18, 0, 0], head: [0.06, 0, 0], arm_l: [0.25, 0, 0.42], fore_l: [-0.15, 0, 0], arm_r: [0.25, 0, -0.42], fore_r: [-0.15, 0, 0], jaw: [0.2, 0, 0] };
+const W_EDGE: Record<string, [number, number, number]> = { thigh_l: [-1.45, 0, 0.08], shin_l: [1.4, 0, 0], thigh_r: [-1.45, 0, -0.08], shin_r: [1.4, 0, 0], torso: [0.24, 0, 0], head: [0.16, 0, 0], arm_l: [-0.38, 0, 0.12], fore_l: [-0.95, 0, 0], arm_r: [-0.38, 0, -0.12], fore_r: [-0.95, 0, 0] };
+const W_STAND: Record<string, [number, number, number]> = { arm_l: [0.04, 0, 0.07], arm_r: [0.04, 0, -0.07], fore_l: [-0.2, 0, 0], fore_r: [-0.2, 0, 0] };
+/** a hand to the side of his skull (rubbing the dent) */
+const W_SKULL: Record<string, [number, number, number]> = { arm_r: [-2.2, 0, -0.32], fore_r: [-2.05, 0, 0] };
 
 interface Shot {
   pos: THREE.Vector3;
@@ -465,7 +483,19 @@ export class HubScene implements GameScene {
   /** debug: window.__hub.debugCam = { pos: [x,y,z], look: [x,y,z], fov } */
   debugCam: { pos: number[]; look: number[]; fov?: number } | null = null;
 
-  constructor(private engine: Engine, private onRide: () => void, private onMenu: () => void) {
+  // ---- the wake-up (after a death), the WANTED poster on the wall, the Codex book
+  private wake: { t: number; days: number; res: PosterData; fc: THREE.Vector3; sy: number; keys: WakeKey[]; posterAt: number; posterDone: number; said: Set<string> } | null = null;
+  private wakeCam: { pos: THREE.Vector3; look: THREE.Vector3; fov: number } | null = null;
+  private poster: WantedPoster | null = null;
+  private posterShot: { pos: THREE.Vector3; look: THREE.Vector3 } | null = null;
+  private futon: THREE.Object3D | null = null;
+  private guitar: THREE.Object3D | null = null;
+  private fireBox: THREE.Box3 | null = null;
+  private gasp = 0;
+  private book: CodexBook | null = null;
+  private bankToast: HTMLDivElement | null = null;
+
+  constructor(private engine: Engine, private onRide: () => void, private onMenu: () => void, private arrival: HubArrival = {}) {
     this.tip = document.createElement('div');
     this.bank = document.createElement('div');
     this.title = document.createElement('div');
@@ -617,6 +647,7 @@ export class HubScene implements GameScene {
     // ------------------------------------------------ the hearth (back right)
     const fpSm = safe(() => HX.fireplaceCraft(1));
     const fp = against(fpSm, 'back', 3.45, 0, 0.04);
+    if (fp) this.fireBox = new THREE.Box3().setFromObject(fp);
     if (fp && fpSm) {
       const fm = fpSm.meta;
       this.firePos.copy(local(fp, fm.fire));
@@ -663,12 +694,12 @@ export class HubScene implements GameScene {
         shot: { pos: new THREE.Vector3(-0.9, 1.25, -1.15), look: new THREE.Vector3(), fov: 46, subject: new THREE.Vector3(0.8, 1.45, -0.93), ndc: [0.3, 0.42] },
       });
     }
-    void fut;
+    this.futon = fut;
     put(B(() => WS.plaidChair()), -0.32, -1.55, Math.PI / 2 - 0.25);
     // between the bench and the futon: a cabinet with the guitar hung above
     const cab = against(B(() => WS.sideCabinet()), 'back', -0.04, 0, 0.05);
     if (cab) {
-      against(B(() => WS.guitar()), 'back', -0.02, 1.2, 0.02, 1, false);
+      this.guitar = against(B(() => WS.guitar()), 'back', -0.02, 1.2, 0.02, 1, false);
       put(B(() => HX.bottlesCraft(2)), 0.0, IN.back + 0.25, 0.3, topOf(cab), 0.7, false);
     }
     // Mama Toad in her rocking chair by the fire, knitting; her basket at her feet; the toadlets about
@@ -1013,7 +1044,16 @@ export class HubScene implements GameScene {
     this.camLook.copy(this.baseL);
     this.camera.position.copy(this.baseP);
     this.camera.lookAt(this.baseL);
-    this.go(Math.max(0, this.stations.findIndex((st) => st.id === 'bench')), true);
+    Codex.sync();
+    const wk = this.arrival.wake;
+    if (wk && this.futon && this.hero) {
+      lastPoster = wk.result;
+      this.startWake(wk.days, wk.result);
+    } else {
+      if (wk) lastPoster = wk.result;
+      if (lastPoster) this.nailPoster(lastPoster, true);
+      this.go(Math.max(0, this.stations.findIndex((st) => st.id === 'bench')), true);
+    }
     (window as any).__music?.setMood('hub');
     this.wind = eng.audio.loop('wind_loop', 0.16);
     eng.input.setWantLock(false);
@@ -1518,7 +1558,7 @@ export class HubScene implements GameScene {
         break;
       case 'book':
         this.active = st;
-        this.codex();
+        this.openBook();
         break;
       case 'hearth':
       case 'mama':
@@ -1650,6 +1690,10 @@ export class HubScene implements GameScene {
       a.mat.dispose();
       a.mesh.geometry.dispose();
     }
+    this.book?.dispose();
+    this.book = null;
+    this.poster?.dispose();
+    this.bankToast?.remove();
     if ((window as any).__hub === this) (window as any).__hub = null;
   }
 
@@ -1928,6 +1972,20 @@ export class HubScene implements GameScene {
     const t = this.t;
     const eng = this.engine;
     const inp = eng.input;
+    // the Codex owns the screen while it is open
+    if (this.book) {
+      this.book.update(rdt);
+      return;
+    }
+    if (this.wake) {
+      this.updateWake(rdt);
+      this.updateCamera(t, rdt);
+      this.placeUI(t, rdt);
+      this.updateTitle(rdt);
+      this.animateLife(t, rdt);
+      this.particles.update(rdt, this.scene.fog as THREE.Fog);
+      return;
+    }
     if (inp.wasPressed('Escape')) {
       if (this.panel) this.closePanel();
       else this.onMenu();
@@ -2263,6 +2321,7 @@ export class HubScene implements GameScene {
     const atHearth = this.here.id === 'hearth' && this.atK > 0.5;
     this.mamaCd -= rdt;
     const heroHead = this.v4.set(this.pos.x, 1.55, this.pos.y);
+    if (this.wake && this.hero?.nodes['head']) this.hero.nodes['head'].getWorldPosition(heroHead).add(this.v5.set(0, 0.12, 0));
     if (m) {
       const n = m.nodes;
       const talk = this.mamaTalk > 0 ? 1 : 0;
@@ -2274,7 +2333,7 @@ export class HubScene implements GameScene {
       const pump = Math.max(0, Math.sin(t * 7.5)) * 0.05 + (talk ? Math.abs(Math.sin(t * 6)) * 0.1 : 0) + Math.max(0, Math.sin(t * 0.5) - 0.92) * 2;
       if (n['throat']) n['throat'].scale.set(1 + pump * 0.6, 1 + pump, 1 + pump * 0.7);
       // the needles work in a little rhythm; she pauses when she talks or looks up at him
-      this.mamaLook = damp(this.mamaLook, atHearth ? 1 : 0, 2, rdt);
+      this.mamaLook = damp(this.mamaLook, atHearth || (this.wake && this.wake.t > 2.2) ? 1 : 0, this.wake ? 4 : 2, rdt);
       this.knitK = damp(this.knitK, talk ? 0.15 : atHearth ? 0.55 : 1, 3, rdt);
       const kn = t * 5.2, kk = this.knitK;
       if (n['fore_r']) n['fore_r'].rotation.set(Math.sin(kn) * 0.09 * kk, Math.cos(kn) * 0.07 * kk, Math.sin(kn) * 0.04 * kk);
@@ -2291,6 +2350,18 @@ export class HubScene implements GameScene {
       if (ml > 0.3) look = heroHead;
       else if (n['knit']) look = n['knit'].getWorldPosition(this.v5);
       this.toadEyes(m, this.mamaSpec?.meta ?? {}, bl, look);
+      // the gasp: she jolts back, mouth open, eyes wide, the knitting forgotten in her lap
+      this.gasp = Math.max(0, this.gasp - rdt * 0.32);
+      const gp = this.gasp > 0 ? Math.sin(Math.min(1, (1 - this.gasp) * 6) * Math.PI * 0.5) * Math.min(1, this.gasp * 2.2) : 0;
+      if (gp > 0.001) {
+        if (n['head']) n['head'].rotation.x -= 0.28 * gp;
+        if (n['jaw']) n['jaw'].rotation.x += 0.3 * gp;
+        if (n['fore_r']) n['fore_r'].rotation.x -= 0.85 * gp;
+        if (n['fore_l']) n['fore_l'].rotation.x -= 0.7 * gp;
+        if (n['body']) n['body'].scale.y *= 1 + 0.04 * gp;
+        for (const e of ['eye_l', 'eye_r']) n[e]?.scale.multiplyScalar(1 + 0.2 * gp);
+        if (this.chair?.nodes['chair']) this.chair.nodes['chair'].rotation.x -= 0.06 * gp;
+      }
       if (n['head']) {
         n['head'].getWorldPosition(this.mamaHead);
         this.mamaHead.y += 0.3;
@@ -2399,6 +2470,10 @@ export class HubScene implements GameScene {
       P.fromArray(this.debugCam.pos);
       L.fromArray(this.debugCam.look);
       fov = this.debugCam.fov ?? 50;
+    } else if (this.wakeCam) {
+      P.copy(this.wakeCam.pos);
+      L.copy(this.wakeCam.look);
+      fov = this.wakeCam.fov;
     } else {
       const shot = this.shotOf(this.here);
       if (this.mv) {
@@ -2447,6 +2522,247 @@ export class HubScene implements GameScene {
     // the live mirror only renders while the camera is close enough to see it
     if (this.mirror) this.mirror.visible = this.camera.position.distanceTo(this.mirror.position) < 6.5;
   }
+  // ======================================================================= the Codex
+  /** the Book of Skills opens the Codex: the old leather field book, on its own lamplit desk */
+  private openBook() {
+    if (this.book) return;
+    this.tip.style.display = 'none';
+    this.prompt.style.opacity = '0';
+    document.body.style.cursor = 'default';
+    const book = new CodexBook(this.engine, {
+      hero: this.heroSpec,
+      back: { scene: this.scene, camera: this.camera },
+      onClosed: () => {
+        if (this.book === book) this.book = null;
+        book.dispose();
+        this.active = null;
+        this.engine.input.setWantLock(false);
+      },
+    });
+    this.book = book;
+    void book.open();
+  }
+
+  // ======================================================================= the WANTED poster
+  /** shot to the wall on the widest bare stretch beside the back window */
+  private nailPoster(res: PosterData, complete: boolean) {
+    this.poster?.dispose();
+    let P: WantedPoster;
+    try {
+      P = new WantedPoster(this.engine, res);
+    } catch (e) {
+      console.warn('[hub] poster', e);
+      return;
+    }
+    const win = HX.CABIN_OPEN.backWin;
+    const gx = this.guitar ? new THREE.Box3().setFromObject(this.guitar).max.x + 0.04 : -0.2;
+    const fx = this.fireBox ? this.fireBox.min.x - 0.04 : 2.65;
+    const L = { c: (gx + win.x0) / 2, w: win.x0 - 0.04 - gx }, R = { c: (win.x1 + fx) / 2, w: fx - win.x1 - 0.04 };
+    const spot = L.w >= R.w ? L : R;
+    const ar = WantedPoster.W / WantedPoster.H;
+    const h = THREE.MathUtils.clamp(spot.w / ar, 0.32, 0.64);
+    P.mesh.scale.setScalar(h / WantedPoster.H);
+    const y = (win.y0 + win.y1) / 2 + 0.04;
+    P.mesh.position.set(spot.c, y, IN.back + 0.03);
+    P.mesh.rotation.z = spot === L ? 0.035 : -0.03;
+    this.scene.add(P.mesh);
+    if (complete) P.complete();
+    this.poster = P;
+    const d = h / (2 * Math.tan(THREE.MathUtils.degToRad(20))) / 0.78;
+    this.posterShot = { pos: new THREE.Vector3(spot.c + 0.1, y - 0.02, IN.back + d), look: new THREE.Vector3(spot.c, y - 0.01, IN.back) };
+  }
+
+  // ======================================================================= the wake-up
+  private startWake(days: number, res: PosterData) {
+    const fb = new THREE.Box3().setFromObject(this.futon!);
+    const fc = fb.getCenter(new THREE.Vector3());
+    const sy = fb.min.y + 0.405 * this.futon!.scale.y;
+    const hy = (this.heroSpec?.meta?.hipY as number) ?? 0.67;
+    const q = (x: number, y: number, z: number) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z, 'YXZ'));
+    const keys: WakeKey[] = [
+      { p: new THREE.Vector3(fc.x - 0.84, sy + 0.13, fc.z + 0.05), q: q(-Math.PI / 2, -Math.PI / 2, 0), j: W_SLEEP },
+      { p: new THREE.Vector3(fc.x - 0.17, sy + 0.07 - hy, fc.z + 0.05), q: q(0, -Math.PI / 2, 0), j: W_SIT },
+      { p: new THREE.Vector3(fc.x - 0.12, sy + 0.07 - hy, fc.z + 0.2), q: q(0, 0, 0), j: W_EDGE },
+      { p: new THREE.Vector3(fc.x - 0.12, 0, fc.z + 0.8), q: q(0, 0, 0), j: W_STAND },
+    ];
+    this.wake = { t: 0, days, res, fc, sy, keys, posterAt: -1, posterDone: -1, said: new Set() };
+    this.intro = true;
+    this.idx = Math.max(0, this.stations.findIndex((st) => st.id === 'hearth'));
+    // the board stays in the garage while he sleeps; he dozes off with his eyes shut
+    for (const k of ['board_back', 'back']) this.hero?.sockets[k]?.children.forEach((c) => (c.visible = false));
+    this.hero?.setExpression('laugh');
+    this.nailPoster(res, false);
+    this.title.style.display = 'none';
+    this.wakeCam = { pos: new THREE.Vector3(fc.x + 0.05, 1.74, fc.z + 2.1), look: new THREE.Vector3(fc.x + 0.25, sy + 0.2, fc.z + 0.05), fov: 44 };
+    this.updateWake(0);
+  }
+
+  /** the wake-up, second by second (real time) */
+  private updateWake(rdt: number) {
+    const w = this.wake!;
+    const eng = this.engine;
+    const inp = eng.input;
+    w.t += rdt;
+    const t = w.t;
+    if (t > 0.8 && (inp.wasPressed('Space') || inp.wasPressed('Escape') || inp.wasPressed('Enter') || inp.wasPressed('Mouse0') || inp.wasPressed('KeyE'))) {
+      this.endWake();
+      return;
+    }
+    const once = (id: string, at: number, fn: () => void) => {
+      if (t >= at && !w.said.has(id)) {
+        w.said.add(id);
+        fn();
+      }
+    };
+    once('twitch', 1.6, () => eng.audio.play('skeleton_rattle', { volume: 0.25, pitch: 1.3 }));
+    once('gasp', 2.5, () => {
+      this.gasp = 1;
+      this.say('Lord have mercy!');
+      this.mamaCd = 30;
+      eng.audio.play('squeak', { volume: 0.7, pitch: 1.25 });
+      eng.audio.play('squeak', { volume: 0.5, pitch: 1.6 });
+    });
+    once('up', 3.05, () => {
+      this.hero?.setExpression('surprised');
+      eng.audio.play('skeleton_rattle', { volume: 0.8 });
+    });
+    once('groggy', 4.2, () => this.hero?.setExpression('hurt'));
+    once('days', 6.3, () => this.say(`${w.days} days you were gone, sugar. The sand brought you home again... like always.`));
+    once('poster', 9.6, () => this.say('Somebody shot that to the wall while you slept.'));
+    once('fill', 10.6, () => {
+      w.posterAt = t;
+      void (this.poster?.fill(() => !this.wake) ?? Promise.resolve()).then(() => {
+        if (this.wake === w) w.posterDone = w.t;
+      });
+    });
+    if (w.posterDone >= 0) {
+      once('bank', w.posterDone + 0.3, () => this.showBank(w.res.banked ?? 0));
+      if (t > w.posterDone + 2.4) {
+        this.endWake();
+        return;
+      }
+    }
+    // ---- his pose: sleep → bolt upright → legs over the edge
+    const k = t < 3.05 ? 0 : t < 3.6 ? Math.min(1, backOut((t - 3.05) / 0.55)) : t < 5.7 ? 1 : t < 6.7 ? 1 + ease((t - 5.7) / 1.0) : 2;
+    this.poseWake(k, t);
+    // ---- the camera: over the coffee table onto the couch, round to the side as he sits up, then the poster
+    const fc = w.fc, sy = w.sy;
+    let pos: THREE.Vector3, look: THREE.Vector3, fov: number;
+    if (t < 2.7) {
+      const u = t / 2.7;
+      pos = this.v1.set(fc.x + 0.05, 1.74 - u * 0.1, fc.z + 2.1 - u * 0.22);
+      look = this.v2.set(fc.x + 0.25, sy + 0.2, fc.z + 0.05);
+      fov = 44;
+    } else if (t < 9.2 || !this.posterShot) {
+      pos = this.v1.set(fc.x - 0.8, 1.36, fc.z + 2.05);
+      look = this.v2.set(fc.x + 0.65, sy + 0.42, fc.z + 0.1);
+      fov = 42;
+    } else {
+      pos = this.v1.copy(this.posterShot.pos);
+      look = this.v2.copy(this.posterShot.look);
+      fov = 40;
+    }
+    const c = this.wakeCam!;
+    const kk = rdt === 0 ? 1 : 1 - Math.exp(-rdt * 2.1);
+    c.pos.lerp(pos, kk);
+    c.look.lerp(look, kk);
+    c.fov += (fov - c.fov) * kk;
+  }
+
+  /** k: 0 asleep, 1 sitting up, 2 on the edge, 3 standing (blends the wake keys), plus life on top */
+  private poseWake(k: number, t: number) {
+    const w = this.wake!;
+    const h = this.hero;
+    if (!h) return;
+    const i = Math.min(w.keys.length - 2, Math.floor(k));
+    const f = k - i;
+    const A = w.keys[i], B = w.keys[i + 1];
+    const H = this.heroHolder;
+    H.position.lerpVectors(A.p, B.p, f);
+    H.quaternion.slerpQuaternions(A.q, B.q, f);
+    h.root.position.set(0, 0, 0);
+    // the rub: a hand up to his skull while he looks around, wondering how he got here
+    const rub = sstep(4.0, 4.4, t) * (1 - sstep(5.3, 5.8, t));
+    const look = sstep(3.5, 3.9, t) * (1 - sstep(8.8, 9.4, t));
+    for (const p of h.geo.parts) {
+      const n = h.nodes[p.name];
+      const a = A.j[p.name] ?? [0, 0, 0], b = B.j[p.name] ?? [0, 0, 0];
+      let x = a[0] + (b[0] - a[0]) * f, y = a[1] + (b[1] - a[1]) * f, z = a[2] + (b[2] - a[2]) * f;
+      const s = W_SKULL[p.name];
+      if (s && rub > 0) {
+        x += (s[0] - x) * rub;
+        y += (s[1] - y) * rub;
+        z += (s[2] - z) * rub;
+      }
+      n.rotation.set(p.rest.x + x, p.rest.y + y, p.rest.z + z);
+    }
+    const N = h.nodes;
+    // asleep: slow breaths, one twitch
+    const sleep = 1 - Math.min(1, k * 3);
+    if (N['torso']) N['torso'].rotation.x += Math.sin(t * 1.25) * 0.03 * sleep;
+    if (N['fore_l']) N['fore_l'].rotation.x += Math.exp(-Math.pow((t - 1.65) * 7, 2)) * -0.5;
+    if (N['head']) {
+      N['head'].rotation.z += Math.exp(-Math.pow((t - 1.75) * 5, 2)) * 0.15 + rub * 0.2;
+      N['head'].rotation.x += rub * 0.18;
+      // looking round the room, then at the poster
+      N['head'].rotation.y += look * (Math.sin((t - 3.6) * 1.9) * 0.55 + (t > 9.2 ? -0.5 : 0));
+    }
+    if (N['fore_r'] && rub > 0) N['fore_r'].rotation.x += Math.sin(t * 15) * 0.09 * rub;
+    if (N['jaw']) N['jaw'].rotation.x += h.exprJaw * 0.5;
+    // Mama's eyes follow his head; the toad code reads this.pos
+    N['head']?.getWorldPosition(this.v3);
+    this.pos.set(this.v3.x, this.v3.z);
+  }
+
+  private showBank(n: number) {
+    this.updateBank();
+    if (!n) return;
+    const el = document.createElement('div');
+    el.style.cssText = "position:absolute;left:50%;top:13vh;transform:translate(-50%,8px);z-index:9;pointer-events:none;font-family:'Alagard';font-size:30px;color:#ffd36b;opacity:0;transition:opacity .5s,transform .8s cubic-bezier(.2,.7,.2,1);text-shadow:0 3px 0 #2a1408,0 0 16px rgba(255,180,80,.5);white-space:nowrap";
+    el.textContent = `+${n} GOLD BANKED`;
+    this.engine.overlay.appendChild(el);
+    this.bankToast = el;
+    this.engine.audio.play('gold_burst', { volume: 0.7 });
+    requestAnimationFrame(() => {
+      el.style.opacity = '1';
+      el.style.transform = 'translate(-50%,0)';
+    });
+    setTimeout(() => (el.style.opacity = '0'), 2600);
+    setTimeout(() => el.remove(), 3400);
+  }
+
+  /** he's up: on his feet, the board back on his shoulders, off to warm himself by Mama's fire */
+  private endWake() {
+    const w = this.wake;
+    if (!w) return;
+    if (this.poster && this.poster.lines < 8) this.poster.complete();
+    if (w.posterDone < 0) this.showBank(w.res.banked ?? 0);
+    for (const k of ['board_back', 'back']) this.hero?.sockets[k]?.children.forEach((c) => (c.visible = true));
+    this.hero?.setExpression('smug');
+    const st = w.keys[3].p;
+    this.pos.set(st.x, st.z);
+    this.vel.set(0, 0);
+    this.yaw = 0;
+    this.heroHolder.rotation.set(0, 0, 0);
+    this.heroHolder.position.set(st.x, 0, st.z);
+    if (this.wakeCam) {
+      this.baseP.copy(this.wakeCam.pos);
+      this.baseL.copy(this.wakeCam.look);
+      this.camera.fov = this.wakeCam.fov;
+    }
+    this.wake = null;
+    this.wakeCam = null;
+    this.intro = false;
+    this.gasp = 0;
+    this.title.style.display = '';
+    const hearth = this.stations.find((s) => s.id === 'hearth') ?? this.stations[0];
+    this.go(hearth);
+    // round behind Mama's chair (between it and the fire) rather than through the coffee table
+    const fc = w.fc;
+    this.route = [new THREE.Vector2(fc.x + 0.45, fc.z + 0.72), new THREE.Vector2(fc.x + 1.25, fc.z + 0.55), new THREE.Vector2(hearth.stand.x - 0.1, fc.z + 0.75), hearth.stand.clone()];
+    this.speed = 1.35;
+  }
+
   private slideK = 0;
   private knitK = 1;
   private mamaLook = 0;

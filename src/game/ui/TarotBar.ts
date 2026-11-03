@@ -10,6 +10,8 @@
 // A hunt starts with the three skill cards SEALED: they lie face down, dimmed,
 // with no key cap, until the skill is learned from a rank-up card; then the
 // card leaps, turns over in a full flourish and bursts with its own particles.
+// The rank-up's skill-unlock cinematic (RankUpCine.SkillUnlock) flies its world
+// card into the slot (TarotBar.current.slot) and lands with landFx.
 import * as THREE from 'three';
 import type { Hud } from './Hud';
 import type { RigSpec } from '../../engine/voxel/Rig';
@@ -178,7 +180,8 @@ void main(){
 
 const PPV = 12; // canvas pixels per voxel for the plaque text
 
-function plaqueText(text: string, wVox: number, hVox: number, capFrac: number, color = '#2a170c') {
+/** engraved Alagard on a transparent canvas sized to a plaque (voxels), as a texture */
+export function plaqueText(text: string, wVox: number, hVox: number, capFrac: number, color = '#2a170c') {
   const cv = document.createElement('canvas');
   cv.width = Math.round(wVox * PPV);
   cv.height = Math.round(hVox * PPV);
@@ -280,7 +283,11 @@ const WIN = CARD.win;
 const ART_RECT = { x: (WIN.x0 + WIN.x1 + 1) / 2 - FW / 2, y: (WIN.y0 + WIN.y1 + 1) / 2 - FH / 2, w: WIN.x1 - WIN.x0 + 1, h: WIN.y1 - WIN.y0 + 1 };
 
 export class TarotBar {
+  /** the live bar (the unlock cinematic flies cards into it) */
+  static current: TarotBar | null = null;
   private cards: CardObj[] = [];
+  private vw = 1;
+  private vh = 1;
   private job: Generator<void, void, void> | null = null;
   private started = false;
   private frameGeo: THREE.BufferGeometry | null = null;
@@ -300,6 +307,26 @@ export class TarotBar {
 
   constructor(private scene: THREE.Scene, private hud: Hud) {
     scene.add(this.norm.points, this.add.points);
+    TarotBar.current = this;
+  }
+
+  /** where a card sits on screen, normalised (x, y from the top-left; h its height), null if the bar isn't dealt yet */
+  slot(key: string) {
+    const c = this.cards.find((k) => k.def.key === key);
+    if (!c || c.sk <= 0 || c.sx <= 0) return null;
+    return { x: c.sx / this.vw, y: c.sy / this.vh, h: (FH * c.sk) / this.vh };
+  }
+
+  /** a flown-in card lands in its slot: a ring of pixel light and a shower of sparks in the god's colour */
+  landFx(key: string, color: number) {
+    const c = this.cards.find((k) => k.def.key === key);
+    if (!c) return;
+    const w = FW * c.sk, h = FH * c.sk;
+    for (let i = 0; i < 48; i++) {
+      const a = (i / 48) * Math.PI * 2, v = 150 + Math.random() * 90;
+      this.add.add({ x: c.sx + Math.cos(a) * w * 0.3, y: c.sy + Math.sin(a) * h * 0.3, vx: Math.cos(a) * v, vy: Math.sin(a) * v * 0.8, drag: 4, life: 0.5 + Math.random() * 0.3, size: i % 6 ? 1 : 2 }, 0xffffff, color);
+    }
+    for (let i = 0; i < 30; i++) this.add.add({ x: c.sx + (Math.random() - 0.5) * w, y: c.sy - h * 0.5, vx: (Math.random() - 0.5) * 30, vy: -40 - Math.random() * 80, ay: 60, drag: 1, life: 0.8 + Math.random() * 0.6, size: 1, flick: 0.4 }, color, 0xffd36b);
   }
 
   /** start / continue the time-sliced build; call once per frame from the HUD render */
@@ -416,6 +443,8 @@ export class TarotBar {
     const st = hud.last;
     this.add.update(dt, s, this.pr);
     this.norm.update(dt, s, this.pr);
+    this.vw = Math.max(1, W);
+    this.vh = Math.max(1, H);
     if (!st || !this.cards.length) return;
     const visible = hud.visible && hud.anchors.slide < 0.98;
     const cw = 46 * s, ch = 74.75 * s;
@@ -631,6 +660,7 @@ export class TarotBar {
 
   dispose() {
     this.job = null;
+    if (TarotBar.current === this) TarotBar.current = null;
     for (const c of this.cards) {
       c.group.removeFromParent();
       c.frameMat.dispose();

@@ -1,14 +1,15 @@
 // World runtime for one sub-area: terrain + atmosphere + storm + water + colliders
 // + props, and the zone-progression transformations (walls collapse, temples rise).
 import * as THREE from 'three';
-import { generateSubArea, SubArea, ZoneDef } from './RegionGen';
+import { generateSubArea, SubArea, ZoneDef, findOpenSpot, type OpenSpotOpts, type Anchor } from './RegionGen';
 import { Terrain, Backdrop } from './Terrain';
 import { Env, PRESETS, AirSand } from './Env';
 import { Storm } from './Storm';
 import { Colliders } from './Colliders';
 import { MAT } from './Heightfield';
 import type { SurfaceInfo } from '../player/Board';
-import { globalUniforms, atmoFogUniforms } from '../../engine/render/VoxelMaterial';
+import { globalUniforms, atmoFogUniforms, ATMO } from '../../engine/render/VoxelMaterial';
+import { smoothstep, lerp, clamp } from '../../engine/math/rand';
 import { SandWaves } from './SandWaves';
 
 const waterVert = /* glsl */ `
@@ -62,9 +63,23 @@ export class World {
   air: AirSand;
   private _g = { x: 0, z: 0 };
   private hazeT = 0;
+  /**
+   * The storm parting for a newly unlocked zone (runs on real time, so a cinematic's
+   * slow-mo never stalls it): t in seconds since the unlock, DUR long. ZoneCine frames it.
+   */
+  parting: { zone: ZoneDef; prev: number; t: number; dur: number; strikes: number } | null = null;
+  /** blocker collapse / plinth rise progress per zone (only ever moves forward) */
+  private transformK = new Map<number, number>();
+  /** storm closing behind the hunter: corridor retreats queued after the old zone is swallowed */
+  private closing: { id: string; at: number; speed: number }[] = [];
+  private lastTime = -1;
+  private murkOn = false;
+  private _murk = new THREE.Color();
 
   constructor(public scene: THREE.Scene, key: 'A' | 'B' | 'C', seed: number) {
+    const t0 = performance.now();
     this.sa = generateSubArea(key, seed);
+    const t1 = performance.now();
     this.env = new Env(scene, this.sa.env, seed);
     this.terrain = new Terrain(this.sa.field, this.sa.wind, this.sand);
     this.sand.ground = (x, z) => this.sa.field.heightSmooth(x, z);
@@ -77,9 +92,11 @@ export class World {
     this.env.apply(this.env.preset);
     this.group.add(this.air.points);
     this.storm = new Storm((x, z) => this.sa.field.heightAt(x, z));
+    this.storm.wind = { x: this.sa.wind.x, z: this.sa.wind.z };
     this.group.add(this.storm.group);
     scene.add(this.group);
     if (this.sa.waterLevel > -100) this.makeWater();
+    console.log(`[world] ${key}: ${this.sa.size} m square, ${this.sa.zones.length} zones (r ${this.sa.zones.map((z) => z.r).join('/')}), ${this.sa.zones.reduce((n, z) => n + z.pois.length, 0)} sights; generate ${(t1 - t0).toFixed(0)} ms, terrain+storm ${(performance.now() - t1).toFixed(0)} ms`);
     // storm: zone 0 open, every other zone + corridor closed
     for (const z of this.sa.zones) {
       this.storm.addDisc('zone' + z.index, z.cx, z.cz, z.r, z.index === 0);
@@ -230,8 +247,10 @@ export class World {
     return this.sa.zones[next];
   }
 
-  /** animate blocker collapse / plinth rise; k: 0..1 */
+  /** animate blocker collapse / plinth rise; k: 0..1 (never runs backwards: several drivers may push it) */
   setTransform(zone: ZoneDef, k: number) {
+    k = Math.max(k, this.transformK.get(zone.index) ?? 0);
+    this.transformK.set(zone.index, k);
     if (zone.blockerStamp) this.sa.field.setStampWeight(zone.blockerStamp, 1 - k);
     if (zone.riseStamp) {
       this.sa.field.setStampWeight(zone.riseStamp, k);
@@ -239,16 +258,156 @@ export class World {
     }
   }
 
+  /**
+   * Unlock: the storm parts. The corridor tears open from the mouth of the zone the hunter
+   * is in and drives through the storm like a blade (lightning at its head), then the new
+   * zone's storm bursts outward. ~6.4 s of real time; see the parting timeline in update().
+   */
   openStormFor(zone: ZoneDef) {
-    this.storm.setTarget('zone' + zone.index, zone.r, 16);
-    this.storm.setTarget('corr' + zone.index, zone.corridor?.w ?? 26, 8);
+    const prev = Math.max(0, zone.index - 1);
+    this.parting = { zone, prev, t: 0, dur: 6.4, strikes: 0 };
+    this.storm.drive('corr' + zone.index, { w: 0, s0: 0, s1: 0 });
+    this.storm.drive('zone' + zone.index, { r: 0 });
   }
-  /** after the player moves into the new zone, swallow the old one */
+  private stepParting(rdt: number, fx: any) {
+    const P = this.parting!;
+    const z = P.zone;
+    P.t += rdt;
+    const t = P.t;
+    const e = (a: number, b: number) => clamp((t - a) / (b - a), 0, 1);
+    const ease = (k: number) => k * k * (3 - 2 * k);
+    const W = z.corridor?.w ?? 34;
+    this.storm.drive('corr' + z.index, { w: W * ease(e(0.25, 1.3)), s0: 0, s1: ease(e(0.45, 3.9)) });
+    this.storm.drive('zone' + z.index, { r: z.r * (1 - Math.pow(1 - e(3.1, 6.2), 3)) });
+    this.setTransform(z, ease(e(0.6, 4.4)));
+    // lightning splits the storm open: at the mouth, then riding the head of the canyon
+    const c = z.corridor;
+    if (c) {
+      const beats = [0.05, 1.15, 2.2, 3.15, 3.9];
+      while (P.strikes < beats.length && t >= beats[P.strikes]) {
+        const k = ease(e(0.45, 3.9));
+        const hx = c.ax + (c.bx - c.ax) * k, hz = c.az + (c.bz - c.az) * k;
+        const side = P.strikes % 2 ? 1 : -1;
+        const nx = -(c.bz - c.az), nz = c.bx - c.ax, nl = Math.hypot(nx, nz) || 1;
+        const off = W * 0.5 + 14;
+        this.storm.strike({ x: hx + (nx / nl) * off * side, z: hz + (nz / nl) * off * side }, 12, P.strikes === 0 ? 1.5 : 1.15);
+        P.strikes++;
+      }
+      // the canyon walls boil with thrown sand as they tear apart
+      if (fx && t < 4.2) {
+        const k = ease(e(0.45, 3.9));
+        const hx = c.ax + (c.bx - c.ax) * k, hz = c.az + (c.bz - c.az) * k;
+        const nx = -(c.bz - c.az), nz = c.bx - c.ax, nl = Math.hypot(nx, nz) || 1;
+        for (const sd of [-1, 1]) {
+          const px = hx + (nx / nl) * sd * (W * 0.5 + 3), pz = hz + (nz / nl) * sd * (W * 0.5 + 3);
+          const y = this.groundAt(px, pz);
+          fx.p.emit({ pos: { x: px, y: y + 2 + Math.random() * 10, z: pz }, count: 2, vel: { x: (nx / nl) * sd * 6, y: 5, z: (nz / nl) * sd * 6 }, spread: 4, jitter: 4, life: [1.2, 2.2], size: [3, 7], sprite: ['cloud0', 'cloud1', 'cloud2'], color: [0xd09a5e, 0xb87a46, 0xe6bc86], alpha: 0.7, drag: 0.8, rot: 6, rotSpeed: 0.8 });
+          fx.p.emit({ pos: { x: px, y: y + 1, z: pz }, count: 6, vel: { x: (nx / nl) * sd * 9, y: 4, z: (nz / nl) * sd * 9 }, spread: 3, jitter: 2, gravity: 6, drag: 0.4, life: [0.6, 1.3], size: [0.08, 0.16], sprite: ['dot3'], color: [0xf0d29a, 0xe3bd80, 0xd6a968], ground: true });
+        }
+      }
+    }
+    if (t >= P.dur) {
+      this.storm.drive('corr' + z.index, { w: W, s0: 0, s1: 1 });
+      this.storm.drive('zone' + z.index, { r: z.r });
+      this.setTransform(z, 1);
+      this.parting = null;
+    }
+  }
+
+  /**
+   * After the hunter has moved on, the storm swallows the old zone: it closes in on the
+   * exit (the disc shrinks while sliding toward the corridor it left by, ~45 s), then the
+   * corridor itself is eaten from the old end toward the new zone (~20 s). The way back in
+   * closes quickly.
+   */
   closeBehind(prevIndex: number) {
-    this.storm.setTarget('zone' + prevIndex, 0, 5);
-    this.storm.setTarget('corr' + (prevIndex + 1), 0, 4);
-    const prevCorr = 'corr' + prevIndex;
-    this.storm.setTarget(prevCorr, 0, 4);
+    const old = this.sa.zones[prevIndex];
+    const exit = this.sa.zones[prevIndex + 1]?.corridor;
+    this.storm.setTarget('corr' + prevIndex, 0, 4);
+    if (!old) return;
+    const T = 45;
+    this.storm.setTarget('zone' + prevIndex, 0, old.r / T);
+    if (exit) {
+      this.storm.moveDisc('zone' + prevIndex, exit.ax, exit.az, Math.hypot(exit.ax - old.cx, exit.az - old.cz) / T);
+      this.closing.push({ id: 'corr' + (prevIndex + 1), at: T + 2, speed: 1 / 20 });
+    } else this.storm.setTarget('corr' + (prevIndex + 1), 0, 4);
+  }
+
+  /** route the storm's own sound (howl, thunder) through the engine's audio */
+  bindAudio(audio: any) {
+    this.storm.bindAudio(audio);
+  }
+
+  /**
+   * Open-spot query for other systems (treasure, wildlife, camps, set-ups): a level patch of
+   * radius `radius` inside the zone, clear of every structure / sight / reserved spot / small
+   * prop, off the corridor mouths and out of water, and (at runtime) clear of colliders.
+   * Returns null when none is found. Claim it with claimSpot so later queries avoid it.
+   */
+  findOpenSpot(zone: number | ZoneDef, radius: number, opts: OpenSpotOpts = {}): { x: number; y: number; z: number } | null {
+    const z = typeof zone === 'number' ? this.sa.zones[zone] : zone;
+    if (!z) return null;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const p = findOpenSpot(z, this.sa.field, radius, opts);
+      if (!p) return null;
+      let hit = false;
+      this.colliders.query(p.x, p.z, radius + 3, (c) => {
+        if (c.enabled && c.solid && Math.hypot(c.x - p.x, c.z - p.z) < c.r + radius) hit = true;
+      });
+      if (!hit) return { x: p.x, y: this.groundAt(p.x, p.z), z: p.z };
+    }
+    return null;
+  }
+  /** reserve a spot (radius r) in a zone so findOpenSpot and later placement keep off it */
+  claimSpot(zone: number | ZoneDef, x: number, z: number, r: number, owner = 'claim', data?: any): Anchor {
+    const zn = typeof zone === 'number' ? this.sa.zones[zone] : zone;
+    const a: Anchor = { kind: 'claim', x, z, data: { r, owner, ...(data ?? {}) } };
+    zn.anchors.push(a);
+    return a;
+  }
+  /** anchors of a kind in a zone (e.g. 'digSpot', 'wildlifeSpot', 'cavePit', 'bossArena', 'viewpoint') */
+  spots(zone: number | ZoneDef, kind: string): Anchor[] {
+    const zn = typeof zone === 'number' ? this.sa.zones[zone] : zone;
+    return zn ? zn.anchors.filter((a) => a.kind === kind) : [];
+  }
+
+  /**
+   * Visibility collapses into orange murk near and inside the storm: the fog closes in,
+   * its colour (and the sky's haze, which shares it) swings to dust-orange and the low
+   * dust layer thickens. Written on top of the current Env preset, restored when clear.
+   */
+  private applyMurk() {
+    const sd = this.storm.focusSdf;
+    const m = smoothstep(26, -16, sd) * (0.6 + 0.4 * this.storm.strength);
+    const env = this.env;
+    const p = env.preset;
+    const day = p.stars < 0.5;
+    const dust = day ? (p.sunElev < 18 ? 0.65 : 0.5) : 0.22;
+    if (m < 0.002) {
+      if (this.murkOn) {
+        env.fog.near = p.fogNear;
+        env.fog.far = p.fogFar;
+        env.fog.color.setHex(p.fog);
+        const hz = this._murk.setHex(p.horizon);
+        ATMO.u[4] = hz.r;
+        ATMO.u[5] = hz.g;
+        ATMO.u[6] = hz.b;
+        ATMO.u[10] = 3.2;
+        ATMO.u[11] = dust;
+        this.murkOn = false;
+      }
+      return;
+    }
+    this.murkOn = true;
+    env.fog.near = lerp(p.fogNear, 2, m);
+    env.fog.far = lerp(p.fogFar, 36, Math.pow(m, 0.8));
+    env.fog.color.setHex(p.fog).lerp(this._murk.setHex(0xb8703a), m);
+    const hz = this._murk.setHex(p.horizon).lerp(new THREE.Color(0xd8904a), m);
+    ATMO.u[4] = hz.r;
+    ATMO.u[5] = hz.g;
+    ATMO.u[6] = hz.b;
+    ATMO.u[10] = lerp(3.2, 40, m);
+    ATMO.u[11] = lerp(dust, 3.4, m);
   }
 
   update(dt: number, focus: THREE.Vector3, time: number, fx: any) {
@@ -269,11 +428,25 @@ export class World {
     this.env.update(focus, dt, time);
     const st = this.env.sun.target.position;
     this.terrain.setShadowCenter(st.x, st.z, this.env.shadowExtent);
-    this.storm.update(dt, fx);
+    // the storm runs its parting on real time (cinematics slow the game clock right down)
+    const rdt = this.lastTime < 0 ? 0 : clamp(time - this.lastTime, 0, 0.1);
+    this.lastTime = time;
+    if (this.parting) this.stepParting(rdt, fx);
+    for (let i = this.closing.length - 1; i >= 0; i--) {
+      const c = this.closing[i];
+      c.at -= dt;
+      if (c.at <= 0) {
+        this.storm.setSpan(c.id, 1, 1, c.speed);
+        this.closing.splice(i, 1);
+      }
+    }
+    this.storm.update(dt, fx, focus);
+    this.applyMurk();
     this.props?.update(dt, focus);
   }
 
   dispose() {
+    this.storm.dispose();
     this.terrain.dispose();
     this.backdrop.dispose();
     this.group.removeFromParent();

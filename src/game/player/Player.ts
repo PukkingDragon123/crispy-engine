@@ -19,6 +19,7 @@ import { P } from '../../engine/voxel/palette';
 import { Input } from '../../engine/Input';
 import { PlayerAnim } from '../anim/playerAnim';
 import { CastAnim } from '../anim/castAnim';
+import { Weapons } from './Weapons';
 
 export interface PlayerVisuals {
   rig: RigSpec;
@@ -173,6 +174,8 @@ export class Player {
   private cast = new CastAnim();
   private castReady = false;
   muzzleWorld = new THREE.Vector3();
+  /** the arsenal: revolver + long guns, switching, the two-hand hold, the dig (player/Weapons.ts) */
+  weapons!: Weapons;
   // tunables
   baseGunDamage = 18;
   fireInterval = 0.17;
@@ -188,11 +191,12 @@ export class Player {
   private holdT = 0;
   private shotBuffer = 0;
   private fanCount = 0;
-  private heat = 0;
+  /** barrel heat (smoke wisps); every gun adds to it */
+  heat = 0;
   private smokeAcc = 0;
-  private lastFireT = -9;
+  lastFireT = -9;
   private killStopAt = -9;
-  private shotCrit = false;
+  shotCrit = false;
   private lookMag = 0;
   // aim assist state
   private stickE: EnemyLike | null = null;
@@ -235,6 +239,7 @@ export class Player {
     ctx.scene.add(this.grappleLine);
     this.hp = this.maxHp;
     this.ammo = Math.round(this.stats.get('ammo'));
+    this.weapons = new Weapons(ctx, this, input, holder);
     this.wireBoardEvents();
     // crits are rolled inside the enemy damage resolve: listen so the shot can feel them
     ctx.events.on('enemyHit', (_e: EnemyLike, hit: Hit, _amt: number, res: { crit?: boolean }) => {
@@ -265,8 +270,13 @@ export class Player {
   get speed() {
     return this.board.speed;
   }
+  /** magazine of the gun in hand */
   get maxAmmo() {
-    return Math.round(this.stats.get('ammo'));
+    return this.weapons ? this.weapons.mag() : Math.round(this.stats.get('ammo'));
+  }
+  /** the animation clock (seconds) */
+  get animTime() {
+    return this.animT;
   }
   /** chest height world point (enemy targeting) */
   center(out = new THREE.Vector3()) {
@@ -457,11 +467,14 @@ export class Player {
     this.updateAim();
     this.updateAssist(dt, this.aiming && !wasAiming);
     if (this.alive) {
-      this.updateGun(dt);
+      this.weapons.preUpdate(dt);
+      if (this.weapons.isLong) this.weapons.updateLong(dt);
+      else this.updateGun(dt);
       this.updateMelee(dt);
       this.updateGrapple(dt);
     }
-    this.spreadDeg = this.coneDeg(this.fanning);
+    this.weapons.scopeFor(dt);
+    this.spreadDeg = this.weapons.isLong ? this.weapons.coneDeg() : this.coneDeg(this.fanning);
     // a frozen frame (engine paused: the pause menu) keeps the last pose — the procedural
     // anim's springs divide by dt and would go NaN (the whole body vanishes on resume)
     if (dt > 1e-6) {
@@ -504,7 +517,8 @@ export class Player {
   }
 
   // -------------------------------------------------------------------- aim
-  private ray = { o: new THREE.Vector3(), d: new THREE.Vector3() };
+  /** the aim ray this frame (origin pulled up to the hunter, unit direction) */
+  ray = { o: new THREE.Vector3(), d: new THREE.Vector3() };
   private updateAim() {
     const { o, d } = this.ray;
     this.cam.aimRay(o, d);
@@ -660,7 +674,7 @@ export class Player {
    * inside a small screen cone (wider at range, tighter up close), landing on
    * the side of the body the reticle was on. Null = leave the shot alone.
    */
-  private magnetize(o: THREE.Vector3, d: THREE.Vector3): THREE.Vector3 | null {
+  magnetize(o: THREE.Vector3, d: THREE.Vector3): THREE.Vector3 | null {
     const A = AIM_ASSIST;
     const S = this.assistMul();
     if (S <= 0) return null;
@@ -695,11 +709,12 @@ export class Player {
   }
 
   /** current shot cone (deg): base × rested-first-shot + movement + bloom, squeezed by ADS */
-  private coneDeg(fanned: boolean) {
+  coneDeg(fanned: boolean) {
     const G = GUN_FEEL;
     const ads = this.cam.aim;
     const rested = !fanned && this.animT - this.lastFireT > G.restTime ? G.restedMul : 1;
-    const base = (fanned ? G.fanSpread : G.hipSpread) * this.stats.get('spread') * rested;
+    const laser = this.weapons ? this.weapons.tune('revolver').hipSpreadMul : 1;
+    const base = (fanned ? G.fanSpread : G.hipSpread) * this.stats.get('spread') * rested * (1 - (1 - laser) * (1 - ads));
     const move = (clamp(this.speed / this.board.t.cap, 0, 1) * 0.55 + (this.board.grounded ? 0 : 0.45)) * (1 - ads * 0.6);
     return (base + move + this.spreadBloom) * (1 - ads * (1 - G.adsSpreadMul));
   }
@@ -729,7 +744,7 @@ export class Player {
       if (R.jam > 0) {
         R.jam -= dt;
       } else {
-        const spd = this.stats.get('reloadSpeed');
+        const spd = this.stats.get('reloadSpeed') / (this.weapons?.tune('revolver').reloadMul ?? 1);
         const prev = R.t;
         R.t += (dt * spd) / R.dur;
         const k = R.t;
@@ -830,6 +845,7 @@ export class Player {
   }
 
   startReload() {
+    if (this.weapons?.isLong) return this.weapons.startReload();
     const R = this.reload;
     if (R.active || this.ammo >= this.maxAmmo) return;
     R.active = true;
@@ -973,30 +989,35 @@ export class Player {
     const side = fanned ? (this.fanCount % 2 ? 1 : -1) : rnd.next() - 0.5;
     this.cam.punch((fanned ? G.kickPitchFan : G.kickPitch) * (1 - ads * 0.35), side * (fanned ? 0.013 : 0.008), fanned ? 0.8 : 1.5, fanned ? side * 0.012 : 0);
     this.cam.addTrauma(fanned ? 0.05 : 0.08);
-    // feedback: hit tick, headshot ping, kill confirm with a short hit-stop
-    const rk = this.reticle;
-    if (firstHit) {
-      rk.hit = 1;
-      ctx.sfx('ui_click', null, 0.3, 1.8 + rnd.next() * 0.15);
-      if (head && headAt) {
-        rk.head = 1;
-        ctx.sfx('counter_clang', null, 0.2, 1.9);
-        ctx.fx.headPop(headAt, d);
-      }
-      if (killed) {
-        rk.kill = 1;
-        ctx.sfx('qte_good', null, 0.38, head ? 0.9 : 0.8);
-        const strong = head || this.shotCrit;
-        this.cam.punch(0, 0, strong ? -2.4 : -1.4);
-        const now = performance.now();
-        if (now - this.killStopAt > 180) {
-          this.killStopAt = now;
-          ctx.engine.hitStop(strong ? G.killStopHead : G.killStop, 0.05);
-        }
-      }
-    }
+    this.shotFeedback(firstHit, killed, head, headAt, d);
     this.onShot?.(firstHit);
     ctx.events.emit('shot', firstHit, venom);
+  }
+
+  /** feedback for any gun: hit tick, headshot ping, kill confirm with a short hit-stop (stopMul scales it) */
+  shotFeedback(firstHit: RayHit | null, killed: boolean, head: boolean, headAt: THREE.Vector3 | null, d: THREE.Vector3, stopMul = 1) {
+    const ctx = this.ctx;
+    const G = GUN_FEEL;
+    const rk = this.reticle;
+    if (!firstHit) return;
+    rk.hit = 1;
+    ctx.sfx('ui_click', null, 0.3, 1.8 + rnd.next() * 0.15);
+    if (head && headAt) {
+      rk.head = 1;
+      ctx.sfx('counter_clang', null, 0.2, 1.9);
+      ctx.fx.headPop(headAt, d);
+    }
+    if (killed) {
+      rk.kill = 1;
+      ctx.sfx('qte_good', null, 0.38, head ? 0.9 : 0.8);
+      const strong = head || this.shotCrit;
+      this.cam.punch(0, 0, strong ? -2.4 : -1.4);
+      const now = performance.now();
+      if (now - this.killStopAt > 180) {
+        this.killStopAt = now;
+        ctx.engine.hitStop((strong ? G.killStopHead : G.killStop) * stopMul, 0.05);
+      }
+    }
   }
 
   // ------------------------------------------------------------- melee
@@ -1335,6 +1356,8 @@ export class Player {
       const piv = this.gun.geo.spec.parts[0].pivot;
       frame.localToWorld(this.muzzleWorld.set((mz[0] - piv[0]) * vs, (mz[1] - piv[1]) * vs, (mz[2] - piv[2]) * vs));
     } else this.muzzleWorld.copy(this.center());
+    // long guns: the two-hand hold, swap reach, reload hands and the dig, over the riding pose
+    this.weapons.pose(dt, this.pa);
   }
 
   /** advance the action layer; poses come from the animation module (envelopes per action) */
@@ -1351,6 +1374,7 @@ export class Player {
   }
 
   dispose() {
+    this.weapons?.dispose();
     this.root.removeFromParent();
     this.grappleLine.removeFromParent();
   }

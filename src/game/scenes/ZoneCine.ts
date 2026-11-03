@@ -1,7 +1,11 @@
-// Zone-entry cutscene. The first time the hunter rides into a newly opened zone the
-// letterbox closes in, time all but stops, and the camera cranes over the zone's
-// landmark in a sweeping descending arc while the zone's name types itself out in
-// big glowing Alagard letters above it; then everything eases back into play (~6 s).
+// Zone cinematics.
+//  - The parting: when a zone unlocks, the storm tears open (World runs that on real time).
+//    The letterbox closes, time all but stops, and the camera stands back from the mouth of
+//    the corridor, then pushes in as the canyon of clear air drives through the towering
+//    wall with lightning at its head, ending on the new zone's sky bursting open (~6 s).
+//  - The entry: the first time the hunter rides into a newly opened zone, the camera cranes
+//    over the zone's landmark in a sweeping descending arc while the zone's name types itself
+//    out in big glowing Alagard letters above it; then everything eases back into play (~6 s).
 //
 // Self-driving: it watches the hunter from `engine.onAfterUpdate`, so it keeps
 // running (and always hands control back) even on frames where the run scene
@@ -41,10 +45,11 @@ interface Mark {
   half: number;
 }
 
-const PRIORITY: Record<string, number> = { landmark: 10, capstone: 9, sphinx: 9, statue: 8, giantSkull: 8, stoneGate: 7, boneGate: 7, ribArch: 6, obelisk: 6, watchtower: 5, windmill: 5, waterTower: 5, hieroglyphWall: 4, column: 3, shack: 2, totem: 1 };
-const HEIGHT: Record<string, number> = { landmark: 12, sphinx: 8, statue: 8, giantSkull: 6, stoneGate: 8, boneGate: 8, ribArch: 8, obelisk: 9, watchtower: 10, windmill: 12, waterTower: 11, hieroglyphWall: 5, column: 7, shack: 6, totem: 4 };
+const PRIORITY: Record<string, number> = { landmark: 10, capstone: 9, rockArch: 9, colossusLegs: 9, shipwreck: 8, sphinx: 9, statue: 8, giantSkull: 8, stoneGate: 7, boneGate: 7, ribArch: 6, obelisk: 6, watchtower: 5, windmill: 5, waterTower: 5, hieroglyphWall: 4, column: 3, shack: 2, totem: 1 };
+const HEIGHT: Record<string, number> = { landmark: 12, rockArch: 15, colossusLegs: 11, shipwreck: 9, sphinx: 8, statue: 8, giantSkull: 6, stoneGate: 8, boneGate: 8, ribArch: 8, obelisk: 9, watchtower: 10, windmill: 12, waterTower: 11, hieroglyphWall: 5, column: 7, shack: 6, totem: 4 };
 const GLOW: Record<string, string> = { A: '#ff9a3a', B: '#46d8c8', C: '#ff5a3a' };
 const _f = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _p = new THREE.Vector3();
+const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
 
 /** seconds: flyover length, title in, title out, blend back */
@@ -70,10 +75,71 @@ export class ZoneCine {
   private resolve: (() => void) | null = null;
   private disposed = false;
   private readonly tick = (_dt: number, rdt: number) => this.update(rdt);
+  /** zones whose storm-parting was shown (or skipped) */
+  private readonly parted = new Set<number>();
+  private mode: 'entry' | 'part' = 'entry';
+  private partKeys: { pos: THREE.Vector3; look: THREE.Vector3; fov: number }[] = [];
 
   constructor(private d: ZoneCineDeps) {
     for (let i = 0; i <= d.world.activeZone; i++) this.seen.add(i);
     d.engine.onAfterUpdate.push(this.tick);
+    // the storm's own howl and thunder go through the engine's audio
+    d.world.bindAudio(d.engine.audio);
+  }
+
+  /** the storm-parting shot for the zone the world is opening now */
+  private playParting(zone: ZoneDef) {
+    const eng = this.d.engine;
+    const c = zone.corridor;
+    this.parted.add(zone.index);
+    if (!c) return;
+    this.active = true;
+    this.mode = 'part';
+    this.ending = false;
+    this.zone = zone;
+    this.t = 0;
+    const w = this.d.world;
+    const ux = c.bx - c.ax, uz = c.bz - c.az, L = Math.hypot(ux, uz) || 1;
+    const u = new THREE.Vector3(ux / L, 0, uz / L), s = new THREE.Vector3(-u.z, 0, u.x);
+    // look from the side the hunter is on
+    const p = this.d.player();
+    if (p && (p.x - c.ax) * s.x + (p.z - c.az) * s.z < 0) s.negate();
+    const at = (back: number, side: number, up: number) => {
+      const x = c.ax - u.x * back + s.x * side, z = c.az - u.z * back + s.z * side;
+      return new THREE.Vector3(x, w.groundAt(x, z) + up, z);
+    };
+    const g0 = w.groundAt(c.ax, c.az);
+    const head = (k: number, up: number) => new THREE.Vector3(c.ax + ux * k, g0 + up, c.az + uz * k);
+    const far = new THREE.Vector3(c.bx + u.x * zone.r * 0.5, w.groundAt(c.bx, c.bz) + 18, c.bz + u.z * zone.r * 0.5);
+    this.partKeys = [
+      { pos: at(64, 24, 22), look: head(0.08, 30), fov: 58 },
+      { pos: at(36, 12, 13), look: head(0.45, 18), fov: 54 },
+      { pos: at(12, 4, 7.5), look: far, fov: 47 },
+    ];
+    this.evalParting(0);
+    this.d.camRig.setCine(this.shot);
+    eng.letterbox(true, 0.5);
+    eng.input.enabled = false;
+    eng.slowMo(0.04, 12);
+    this.d.hud?.(false);
+    eng.audio.play('whoosh_big', { volume: 0.55 });
+    eng.audio.play('quake_rumble', { volume: 0.6 });
+  }
+  /** camera along the parting keys at storm time t */
+  private evalParting(t: number) {
+    const K = this.partKeys;
+    if (K.length < 3) return;
+    const a = Ease.inOutSine(clamp01(t / 2.6)), b = Ease.inOutSine(clamp01((t - 2.4) / 3.2));
+    const k0 = K[0], k1 = K[1], k2 = K[2];
+    this.shot.pos.copy(k0.pos).lerp(k1.pos, a).lerp(k2.pos, b);
+    this.shot.look.copy(k0.look).lerp(k1.look, a).lerp(k2.look, b);
+    // a little shake as the storm tears
+    const sh = Math.max(0, 1 - t / 4) * 0.12;
+    this.shot.pos.x += Math.sin(t * 37) * sh;
+    this.shot.pos.y += Math.sin(t * 41 + 1) * sh;
+    const g = this.d.world.groundAt(this.shot.pos.x, this.shot.pos.z) + 2.5;
+    if (this.shot.pos.y < g) this.shot.pos.y = g;
+    this.shot.fov = k0.fov + (k1.fov - k0.fov) * a + (k2.fov - k1.fov) * b;
   }
 
   /** play the cutscene for a zone now (normally triggered automatically on entry) */
@@ -82,6 +148,7 @@ export class ZoneCine {
     const eng = this.d.engine;
     this.seen.add(zone.index);
     this.active = true;
+    this.mode = 'entry';
     this.ending = false;
     this.zone = zone;
     this.t = 0;
@@ -105,7 +172,11 @@ export class ZoneCine {
 
   /** cut the running cutscene short and hand control back */
   skip() {
-    if (this.active && !this.ending) this.t = Math.max(this.t, DUR);
+    if (!this.active || this.ending) return;
+    if (this.mode === 'part') {
+      this.handBack();
+      this.t = 0;
+    } else this.t = Math.max(this.t, DUR);
   }
 
   private update(rdt: number) {
@@ -116,12 +187,21 @@ export class ZoneCine {
       return;
     }
     if (this.active) {
-      this.step(rdt);
+      if (this.mode === 'part') this.stepParting(rdt);
+      else this.step(rdt);
       return;
+    }
+    const w = this.d.world;
+    const pt = w.parting;
+    if (pt && !this.parted.has(pt.zone.index)) {
+      if (pt.t > 1.2) this.parted.add(pt.zone.index); // too late to make sense of it: let it play out unseen
+      else if ((!this.d.canPlay || this.d.canPlay()) && !this.d.camRig.cine) {
+        this.playParting(pt.zone);
+        return;
+      }
     }
     const p = this.d.player();
     if (!p) return;
-    const w = this.d.world;
     for (let i = 1; i <= w.unlockedZone && i < w.sa.zones.length; i++) {
       if (this.seen.has(i)) continue;
       const z = w.sa.zones[i];
@@ -148,6 +228,19 @@ export class ZoneCine {
     this.sub?.update(rdt, cam);
     if (t >= DUR && !this.ending) this.handBack();
     if (t >= DUR + T_BACK) this.finish();
+  }
+
+  private stepParting(rdt: number) {
+    this.t += rdt;
+    const pt = this.d.world.parting;
+    // follow the storm's own clock while it runs (it is the same real time)
+    const st = pt && pt.zone === this.zone ? pt.t : this.t;
+    if (!this.ending) this.evalParting(st);
+    if (st >= 6.0 && !this.ending) {
+      this.handBack();
+      this.t = 0;
+    }
+    if (this.ending && this.t >= T_BACK) this.finish();
   }
 
   /** the shot at progress k (0..1): a descending arc around the landmark */
@@ -219,6 +312,7 @@ export class ZoneCine {
     this.sub?.dispose();
     this.title = this.sub = null;
     this.active = false;
+    this.mode = 'entry';
     this.zone = null;
     const r = this.resolve;
     this.resolve = null;

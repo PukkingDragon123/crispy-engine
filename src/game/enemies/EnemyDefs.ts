@@ -26,6 +26,8 @@ export interface AttackDef {
   alphaOnly?: boolean;
   /** the move's name (song titles only — Rolling Stones / Guns N' Roses / the Beatles) */
   title?: string;
+  /** a big blow: offers a QTE DODGE (timed SPACE, slow-mo side-step, a counter opening) right before it lands */
+  qte?: boolean;
 }
 
 export type ProjKind = 'bullet' | 'venom' | 'curse' | 'dung' | 'arrow' | 'sand' | 'needle' | 'dynamite' | 'bone' | 'blood';
@@ -106,16 +108,18 @@ export const ENEMIES: Record<string, EnemyDef> = {
   giantScorpion: {
     id: 'giantScorpion', name: 'Giant Scorpion', title: 'Eight Legs of Bad News', rig: 'giant_scorpion', rigAlpha: 'giant_scorpion_alpha',
     hp: 260, armor: 30, physRes: 0.1, magicRes: 0.2, statusRes: { poison: 0.85 }, speed: 5, radius: 1.3, height: 1.6,
-    ai: 'charger', attacks: [{ kind: 'lob', range: 24, minRange: 6, cooldown: 3.2, windup: 0.8, dmg: 9, count: 3, speed: 14, proj: 'venom', status: [{ id: 'poison', stacks: 3, dur: 4 }] }, { kind: 'charge', range: 20, minRange: 6, cooldown: 6, windup: 0.9, dmg: 22 }, { kind: 'melee', range: 3, cooldown: 1.6, windup: 0.5, dmg: 16 }],
+    ai: 'charger', attacks: [{ kind: 'lob', range: 24, minRange: 6, cooldown: 3.2, windup: 0.8, dmg: 9, count: 3, speed: 14, proj: 'venom', status: [{ id: 'poison', stacks: 3, dur: 4 }] }, { kind: 'charge', range: 20, minRange: 6, cooldown: 6, windup: 0.9, dmg: 22, qte: true }, { kind: 'melee', range: 3, cooldown: 1.6, windup: 0.5, dmg: 16 }],
     contact: 10, bounty: 30, gold: [4, 9], hitKind: 'chitin', weakness: 'Nearly immune to poison — Serket\'s own children. Use raw firepower, fire and armor break.',
     firstWave: 14, weight: 2, lore: 'Serket\'s brood, stolen and twisted. Pinch refuses to look at them.',
   },
   vulture: {
     id: 'vulture', name: 'Bone Vulture', title: 'Circling Your Wallet', rig: 'vulture', rigAlpha: 'vulture_alpha',
-    hp: 22, armor: 0, physRes: 0, magicRes: 0, statusRes: {}, speed: 9, radius: 0.6, height: 0.9,
-    ai: 'flyer', attacks: [{ kind: 'dive', range: 18, cooldown: 3.5, windup: 0.6, dmg: 10 }],
-    contact: 6, bounty: 4, gold: [0, 2], hitKind: 'bone', weakness: 'Flimsy. Shoot them out of the sky mid-dive.',
-    flying: true, firstWave: 7, weight: 3, group: [2, 4], lore: 'They follow bounty hunters, waiting for an easy payday.',
+    hp: 26, armor: 0, physRes: 0, magicRes: 0, statusRes: {}, speed: 9, radius: 0.6, height: 0.9,
+    // circles high, screams, then stoops on a ring that tracks you and locks; a hit can snatch and drag you
+    ai: 'flyer', attacks: [{ kind: 'dive', range: 24, cooldown: 6, windup: 1.05, dmg: 12 }],
+    contact: 6, bounty: 5, gold: [0, 2], hitKind: 'bone', weakness: 'The scream means a stoop: leave the ring before it locks. Shoot them out of the sky mid-dive; if one grabs you, mash F to shake it off.',
+    flying: true, firstWave: 7, weight: 2.4, group: [2, 3], moveTitles: { snatch: 'Beast of Burden' },
+    lore: 'They follow bounty hunters, waiting for an easy payday. Lately they stopped waiting.',
   },
   outlaw: {
     id: 'outlaw', name: 'Dune Outlaw', title: 'Wanted: For Everything', rig: 'outlaw_rider', rigAlpha: 'outlaw_rider_alpha',
@@ -235,10 +239,20 @@ export const ENEMIES: Record<string, EnemyDef> = {
   bellSnake: {
     id: 'bellSnake', name: 'Bell Snake', title: 'The Rattle Before the Grave', rig: 'bell_snake', rigAlpha: 'bell_snake_alpha',
     hp: 150, armor: 20, physRes: 0.05, magicRes: 0.1, statusRes: { poison: 0.8 }, speed: 6.5, radius: 0.75, height: 0.8,
-    ai: 'constrictor', attacks: [{ kind: 'leap', range: 9, minRange: 2.5, cooldown: 5.5, windup: 1.15, dmg: 16 }, { kind: 'melee', range: 2.5, cooldown: 1.8, windup: 0.45, dmg: 12, status: [{ id: 'poison', stacks: 3, dur: 4 }] }, { kind: 'lob', range: 17, minRange: 4, cooldown: 5, windup: 0.75, dmg: 8, count: 4, speed: 12, proj: 'venom', status: [{ id: 'poison', stacks: 2, dur: 4 }], alphaOnly: true }],
+    ai: 'constrictor', attacks: [{ kind: 'leap', range: 9, minRange: 2.5, cooldown: 5.5, windup: 1.15, dmg: 16, qte: true }, { kind: 'melee', range: 2.5, cooldown: 1.8, windup: 0.45, dmg: 12, status: [{ id: 'poison', stacks: 3, dur: 4 }] }, { kind: 'lob', range: 17, minRange: 4, cooldown: 5, windup: 0.75, dmg: 8, count: 4, speed: 12, proj: 'venom', status: [{ id: 'poison', stacks: 2, dur: 4 }], alphaOnly: true }],
     contact: 8, bounty: 16, gold: [2, 6], hitKind: 'flesh', weakness: 'Listen for the rattle: the strike comes next. If it wraps you, mash to break free. Alphas burst into acid when they die.',
     firstWave: 13, weight: 1.2, special: 'acidBurst', moveTitles: { wrap: 'I Want to Hold Your Hand', burst: 'Gimme Shelter' },
     lore: 'Big as a stagecoach, loud as a church bell. It swallows bounty hunters whole and keeps their spurs.',
+  },
+  // ------------------------------------------------------------ Khonsu's court
+  cursePriest: {
+    id: 'cursePriest', name: 'Curse Priest', title: 'Keeps the Moon Awake', rig: 'curse_priest', rigAlpha: 'curse_priest_alpha',
+    hp: 55, armor: 10, physRes: 0, magicRes: 0.3, statusRes: { curse: 1, burn: -0.5 }, speed: 3.4, radius: 0.45, height: 2.3,
+    ai: 'support', attacks: [{ kind: 'fan', range: 24, minRange: 5, cooldown: 3.4, windup: 0.85, dmg: 7, count: 5, spread: 0.6, speed: 11, proj: 'curse', status: [{ id: 'curse', stacks: 1, dur: 5 }] }, { kind: 'ring', range: 9, cooldown: 7, windup: 1.0, dmg: 6, count: 14, speed: 9, proj: 'curse' }],
+    contact: 4, bounty: 11, gold: [2, 5], hitKind: 'linen', burnMul: 1.6, special: 'ward', moveTitles: { ward: "Mother's Little Helper" },
+    weakness: 'While a priest chants, its moon-thread wards the Avatar of Khonsu (he takes far less damage). Cut the thread: kill the priests first.',
+    firstWave: 26, weight: 0.8, group: [1, 2],
+    lore: 'Khonsu\'s night-priests, wrapped for the tomb and woken for one more service. They sing the moon up, whatever the hour.',
   },
 };
 
@@ -267,6 +281,7 @@ const SONG_TITLES: Record<string, string[]> = {
   duneWorm: ['Get Back', 'Yellow Submarine'],
   thornyLizard: ["Don't Cry", 'Help!'],
   bellSnake: ['Sympathy for the Devil', 'Garden of Eden', 'Lucy in the Sky with Diamonds'],
+  cursePriest: ['Eleanor Rigby', 'Tomorrow Never Knows'],
 };
 for (const [id, titles] of Object.entries(SONG_TITLES))
   titles.forEach((t, i) => {

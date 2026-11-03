@@ -337,6 +337,9 @@ export class Terrain {
   material: THREE.MeshStandardMaterial;
   depthMaterial: THREE.MeshDepthMaterial;
   private chunks = new Map<number, Chunk>();
+  /** chunks holding a mesh */
+  private live = new Set<Chunk>();
+  private look: Chunk[] = [];
   private nC: number;
   built = 0;
   /** the chunk being meshed a few rows per frame (no hitches at high resolution) */
@@ -422,7 +425,16 @@ export class Terrain {
     const t0 = performance.now();
     this.flushHF();
     const want: Chunk[] = [];
-    for (const c of this.chunks.values()) {
+    // only the chunks inside the outermost LOD ring (plus any still holding a mesh) need a look:
+    // the big maps have thousands of chunks
+    const reach = LOD_DIST[LOD_DIST.length - 1] + CHUNK;
+    const i0 = Math.max(0, Math.floor((focus.x - reach) / CHUNK)), i1 = Math.min(this.nC - 1, Math.floor((focus.x + reach) / CHUNK));
+    const j0 = Math.max(0, Math.floor((focus.z - reach) / CHUNK)), j1 = Math.min(this.nC - 1, Math.floor((focus.z + reach) / CHUNK));
+    const look = this.look;
+    look.length = 0;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) look.push(this.chunks.get(i + j * 1000)!);
+    for (const c of this.live) if (c.cx < i0 || c.cx > i1 || c.cz < j0 || c.cz > j1) look.push(c);
+    for (const c of look) {
       const x0 = c.cx * CHUNK,
         z0 = c.cz * CHUNK;
       const dx = Math.max(x0 - focus.x, 0, focus.x - (x0 + CHUNK));
@@ -444,6 +456,7 @@ export class Terrain {
           c.mesh.geometry.dispose();
           c.mesh = null;
           c.builtLod = -1;
+          this.live.delete(c);
         }
         continue;
       }
@@ -497,6 +510,7 @@ export class Terrain {
       c.mesh.matrixAutoUpdate = false;
       c.mesh.customDepthMaterial = this.depthMaterial;
       this.group.add(c.mesh);
+      this.live.add(c);
     }
     c.mesh.castShadow = lod <= 2;
     c.builtLod = lod;
@@ -525,8 +539,10 @@ export class Backdrop {
   constructor(field: Heightfield, wind: { x: number; z: number }, seed: number) {
     const S = field.size;
     const nz = new Noise(seed * 13 + 5);
-    const CELL = 12;
-    const x0 = -0.9 * S, x1 = 1.9 * S;
+    // the big maps: the outer ring stops ~800 m out (past the camera's useful range in the haze)
+    const CELL = S > 1000 ? 16 : 12;
+    const pad = Math.min(0.9 * S, 820);
+    const x0 = -pad, x1 = S + pad;
     const N = Math.ceil((x1 - x0) / CELL) + 1;
     const pos = new Float32Array(N * N * 3);
     const col = new Float32Array(N * N * 3);

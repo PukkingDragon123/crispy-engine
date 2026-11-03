@@ -8,6 +8,12 @@
 // flies into the hero and shatters into light that soaks into him while the
 // rest crumble back into sand. R rerolls, B banishes, a click skips the intro.
 // Then the world eases out of slow-mo and the run camera takes back over.
+// Every card lands with its rarity's sting (a chime per tier, brass and choir at
+// the top) and sheds motes in its rarity colour. A learned tarot skill dives into
+// the sand and plays its own unlock cinematic (RankUpCine.SkillUnlock); the card
+// then flies to its slot on the bar after the stage is released, and the skill
+// unseals when it lands. A gamble is decided at the pick (resolveGamble) and
+// played out with dice, a coin or a revolver chamber (RankUpCine.GambleShow).
 // Each card is a sculpted 3D frame for its rarity carrying a photographed
 // vignette of the upgrade (SkillArt, baked a slice per frame while it rises).
 import * as THREE from 'three';
@@ -19,7 +25,8 @@ import { SkillArt } from './SkillArt';
 import { Spring } from '../../engine/Tween';
 import type { Input } from '../../engine/Input';
 import { damp } from '../../engine/math/rand';
-import { RankUpCine, CineHero, LightPillar } from './RankUpCine';
+import { RankUpCine, CineHero, LightPillar, SkillUnlock, GambleShow } from './RankUpCine';
+import { resolveGamble, GambleOutcome } from '../run/UpgradesExtra';
 import { GlyphRings } from '../fx/SerketSpirit';
 import type { CameraRig } from '../player/CameraRig';
 
@@ -57,7 +64,7 @@ interface Card {
   pillarK: number;
   /** learn-a-skill cards: a ring of 3D hieroglyphs orbits them */
   glyphs: GlyphRings | null;
-  fly: { t: number; from: THREE.Vector3; ctrl: THREE.Vector3; to: THREE.Vector3 } | null;
+  fly: { t: number; from: THREE.Vector3; ctrl: THREE.Vector3; to: THREE.Vector3; mode: 'hero' | 'dive' | 'deal' } | null;
   crumble: number;
   crumbleFrom: THREE.Vector3 | null;
 }
@@ -79,6 +86,11 @@ const _v2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
 const hintCards = (rerolls: number) => `HOVER for details · CLICK or 1–4 to claim · RIGHT-DRAG to turn · R reroll (${rerolls}) · B banish`;
+/** a chime per rarity tier, up a major arpeggio */
+const STING = [1, 1.26, 1.5, 2, 2.52, 3];
+const PRISM = [0xff8a8a, 0xffe08a, 0x9aff9a, 0x8ad8ff, 0xd8a0ff];
+const WIN_COL = 0x8fff6a;
+const LOSE_COL = 0xff4a3a;
 
 export interface PickerOpts {
   /** the run camera rig (smooth hand-back after the pick) */
@@ -118,6 +130,14 @@ export class CardPicker {
   private late: (dt: number, rdt: number) => void;
   private offRank: () => void;
   private time = 0;
+  /** a tarot skill being learned (its cinematic, then its flight to the bar) */
+  private unlock: SkillUnlock | null = null;
+  /** a gamble playing out, and its decided outcome */
+  private show: GambleShow | null = null;
+  private outcome: GambleOutcome | null = null;
+  /** real-time delayed calls (rarity stings) */
+  private timers: { t: number; fn: () => void }[] = [];
+  private heroArt = false;
 
   constructor(private ctx: Ctx, private up: UpgradeManager, private input: Input, private getHero: () => THREE.Vector3, private opts: PickerOpts = {}) {
     ctx.scene.add(this.group, this.hitGroup);
@@ -134,6 +154,15 @@ export class CardPicker {
 
   dispose() {
     this.hint.remove();
+    // a skill still in flight unseals now
+    if (this.unlock) {
+      this.unlock.finishNow();
+      this.unlock.dispose();
+      this.unlock = null;
+    }
+    this.up.deferLearn.clear();
+    this.show?.dispose();
+    this.show = null;
     for (const c of [...this.cards, ...this.dying]) this.kill(c);
     this.cards = [];
     this.dying = [];
@@ -181,6 +210,13 @@ export class CardPicker {
       eng.audio.setMuffle(0.4);
       eng.input.setWantLock(false);
       this.hero = this.heroNow();
+      if (this.hero && !this.heroArt) {
+        // the tarot dioramas show the player's own Sundown and revolver
+        this.heroArt = true;
+        const spec = this.hero.rig.geo.spec;
+        this.art.setHero(spec, spec.name + ':player');
+        this.art.setGun(((this.hero as any).gun?.geo?.spec as any) ?? null);
+      }
       tCards = this.cine.begin(this.hero, rank);
       this.stage();
     } else tCards = this.cine.again(rank);
@@ -233,6 +269,8 @@ export class CardPicker {
     const ctx = this.ctx;
     const L = this.layout(offers.length);
     this.art.request(offers.map((o) => o.def));
+    // a skill card's tarot is photographed now so it can burn in if it is chosen
+    if (this.hero) this.art.requestKeys(offers.filter((o) => o.def.learn).map((o) => 'tarot:' + o.def.learn));
     this.cards = offers.map((o, i) => {
       const rows = this.up.preview(o);
       const card3 = makeSkillCard(o, rows, { rows, lv: (id) => this.up.lv(id) });
@@ -314,12 +352,28 @@ export class CardPicker {
     this.hint.style.display = 'none';
     this.hovered = null;
     this.chosen = card;
-    const to = this.hero ? this.cine.heroChest() : this.getHero().clone().add(new THREE.Vector3(0, 1.1, 0));
+    const def = card.offer.def;
+    const cine = this.cine;
+    let to: THREE.Vector3;
+    let mode: 'hero' | 'dive' | 'deal' = 'hero';
+    if (def.gamble) {
+      // decided now; the props will play exactly this (with no hero on stage it simply resolves)
+      this.outcome = resolveGamble(card.offer, this.up, this.ctx, this.heroNow() ?? (this.ctx.engine.current as any)?.player);
+    }
+    if (def.gamble && this.hero) {
+      mode = 'deal';
+      to = cine.H.clone().addScaledVector(_v.copy(cine.B.pos).sub(cine.H).setY(0).normalize(), 1.0).add(new THREE.Vector3(0, cine.heroTop * 0.75, 0));
+    } else if (def.learn && this.hero) {
+      // a new skill: the card dives into the sand where its tarot will rise
+      mode = 'dive';
+      to = SkillUnlock.spot(cine, this.ctx.world.groundAt).add(new THREE.Vector3(0, -0.35, 0));
+    } else to = this.hero ? cine.heroChest() : this.getHero().clone().add(new THREE.Vector3(0, 1.1, 0));
     const from = card.mesh.position.clone();
-    const ctrl = from.clone().lerp(to, 0.4).addScaledVector(this.sy, 0.9);
-    card.fly = { t: 0, from, ctrl, to };
+    const ctrl = from.clone().lerp(to, 0.4).addScaledVector(this.sy, mode === 'dive' ? 0.6 : 0.9);
+    card.fly = { t: 0, from, ctrl, to, mode };
     card.card.setPanel(0, card.side);
     this.ctx.sfx('card_pick', from, 0.9);
+    if (mode === 'deal') this.ctx.sfx('rev_spin', from, 0.35, 1.4);
     this.cine.gaze = card.mesh.position;
     for (const c of this.cards) if (c !== card) this.crumble(c);
     this.cards = [card];
@@ -345,10 +399,57 @@ export class CardPicker {
     if (!more) this.release();
     const picked = card.offer;
     const lv = this.up.apply(picked.def.id);
-    this.ctx.toast(picked.def.name.toUpperCase(), RARITY[picked.def.rarity].color, lv > 1 ? `Level ${lv}` : picked.def.cat === 'evolution' ? 'EVOLVED!' : 'Acquired');
+    const o = this.outcome;
+    if (o) this.ctx.toast(o.title, o.win ? '#9dff5a' : '#ff6a4a', o.line);
+    else this.ctx.toast(picked.def.name.toUpperCase(), RARITY[picked.def.rarity].color, lv > 1 ? `Level ${lv}` : picked.def.cat === 'evolution' ? 'EVOLVED!' : 'Acquired');
     this.ctx.events.emit('upgradePicked', picked.def.id, lv);
+    this.show?.dispose();
+    this.show = null;
+    this.outcome = null;
     this.busy = false;
     if (more) this.begin();
+  }
+
+  /** the unlock show is over: learn (deferred until the card lands), release the stage, send the card to the bar */
+  private finishUnlock(card: Card) {
+    const u = this.unlock!;
+    this.kill(card);
+    this.cards = [];
+    this.chosen = null;
+    this.cine.gaze = null;
+    const id = card.offer.def.id;
+    this.up.deferLearn.add(id);
+    const lv = this.up.apply(id);
+    this.ctx.events.emit('upgradePicked', id, lv);
+    this.release();
+    u.onLand = () => {
+      // the card is in its slot: the skill unseals (UpgradeEffects learns it next frame) and the bar card turns face up
+      this.up.deferLearn.delete(id);
+      this.busy = false;
+    };
+    u.release();
+  }
+
+  /** a card has landed: its rarity's sting and a burst of its light */
+  private sting(c: Card) {
+    const def = c.offer.def;
+    const R = RARITY[def.rarity];
+    const at = c.mesh.position.clone();
+    const ctx = this.ctx;
+    const n = R.rank + 1;
+    const low = def.curse ? 0.84 : 1;
+    for (let i = 0; i < n; i++) this.later(i * 0.075, () => ctx.sfx('gem_chime', at, 0.3 + 0.05 * R.rank, STING[i] * low));
+    if (R.rank >= 3) ctx.sfx(def.curse ? 'sting_negative' : 'sting_positive', at, 0.3 + 0.12 * (R.rank - 3), R.rank >= 5 ? 1.12 : 1);
+    if (R.rank >= 4) this.later(0.12, () => ctx.sfx('loot_reveal', at, 0.45 + 0.1 * (R.rank - 4)));
+    if (R.rank >= 5) this.later(0.2, () => ctx.sfx('divine_whisper', at, 0.6, 1.1));
+    if (def.gamble) this.later(0.05, () => ctx.sfx(def.gamble === 'roulette' ? 'rev_spin' : 'pickup_gold', at, 0.4, 1.25));
+    const col = R.rank >= 5 ? PRISM : [R.glow, 0xffffff];
+    this.cine.p.emit({ pos: at, count: 6 + R.rank * 7, spread: 1.4 + R.rank * 0.45, life: [0.3, 0.75], size: [0.07, 0.015], sprite: ['spark', 'star4'], additive: true, color: col, drag: 3 });
+  }
+
+  private later(t: number, fn: () => void) {
+    if (t <= 0) fn();
+    else this.timers.push({ t, fn });
   }
 
   /** world time eases back in and the run camera blends home from the last stage shot */
@@ -390,6 +491,10 @@ export class CardPicker {
     }
     this.animateDying(rdt);
     if (this.phase === 'resolve') {
+      if (inp.wasPressed('Mouse0') || inp.wasPressed('Space') || inp.wasPressed('Enter')) {
+        this.unlock?.skip();
+        this.show?.skip();
+      }
       this.animateFly(rdt);
       return;
     }
@@ -560,12 +665,23 @@ export class CardPicker {
           c.flipCur = 0;
           c.card.setSheen(-9);
           c.card.fillPips();
+          this.sting(c);
           if (c.entrance === 'spin') ctx.sfx('gem_chime', m.position, 0.5, 1.2);
         }
         continue;
       }
       // the pillar dies down once the card is home
       if (c.pillar) c.pillarK = Math.max(0, c.pillarK - rdt * 1.6);
+      // it sheds motes of its rarity's light off the frame (more the rarer it is)
+      {
+        const R = RARITY[c.offer.def.rarity];
+        if (Math.random() < [0.7, 1.8, 3.2, 5, 8, 12][R.rank] * (1 + c.hover) * rdt) {
+          const e = Math.random() * 4;
+          _v.set(e < 2 ? (e < 1 ? -0.5 : 0.5) * CARD_W : (Math.random() - 0.5) * CARD_W, e >= 2 ? (e < 3 ? -0.5 : 0.5) * CARD_H : (Math.random() - 0.5) * CARD_H, 0.01);
+          m.localToWorld(_v);
+          p.emit({ pos: _v, count: 1, vel: { x: 0, y: 0.22, z: 0 }, spread: 0.12, life: [0.7, 1.3], size: [0.035 + R.rank * 0.006, 0.01], sprite: ['star4', 'spark', 'glow8'], additive: true, color: R.rank >= 5 ? PRISM : [R.glow, 0xffffff], drag: 1, fadeIn: 0.2 });
+        }
+      }
       // ---- resting / hovered
       c.hover = damp(c.hover, c === this.hovered ? 1 : 0, 9, rdt);
       const hs = c.hover * c.hover * (3 - 2 * c.hover);
@@ -625,19 +741,35 @@ export class CardPicker {
     const m = c.mesh;
     const col = RARITY[c.offer.def.rarity].hex;
     if (f.t < 1) {
-      f.t = Math.min(1, f.t + rdt / 0.5);
+      f.t = Math.min(1, f.t + rdt / (f.mode === 'dive' ? 0.42 : f.mode === 'deal' ? 0.36 : 0.5));
       const k = f.t * f.t;
-      // a curved flight into his chest, spinning, shrinking, going white-hot
+      // a curved flight into his chest (or down into the sand, or to the dealing spot), spinning, shrinking, going white-hot
       const a = 1 - k;
       m.position.set(a * a * f.from.x + 2 * a * k * f.ctrl.x + k * k * f.to.x, a * a * f.from.y + 2 * a * k * f.ctrl.y + k * k * f.to.y, a * a * f.from.z + 2 * a * k * f.ctrl.z + k * k * f.to.z);
       m.rotateY(rdt * 14 * (0.3 + k));
-      m.scale.setScalar(c.base * (1 - k * 0.78));
-      c.card.setFlash(Math.min(1, k * 1.4));
+      m.scale.setScalar(c.base * (1 - k * (f.mode === 'dive' ? 0.45 : 0.78)));
+      c.card.setFlash(Math.min(1, k * (f.mode === 'dive' ? 0.9 : 1.4)));
       this.cine.p.emit({ pos: m.position, count: 3, spread: 0.8, life: [0.2, 0.45], size: [0.08, 0.01], sprite: ['spark', 'star4', 'glow8'], additive: true, color: [col, 0xffffff], drag: 2 });
       if (f.t >= 1) {
         m.visible = false;
-        this.cine.soak(col);
-        this.resolveAt = this.cine.t + 0.22;
+        if (f.mode === 'hero') {
+          this.outcome?.apply();
+          this.cine.soak(this.outcome ? (this.outcome.win ? WIN_COL : LOSE_COL) : col);
+          this.resolveAt = this.cine.t + 0.22;
+        } else if (f.mode === 'dive') {
+          const g = f.to.clone().add(new THREE.Vector3(0, 0.35, 0));
+          const p = this.cine.p;
+          p.emit({ pos: g, count: 28, spread: 3.5, up: 4.5, life: [0.5, 1.0], size: [0.07, 0.04], sprite: GRAIN, color: SAND, gravity: 11, drag: 1, ground: true, bounce: 0.15 });
+          p.emit({ pos: g, count: 6, spread: 1.6, up: 1, life: [0.8, 1.4], size: [0.4, 1.1], sprite: PUFF, color: SAND, alpha: 0.7, drag: 2.4, rot: 6, rotSpeed: 0.7, jitter: 0.3 });
+          this.ctx.sfx('sand_burst', g, 0.9, 0.85);
+          this.cine.kick(0.3);
+          const key = c.offer.def.learn!;
+          this.unlock = new SkillUnlock(this.cine, this.ctx, key, () => this.art.textureKey('tarot:' + key));
+        } else if (this.outcome) {
+          const o = this.outcome;
+          this.show = new GambleShow(this.cine, this.ctx, o, f.to);
+          this.show.onReveal = () => o.apply();
+        }
       }
       if (c.pillar) {
         c.pillarK = Math.max(0, c.pillarK - rdt * 3);
@@ -645,6 +777,15 @@ export class CardPicker {
         c.pillar.update();
       }
       this.orbit(c, rdt, 0);
+    } else if (this.unlock && this.unlock.stage === 'show') {
+      if (this.unlock.ready) this.finishUnlock(c);
+    } else if (this.show && this.resolveAt < 0) {
+      if (this.show.done) {
+        // the result's light soaks into him (green for a win, red for a loss), the camera goes back to the arch
+        this.cine.soak(this.outcome?.win ? WIN_COL : LOSE_COL);
+        this.cine.shoot(this.cine.B, 0.55);
+        this.resolveAt = this.cine.t + 0.3;
+      }
     } else if (this.resolveAt >= 0 && this.cine.t >= this.resolveAt) {
       this.resolveAt = -1;
       this.finish(c);
@@ -686,6 +827,23 @@ export class CardPicker {
   private lateUpdate(rdt: number) {
     const cine = this.cine;
     if (cine.alive || cine.p.count > 0) cine.update(rdt, this.active);
+    for (let i = this.timers.length - 1; i >= 0; i--) {
+      const tm = this.timers[i];
+      tm.t -= rdt;
+      if (tm.t <= 0) {
+        this.timers.splice(i, 1);
+        tm.fn();
+      }
+    }
+    // the unlock show poses the hero after the stage has aimed his head; its card keeps flying after the release
+    if (this.unlock) {
+      this.unlock.update(rdt);
+      if (this.unlock.stage === 'done') {
+        this.unlock.dispose();
+        this.unlock = null;
+      }
+    }
+    this.show?.update(rdt);
     // the hunter stays on stage while the picker is open (RunScene hides him for the old flat picker)
     if (this.active && this.hero) {
       this.hero.root.visible = true;

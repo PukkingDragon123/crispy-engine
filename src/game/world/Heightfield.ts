@@ -198,7 +198,8 @@ export class Heightfield {
   finalize() {
     this.h.set(this.base);
     this.mat.set(this.baseMat);
-    if (this.stamps.length) this.recompute(0, 0, this.size, this.size, false);
+    // only the stamps' rects differ from the base (each recompute starts from base, so overlaps are fine)
+    for (const st of this.stamps) if (st.weight > 0.0001) this.recompute(st.x0, st.z0, st.x1, st.z1, false);
   }
 
   /** ray march against heightfield; returns distance or -1 */

@@ -7,7 +7,9 @@
 // or keep what you have (the spurned piece is scrapped for gold).
 //
 // Listens to 'enemyKilled' and 'bossDefeated' on ctx.events by itself; chests
-// and the shop call onChest() / shopWares().
+// and the shop call onChest() / shopWares(). Gear is BLUEPRINT-GATED: apart from
+// the starter kit (Equipment STARTER_GEAR) a piece only drops once its blueprint
+// is known; onChest() emits 'chestLooted' (tier, at) for the blueprint rolls.
 import * as THREE from 'three';
 import type { Ctx, EnemyLike } from '../Ctx';
 import type { Player } from '../player/Player';
@@ -19,6 +21,7 @@ import { rnd } from '../../engine/math/rand';
 import { sharedVoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { Equipment, BOARD_SLOTS, GEAR, GEAR_IDS, GEAR_RARITY_ORDER, GearId, GearRarity, SLOT_INFO, buildGearDisplay, gearGlassMaterial, gearHex, gearPreview } from '../player/Equipment';
 import { makeGearCard, GearCard3D } from '../ui/GearCard';
+import { Blueprints } from '../meta/Blueprints';
 
 type ChestTier = 'wood' | 'silver' | 'gold' | 'divine';
 
@@ -85,13 +88,16 @@ export class GearPickups {
   }
 
   // ------------------------------------------------------------------ loot tables
-  /** pick a piece by rarity band (luck tilts it toward the rare end), never one you wear or one lying around */
+  /**
+   * Pick a piece by rarity band (luck tilts it toward the rare end), never one you wear or one
+   * lying around. Only the starter kit and pieces whose BLUEPRINT is known can drop (meta/Blueprints).
+   */
   roll(min: GearRarity = 'common', max: GearRarity = 'legendary', bias = 1): GearId | null {
     const lo = GEAR_RARITY_ORDER.indexOf(min), hi = GEAR_RARITY_ORDER.indexOf(max);
     const luck = this.player.stats.get('rarity') * bias;
     const pool = GEAR_IDS.filter((id) => {
       const r = GEAR_RARITY_ORDER.indexOf(GEAR[id].rarity);
-      return r >= lo && r <= hi && !this.equipment.has(id) && !this.drops.some((d) => d.id === id) && !this.queue.includes(id);
+      return r >= lo && r <= hi && Blueprints.gearUnlocked(id) && !this.equipment.has(id) && !this.drops.some((d) => d.id === id) && !this.queue.includes(id);
     });
     if (!pool.length) return null;
     return rnd.weighted(pool, (id) => {
@@ -102,6 +108,8 @@ export class GearPickups {
 
   /** a chest just opened (call from the chest's loot callback) */
   onChest(tier: ChestTier, at: { x: number; y: number; z: number }) {
+    // the treasure hunt rolls its blueprint scrolls off this (run/TreasureHunt.ts)
+    this.ctx.events.emit('chestLooted', tier, at);
     const c = CHEST[tier];
     if (!rnd.chance(c.chance)) return null;
     const id = this.roll(c.min, c.max, c.bias);

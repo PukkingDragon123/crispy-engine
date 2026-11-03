@@ -18,7 +18,23 @@ export interface SaveData {
   look: { hat: string; outfit: string; board: string };
   gun: GunLoadout;
   codex: Record<string, number>;
+  /** the Codex book: discovery flags per entry (`cat:id` → bits, see meta/Codex.ts) */
+  book: { f: Record<string, number> };
+  /** permanently learned blueprints (ids from meta/Blueprints.ts) */
+  blueprints: string[];
+  /** the gun rack: the long gun carried beside the revolver and each gun's fitted attachments */
+  arsenal: ArsenalLoadout;
+  /** the treasure-hunt collection: relic ids dug up so far (any region) */
+  relics: string[];
   seenIntro: boolean;
+}
+
+export type LongGunId = 'shotgun' | 'tommy';
+export interface ArsenalLoadout {
+  /** the second gun on the sling (null until a gun blueprint is found) */
+  secondary: LongGunId | null;
+  /** fitted attachment ids per gun (one per slot), e.g. { shotgun: ['sg_choke'], tommy: ['tm_cutts', 'tm_drum100'] } */
+  attach: Record<string, string[]>;
 }
 
 const KEY = 'dustup-save-v1';
@@ -73,6 +89,10 @@ function fresh(): SaveData {
     look: { hat: 'stetson', outfit: 'punk', board: 'driftwood' },
     gun: { barrel: 'standard', cylinder: 'standard', grip: 'wood', sight: 'none' },
     codex: {},
+    book: { f: {} },
+    blueprints: [],
+    arsenal: { secondary: null, attach: {} },
+    relics: [],
     seenIntro: false,
   };
 }
@@ -87,6 +107,10 @@ export function loadSave(): SaveData {
       const d = JSON.parse(raw) as SaveData;
       if (d && d.v === 1) {
         cache = { ...fresh(), ...d };
+        if (!cache.book?.f) cache.book = { f: {} };
+        if (!Array.isArray(cache.blueprints)) cache.blueprints = [];
+        if (!cache.arsenal?.attach) cache.arsenal = { secondary: cache.arsenal?.secondary ?? null, attach: {} };
+        if (!Array.isArray(cache.relics)) cache.relics = [];
         // the punk biker jacket is Sundown's new signature look: hand it to old saves once
         if (!cache.unlocked.includes('outfit:punk')) {
           cache.unlocked.push('outfit:punk');

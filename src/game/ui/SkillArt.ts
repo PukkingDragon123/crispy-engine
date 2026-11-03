@@ -3,10 +3,13 @@
 // Pinch and his brood at sunset, the gods' statues, the oasis, the rib arch —
 // photographed through the CardStudio and cached. Photos are baked a step at a
 // time (call step() every frame while a pick is open) so nothing freezes.
+// Keys 'tarot:E' / 'tarot:C' / 'tarot:G' bake the tarot bar's dioramas lit for the
+// world (the skill-unlock cinematic raises that card out of the sand).
 import { EXTRA_ART_FAMILY } from '../run/UpgradesExtra';
 import * as THREE from 'three';
 import { CardStudio, Shot } from './CardStudio';
-import { Kit, neckSlicerShot } from './TarotCards';
+import { Kit, neckSlicerShot, TAROT } from './TarotCards';
+import { diceModel, coinModel, cylinderModel } from './RankUpCine';
 import * as TP from '../models/props/tarot';
 import { hudRound } from '../models/props/hud';
 import { modelEntry } from '../models/lookup';
@@ -42,7 +45,7 @@ const FAMILY: Record<string, string> = {
   hellfireTrail: 'fire', bulletBallet: 'board', grappleSlam: 'tumbleweed', lodestone: 'coins', comboFever: 'blood',
   thunderChamber: 'gunstorm', hellrider: 'fire', venomBrood: 'brood',
 };
-const CAT_FALLBACK: Record<string, string> = { gun: 'gun', insect: 'swarm', passive: 'oasis', gear: 'rounds', relic: 'ra', evolution: 'venom' };
+const CAT_FALLBACK: Record<string, string> = { gun: 'gun', insect: 'swarm', passive: 'oasis', gear: 'rounds', relic: 'ra', evolution: 'venom', gamble: 'dice' };
 
 export function skillFamily(def: UpgradeDef) {
   return FAMILY[def.id] ?? CAT_FALLBACK[def.cat] ?? 'gun';
@@ -468,6 +471,50 @@ const VIGS: Record<string, VigFn> = {
     yield;
     return { root, focus: [skull!], crop: [0, 2.4], yaw: 0.15, pitch: 0.08, fov: 30, fill: 0.62, look: 'blood' };
   },
+  *dice(k) {
+    // a poker table in a dark saloon: two bone dice come up boxcars by a spill of gold and the iron
+    const root = new THREE.Group();
+    yield* sand(k, root, 31, 0x8a5a40);
+    const table = put(k.mesh('table', 0.8), root, [0, 0, 0], 0.15);
+    const top = 0.92 * 0.8;
+    const d1 = put(k.mesh(diceModel(false), 0.42), root, [-0.1, top + 0.053, 0.1], 0.5, Math.PI, 0);
+    put(k.mesh(diceModel(false), 0.42), root, [0.09, top + 0.053, 0.16], -0.35, Math.PI, 0);
+    for (let i = 0; i < 5; i++) put(k.mesh('gold_coin', 0.3), root, [0.26 + (i % 2) * 0.05, top + i * 0.012, -0.12 + (i % 3) * 0.02], i * 0.7, -Math.PI / 2);
+    const gun = k.rig('revolver_standard', 1.1);
+    if (gun) put(gun.root, root, [-0.28, top + 0.035, -0.14], 2.6, 0, Math.PI / 2);
+    put(k.mesh('bottle_1', 0.8), root, [0.34, top, -0.32], 0.3);
+    yield;
+    return { root, focus: [table!, ...(d1 ? [d1] : [])], crop: [0.66, 1.4], yaw: 0.2, pitch: 0.42, fov: 30, fill: 0.95, look: 'saloon', lamps: [{ pos: [0.3, 1.4, 0.7], color: 0xffb060, intensity: 4.5, distance: 3 }] };
+  },
+  *deadman(k) {
+    // across the table from a dead man: his black die, your bone one, his hat and skull at the far side
+    const root = new THREE.Group();
+    yield* sand(k, root, 32, 0x5a4a5a);
+    const table = put(k.mesh('table', 0.8), root, [0, 0, 0], 0.1);
+    const top = 0.92 * 0.8;
+    put(k.mesh(diceModel(false), 0.42), root, [-0.1, top + 0.053, 0.14], 0.4, -Math.PI / 2, 0);
+    put(k.mesh(diceModel(true), 0.42), root, [0.1, top + 0.053, 0.1], -0.6, 0, -Math.PI / 2);
+    const skull = put(k.mesh('skull_cow', 0.42), root, [0.02, top, -0.26], 0.2);
+    put(k.mesh('gold_coin', 0.3), root, [0.3, top, 0.12], 0.4, -Math.PI / 2);
+    const gun = k.rig('revolver_standard', 1.1);
+    if (gun) put(gun.root, root, [-0.3, top + 0.035, -0.08], 2.2, 0, Math.PI / 2);
+    yield;
+    return { root, focus: [table!, ...(skull ? [skull] : [])], crop: [0.66, 1.5], yaw: 0.15, pitch: 0.36, fov: 30, fill: 0.95, look: 'night', lamps: [{ pos: [0.2, 1.3, 0.6], color: 0x9fc8ff, intensity: 4, distance: 3 }, { pos: [-0.5, 0.9, -0.4], color: 0xff6a3a, intensity: 2.5, distance: 2 }] };
+  },
+  *roulette(k) {
+    // the cylinder out of the frame on the felt, one round stood beside it, the iron
+    const root = new THREE.Group();
+    yield* sand(k, root, 33, 0x8a4a3a);
+    const table = put(k.mesh('table', 0.8), root, [0, 0, 0], 0.2);
+    const top = 0.92 * 0.8;
+    const cyl = put(k.mesh(cylinderModel([true, false, false, false, false, false]), 0.42), root, [-0.04, top + 0.09, 0.08], 0.5, -0.25, 0);
+    put(round(k, 'brass', 0.11), root, [0.2, top, 0.18], 0.3);
+    put(k.mesh(coinModel(), 0.42), root, [0.24, top + 0.01, -0.06], 0.6, -Math.PI / 2);
+    const gun = k.rig('revolver_standard', 1.1);
+    if (gun) put(gun.root, root, [-0.24, top + 0.035, -0.2], 2.4, 0, Math.PI / 2);
+    yield;
+    return { root, focus: [table!, ...(cyl ? [cyl] : [])], crop: [0.66, 1.45], yaw: 0.22, pitch: 0.38, fov: 30, fill: 0.95, look: 'saloon', lamps: [{ pos: [0.1, 1.3, 0.6], color: 0xff6a3a, intensity: 4.5, distance: 3 }] };
+  },
   *moon(k) {
     const root = new THREE.Group();
     yield* sand(k, root, 28, 0x5a6a8a, 10, 14);
@@ -552,6 +599,9 @@ export function bakeVignette(renderer: THREE.WebGLRenderer, key: string, w: numb
   }
 }
 
+/** photo size of a tarot card's 66×88 window (the unlock cinematic's world card) */
+const TAROT_WORLD_ART: [number, number] = [168, 224];
+
 /** bakes and caches the vignette photos; textures are linear-light ×0.5 (sample ×2) */
 export class SkillArt {
   private cache = new Map<string, THREE.Texture>();
@@ -580,6 +630,11 @@ export class SkillArt {
   setHero(spec: RigSpec | null, key: string) {
     this.hero = spec;
     this.heroKey = key;
+  }
+
+  /** the player's revolver for vignettes that show it */
+  setGun(spec: RigSpec | null) {
+    if (spec) this.gun = spec;
   }
 
   request(defs: UpgradeDef[]) {
@@ -620,14 +675,17 @@ export class SkillArt {
       while (this.queue.length) {
         const fam = this.queue[0];
         try {
-          const it = vignetteShot(fam, kit);
+          const tarot = fam.startsWith('tarot:') ? TAROT.find((d) => d.key === fam.slice(6)) : null;
+          const it = tarot ? tarot.scene(kit) : vignetteShot(fam, kit);
           let r = it.next();
           while (!r.done) {
             yield;
             r = it.next();
           }
           yield;
-          const cv = studio.shoot(r.value, SKILL_ART[0], SKILL_ART[1], 2);
+          // tarot dioramas are framed for the 66×88 window and lit for the world here
+          const size = tarot ? TAROT_WORLD_ART : SKILL_ART;
+          const cv = studio.shoot(tarot ? { ...r.value, display: 'scene' } : r.value, size[0], size[1], 2);
           const tex = new THREE.CanvasTexture(cv);
           tex.colorSpace = THREE.SRGBColorSpace;
           tex.anisotropy = 4;

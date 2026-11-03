@@ -14,6 +14,9 @@ import { clamp, damp, dampAngle, rnd, wrapAngle } from '../../engine/math/rand';
 import { P } from '../../engine/voxel/palette';
 import { Spring } from '../../engine/Tween';
 import { EnemyAnim, animateEnemy, AnimEnv, GETUP } from '../anim/enemyAnim';
+import { Warnings, WarnTier, MarkHandle } from './Warnings';
+import { Dodge } from './Dodge';
+import type { Qte } from '../ui/Qte';
 
 /** attacks that fire something: they wind up with a muzzle glint and share the ranged fairness cap */
 const RANGED = new Set(['burst', 'fan', 'ring', 'spiral', 'snipe', 'lob', 'volley', 'stream']);
@@ -35,7 +38,10 @@ type Skel = 'humanoid' | 'beetle' | 'scorpion' | 'bird' | 'quad' | 'worm' | 'sna
 
 export interface PlayerLink {
   pos: THREE.Vector3;
-  board: { vel: THREE.Vector3; speed: number; impulse: THREE.Vector3; grounded: boolean };
+  board: { pos: THREE.Vector3; vel: THREE.Vector3; speed: number; impulse: THREE.Vector3; grounded: boolean };
+  /** the hunter's scene graph (QTE-dodge afterimages) and i-frame timer */
+  root?: THREE.Object3D;
+  invuln?: number;
   stats: StatSheet;
   status: StatusSet;
   alive: boolean;
@@ -206,7 +212,7 @@ export class Enemy implements EnemyLike {
   name: string;
   flying?: boolean;
   status = new StatusSet();
-  state: 'spawn' | 'move' | 'windup' | 'strike' | 'recover' | 'stagger' | 'down' | 'hidden' | 'charge' | 'leap' | 'dive' | 'burrow' | 'erupt' | 'wrap' = 'spawn';
+  state: 'spawn' | 'move' | 'windup' | 'strike' | 'recover' | 'stagger' | 'down' | 'hidden' | 'charge' | 'leap' | 'dive' | 'burrow' | 'erupt' | 'wrap' | 'snatch' | 'climb' = 'spawn';
   stateT = 0;
   atk: AttackDef | null = null;
   /** the wind-up time of the current attack (its def, stretched for fairness: early waves, shots from off-screen) */
@@ -285,6 +291,17 @@ export class Enemy implements EnemyLike {
   bodyN = 0;
   /** the rig key this one was built from (colour morphs) */
   rigKey: string;
+  /** QTE dodge: offered for this wind-up already / the wind-up is held while the ring closes / the hunter dodged it */
+  qteTried = false;
+  qteHold = false;
+  dodged = false;
+  /** wide open after a dodged blow (takes bonus damage) */
+  exposedT = 0;
+  /** between waves: seconds spent slinking off (0 = fighting) */
+  retreat = 0;
+  /** vulture: its tracking strike ring, the slow lazy-spiral phase */
+  mark: MarkHandle | null = null;
+  spiral = rnd.next() * 10;
   constructor(public def: EnemyDef, public alpha: boolean, wave: number, render: EnemyRender) {
     const sc = waveScale(wave);
     this.scale = alpha ? 1.32 : 1;
@@ -395,6 +412,13 @@ export class Enemies implements EnemyApi {
   /** extra rigged instances drawn with the horde each frame (skills push into a RigBatch: the scarab swarm) */
   drawHooks: ((render: EnemyRender) => void)[] = [];
   private grid = new Map<number, Enemy[]>();
+  /** the attack-warning language ("!" glyphs, ground markers) — bosses use it too */
+  warn: Warnings;
+  /** QTE dodge for big attacks (needs `qte`) */
+  dodge: Dodge;
+  /** the vulture currently hauling the hunter off */
+  snatching: Enemy | null = null;
+  private snatchTick = 0;
   private laserMat = new THREE.LineBasicMaterial({ color: 0xff3020, transparent: true, opacity: 0.85 });
 
   constructor(private ctx: Ctx, private player: PlayerLink) {
@@ -408,6 +432,9 @@ export class Enemies implements EnemyApi {
     };
     this.proj = new Projectiles(ctx, () => player as any);
     this.callouts = new SkillCallouts(ctx.scene);
+    this.warn = new Warnings(ctx);
+    this.dodge = new Dodge(ctx, player);
+    if (typeof window !== 'undefined') (window as any).__horde = this; // dev handle: __horde.spawn('vulture', x, z)
     // alpha thorny-devil acid drops sometimes leave a small fizzing puddle
     this.proj.onAcid = (x, _y, z, dmg, src) => {
       if (rnd.chance(0.3)) this.addHazard(x, z, 0.85, 2.6, Math.max(4, dmg * 1.2), src, false);
@@ -430,6 +457,38 @@ export class Enemies implements EnemyApi {
 
   get alive() {
     return this.list.length;
+  }
+
+  /** the QTE overlay (RunScene: `enemies.qte = this.qte`); enables QTE dodges and the vulture snatch */
+  set qte(q: Qte | null) {
+    this.dodge.qte = q;
+  }
+  get qte() {
+    return this.dodge.qte;
+  }
+
+  /**
+   * Between waves: everything still standing slinks off (husks sink back into the
+   * sand, flyers climb away, the rest run for the dunes) — no bounty for leavers.
+   */
+  calm() {
+    for (const e of this.list) {
+      if (!e.alive || e.retreat > 0) continue;
+      e.retreat = 0.001 + rnd.next() * 0.6;
+      if (e.state === 'windup' || e.state === 'strike') {
+        e.state = 'move';
+        e.stateT = 0;
+        this.clearTelegraph(e);
+        this.warn.cancelFor(e);
+      }
+      this.warn.endMark(e.mark);
+      e.mark = null;
+      e.qteHold = false;
+      if (e.state === 'hidden') e.state = 'move';
+      if (e.focus) e.focus = null;
+    }
+    if (this.snatching) this.releaseSnatch(this.snatching, true, 1, false);
+    if (this.wrapping) this.releaseWrap(this.wrapping, false);
   }
 
   // ------------------------------------------------------------- spawning
@@ -638,6 +697,8 @@ export class Enemies implements EnemyApi {
     // flipped scarabs take bonus; anything knocked flat takes a little more (ground and pound)
     if (e.flipped > 0) mult *= 2;
     if (e.state === 'down' && !DOT.has(hit.source)) mult *= 1.25;
+    // the counter window after a dodged blow
+    if (e.exposedT > 0 && !DOT.has(hit.source)) mult *= 1.6;
     // mariachi buff makes allies tougher? no — buff = speed/damage only
     const pl = this.player;
     const res = resolveHit(pl.stats, { ...hit, mult: (hit.mult ?? 1) * mult }, {
@@ -669,6 +730,8 @@ export class Enemies implements EnemyApi {
     }
     // flinch weight, poise break → stagger, heavy blows → knockdown
     this.react(e, hit, amt);
+    // a vulture shot hard mid-stoop (or while hauling its prey) tumbles out of the sky
+    if (e.skel === 'bird' && e.hp > 0 && !DOT.has(hit.source) && (e.state === 'dive' || e.state === 'snatch' || e.state === 'windup') && (amt >= e.maxHp * 0.22 || hit.headshot || (hit.knock ?? 0) >= 9)) this.knockOutOfSky(e);
     // feedback
     const pp = point ?? new THREE.Vector3(e.pos.x, e.pos.y + e.height * 0.6, e.pos.z);
     const kind = hit.source === 'poison' ? 'poison' : hit.headshot && e.def.hitKind !== 'chitin' ? 'bone' : e.def.hitKind;
@@ -802,7 +865,11 @@ export class Enemies implements EnemyApi {
     e.stateT = Math.min(was, 0.45 - dur);
     e.poise = 0;
     e.glow = 0;
+    e.qteHold = false;
     this.clearTelegraph(e);
+    this.warn.cancelFor(e);
+    this.warn.endMark(e.mark);
+    e.mark = null;
   }
 
   /** knocked flat: tossed along the push, lies a beat, then gets back up (animation: enemyAnim downPose) */
@@ -1203,9 +1270,13 @@ export class Enemies implements EnemyApi {
 
   kill(e: Enemy, hit: Hit | null, dx: number, dz: number, crit = false, collapse = false) {
     if (!e.alive) return;
+    if (this.snatching === e) this.releaseSnatch(e, true, 1, false);
     e.alive = false;
     const ctx = this.ctx;
     this.clearTelegraph(e);
+    this.warn.cancelFor(e);
+    this.warn.endMark(e.mark);
+    e.mark = null;
     const c = { x: e.pos.x, y: e.pos.y + e.height * 0.5, z: e.pos.z };
     const fluid = fluidFor(e.def.id, e.def.hitKind, e.alpha);
     // violent deaths send the bones flying; everything else collapses procedurally first
@@ -1524,6 +1595,11 @@ export class Enemies implements EnemyApi {
       e.poise = Math.max(0, e.poise - dt * 0.4);
       e.coughCd -= dt;
       e.eatenT = Math.max(0, e.eatenT - dt);
+      if (e.exposedT > 0) {
+        // wide open after a dodged blow: gold glints say "hit it now"
+        e.exposedT = Math.max(0, e.exposedT - dt);
+        if (rnd.chance(dt * 9)) ctx.particles.emit({ pos: { x: e.pos.x + (rnd.next() - 0.5) * e.radius * 2, y: e.pos.y + e.height * (0.3 + rnd.next() * 0.7), z: e.pos.z + (rnd.next() - 0.5) * e.radius * 2 }, count: 1, vel: { x: 0, y: 0.6, z: 0 }, life: [0.3, 0.45], size: [0.32, 0.05], sprite: 'star4', additive: true, color: [0xffd36b, 0xffffff], sizeJitter: 0.2 });
+      }
       for (let k = 0; k < e.cds.length; k++) e.cds[k] -= dt;
       e.buffT = Math.max(0, e.buffT - dt);
       for (const b of bands) if (b !== e && b.pos.distanceTo(e.pos) < 12) e.buffT = Math.max(e.buffT, 0.5);
@@ -1608,13 +1684,17 @@ export class Enemies implements EnemyApi {
     this.updateRag(dt);
     this.gore.update(dt);
     this.callouts.update(dt, ctx.camera, ctx.engine.height);
+    this.warn.update(dt);
+    this.dodge.update();
+    if (this.snatching) this.updateSnatch(this.snatching, dt);
     // render
     this.render.begin();
     const cam = ctx.camera.position;
     const drawE = (e: Enemy) => {
       if (e.anim.hidden) return;
       const cd = cam.distanceTo(e.pos);
-      const lod: 0 | 1 | 2 = cd > 58 ? 2 : cd > 26 ? 1 : 0;
+      // soaring vultures keep the full rig (and its sun shadow on the sand) further out
+      const lod: 0 | 1 | 2 = cd > 58 ? 2 : cd > (e.skel === 'bird' && e.alive ? 52 : 26) ? 1 : 0;
       this.rootMatrix(e, _m);
       const fx: [number, number, number, number] = [e.flash * 0.85, 0, e.glow, 0];
       e.batch.push(_m, e.rot, e.hidden, lod, fx, e.tint, e.posOff);
@@ -1918,7 +1998,7 @@ export class Enemies implements EnemyApi {
     if (e.state === 'spawn') {
       const dur = e.emerge === 'sand' ? 1.1 : e.emerge === 'fly' ? 1.6 : 0.3;
       if (e.emerge === 'sand' && rnd.chance(0.5)) ctx.fx.sandSpray({ x: e.pos.x, y: ground, z: e.pos.z }, { x: 0, y: 1, z: 0 }, 1.2);
-      if (e.emerge === 'fly') e.pos.y = damp(e.pos.y, ground + 7, 2, dt);
+      if (e.emerge === 'fly') e.pos.y = damp(e.pos.y, ground + (e.skel === 'bird' ? 12 : 7), 2, dt);
       if (e.stateT > dur) {
         e.state = 'move';
         e.stateT = 0;
@@ -1963,6 +2043,7 @@ export class Enemies implements EnemyApi {
       e.vel.multiplyScalar(Math.exp(-6 * dt));
       e.pos.addScaledVector(e.vel, dt);
       if (!e.flying) e.pos.y = ground;
+      else if (e.skel === 'bird') this.birdFall(e, dt, ground);
       if (rnd.chance(dt * 3)) ctx.particles.emit({ pos: { x: e.pos.x, y: e.pos.y + e.height + 0.3, z: e.pos.z }, count: 1, vel: { x: 0, y: 0.5, z: 0 }, life: [0.5, 0.6], size: [0.18, 0.12], sprite: 'star4', color: 0xfff2a0, additive: false });
       return;
     }
@@ -1986,10 +2067,22 @@ export class Enemies implements EnemyApi {
       e.vel.multiplyScalar(Math.exp(-5 * dt));
       e.pos.addScaledVector(e.vel, dt);
       if (!e.flying) e.pos.y = ground;
+      else if (e.skel === 'bird') this.birdFall(e, dt, ground);
       if (e.stateT > 0.45) {
-        e.state = 'move';
+        // a knocked-down vulture labours back up to its circle
+        e.state = e.skel === 'bird' ? 'climb' : 'move';
         e.stateT = 0;
       }
+      return;
+    }
+    // ---- between waves: slink off
+    if (e.retreat > 0) {
+      this.slinkOff(e, dt, ground, toX, toZ, dist);
+      return;
+    }
+    // ---- bone vultures: soar, scream, stoop, snatch, climb
+    if (e.skel === 'bird' && d.ai === 'flyer') {
+      this.thinkVulture(e, dt, time, ppos, pvel, ground, dist);
       return;
     }
     // the hunter is down: everyone stops to gloat (the animation layer dances)
@@ -2076,6 +2169,20 @@ export class Enemies implements EnemyApi {
     if (e.state === 'windup' && e.atk) {
       const a = e.atk;
       const W = e.wind;
+      // QTE DODGE: big blows offer a timed SPACE a beat before they land; the wind-up holds while the ring closes
+      const hitAt = W * (a.kind === 'melee' ? 1 / buff : 1);
+      if (!e.qteTried && !foc && e.stateT >= hitAt - 0.12) {
+        e.qteTried = true;
+        if (this.isBig(e, a) && this.dodge.ready() && this.threatens(e, a, ppos, pvel, dist)) {
+          e.qteHold = true;
+          this.warn.bang(e, { tier: 'grab', life: 1.2, y: e.height * e.scale + 0.55 });
+          void this.dodge.offer({ from: e.pos }).then((r) => {
+            e.qteHold = false;
+            e.dodged = r === 'good' || r === 'perfect';
+          });
+        }
+      }
+      if (e.qteHold) e.stateT = Math.min(e.stateT, hitAt - 0.01);
       if (d.ai === 'constrictor' && Math.floor(e.stateT / 0.2) !== Math.floor((e.stateT - dt) / 0.2)) ctx.sfx('skeleton_rattle', e.pos, 0.55, 1.7 + rnd.next() * 0.2);
       e.glow = clamp(e.stateT / W, 0, 1) * 1.5;
       e.yaw = dampAngle(e.yaw, face, a.kind === 'snipe' ? 6 : 10, dt);
@@ -2105,7 +2212,7 @@ export class Enemies implements EnemyApi {
       e.pos.z += wantZ * dt;
       e.pos.y = ground;
       if (rnd.chance(0.8)) ctx.fx.sandSpray({ x: e.pos.x, y: ground, z: e.pos.z }, { x: -wantX * 0.1, y: 0, z: -wantZ * 0.1 }, 1.5);
-      if (dist < e.radius + 0.8 && e.contactCd <= 0) {
+      if (dist < e.radius + 0.8 && e.contactCd <= 0 && !e.dodged) {
         e.contactCd = 1;
         this.player.takeHit({ base: (e.atk?.dmg ?? 20) * e.dmgMul, kind: 'phys', source: 'contact', knock: 12 }, e.pos);
         ctx.shake(0.4);
@@ -2114,6 +2221,7 @@ export class Enemies implements EnemyApi {
         e.state = 'recover';
         e.stateT = 0;
         e.squash.kick(-5);
+        if (e.dodged) this.expose(e);
       }
       return;
     }
@@ -2127,6 +2235,11 @@ export class Enemies implements EnemyApi {
         e.state = 'recover';
         e.stateT = 0;
         e.squash.kick(-9);
+        if (e.dodged) {
+          // it pounced on an afterimage: sprawled in the sand, wide open
+          this.expose(e);
+          return;
+        }
         const p = { x: e.pos.x, y: e.pos.y, z: e.pos.z };
         if (e.state === 'recover' && (d.ai === 'leaper' || d.ai === 'pack')) {
           ctx.fx.sandBurst(p, 1);
@@ -2344,14 +2457,402 @@ export class Enemies implements EnemyApi {
           ctx.sfx('giant_scorpion_hiss', e.pos, 0.55, 1.5);
         }
         e.squash.kick(a.kind === 'melee' ? 5 : 3);
-        if (a.kind === 'melee' || a.kind === 'explode' || a.kind === 'charge' || a.kind === 'leap') {
-          ctx.particles.emit({ pos: { x: e.pos.x, y: e.pos.y + e.height + 0.45, z: e.pos.z }, count: 1, vel: { x: 0, y: 0.8, z: 0 }, life: [W, W], size: [0.5, 0.5], sprite: 'dg_!', color: a.kind === 'explode' ? 0xff4020 : 0xffd040, screen: true, sizeJitter: 0 });
-        }
+        e.qteTried = false;
+        e.qteHold = false;
+        e.dodged = false;
+        // the warning language: a "!" over the attacker, ground markers for line / area moves
+        const tier = this.warnTier(e, a);
+        if (tier) this.warn.bang(e, { tier, life: W, y: e.height * e.scale + 0.5 });
+        if (a.kind === 'whip' || a.kind === 'lasso') this.warn.lane(e.pos.x, e.pos.z, toX / dist, toZ / dist, a.range + 0.6, a.kind === 'whip' ? 2.6 : 1.6, W, a.kind === 'lasso' ? 'grab' : 'tell');
+        if (a.kind === 'aura' || a.kind === 'vortex') this.warn.circle(e.pos.x, e.pos.z, a.radius ?? 5, W, a.kind === 'vortex' ? 'heavy' : 'tell');
         if (a.kind === 'explode') ctx.sfx('dynamite_fuse', e.pos, 0.8);
         if (d.id === 'jackal' && a.kind === 'leap') ctx.sfx('jackal_attack', e.pos, 0.7);
         if (d.id === 'giantScorpion') ctx.sfx('giant_scorpion_hiss', e.pos, 0.7);
         if (d.id === 'mummy' && rnd.chance(0.5)) ctx.sfx('mummy_groan', e.pos, 0.6);
         break;
+      }
+    }
+  }
+
+  // ------------------------------------------------------------- warnings, QTE dodges, openings
+  /** which "!" an attack gets (null: its muzzle glint is warning enough) */
+  private warnTier(e: Enemy, a: AttackDef): WarnTier | null {
+    if (this.isBig(e, a)) return 'grab';
+    const heavyBody = e.alpha || e.def.ai === 'tank' || e.def.hp >= 120;
+    switch (a.kind) {
+      case 'explode':
+      case 'charge':
+      case 'vortex':
+      case 'snipe':
+        return 'heavy';
+      case 'leap':
+        return e.def.ai === 'constrictor' ? 'grab' : heavyBody ? 'heavy' : 'tell';
+      case 'lasso':
+        return 'grab';
+      case 'melee':
+      case 'whip':
+      case 'aura':
+        // a crowd of trash swings thins out its tells so the big ones stay readable
+        if (!heavyBody && this.warn.active >= 14) return null;
+        return heavyBody ? 'heavy' : 'tell';
+      case 'howl':
+        return e.alpha ? 'tell' : null;
+      case 'ring':
+      case 'spiral':
+        return e.alpha || (a.count ?? 0) >= 14 ? 'tell' : null;
+      default:
+        return e.alpha ? 'tell' : null;
+    }
+  }
+
+  /** big blows that can offer a QTE dodge */
+  private isBig(e: Enemy, a: AttackDef) {
+    return !!a.qte || (e.alpha && (a.kind === 'leap' || a.kind === 'charge'));
+  }
+
+  /** will this blow actually land on the hunter if nothing changes? (no QTE for a whiff) */
+  private threatens(e: Enemy, a: AttackDef, p: THREE.Vector3, pv: THREE.Vector3, dist: number) {
+    if (!this.player.alive || (this.player.invuln ?? 0) > 0 || Math.abs(p.y - e.pos.y) > 3) return false;
+    if (a.kind === 'charge') {
+      const fx = Math.sin(e.yaw), fz = Math.cos(e.yaw);
+      const along = (p.x - e.pos.x) * fx + (p.z - e.pos.z) * fz;
+      const lat = Math.abs(-(p.x - e.pos.x) * fz + (p.z - e.pos.z) * fx);
+      return along > 0 && along < 16 && lat < e.radius + 1.6;
+    }
+    if (a.kind === 'leap') return Math.hypot(p.x + pv.x * 0.4 - e.pos.x, p.z + pv.z * 0.4 - e.pos.z) < a.range + 1.5;
+    return dist < a.range + 1;
+  }
+
+  /** a dodged blow leaves the attacker wide open: staggered, +60% damage taken, gold glints */
+  private expose(e: Enemy) {
+    e.dodged = false;
+    if (!e.alive) return;
+    e.exposedT = 2.6;
+    this.stagger(e, 1.6);
+    const ctx = this.ctx;
+    const top = { x: e.pos.x, y: e.pos.y + e.height * e.scale + 0.7, z: e.pos.z };
+    this.callouts.show('OPENING!', '#ffd36b', top.x, top.y, top.z);
+    ctx.sfx('counter_clang', e.pos, 0.7, 0.75);
+    ctx.fx.sparkle(top, 0xffd36b, 12, 0.8);
+    ctx.fx.sandBurst({ x: e.pos.x, y: this.ctx.world.groundAt(e.pos.x, e.pos.z), z: e.pos.z }, 0.9 * e.scale);
+    ctx.events.emit('enemyExposed', e);
+  }
+
+  // ------------------------------------------------------------- between waves
+  private slinkOff(e: Enemy, dt: number, ground: number, toX: number, toZ: number, dist: number) {
+    const ctx = this.ctx;
+    e.retreat += dt;
+    e.glow = damp(e.glow, 0, 6, dt);
+    if (e.skel === 'bird' || e.flying) {
+      // climb away over the dunes
+      e.state = 'climb';
+      e.vel.x = damp(e.vel.x, (-toX / dist) * 8, 1.5, dt);
+      e.vel.z = damp(e.vel.z, (-toZ / dist) * 8, 1.5, dt);
+      e.vel.y = 4.5;
+      e.pos.addScaledVector(e.vel, dt);
+      e.yaw = dampAngle(e.yaw, Math.atan2(e.vel.x, e.vel.z), 3, dt);
+      if (e.retreat > 5 || e.pos.y > ground + 34) e.alive = false;
+      return;
+    }
+    if (e.state !== 'move') {
+      e.state = 'move';
+      e.stateT = 0;
+    }
+    const s = e.def.speed * e.spdMul * 0.85;
+    this.move(e, (-toX / dist) * s, (-toZ / dist) * s, dt, ground, Math.atan2(-toX, -toZ));
+    // out of the fight: sink back into the sand
+    if (e.retreat > 2.4 + e.quirk * 1.6) {
+      if (ctx.camera.position.distanceTo(e.pos) < 70) {
+        ctx.fx.sandBurst({ x: e.pos.x, y: ground, z: e.pos.z }, 0.9 * e.scale);
+        ctx.fx.dust({ x: e.pos.x, y: ground + 0.3, z: e.pos.z }, 0.8 * e.scale, P.sand0, 3);
+      }
+      e.alive = false;
+    }
+  }
+
+  // ------------------------------------------------------------- bone vulture
+  /** a knocked-out or stunned vulture drops toward the sand */
+  private birdFall(e: Enemy, dt: number, ground: number) {
+    e.vel.y -= 16 * dt;
+    e.pos.y += e.vel.y * dt;
+    if (e.pos.y < ground + 0.35) {
+      if (e.vel.y < -4 && this.ctx.camera.position.distanceTo(e.pos) < 50) {
+        this.ctx.fx.sandBurst({ x: e.pos.x, y: ground, z: e.pos.z }, 0.8);
+        this.ctx.sfx('board_land', e.pos, 0.4, 1.2);
+      }
+      e.pos.y = ground + 0.35;
+      e.vel.y = 0;
+    }
+  }
+
+  /** shot hard out of the stoop: it tumbles, and lets go of anything it was carrying */
+  private knockOutOfSky(e: Enemy) {
+    if (this.snatching === e) this.releaseSnatch(e, true, 1, false);
+    this.warn.cancelFor(e);
+    this.warn.endMark(e.mark);
+    e.mark = null;
+    e.qteHold = false;
+    e.state = 'stagger';
+    e.stateT = 0.45 - 1.2;
+    e.vel.y = Math.min(e.vel.y, -3);
+    this.ctx.sfx('vulture_screech', e.pos, 0.7, 1.35);
+    this.ctx.particles.emit({ pos: { x: e.pos.x, y: e.pos.y + 0.4, z: e.pos.z }, count: 10, spread: 2.2, up: 1, life: [0.8, 1.6], size: [0.12, 0.08], sprite: ['twig', 'dot4'], color: [0x45301f, 0x5a3e2c, 0xeee2c8], gravity: 2.5, drag: 2, rot: 6, rotSpeed: 4 });
+  }
+
+  private thinkVulture(e: Enemy, dt: number, time: number, ppos: THREE.Vector3, pvel: THREE.Vector3, ground: number, dist: number) {
+    const ctx = this.ctx;
+    const d = e.def;
+    const a = d.attacks[0];
+    const spd = d.speed * e.spdMul * e.status.slowMul() * (e.buffT > 0 ? 1.3 : 1);
+    const cruise = Math.max(ground, ppos.y) + (e.alpha ? 13.5 : 11.5) + Math.sin(time * 0.37 + e.quirk * 9) * 1.2;
+    const y0 = e.pos.y;
+    switch (e.state) {
+      case 'snatch':
+        return; // updateSnatch carries it
+      case 'windup': {
+        // the shriek: brake, rear up, glare down at the tracking ring
+        const W = e.wind;
+        e.vel.x *= Math.exp(-3 * dt);
+        e.vel.z *= Math.exp(-3 * dt);
+        e.pos.x += e.vel.x * dt;
+        e.pos.z += e.vel.z * dt;
+        e.pos.y = damp(e.pos.y, cruise + 1.6, 2, dt);
+        const m = e.mark;
+        const tx = m ? m.x : ppos.x, tz = m ? m.z : ppos.z;
+        e.yaw = dampAngle(e.yaw, Math.atan2(tx - e.pos.x, tz - e.pos.z), 6, dt);
+        e.glow = clamp(e.stateT / W, 0, 1) * 1.3;
+        if (Math.floor(e.stateT / 0.25) !== Math.floor((e.stateT - dt) / 0.25) && rnd.chance(0.5)) ctx.particles.emit({ pos: { x: e.pos.x, y: e.pos.y, z: e.pos.z }, count: 2, spread: 1.4, up: -0.5, life: [0.9, 1.6], size: [0.1, 0.06], sprite: ['twig'], color: [0x45301f, 0x5a3e2c], gravity: 1.5, drag: 2.5, rot: 6, rotSpeed: 3 });
+        if (e.stateT >= W) {
+          // stoop
+          e.state = 'dive';
+          e.stateT = 0;
+          e.glow = 0;
+          e.contactCd = 1.2;
+          e.leapFrom.copy(e.pos);
+          e.leapTo.set(tx, ctx.world.groundAt(tx, tz) + 0.95, tz);
+          e.leapDur = clamp(e.leapFrom.distanceTo(e.leapTo) / (e.alpha ? 25 : 21), 0.5, 0.95);
+          e.yaw = Math.atan2(tx - e.pos.x, tz - e.pos.z);
+          ctx.sfx('whoosh_big', e.pos, 0.8, 0.75);
+          ctx.sfx('vulture_screech', e.pos, 0.9, 0.85);
+        }
+        e.vel.y = (e.pos.y - y0) / Math.max(dt, 1e-4);
+        return;
+      }
+      case 'dive': {
+        const T = e.leapDur;
+        // QTE DODGE as the talons come in
+        if (!e.qteTried && e.stateT >= T * 0.68) {
+          e.qteTried = true;
+          if (this.dodge.ready() && this.player.alive && (this.player.invuln ?? 0) <= 0 && Math.hypot(ppos.x - e.leapTo.x, ppos.z - e.leapTo.z) < 3.2 && Math.abs(ppos.y - e.leapTo.y) < 3) {
+            e.qteHold = true;
+            void this.dodge.offer({ from: e.leapFrom }).then((r) => {
+              e.qteHold = false;
+              e.dodged = r === 'good' || r === 'perfect';
+            });
+          }
+        }
+        if (e.qteHold) e.stateT = Math.min(e.stateT, T * 0.7);
+        const k = clamp(e.stateT / T, 0, 1);
+        const kk = Math.pow(k, 1.55);
+        const px = e.pos.x, pz = e.pos.z;
+        e.pos.lerpVectors(e.leapFrom, e.leapTo, kk);
+        e.pos.y += Math.sin(k * Math.PI) * -1.2;
+        e.pos.y = Math.max(e.pos.y, ctx.world.groundAt(e.pos.x, e.pos.z) + 0.6);
+        e.vel.set((e.pos.x - px) / Math.max(dt, 1e-4), (e.pos.y - y0) / Math.max(dt, 1e-4), (e.pos.z - pz) / Math.max(dt, 1e-4));
+        if (e.pos.y < ground + 3.5 && rnd.chance(0.7)) ctx.fx.sandSpray({ x: e.pos.x, y: ground + 0.05, z: e.pos.z }, { x: e.vel.x * 0.05, y: 1.4, z: e.vel.z * 0.05 }, 1.1);
+        if (k < 1) return;
+        // talons
+        this.warn.endMark(e.mark);
+        e.mark = null;
+        e.state = 'climb';
+        e.stateT = 0;
+        ctx.fx.sandBurst({ x: e.pos.x, y: ground, z: e.pos.z }, 1);
+        ctx.fx.dust({ x: e.pos.x, y: ground + 0.3, z: e.pos.z }, 1.3, P.sand0, 5);
+        if (e.dodged) {
+          // it struck an afterimage and ploughed into the dune
+          e.pos.y = ground + 0.35;
+          e.vel.set(e.vel.x * 0.2, 0, e.vel.z * 0.2);
+          ctx.sfx('board_land', e.pos, 0.7, 0.9);
+          ctx.shake(0.15);
+          this.expose(e);
+          return;
+        }
+        const hd = Math.hypot(ppos.x - e.pos.x, ppos.z - e.pos.z);
+        if (hd < 2.3 && Math.abs(ppos.y + 0.9 - e.pos.y) < 2.6 && this.player.alive) {
+          const dealt = this.player.takeHit({ base: a.dmg * e.dmgMul, kind: 'phys', source: 'contact', knock: 3, status: [{ id: 'bleed', stacks: 1, dur: 3 }] }, e.pos);
+          ctx.sfx('hit_flesh', e.pos, 0.8, 1.2);
+          const canSnatch = dealt > 0 && !this.snatching && !this.wrapping && !!this.qte && !this.qte.active && rnd.chance(e.alpha ? 1 : 0.6);
+          if (canSnatch) this.startSnatch(e, time);
+        }
+        return;
+      }
+      case 'climb':
+      case 'strike':
+      case 'recover': {
+        // labour back up to the circle on heavy beats
+        e.state = 'climb';
+        const fx = Math.sin(e.yaw), fz = Math.cos(e.yaw);
+        e.vel.x = damp(e.vel.x, fx * spd * 0.8, 2, dt);
+        e.vel.z = damp(e.vel.z, fz * spd * 0.8, 2, dt);
+        e.pos.x += e.vel.x * dt;
+        e.pos.z += e.vel.z * dt;
+        e.pos.y = damp(e.pos.y, cruise, 1.4, dt);
+        e.yaw = dampAngle(e.yaw, Math.atan2(e.vel.x, e.vel.z) + 0.6 * e.orbitDir * dt, 2, dt);
+        e.vel.y = (e.pos.y - y0) / Math.max(dt, 1e-4);
+        if (e.pos.y < ground + 3 && rnd.chance(dt * 12)) ctx.fx.dust({ x: e.pos.x, y: ground + 0.2, z: e.pos.z }, 0.9, P.sand0, 2);
+        if (e.pos.y > cruise - 1.3 || e.stateT > 3.2) {
+          e.state = 'move';
+          e.stateT = 0;
+        }
+        return;
+      }
+    }
+    // ---- soaring: a lazy banked circle over the hunter, the radius breathing in and out (a slow spiral)
+    e.spiral += dt * (0.3 + e.quirk * 0.12);
+    const R = (e.alpha ? 10.5 : 9) + Math.sin(e.spiral) * 3.4;
+    const w = clamp((spd * 0.45) / R, 0.22, 0.7);
+    e.targetOff += dt * w * e.orbitDir;
+    const tx = ppos.x + pvel.x * 0.6 + Math.cos(e.targetOff) * R, tz = ppos.z + pvel.z * 0.6 + Math.sin(e.targetOff) * R;
+    let wx = (tx - e.pos.x) * 1.4, wz = (tz - e.pos.z) * 1.4;
+    const wl = Math.hypot(wx, wz);
+    const cap = spd * 1.45;
+    if (wl > cap) {
+      wx *= cap / wl;
+      wz *= cap / wl;
+    }
+    // stay inside the storm
+    const sd = ctx.world.storm.sdf(e.pos.x, e.pos.z);
+    if (sd < 6) {
+      const inw = ctx.world.storm.inward(e.pos.x, e.pos.z, { x: 0, z: 0 });
+      wx += inw.x * spd * (6 - sd) * 0.3;
+      wz += inw.z * spd * (6 - sd) * 0.3;
+    }
+    e.vel.x = damp(e.vel.x, wx, 1.6, dt);
+    e.vel.z = damp(e.vel.z, wz, 1.6, dt);
+    e.pos.x += e.vel.x * dt;
+    e.pos.z += e.vel.z * dt;
+    e.pos.y = damp(e.pos.y, cruise, 1.1, dt);
+    e.vel.y = (e.pos.y - y0) / Math.max(dt, 1e-4);
+    if (Math.hypot(e.vel.x, e.vel.z) > 0.5) e.yaw = dampAngle(e.yaw, Math.atan2(e.vel.x, e.vel.z), 3, dt);
+    e.glow = damp(e.glow, 0, 6, dt);
+    if (rnd.chance(dt * 0.05)) ctx.sfx('vulture_screech', e.pos, 0.3, 1.15 + rnd.next() * 0.15);
+    // pick the moment: only a couple of vultures commit at once
+    if (!a || e.cds[0] > 0 || e.life < 2.5 || dist > 24 || !this.player.alive || this.snatching) return;
+    let diving = 0;
+    for (const o of this.list) if (o.skel === 'bird' && (o.state === 'windup' || o.state === 'dive')) diving++;
+    if (diving >= (this.wave >= 20 ? 2 : 1)) return;
+    const W = a.windup * (1 + Math.max(0, 8 - this.wave) * 0.04) * (e.alpha ? 0.9 : 1);
+    e.wind = W;
+    e.atk = a;
+    e.cds[0] = a.cooldown * (0.85 + rnd.next() * 0.3);
+    e.state = 'windup';
+    e.stateT = 0;
+    e.dodged = false;
+    e.qteHold = false;
+    // only some dives offer the QTE (alphas always): the ring is the main tell
+    e.qteTried = !(e.alpha || rnd.chance(0.4));
+    if (a.title) this.skill(e, a.title, time);
+    ctx.sfx('vulture_screech', e.pos, 1, 0.95);
+    this.warn.bang(e, { tier: e.alpha ? 'grab' : 'heavy', life: W + 0.2, y: 1.2 * e.scale });
+    // the strike ring tracks the hunter (leading their run), then locks just before the stoop
+    const pl = this.player;
+    this.warn.endMark(e.mark);
+    e.mark = this.warn.circle(ppos.x, ppos.z, 2.4, W + 0.9, e.alpha ? 'grab' : 'heavy', () => (pl.alive ? { x: pl.pos.x + pl.board.vel.x * 0.45, z: pl.pos.z + pl.board.vel.z * 0.45 } : null), Math.max(0.3, W - 0.32));
+  }
+
+  /** the talons close: the hunter is hauled off along the dive, pecked, until they shake it off */
+  private startSnatch(e: Enemy, time: number) {
+    const ctx = this.ctx;
+    this.snatching = e;
+    e.state = 'snatch';
+    e.stateT = 0;
+    this.snatchTick = 0.55;
+    let dx = e.leapTo.x - e.leapFrom.x, dz = e.leapTo.z - e.leapFrom.z;
+    const dl = Math.hypot(dx, dz) || 1;
+    dx /= dl;
+    dz /= dl;
+    const sp = e.alpha ? 7.5 : 6.5;
+    e.vel.set(dx * sp, 0, dz * sp);
+    const title = e.def.moveTitles?.snatch ?? 'Beast of Burden';
+    this.skill(e, title, time, true);
+    ctx.toast(title.toUpperCase(), '#c84a2a', 'Snatched! Mash F to shake it off');
+    ctx.sfx('vulture_screech', e.pos, 1, 0.8);
+    ctx.shake(0.3);
+    ctx.events.emit('vultureSnatch', e);
+    const q = this.qte;
+    if (!q) return;
+    void q.run({ kind: 'mash', key: 'KeyF', label: 'SHAKE IT OFF', duration: 2.3, target: e.alpha ? 13 : 10 }).then((r) => {
+      if (this.snatching !== e) return;
+      this.releaseSnatch(e, r !== 'fail', r === 'perfect' ? 1.6 : 1);
+    });
+  }
+
+  private updateSnatch(e: Enemy, dt: number) {
+    const ctx = this.ctx;
+    const pl = this.player;
+    if (!e.alive || !pl.alive || e.state !== 'snatch') {
+      this.releaseSnatch(e, false, 1, false);
+      return;
+    }
+    // drift the haul a little and keep it out of the storm
+    const turn = Math.sin(e.stateT * 1.3 + e.quirk * 5) * 0.5 * dt;
+    const c = Math.cos(turn), sn = Math.sin(turn);
+    let vx = e.vel.x * c - e.vel.z * sn, vz = e.vel.x * sn + e.vel.z * c;
+    const b = pl.board;
+    if (ctx.world.storm.sdf(b.pos.x, b.pos.z) < 9) {
+      const inw = ctx.world.storm.inward(b.pos.x, b.pos.z, { x: 0, z: 0 });
+      const sp = Math.hypot(vx, vz);
+      vx = damp(vx, inw.x * sp, 3, dt);
+      vz = damp(vz, inw.z * sp, 3, dt);
+    }
+    e.vel.set(vx, 0, vz);
+    const g = ctx.world.groundAt(b.pos.x + vx * dt, b.pos.z + vz * dt);
+    b.pos.x += vx * dt;
+    b.pos.z += vz * dt;
+    b.pos.y = damp(b.pos.y, g + Math.min(2.4, 0.6 + e.stateT * 2.2), 5, dt);
+    b.vel.set(0, 0, 0);
+    e.pos.set(b.pos.x - vx * 0.03, b.pos.y + 1.3 * e.scale, b.pos.z - vz * 0.03);
+    e.yaw = Math.atan2(vx, vz);
+    // pecks
+    this.snatchTick -= dt;
+    if (this.snatchTick <= 0) {
+      this.snatchTick = 0.6;
+      pl.takeHit({ base: (e.def.attacks[0]?.dmg ?? 10) * 0.35 * e.dmgMul, kind: 'phys', source: 'contact', knock: 0 }, e.pos);
+      ctx.sfx('hit_flesh', e.pos, 0.4, 1.3);
+      e.squash.kick(-3);
+    }
+    if (rnd.chance(dt * 14)) ctx.fx.dust({ x: b.pos.x, y: g + 0.2, z: b.pos.z }, 1.1, P.sand0, 2);
+    if (rnd.chance(dt * 6)) ctx.particles.emit({ pos: { x: e.pos.x, y: e.pos.y, z: e.pos.z }, count: 1, spread: 1.5, up: 0.4, life: [0.8, 1.4], size: [0.1, 0.07], sprite: 'twig', color: [0x45301f, 0x5a3e2c], gravity: 1.5, drag: 2.5, rot: 6, rotSpeed: 3 });
+    // no QTE overlay to answer it: it drops its prey on its own
+    if (e.stateT > (this.qte ? 2.9 : 1.6)) this.releaseSnatch(e, false);
+  }
+
+  /** end a snatch. broke: the hunter shook it off (the bird is hurt and tumbles); else it drops its prey */
+  releaseSnatch(e: Enemy, broke: boolean, mult = 1, hurtBird = true) {
+    if (this.snatching !== e) return;
+    this.snatching = null;
+    const ctx = this.ctx;
+    const pl = this.player;
+    const b = pl.board;
+    b.vel.set(e.vel.x * 0.6, broke ? 3 : -1, e.vel.z * 0.6);
+    if (!e.alive) return;
+    if (broke) {
+      e.state = 'stagger';
+      e.stateT = 0.45 - 1.3;
+      e.vel.set(-e.vel.x * 0.3, 2, -e.vel.z * 0.3);
+      if (hurtBird && e.hp > 0) {
+        ctx.toast(mult > 1.2 ? 'TORE IT OFF!' : 'SHOOK IT OFF', '#ffd36b');
+        ctx.sfx('punch', e.pos, 0.9);
+        ctx.shake(0.25);
+        this.damage(e, { base: e.maxHp * 0.3 * mult, kind: 'phys', source: 'melee', knock: 8, canCrit: false, status: [{ id: 'stun', stacks: 1, dur: 1 }] });
+      }
+      if (e.alive) ctx.particles.emit({ pos: { x: e.pos.x, y: e.pos.y, z: e.pos.z }, count: 12, spread: 2.5, up: 1, life: [0.8, 1.6], size: [0.12, 0.08], sprite: ['twig', 'dot4'], color: [0x45301f, 0x5a3e2c, 0xeee2c8], gravity: 2, drag: 2, rot: 6, rotSpeed: 4 });
+    } else {
+      e.state = 'climb';
+      e.stateT = 0;
+      if (hurtBird && pl.alive) {
+        pl.takeHit({ base: (e.def.attacks[0]?.dmg ?? 10) * 1.3 * e.dmgMul, kind: 'phys', source: 'contact', knock: 6 }, e.pos);
+        ctx.sfx('vulture_screech', e.pos, 0.8, 1.1);
       }
     }
   }
@@ -2426,6 +2927,10 @@ export class Enemies implements EnemyApi {
     switch (a.kind) {
       case 'melee':
         ctx.sfx('melee_whoosh', e.pos, 0.6);
+        if (e.dodged) {
+          this.expose(e);
+          break;
+        }
         if (foc) {
           if (dist < a.range + 0.7 + foc.radius) foc.hurt(dmg, e.pos, 'melee');
         } else if (dist < a.range + 0.7 && Math.abs(ppos.y - e.pos.y) < 2) {
@@ -2663,6 +3168,9 @@ export class Enemies implements EnemyApi {
 
   clear() {
     for (const e of this.list) this.clearTelegraph(e);
+    if (this.snatching) this.releaseSnatch(this.snatching, true, 1, false);
+    this.warn.clear();
+    this.dodge.clear();
     this.list.length = 0;
     this.dying.length = 0;
     this.wrapping = null;

@@ -18,6 +18,7 @@ import { VoxelModel as VM, unkey, downsampleModel, mix as mixRGB, mulRGB } from 
 import { ruinify, ruinSpots, RuinOpts, RuinSpots, NOCOL, cobweb, spiderNest, plankDebris, outpostTower, oasisReeds, oasisFlowers, lilyPads } from '../models/props/ruins';
 import { globalUniforms, atmoFogUniforms } from '../../engine/render/VoxelMaterial';
 import { PRESETS } from './Env';
+import { rockArch, colossusLegs, colossusHead, shipwreck, shrine, cairn } from '../models/props/wilds';
 
 type SM = {
   model: VoxelModel;
@@ -249,6 +250,13 @@ const KINDS: Record<string, KindDef> = {
   stoneGate: { variants: 1, build: () => P.templeGate(0), solid: 'voxel', unique: true },
   ore: { variants: 5, build: (v, a) => P.oreNode(a.data?.type ?? (['copper', 'silver', 'gold', 'turquoise', 'amethyst'] as const)[v % 5], v), solid: 'circle', radius: 0.5, unique: true },
   tumbleweed: { variants: 3, build: (v) => P.tumbleweed(v), solid: 'none' },
+  // the wild sights (zone POIs): sculpted set pieces, ridden past, under and around
+  rockArch: { variants: 3, build: (v) => rockArch(v), solid: 'voxel', unique: true },
+  colossusLegs: { variants: 1, build: () => colossusLegs(), solid: 'voxel', unique: true },
+  colossusHead: { variants: 1, build: () => colossusHead(), solid: 'voxel', unique: true },
+  shipwreck: { variants: 2, build: (v) => shipwreck(v), solid: 'voxel', unique: true },
+  shrine: { variants: 3, build: (v) => shrine(v), solid: 'voxel', unique: true },
+  cairn: { variants: 2, build: (v) => cairn(v), solid: 'circle', radius: 0.6 },
   rimStone: { variants: 6, build: (v) => rimStone(v), solid: 'circle', radius: 0.7 },
   rimGate: { variants: 2, build: (v) => rimStone(6 + v), solid: 'circle', radius: 0.7 },
 };
@@ -280,6 +288,8 @@ interface Variant {
 }
 
 interface Batch {
+  /** instances further than this are not drawn (big zones: keep the far scatter off the GPU) */
+  hide: number;
   v: Variant;
   near: THREE.InstancedMesh;
   far: THREE.InstancedMesh;
@@ -369,7 +379,8 @@ export class Props {
   }
 
   /** unique mesh with automatic distance LOD */
-  private lodMesh(v: Variant, foliage: boolean, nearDist = 60) {
+  /** unique mesh with automatic distance LOD; culled past `hide` m (the storm and the haze hide it anyway) */
+  private lodMesh(v: Variant, foliage: boolean, nearDist = 60, hide = v.height > 6 ? 560 : 320) {
     const lod = new THREE.LOD();
     const mat = foliage ? sharedFoliageMaterial : sharedVoxelMaterial;
     const a = new THREE.Mesh(v.geo, mat);
@@ -380,6 +391,7 @@ export class Props {
     b.receiveShadow = true;
     lod.addLevel(a, 0);
     lod.addLevel(b, nearDist);
+    lod.addLevel(new THREE.Object3D(), hide);
     return lod;
   }
 
@@ -502,7 +514,7 @@ export class Props {
             im.count = 0;
             this.group.add(im);
           }
-          b = { v, near, far, insts: [], foliage: !!def.foliage };
+          b = { v, near, far, insts: [], foliage: !!def.foliage, hide: def.foliage || v.height < 0.9 ? 170 : RIM_KINDS.has(kind) ? 380 : 280 };
           zoneBatches.set(bkey, b);
           this.batches.push(b);
         }
@@ -554,7 +566,7 @@ export class Props {
       this.world.field.inBounds(x, zz, 6) &&
       this.world.groundAt(x, zz) > sa.waterLevel + 0.3 &&
       !z.anchors.some((a) => a.kind !== 'tumbleweed' && Math.hypot(a.x - x, a.z - zz) < pad);
-    const n = Math.round((Math.PI * 2 * R) / 8.5);
+    const n = Math.round((Math.PI * 2 * R) / 11);
     for (let i = 0; i < n; i++) {
       const a = ((i + rng.range(-0.25, 0.25)) / n) * Math.PI * 2;
       const rr = R + rng.range(-0.8, 2.2);
@@ -593,7 +605,9 @@ export class Props {
     for (const inst of b.insts) {
       if (inst.broken) continue;
       p.setFromMatrixPosition(inst.matrix);
-      const near = p.distanceTo(focus) < this.lodNear;
+      const dist = p.distanceTo(focus);
+      if (dist > b.hide) continue;
+      const near = dist < this.lodNear;
       if (near) b.near.setMatrixAt(n++, inst.matrix);
       else b.far.setMatrixAt(f++, inst.matrix);
     }

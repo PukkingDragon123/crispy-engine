@@ -15,6 +15,15 @@ import { P } from '../../engine/voxel/palette';
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 
+/** QTE DODGE for a miniboss blow (the shared enemies.dodge); true = the hunter twisted clear */
+async function dodgeQte(b: Boss, from: { x: number; z: number }, inZone: () => boolean) {
+  const dg = b.d.enemies.dodge;
+  if (!dg.qte) dg.qte = b.d.qte;
+  if (!b.alive || !inZone() || !dg.ready()) return false;
+  const r = await dg.offer({ from });
+  return r === 'good' || r === 'perfect';
+}
+
 function nodeWorld(b: Boss, name: string, out = new THREE.Vector3()) {
   const n = b.rig.nodes[name] ?? b.rig.sockets[name];
   if (!n) return out.set(b.pos.x, b.pos.y + b.height * 0.6, b.pos.z);
@@ -63,6 +72,7 @@ export class BigBertha extends Boss {
     this.setExpr('angry');
     this.anim.wind = 1;
     ctx.sfx('boss_roar', this.pos, 0.7, 1.25);
+    this.d.enemies.warn.bang(this, { tier: 'heavy', life: 0.7, y: this.height + 0.6 });
     for (let i = 0; i < 5; i++) {
       this.faceTarget(this.playerPos());
       const dir = _v.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
@@ -75,14 +85,19 @@ export class BigBertha extends Boss {
     this.moveTarget = end;
     this.moveSpeed = 24 + this.phase * 5;
     this.dashing = true;
-    let hit = false;
+    let hit = false, offered = false, dodged = false;
     const t0 = this.t;
     ctx.sfx('whoosh_big', this.pos, 0.9);
     try {
       while (this.t - t0 < 1.7 && Math.hypot(end.x - this.pos.x, end.z - this.pos.z) > 1.6) {
         await this.wait(0.03);
         ctx.fx.dust({ x: this.pos.x, y: this.pos.y + 0.3, z: this.pos.z }, 1.2, 0xe6cf9f, 2);
-        if (!hit && this.distToPlayer() < this.radius + 1.3 && Math.abs(this.player.pos.y - this.pos.y) < 2.5) {
+        if (!offered && this.distToPlayer() < this.radius + 4.5) {
+          offered = true;
+          const px = this.player.pos.x - this.pos.x, pz = this.player.pos.z - this.pos.z;
+          dodged = await dodgeQte(this, this.pos, () => px * dir.x + pz * dir.z > 0);
+        }
+        if (!hit && !dodged && this.distToPlayer() < this.radius + 1.3 && Math.abs(this.player.pos.y - this.pos.y) < 2.5) {
           hit = true;
           this.player.takeHit({ base: 26 + this.phase * 7, kind: 'phys', source: 'contact', knock: 18 }, this.pos.clone());
           ctx.shake(0.5);
@@ -163,7 +178,11 @@ export class BigBertha extends Boss {
     const g = ctx.world.groundAt(at.x, at.z);
     this.root.visible = true;
     this.rig.root.position.y = -3;
+    this.d.enemies.warn.bang({ x: at.x, y: g, z: at.z }, { tier: 'heavy', life: 0.9, y: 3 });
     const slam = this.slam(at, 4.6, 34 + this.phase * 6, 0.9, 'sand');
+    await this.wait(0.72);
+    const pl = this.player;
+    await dodgeQte(this, at, () => Math.hypot(pl.pos.x - at.x, pl.pos.z - at.z) < 4.6);
     await slam;
     this.player.board.impulse.y += 14;
     this.pos.y = g;
@@ -594,6 +613,7 @@ export class Pharaoh extends Boss {
     this.anim.wind = 1;
     this.guarding = false;
     this.ctx.sfx('divine_whisper', this.pos, 0.9);
+    this.d.enemies.warn.bang(this, { tier: 'heavy', life: 0.8 * (1 + this.phase), y: this.height + 0.5 });
     const n = 1 + this.phase;
     for (let i = 0; i < n; i++) {
       const pv = this.player.board.vel;

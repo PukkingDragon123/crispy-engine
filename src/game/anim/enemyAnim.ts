@@ -1415,41 +1415,108 @@ function insect(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase, pairs: 3 
 }
 
 // ============================================================= bird
+/**
+ * The bone vulture: soars in a lazy banked circle with only the odd heavy flap,
+ * rears up and screams with its wings cupped before a strike, folds both wing
+ * joints into a stoop for the dive and throws its talons forward at the end,
+ * beats hard while it hauls its prey along (legs locked down), and labours
+ * back up to altitude afterwards. Missing joints (older bird rigs) are skipped.
+ */
 function bird(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   const t = env.time, dt = env.dt;
   const st = e.state;
   const diving = st === 'dive';
-  a.wave += dt * (diving ? 0.5 : 2.4 + (e.vel.y > 0 ? 1.2 : 0));
-  // asymmetric flap: powerful fast downstroke, slower recovery
+  const shriek = st === 'windup';
+  const hauling = st === 'snatch';
+  const climbing = st === 'climb' || st === 'spawn' || st === 'recover';
+  const soaring = st === 'move';
+  const glide = clamp01(-e.vel.y / 4);
+  // flap rate and depth by what the bird is doing
+  const burst = Math.pow(Math.max(0, Math.sin(t * 0.42 + a.seed)), 10); // the odd lazy flap while soaring
+  const rate = diving ? 0.3 : hauling ? 4.6 : climbing ? 3.2 : shriek ? 1.6 : soaring ? 1.2 + burst * 1.6 : 2.4;
+  a.wave += dt * (rate + (e.vel.y > 0.5 ? 0.8 : 0));
+  // asymmetric flap: powerful fast downstroke, slower recovery; the hand lags behind the arm
   const p = a.wave - Math.floor(a.wave);
   const flap = p < 0.4 ? 1 - 2 * smoother(p / 0.4) : -1 + 2 * smoother((p - 0.4) / 0.6);
-  const glide = clamp01(-e.vel.y / 4);
-  let w = flap * lerp(0.75, 0.15, glide) + 0.15;
-  if (diving) w = -0.55 + Math.sin(t * 30) * 0.04;
+  const p2 = (a.wave - 0.12) - Math.floor(a.wave - 0.12);
+  const flap2 = p2 < 0.4 ? 1 - 2 * smoother(p2 / 0.4) : -1 + 2 * smoother((p2 - 0.4) / 0.6);
+  let amp = soaring ? 0.06 + burst * 0.6 : hauling ? 0.95 : climbing ? 0.8 : shriek ? 0.12 : lerp(0.75, 0.15, glide);
+  let w = flap * amp + (soaring ? 0.16 + Math.sin(t * 0.9 + a.seed) * 0.04 : 0.15);
+  let w2 = flap2 * amp * 0.55 + (soaring ? -0.06 : 0);
+  let sweep = 0, sweep2 = 0, legX = 0, footX = 0, pitch = soaring ? 0.04 - glide * 0.1 : 0.1 - glide * 0.1;
+  let jaw = 0;
+  if (shriek) {
+    // rear up and scream: wings spread wide and cupped forward, shivering, legs lowering
+    const k = ap.antic;
+    w = 0.32 + 0.22 * k + Math.sin(t * 38) * 0.03 * k;
+    w2 = 0.18 * k;
+    sweep = -0.22 * k;
+    sweep2 = -0.3 * k;
+    pitch = -0.55 * k;
+    legX = -0.7 * k;
+    footX = -0.5 * k;
+    jaw = 0.55 * Math.min(1, e.stateT * 6);
+  } else if (diving) {
+    // the stoop: arms swept back and pressed in, hands folded behind, talons thrown forward at the end
+    const k = clamp01(e.stateT / Math.max(0.2, e.leapDur));
+    const fold = smoother(Math.min(1, k * 3));
+    const strike = smoother(clamp01((k - 0.62) / 0.3));
+    w = lerp(0.3, -0.42, fold) + Math.sin(t * 30) * 0.03 + strike * 0.75;
+    w2 = lerp(0, 0.5, fold) - strike * 0.5;
+    sweep = lerp(0, 1.05, fold) * (1 - strike * 0.7);
+    sweep2 = lerp(0, 1.25, fold) * (1 - strike * 0.6);
+    pitch = lerp(0.2, 0.95, fold) * (1 - strike) - strike * 0.55;
+    legX = lerp(0, -1.55, strike);
+    footX = lerp(0.3, -0.9, strike);
+    jaw = 0.3 + strike * 0.4;
+  } else if (hauling) {
+    pitch = -0.55 + Math.sin(t * 9) * 0.05;
+    legX = -0.95;
+    footX = 0.55; // locked shut on the prey
+    jaw = 0.25 + Math.max(0, Math.sin(t * 7)) * 0.3;
+  } else if (climbing) {
+    pitch = -0.38;
+    legX = -0.2;
+    footX = 0.2;
+  }
   if (a.dying) {
     const k = a.dT;
     w = Math.sin(t * 17) * 0.8 * Math.exp(-k * 2);
+    w2 = Math.sin(t * 13 + 1) * 0.6 * Math.exp(-k * 2);
+    legX = -0.6;
     a.tilt = k * 3.5;
     a.roll = Math.sin(k * 6) * 0.8;
     if (!a.impactDone && e.pos.y <= env.groundAt(e.pos.x, e.pos.z) + 0.2) {
       a.impact = true;
       a.impactDone = true;
     }
+  } else if (st === 'stagger') {
+    // knocked out of the air: flailing tumble
+    w = Math.sin(t * 21) * 0.7;
+    w2 = Math.sin(t * 17 + 2) * 0.6;
+    a.roll = Math.sin(t * 9) * 0.5;
   }
-  S(e, 'wing_l', 0, 0, w);
-  S(e, 'wing_r', 0, 0, -w);
+  S(e, 'wing_l', 0, sweep, w);
+  S(e, 'wing_r', 0, -sweep, -w);
+  S(e, 'wing2_l', 0, sweep2, w2);
+  S(e, 'wing2_r', 0, -sweep2, -w2);
+  S(e, 'leg_l', legX + Math.sin(t * 2.3) * 0.04, 0, 0.05);
+  S(e, 'leg_r', legX + Math.sin(t * 2.3 + 1) * 0.04, 0, -0.05);
+  S(e, 'foot_l', footX, 0, 0);
+  S(e, 'foot_r', footX, 0, 0);
+  S(e, 'jaw', jaw, 0, 0);
   const toX = env.player.x - e.pos.x, toZ = env.player.z - e.pos.z;
   const lx = toX * Math.cos(e.yaw) - toZ * Math.sin(e.yaw);
   const lz = toX * Math.sin(e.yaw) + toZ * Math.cos(e.yaw);
   const look = lookAngles(lx, env.player.y - e.pos.y, lz, 1.2, 0.9);
   a.headY.step(look.yaw, dt);
   a.headP.step(-look.pitch * 0.6, dt);
-  S(e, 'head', a.headP.x - 0.25 + (diving ? 0.5 : 0) + flap * 0.06, a.headY.x, 0);
-  S(e, 'tail', Math.sin(t * 3) * 0.1 + flap * 0.08, a.turn * -0.2, 0);
-  a.bank.step(clamp(-a.turn * 0.35, -0.6, 0.6), dt);
-  RR(e, (diving ? 0.9 : 0.1 - glide * 0.1) + a.flP.x * 0.4, 0, a.bank.x + a.flR.x * 0.4);
-  RO(e, 0, -flap * 0.05, 0);
-  void ap;
+  // the head stays level with the horizon through the bank, eyes on the prey
+  S(e, 'head', a.headP.x - 0.25 - pitch * 0.6 + flap * 0.06 * amp + (shriek ? 0.35 : 0), a.headY.x, -a.bank.x * 0.6);
+  S(e, 'tail', Math.sin(t * 3) * 0.1 + flap * 0.08 * amp + (shriek ? -0.35 : diving ? 0.25 : 0), a.turn * -0.25, a.turn * 0.15);
+  a.bank.step(clamp(-a.turn * (soaring ? 0.55 : 0.35), -0.75, 0.75), dt);
+  RR(e, pitch + a.flP.x * 0.4, 0, a.bank.x + a.flR.x * 0.4);
+  RO(e, 0, -flap * 0.05 * amp, 0);
 }
 
 // ============================================================= snake (bell snake)
