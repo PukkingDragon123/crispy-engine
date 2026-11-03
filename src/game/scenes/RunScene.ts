@@ -164,6 +164,7 @@ export class RunScene implements GameScene {
   escort: TravelerEscort | null = null;
   wagon: WagonRepair | null = null;
   slicer!: NeckSlicer;
+  private pickerShown = false;
   private waveIntroT = 0;
   private gameOver = false;
   ready = false;
@@ -874,6 +875,14 @@ export class RunScene implements GameScene {
       this.camRig.update(rdt, this.player.pos, 0, false, 0);
       this.updateHud(rdt);
       return;
+    }
+    // the upgrade cards own the screen: no hunter, buddy or HUD in front of them
+    if (this.picker.active !== this.pickerShown) {
+      this.pickerShown = this.picker.active;
+      this.player.root.visible = !this.pickerShown;
+      this.skills.pinchRoot.visible = !this.pickerShown;
+      this.garments.setEnabled(!this.pickerShown);
+      this.hud.setVisible(!this.pickerShown);
     }
     if (this.picker.active) {
       this.cloth.update(rdt * 0.2, e.realTime);
