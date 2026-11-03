@@ -587,7 +587,7 @@ export class Cinema {
       if (performance.now() - this.lastBoss > 1500) this.stamp(p.title, p.color);
     }
     // the effects stage keeps its own clock (the choice stage pauses the world on purpose)
-    const frozen = eng.paused && !cineFlags.choice;
+    const frozen = (eng.paused && !cineFlags.choice) || !!(window as any).__cineHold;
     this.kit.update(frozen ? 0 : rdt * fxRate, dt);
     for (let i = this.beats.length - 1; i >= 0; i--) {
       const b = this.beats[i];

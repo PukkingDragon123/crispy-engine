@@ -254,7 +254,9 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
       const now = performance.now();
       const dt = Math.min(dtCap, (now - last) / 1000);
       last = now;
+      if ((window as any).__cineHold) continue; // dev: freeze for a screenshot
       T += dt;
+      (window as any).__coldT = T;
       // time: real speed until the blast, then deep slow motion, easing up a little for the title
       rate = T < 2.0 ? 1 : T < 7.6 ? 0.3 : 0.42;
       const cdt = dt * rate;

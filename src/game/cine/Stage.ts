@@ -513,6 +513,7 @@ export class ChoiceStage {
   // ------------------------------------------------------------------ the scene
   update(rdt: number) {
     if (this.phase === 'gone') return;
+    if ((window as any).__cineHold) rdt = 0; // dev: freeze the scene for a screenshot
     this.t += rdt;
     this.pt += rdt;
     const inp = this.input;

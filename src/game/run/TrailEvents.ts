@@ -166,7 +166,7 @@ const EVENTS: TrailEvent[] = [
         { rig: 'outlaw_rider_v1', at: [-1.5, 0.3], hideBoard: true, voice: 'outlaw', yaw: 0.15 },
         { rig: 'outlaw_rider_v2', at: [1.1, 0.9], hideBoard: true, voice: 'outlaw', yaw: -0.2 },
       ],
-      props: [{ key: 'wagon_1', at: [3.6, -1.8], yaw: 1.25, blast: true }, { key: 'trunk', at: [2.4, 0.4], yaw: 0.6 }],
+      props: [{ key: 'wagon_1', at: [3.6, -1.8], yaw: 1.25, blast: true }, { key: 'barrel_2', at: [-3.2, -1.2] }],
       opener: 'dynamite',
       presenter: 'items',
       lines: [{ text: 'Howdy, skeleton. That wagon was the warm-up.' }, { who: 1, text: 'Your purse, or your skull. Pick quick.' }],

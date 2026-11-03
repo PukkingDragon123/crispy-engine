@@ -73,6 +73,7 @@ async function main() {
     music.setMood('explore');
     nav.ride(params.get('intro') === '1');
   } else if (debug === 'hub') nav.hub();
+  else if (debug === 'cave') void import('./game/scenes/CaveScene').then((m) => m.debugCave(engine, { skipIntro: params.get('intro') === '0', olmNow: params.has('olm') }));
   else nav.menu();
   // ready once the first scene has finished building
   while (!engine.current || (engine.current as any).ready === false) await new Promise((r) => setTimeout(r, 100));

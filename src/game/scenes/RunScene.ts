@@ -62,6 +62,7 @@ import { Tutorial } from '../run/Tutorial';
 import { RuinNests } from '../run/RuinNests';
 import { Wildlife } from '../run/Wildlife';
 import { TreasureHunt } from '../run/TreasureHunt';
+import { CavePit } from '../run/CavePit';
 import { Barks } from '../audio/Barks';
 import { DeathCine, deathCineFromRun } from './DeathCine';
 import { CodexRun } from '../ui/codex/CodexRun';
@@ -193,6 +194,7 @@ export class RunScene implements GameScene {
   ruins: RuinNests | null = null;
   wildlife: Wildlife | null = null;
   treasure: TreasureHunt | null = null;
+  cavePit: CavePit | null = null;
   private codexRun: CodexRun | null = null;
   equipment!: Equipment;
   gearLoot!: GearPickups;
@@ -319,6 +321,13 @@ export class RunScene implements GameScene {
       addBounty: (v) => this.addBounty(v),
     });
     this.ruins = new RuinNests({ ctx: this.ctx, player: this.player, enemies: this.enemies, props: this.props, inter: this.inter, chest: (x, z, t, r) => this.spawnChest(x, z, t, r) });
+    this.cavePit = new CavePit({
+      ctx: this.ctx, player: this.player, cam: this.camRig, hud: this.hud,
+      look: this.opts.look, gun: this.opts.gun, seed: this.opts.seed,
+      carry: () => this.caveCarry(),
+      restore: (c) => this.caveRestore(c),
+      busy: () => this.gameOver || !!this.trial || this.bosses.some((b) => b.alive) || this.picker.active || this.choice.active || this.shop.active || this.slicer.active,
+    });
     this.treasure = new TreasureHunt({
       ctx: this.ctx, player: this.player, inter: this.inter, input: e.input, area: this.opts.area, hud: this.hud, items: this.items,
       pickups: { drop: (k, v, at, n) => this.pickups?.drop(k, v, at, n) },
@@ -426,6 +435,7 @@ export class RunScene implements GameScene {
     this.ruins?.dispose();
     this.wildlife?.dispose();
     this.treasure?.dispose();
+    this.cavePit?.dispose();
     this.codexRun?.dispose();
     this.engine.paused = false;
     this.engine.post.u.uDesat.value = 0;
@@ -650,6 +660,7 @@ export class RunScene implements GameScene {
     this.ruins?.populateZone(z);
     this.wildlife?.populateZone(z);
     this.treasure?.populateZone(z);
+    this.cavePit?.populateZone(z);
   }
 
   spawnChest(x: number, z: number, tier: 'wood' | 'silver' | 'gold' | 'divine', rot = rnd.next() * 6.28) {
@@ -865,8 +876,17 @@ export class RunScene implements GameScene {
       if (Math.random() < 0.5) this.fx.dust({ x: p.x + (Math.random() - 0.5) * 30, y: p.y + k * 40, z: p.z + (Math.random() - 0.5) * 30 }, 4, 0xe6c08a, 6);
     }, Ease.inQuad, true);
     await eng.fadeOut(0.9, '#e6c08a');
-    const carry: RunCarry = {
-      run: { ...this.run, wave: wave - 1 },
+    const carry = this.caveCarry();
+    carry.run.wave = wave - 1;
+    eng.input.enabled = true;
+    eng.letterbox(false, 0.1);
+    void eng.setScene(new RunScene(eng, { ...this.opts, area: next, startWave: wave, intro: false, carry, seed: (this.opts.seed * 17 + 3) % 100000 }), 0.9);
+  }
+
+  /** the run as it stands, for travel to another area or down into the cave */
+  private caveCarry(): RunCarry {
+    return {
+      run: { ...this.run },
       history: [...this.upgrades.history],
       items: this.items.slots.map((x) => (x ? { ...x } : null)),
       hpFrac: this.player.hp / this.player.maxHp,
@@ -877,9 +897,19 @@ export class RunScene implements GameScene {
       bosses: [...this.bossNames],
       ult: this.ult.variant,
     };
-    eng.input.enabled = true;
-    eng.letterbox(false, 0.1);
-    void eng.setScene(new RunScene(eng, { ...this.opts, area: next, startWave: wave, intro: false, carry, seed: (this.opts.seed * 17 + 3) % 100000 }), 0.9);
+  }
+
+  /** back up from the cave: take what was earned below */
+  private caveRestore(c: RunCarry) {
+    Object.assign(this.run, c.run);
+    for (const id of c.history.slice(this.upgrades.history.length)) this.upgrades.apply(id);
+    this.items.slots = c.items.map((s) => (s ? { ...s } : null)) as any;
+    this.player.hp = this.player.maxHp * Math.max(0.05, c.hpFrac);
+    this.player.ammo = this.player.maxAmmo;
+    this.codexKills = { ...c.codex };
+    this.bossNames = [...c.bosses];
+    this.equipment.restore((c.gear ?? []) as any);
+    this.equipment.deadHandSpent = !!c.deadHand;
   }
 
   private pausedByUser = false;
@@ -939,6 +969,14 @@ export class RunScene implements GameScene {
   // ------------------------------------------------------------------ update
   update(dt: number, rdt: number) {
     if (!this.ready) return;
+    // below ground: the cave stage runs, the desert stays frozen as it was
+    if (this.cavePit?.stage) {
+      this.windLoop?.setVolume(0, 0.4);
+      this.slideLoop?.setVolume(0, 0.1);
+      this.stormLoop?.setVolume(0, 0.4);
+      this.cavePit.stageUpdate(dt, rdt);
+      return;
+    }
     this.codexRun?.update(rdt);
     const e = this.engine;
     this.run.time += dt;
@@ -1043,6 +1081,7 @@ export class RunScene implements GameScene {
     this.missions.update(dt);
     this.ruins?.update(dt);
     this.wildlife?.update(dt);
+    this.cavePit?.update(dt);
     for (const s of this.scarabs) s.update(dt, this.player);
     for (let i = this.bosses.length - 1; i >= 0; i--) {
       const b = this.bosses[i];
@@ -1167,6 +1206,10 @@ export class RunScene implements GameScene {
   }
 
   postRender(renderer: THREE.WebGLRenderer) {
+    if (this.cavePit?.stage) {
+      this.cavePit.stage.postRender(renderer);
+      return;
+    }
     if (!this.ready || this.trial) return;
     this.hud3d.update(this.lastRdt);
     this.gearHud.update(this.lastRdt);
