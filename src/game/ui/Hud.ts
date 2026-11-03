@@ -51,6 +51,7 @@ export interface HudAnchors {
   coin: { x: number; y: number; pop: number };
   items: { x: number; y: number; size: number; model: string; count: number }[];
   ult: { x: number; y: number; frac: number; ready: boolean };
+  heart: { x: number; y: number; frac: number };
   slide: number;
 }
 
@@ -69,6 +70,7 @@ interface HP {
   t: number;
   life: number;
   kind: 'casing' | 'coin' | 'chip' | 'spark' | 'smoke';
+  col?: string;
   tx?: number;
   ty?: number;
   sx?: number;
@@ -110,6 +112,10 @@ export class Hud {
   private waveDrop = 1;
   /** 3D layer draws the cylinder, coin, item models and Pinch idol; 2D skips those */
   use3D = false;
+  /** last frame's state (read by the 3D layer) */
+  last: HudState | null = null;
+  /** where the 3D tarot cards sit (HUD px): keycaps + cooldown numbers are drawn under them */
+  cardAnchors: { key: string; x: number; y: number; h: number; cd: number }[] = [];
   /** item slots the 3D layer could fill (model exists) — 2D icon is skipped for these */
   items3D: boolean[] = [];
   anchors: HudAnchors = {
@@ -117,6 +123,7 @@ export class Hud {
     coin: { x: 0, y: 0, pop: 0 },
     items: [],
     ult: { x: 0, y: 0, frac: 0, ready: false },
+    heart: { x: 0, y: 0, frac: 1 },
     slide: 0,
   };
   /** world -> screen (css px) projector, set by RunScene */
@@ -179,6 +186,13 @@ export class Hud {
   dispose() {
     this.canvas.remove();
     this.hint.remove();
+  }
+  /** a burst of 2D pixel sparks at a HUD-pixel position (skill cards, pickups) */
+  burst(x: number, y: number, cols: string[], n = 24, speed = 90) {
+    for (let i = 0; i < n && this.parts.length < 400; i++) {
+      const a = Math.random() * Math.PI * 2, v = speed * (0.4 + Math.random() * 0.8);
+      this.parts.push({ kind: 'spark', x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 30, t: 0, life: 0.5 + Math.random() * 0.5, col: cols[i % cols.length] });
+    }
   }
   setVisible(v: boolean) {
     this.visible = v;
@@ -284,8 +298,10 @@ export class Hud {
     const img = this.cylinderImage(n, loaded, venom, R);
     const ox = cx - this.cylOpen * 16, oy = cy - this.cylOpen * 6 + this.recoil * 2;
     // backing plaque
-    const plaque = woodPanel(64, 56, 3, { iron: true, dark: true });
-    this.blit(plaque, cx - 32, cy - 28);
+    if (!this.use3D) {
+      const plaque = woodPanel(64, 56, 3, { iron: true, dark: true });
+      this.blit(plaque, cx - 32, cy - 28);
+    }
     // motion blur ghosts
     const signedVel = (this.cylRot - prev) / Math.max(dt, 1e-3);
     this.anchors.cyl = { x: ox, y: oy, R, rot: this.cylRot, angVel: signedVel, open: this.cylOpen, recoil: this.recoil, shown: showAmmo, n, venom: s.venom, phase: rel.active ? rel.phase : '', active: rel.active };
@@ -336,6 +352,7 @@ export class Hud {
 
   // ------------------------------------------------------------------ frame
   update(dt: number, s: HudState) {
+    this.last = s;
     this.t += dt;
     const c = this.ctx;
     const W = this.w, H = this.h;
@@ -383,7 +400,8 @@ export class Hud {
       const low = frac < 0.3;
       drawBarFill(c, x + 18 + sx, y + sy, bw, bh, frac, this.hpFlash > 0.5 ? { o: '#fff', d: '#fff', m: '#ffe0d0', l: '#fff', h: '#fff' } : low && Math.sin(this.t * 9) > 0 ? { ...UI.blood, m: '#ff5a3a' } : UI.blood, this.hpTrail);
       if (s.shield > 0) drawBarFill(c, x + 18 + sx, y - 6 + sy, bw, 9, Math.min(1, s.shield / s.maxHp), UI.sky);
-      this.spr('skullIcon', x - 2 + sx, y - 1 + sy + (low ? Math.round(Math.sin(this.t * 9)) : 0));
+      this.anchors.heart = { x: x + 4, y: y + 6, frac };
+      if (!this.use3D) this.spr('skullIcon', x - 2 + sx, y - 1 + sy + (low ? Math.round(Math.sin(this.t * 9)) : 0));
       text(c, `${Math.ceil(s.hp)}`, x + 26 + sx, y + 1 + sy, UI.text, 16);
       text(c, `/${Math.round(s.maxHp)}`, x + 26 + measure(c, `${Math.ceil(s.hp)}`) + sx, y + 1 + sy, UI.textDim, 16);
       // boost tail
@@ -476,7 +494,13 @@ export class Hud {
     }
 
     // ---------------------------------------------------------- skills + ultimate (bottom right)
-    {
+    if (this.use3D) {
+      for (const a of this.cardAnchors) {
+        const kc = keycap(a.key);
+        this.blit(kc, a.x - kc.width / 2, a.y + a.h / 2 + 2);
+        if (a.cd > 0.05 && a.cd < 99) text(c, a.cd < 1 ? a.cd.toFixed(1) : String(Math.ceil(a.cd)), a.x, a.y - 8, UI.text, 16, 'center');
+      }
+    } else {
       const ux = W - 26 + slide * 200, uy = H - 30;
       // ultimate ring
       const R = 19;
@@ -536,7 +560,7 @@ export class Hud {
         }
         continue;
       }
-      p.vy += (p.kind === 'smoke' ? -10 : 260) * dt;
+      p.vy += (p.kind === 'smoke' ? -10 : p.kind === 'spark' ? 120 : 260) * dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       if (p.kind === 'casing') {
@@ -548,6 +572,11 @@ export class Hud {
         p.rot! += dt * 14;
         px(c, p.x, p.y, 2, 3, UI.brass.l);
         px(c, p.x, p.y, 2, 1, UI.brass.h);
+      } else if (p.kind === 'spark') {
+        const a = Math.max(0, 1 - p.t / p.life);
+        c.globalAlpha = a;
+        px(c, p.x, p.y, 2, 2, p.col ?? UI.brass.h);
+        c.globalAlpha = 1;
       } else if (p.kind === 'smoke') {
         const a = 1 - p.t / p.life;
         px(c, p.x, p.y, 3, 3, `rgba(220,210,190,${a * 0.6})`);

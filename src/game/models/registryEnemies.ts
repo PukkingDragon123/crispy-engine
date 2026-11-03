@@ -11,8 +11,11 @@ import { outlawRiderRig } from './enemies/outlaw';
 import { dustMarshalRig } from './enemies/marshal';
 import { pharaohRig } from './enemies/pharaoh';
 import { sethosRig } from './enemies/sethos';
-import { sunrollerRig, sunBallModel } from './enemies/sunroller';
+import { sunrollerRig, sunBallModel, sunBallRig } from './enemies/sunroller';
+import { sandWolfRig } from './enemies/wolf';
+import { duneWormRig } from './enemies/worm';
 import { sandwormRig } from './enemies/sandworm';
+import { khonsuAvatarRig, khonsuHandRig } from './enemies/khonsu';
 
 export const ENEMY_MODELS: Record<string, ModelEntry> = {
   husk: () => huskRig(),
@@ -52,10 +55,18 @@ export const ENEMY_MODELS: Record<string, ModelEntry> = {
   dust_marshal_3: () => dustMarshalRig(3),
   sunroller: () => sunrollerRig(),
   sun_ball: () => sunBallModel(),
+  sun_ball_rig: () => sunBallRig(),
+  sand_wolf: () => sandWolfRig(),
+  sand_wolf_alpha: () => sandWolfRig({ alpha: true }),
+  dune_worm: () => duneWormRig(),
+  dune_worm_alpha: () => duneWormRig({ alpha: true }),
   pharaoh: () => pharaohRig(),
   sandworm: () => sandwormRig({ segments: 8, scale: 1 }),
   sandworm_big: () => sandwormRig({ segments: 12, scale: 1.5 }),
   sethos_1: () => sethosRig(1),
   sethos_2: () => sethosRig(2),
   sethos_3: () => sethosRig(3),
+  khonsu_avatar: () => khonsuAvatarRig(),
+  khonsu_avatar_enraged: () => khonsuAvatarRig({ enraged: true }),
+  khonsu_hand: () => khonsuHandRig(),
 };

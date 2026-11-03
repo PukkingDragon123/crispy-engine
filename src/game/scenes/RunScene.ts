@@ -221,7 +221,7 @@ export class RunScene implements GameScene {
       board: resolveStatic([`board_${look.board}`, 'board_driftwood'], placeholderBoard),
     };
     this.player = new Player(this.ctx, vis, this.camRig, e.input);
-    this.hud3d.setBust(vis.rig, vis.rig.name + ':player');
+    this.hud3d.setBust(vis.rig, vis.rig.name + ':player', vis.gun);
     if (this.opts.gun) this.player.stats.add(gunMods(this.opts.gun) as any);
     this.enemies = new Enemies(this.ctx, this.player as any);
     this.ctx.enemies = this.enemies;

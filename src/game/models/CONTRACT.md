@@ -3,6 +3,15 @@
 All models are built with `src/engine/voxel/VoxelModel.ts` (DSL), colors from
 `src/engine/voxel/palette.ts`, and rigs follow `src/engine/voxel/Rig.ts`.
 
+## ★★★ MOST IMPORTANT RULES (user, permanent — see /CLAUDE.md; they override everything below) ★★★
+1. **Never use lazy, ugly, simple shapes** (plain spheres, boxes, cylinders, cones, rings, flat quads) for any model, prop,
+   creature, effect or HUD piece. Every shape feels organic and hand-sculpted; anything that moves has a rig.
+2. **Never hand-draw 2D art in code.** No canvas-primitive pictures (motifs, icons, portraits, card scenes, posters,
+   backdrops). 2D art = a real 3D scene of game models photographed through IconFactory / CardStudio + post-processing.
+   Typography is the only thing drawn directly; anything else 2D must be beautiful and polished, never a mess.
+3. **No 2D eyes** — modelled, realistic eyes.
+4. Beautiful, detailed, polished, alive. Lazy-looking work is wrong.
+
 ## ★ STYLE v2 — THE ONLY ART RULES (user, final: "forget my old rules, make it just look good, human made, stylized") ★
 Reference the user gave: a polished cartoon voxel skeleton (MagicaVoxel-style). Big rounded-blocky skull, about 28% of
 body height and as wide as the shoulders. Large square dark eye sockets, a small nose hole, a grin with a clean row of
@@ -29,11 +38,9 @@ Every old note about resolution, the pixel-art pass, ramps, outlines, textures, 
 - Glow: none, except tiny accents (fuse spark, a rune line).
 
 **Faces**
-- Big square eye sockets, 1 voxel deep, with dark walls (3×3 to 4×4 at 1/30). The engine draws expressive 2D eyes
-  inside them.
-- The `eye_l`/`eye_r` part is a tiny dark plug whose pivot is exactly the socket centre at the face surface, +Z out of the
-  face, oriented with the head. The engine hides it and uses its bbox for the 2D eye size, so make it the size of the socket.
-- Expressions only need `jaw` angle + `brow` angles. Eye-shape variants are no longer needed (eyes are 2D).
+- Eye sockets with dark walls. **No 2D eyes (user rule)**: the `eye_l`/`eye_r` parts are modelled eyes (glowing ember
+  pupils / realistic eyeballs) that the engine renders as real geometry; pivot at the socket centre, +Z out of the face.
+- Expressions: `jaw` angle + `brow` angles (+ eye part scale/rotation).
 
 **Scales** (one family look)
 - Humanoids (Sundown, all humanoid enemies/variants, merchant): **1/30 m**.
