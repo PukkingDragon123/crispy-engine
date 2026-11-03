@@ -535,18 +535,19 @@ export class HubScene implements GameScene {
     const MIR = new THREE.Vector3(4.22, 0, 0.12), MIR_YAW = -0.95;
     const mir = put(mirSm, MIR.x, MIR.z, MIR_YAW, 0, 1, false);
     this.walls.push({ x0: MIR.x - 0.2, z0: MIR.z - 0.26, x1: MIR.x + 0.3, z1: MIR.z + 0.16 });
-    const mirShot = (m: THREE.Vector3): Shot => {
-      const n = new THREE.Vector3(Math.sin(MIR_YAW), 0, Math.cos(MIR_YAW)), tt = new THREE.Vector3(-n.z, 0, n.x).negate();
-      const pos = m.clone().addScaledVector(n, 2.55).addScaledVector(tt, 0.72).setY(1.42);
-      return { pos, look: m.clone().add(new THREE.Vector3(0, 0.04, 0)), fov: 38 };
-    };
+    // mirror geometry: n = the glass normal, mt = the viewer's right when facing it. Sundown stands 1 m out and a
+    // little left; the camera sits 2.6 m out and 0.85 m right, so the line to his reflection lands on the glass
+    // (≈0.13 m from its centre) and clears his own back by more than half a metre
+    const mn = new THREE.Vector3(Math.sin(MIR_YAW), 0, Math.cos(MIR_YAW)), mt = new THREE.Vector3(Math.cos(MIR_YAW), 0, -Math.sin(MIR_YAW));
+    const mirShot = (m: THREE.Vector3): Shot => ({ pos: m.clone().addScaledVector(mn, 2.6).addScaledVector(mt, 0.85).setY(1.45), look: m.clone().add(new THREE.Vector3(0, 0.04, 0)), fov: 38 });
+    const mirStand = (m: THREE.Vector3) => new THREE.Vector2(m.x + mn.x - mt.x * 0.15, m.z + mn.z - mt.z * 0.15);
     let mirrorAt = new THREE.Vector3(MIR.x, 1.05, MIR.z);
     if (mir && mirSm) mirrorAt = local(mir, mirSm.meta.glass);
     station({
       id: 'wardrobe',
       label: 'Wardrobe & Mirror — hats and outfits',
-      stand: new THREE.Vector2(MIR.x - 0.52, MIR.z + 0.4),
-      face: Math.atan2(0.52, -0.4),
+      stand: mirStand(mirrorAt),
+      face: Math.atan2(-mn.x, -mn.z),
       at: new THREE.Vector3(MIR.x - 0.1, 1.95, MIR.z),
       r: 0.8,
       objs: [arm, mir],
