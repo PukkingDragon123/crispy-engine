@@ -47,7 +47,7 @@ import { TrailEvents } from '../run/TrailEvents';
 import { ResultsScene } from './ResultsScene';
 import { playIntro } from './IntroCine';
 import { nav } from '../Nav';
-import { awardRun, loadSave, GunLoadout, gunMods } from '../meta/Save';
+import { awardRun, loadSave, writeSave, GunLoadout, gunMods } from '../meta/Save';
 import * as CH from '../models/characters';
 import { FaceQuads } from '../fx/FaceFx';
 import { MeerkatColony, findClearSpot } from '../run/MeerkatColony';
@@ -376,6 +376,14 @@ export class RunScene implements GameScene {
   private wireEvents() {
     const ev = this.events;
     const ctx = this.ctx;
+    // the rain-frog family's thanks: skills cast twice for the rest of the run, and Mama's wig (kept forever)
+    ev.on('frogBlessing', () => (this.skills.echo = true));
+    ev.on('frogWig', () => {
+      const sv = loadSave();
+      if (!sv.unlocked.includes('hat:wig')) sv.unlocked.push('hat:wig');
+      sv.look.hat = 'wig';
+      writeSave(sv);
+    });
     // a bell snake coils around the board: mash to break free
     ev.on('snakeWrap', async (sn: any) => {
       const r = await this.qte.run({ kind: 'mash', key: 'KeyE', label: 'BREAK FREE', duration: 2.2, target: 12 });

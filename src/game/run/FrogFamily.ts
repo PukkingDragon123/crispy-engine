@@ -42,7 +42,7 @@ import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { sharedVoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { clamp, damp, dampAngle, rnd, hash3, smoothstep, lerp } from '../../engine/math/rand';
 import { SpringF } from '../anim/spring';
-import { frogWigHat, FROG_WIG_VS, FROG_WIG_PIVOT } from '../models/enemies/frog';
+import { frogWigHat, frogWigPivot } from '../models/enemies/frog';
 
 export interface FrogFamilyDeps {
   ctx: Ctx;
@@ -149,16 +149,20 @@ const _v3 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _y = new THREE.Vector3(0, 1, 0);
 
-/** Sundown's neck joint -> hat joint, for rigs without a `hat` node */
-const HEAD_TO_HAT = new THREE.Vector3(0, (59 - 46) * FROG_WIG_VS, (-1 + 1.5) * FROG_WIG_VS);
-let WIG_GEO: THREE.BufferGeometry | null = null;
-/** the hunter-sized wig, meshed in hat-node space (pivot = the hat joint) */
-function hunterWigGeo() {
-  if (!WIG_GEO) {
-    WIG_GEO = buildVoxelGeometry(frogWigHat(), { voxelSize: FROG_WIG_VS, pivot: FROG_WIG_PIVOT });
-    WIG_GEO.computeBoundingBox();
+/** Sundown's neck joint -> hat joint (design units are 1/36 m on every build), for rigs without a `hat` node */
+const HEAD_TO_HAT = new THREE.Vector3(0, (59 - 46) / 36, (-1 + 1.5) / 36);
+const WIG_GEOS = new Map<number, THREE.BufferGeometry>();
+/** the hunter-sized wig on his rig's own grid (classic 1/36 or HD 1/54), meshed in hat-node space (pivot = the hat joint) */
+function hunterWigGeo(rig: RigInstance) {
+  const vs = rig.geo.spec.voxelSize || 1 / 36;
+  const vpu = Math.round(1 / vs);
+  let g = WIG_GEOS.get(vpu);
+  if (!g) {
+    g = buildVoxelGeometry(frogWigHat(vpu), { voxelSize: vs, pivot: frogWigPivot(vpu) });
+    g.computeBoundingBox();
+    WIG_GEOS.set(vpu, g);
   }
-  return WIG_GEO;
+  return g;
 }
 
 /** a small sculpted rain puddle: irregular rim, depth gradient, sky glints, wet-sand lip, pebbles, a grass sprig */
@@ -982,12 +986,14 @@ export class FrogFamily {
     const N = this.tN, L = this.tL;
     const s = clamp((len - L * 1.05) / (N - 1), 0, L * 0.95) * reach;
     t1.rotation.set(flip * (phiT - arc / 2), flip * psi, 0);
-    const wob = S.phase === 'act' ? Math.sin(this.t * 30) * 0.02 : 0;
+    // a living, wet wiggle travelling down the chain while it is out (alternating, so the tip stays put)
+    const live = S.phase === 'act' ? 1 : S.phase === 'out' ? reach * 0.5 : 0;
     for (let i = 2; i <= N; i++) {
       const nd = n['tongue' + i];
       const u = (i - 1) / (N - 1);
+      const w = Math.sin(this.t * 14 - i * 0.85) * 0.045 * live;
       nd.position.set(0, 0, -s);
-      nd.rotation.set(flip * (arc / (N - 1)) + curl * u * u * 0.55 + wob, 0, 0);
+      nd.rotation.set(flip * (arc / (N - 1)) + curl * u * u * 0.55 + w, Math.cos(this.t * 11 - i * 0.7) * 0.03 * live, 0);
     }
     // things stuck to the tip ride along
     const tip = n['tongue_tip'];
@@ -1146,7 +1152,7 @@ export class FrogFamily {
           out: 0.16,
           act: 0.75,
           back: 0.4,
-          arc: 0.45,
+          arc: 0.75,
           target: (k) => this.lickPoint(k),
           reached: () => {
             ctx.sfx('scarab_squish', pl.pos, 0.35, 1.6);
@@ -1336,7 +1342,7 @@ export class FrogFamily {
         this.landWig();
         return;
       }
-      const hg = hunterWigGeo();
+      const hg = hunterWigGeo(this.d.player.rig);
       const cH = hg.boundingBox!.getCenter(_v3);
       if (H.offset) cH.add(H.offset);
       const to = H.node.localToWorld(cH);
@@ -1390,9 +1396,9 @@ export class FrogFamily {
     const geo = hat?.geometry ?? null;
     let mesh: THREE.Mesh | null = null;
     // (a second family later in the run: he is already wearing one)
-    const wearing = !!H.node?.children.some((c) => (c as THREE.Mesh).geometry === WIG_GEO);
+    const wearing = !!H.node?.children.some((c) => (c as THREE.Mesh).geometry === WIG_GEOS.get(Math.round(1 / (r.geo.spec.voxelSize || 1 / 36))));
     if (H.node && !wearing) {
-      mesh = new THREE.Mesh(hunterWigGeo(), r.material);
+      mesh = new THREE.Mesh(hunterWigGeo(r), r.material);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       if (H.offset) mesh.position.copy(H.offset);

@@ -768,30 +768,46 @@ function curlyWig(m: VoxelModel, f: WigFit, rings?: VoxelModel[]) {
   wigBow(m, f, mass, k);
 }
 
-/** the hunter's fit: Sundown's skull (1/36 grid, rows 48-62, 12 wide, brows ~57, face front z 6) */
-const SUNDOWN_WIG: WigFit = { hc: [0, 56, -0.5], hr: [6.6, 7.6, 7.0], cr: 2.35, faceZ: 1, browY: 58.6, faceX: 6.9, hangY: 46.5, ringLen: 6.5, ringR: 1.85, bowDir: [0.55, 0.7, 0.45], bowS: 2.3, bowRoll: -0.45, seed: 3 };
+/** the hunter's fit, in Sundown's design units (= classic 1/36 voxels): skull rows 48-63, ~13 wide, brows ~57, face front z 6 */
+const SUNDOWN_WIG: WigFit = { hc: [0, 56, -0.5], hr: [6.6, 7.6, 7.0], cr: 2.35, faceZ: 1, browY: 58.6, faceX: 6.9, hangY: 46.5, ringLen: 5.2, ringR: 1.85, bowDir: [0.55, 0.7, 0.45], bowS: 2.3, bowRoll: -0.45, seed: 3 };
+const scaleFit = (f: WigFit, k: number): WigFit => ({
+  ...f,
+  hc: [f.hc[0] * k, f.hc[1] * k, f.hc[2] * k],
+  hr: [f.hr[0] * k, f.hr[1] * k, f.hr[2] * k],
+  cr: f.cr * k,
+  faceZ: f.faceZ * k,
+  browY: f.browY * k,
+  faceX: f.faceX * k,
+  hangY: f.hangY * k,
+  ringLen: f.ringLen * k,
+  ringR: f.ringR * k,
+  bowS: f.bowS * k,
+});
 
-/** voxel size of the wig hat (Sundown's grid) */
+/** voxel size of the classic (1/36) wig hat; the HD hero (characters/sundown.ts) uses 1/54: pass `vpu` 54 */
 export const FROG_WIG_VS = 1 / 36;
-/** the hat part's joint in Sundown's rig (same as every hat: `J.hat`) */
+/** the hat joint `J.hat` in design units (= classic voxels). Voxel coords on a grid: `frogWigPivot(vpu)` */
 export const FROG_WIG_PIVOT: V3 = [0, 59, -1];
-/** `hat_top` row for the wig (the top of the bouffant), for `HAT_TOP` */
+/** `HAT_TOP` entry for the wig, in design units (the top of the bouffant) */
 export const FROG_WIG_TOP = 69;
-const wigHatBase = memo((_: void): VoxelModel => {
+/** the hat part's pivot/attach in voxel coords of a `vpu` voxels-per-metre grid (36 classic, 54 HD) */
+export const frogWigPivot = (vpu = 36): V3 => [FROG_WIG_PIVOT[0] * (vpu / 36), FROG_WIG_PIVOT[1] * (vpu / 36), FROG_WIG_PIVOT[2] * (vpu / 36)];
+const wigHatBase = memo((o: { vpu: number }): VoxelModel => {
   const m = new VoxelModel('hat');
-  curlyWig(m, SUNDOWN_WIG);
+  curlyWig(m, scaleFit(SUNDOWN_WIG, o.vpu / 36));
   hollow(m, 2);
   return m;
 });
 /**
  * Mama Rain Frog's big fabulous curly wig as a hat for the hunter: lilac bouffant,
- * corkscrew ringlets, satin bow with a pearl. Authored in Sundown's rig space like
- * every hat in characters/skeleton.ts: part `hat`, parent `head`, pivot/attach
- * `FROG_WIG_PIVOT` ([0,59,-1]), voxel size `FROG_WIG_VS` (1/36); `hat_top` row
- * `FROG_WIG_TOP`. Returns a fresh copy.
+ * corkscrew ringlets, satin bow with a pearl. Authored exactly like the hats in
+ * characters/: part `hat`, parent `head`, pivot = attach = the hat joint.
+ * - classic skeleton.ts (1/36): `frogWigHat()` / `frogWigHat(36)`, pivot `FROG_WIG_PIVOT`.
+ * - HD sundown.ts (1/54, `Sc` grid = design x 1.5): `frogWigHat(54)`, pivot `frogWigPivot(54)` (= `vx(J.hat)`).
+ * `HAT_TOP.wig = FROG_WIG_TOP` (design units) in both. Returns a fresh copy.
  */
-export function frogWigHat(): VoxelModel {
-  return wigHatBase().clone();
+export function frogWigHat(vpu = 36): VoxelModel {
+  return wigHatBase({ vpu }).clone();
 }
 
 // ---------------------------------------------------------------- the frog

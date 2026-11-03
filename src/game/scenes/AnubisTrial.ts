@@ -860,7 +860,7 @@ export class AnubisTrial {
   };
   private shotCrane: ShotFn = (t) => {
     const u = sstep(0, 1, t / 4.6);
-    return { p: V(-2.4, 0.8, 9.6).lerp(V(-3.2, 8.4, 5.2), u), l: V(0, 2.4, 0).lerp(V(0, 6.8, -19), u), fov: mixN(54, 50, u) };
+    return { p: V(-1.9, 0.8, 9.8).lerp(V(-2.0, 8.0, 7.8), u), l: V(0, 2.4, 0).lerp(V(0, 6.6, -19), u), fov: mixN(54, 50, u) };
   };
   private shotHero: ShotFn = (t) => {
     const u = sstep(0, 1, t / 4.2);

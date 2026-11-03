@@ -226,7 +226,11 @@ export class MenuScene implements GameScene {
   /** ground height (scene metres) */
   private gy = (x: number, z: number) => this.hf.heightAt(x + CX, z + CZ) - BASE;
 
+  /** ms the set took to build (diagnostics) */
+  buildMs = 0;
+
   async enter() {
+    const t0 = performance.now();
     const s = this.scene;
     const eng = this.engine;
     this.buildSky();
@@ -277,6 +281,7 @@ export class MenuScene implements GameScene {
     eng.tweens.after(1.2, () => this.say('Click a sign  ·  arrows + Enter'), true);
     this.built = true;
     this.ready = true;
+    this.buildMs = Math.round(performance.now() - t0);
   }
 
   // ================================================================ build
@@ -382,14 +387,6 @@ export class MenuScene implements GameScene {
     const lg = MS.seatLog();
     const log = this.place(vmesh(lg.model, lg.voxelSize), SEAT.x, SEAT.z, SEAT.yaw, 0.04);
     this.logFrame.top = log.position.y + lg.seatTop;
-    // a few stones scattered round the camp
-    try {
-      for (const [x, z, sd] of [[-0.6, 1.9, 1], [1.9, 0.5, 2], [-3.0, -0.4, 3]] as [number, number, number][]) {
-        const r = P.rock(sd, 1);
-        const m = this.place(vmesh(r.model, r.voxelSize), x, z, sd, 0.05);
-        m.scale.setScalar(0.6);
-      }
-    } catch {}
     // far silhouettes: saguaros on the dunes, giant ribs against the sun, a broken obelisk in the haze
     try {
       for (const [x, z, sd] of [[-15, -21, 3], [11, -29, 5], [26, -47, 7], [-34, -58, 2], [44, -80, 4], [-8, -95, 6]] as [number, number, number][]) {
@@ -397,9 +394,6 @@ export class MenuScene implements GameScene {
         const m = this.place(vmesh(c.model, c.voxelSize), x, z, sd, 0.2);
         m.scale.setScalar(1.1 + (sd % 3) * 0.2);
       }
-      const rib = P.ribArch(1);
-      const rm = this.place(vmesh(rib.model, rib.voxelSize), -24, -82, 1.2, 1.2);
-      rm.scale.setScalar(1.6);
       const ob = P.obelisk(4, true);
       this.place(vmesh(ob.model, ob.voxelSize), 52, -118, 0.4, 2);
     } catch {}
@@ -539,7 +533,12 @@ export class MenuScene implements GameScene {
           console.warn('[menu] board_back mount failed', err);
         }
       }
-      if (!onBack) {
+      if (onBack) {
+        // the board's nose is hidden behind his hat: Pinch rides his left shoulder instead
+        this.perch.removeFromParent();
+        this.perch.position.set(0, 0, 0);
+        if (!hero.attach('shoulder_l', this.perch)) hero.nodes['torso']?.add(this.perch);
+      } else {
         const g = new THREE.Group();
         bm.rotation.x = -Math.PI / 2;
         g.add(bm);
@@ -769,7 +768,7 @@ export class MenuScene implements GameScene {
     const yaw = 0.035 + 0.075 * Math.sin(t * 0.12) + 0.03 * Math.sin(t * 0.27 + 1) + this.mouse.x * 0.035;
     const dist = CAM_DIST + (1 - intro) * 3.2;
     const cx = CAM_T.x + Math.sin(yaw) * dist, cz = CAM_T.z + Math.cos(yaw) * dist;
-    const cy = this.gy(cx, cz) + 1.72 + 0.07 * Math.sin(t * 0.17) + this.mouse.y * 0.1 + (1 - intro) * 0.9;
+    const cy = this.gy(cx, cz) + 1.42 + 0.07 * Math.sin(t * 0.17) + this.mouse.y * 0.1 + (1 - intro) * 0.9;
     this.camera.position.set(cx, cy, cz);
     this.camera.lookAt(CAM_T.x + Math.sin(t * 0.21) * 0.05, CAM_T.y + Math.sin(t * 0.33) * 0.03, CAM_T.z);
   }
@@ -1067,10 +1066,13 @@ export class MenuScene implements GameScene {
     this.fireLight.intensity = 9 * flick;
     this.fireLight.position.set(FIRE.x + Math.sin(t * 9) * 0.03 + W.x * 0.08 * this.gust, FIRE.y + 0.45 + Math.sin(t * 13) * 0.03, FIRE.z);
     const base: EmitOpts = { pos: f, count: 1 };
-    for (let i = this.rate('flame', 26, dt); i > 0; i--)
-      P.emit({ ...base, pos: { x: f.x + (Math.random() - 0.5) * 0.24, y: f.y + 0.1, z: f.z + (Math.random() - 0.5) * 0.24 }, vel: { x: W.x * lean, y: 0.95, z: W.z * lean }, spread: 0.12, life: [0.32, 0.6], size: [0.36, 0.06], sprite: ['flame0', 'flame1', 'flame2', 'flame3'], animate: true, color: [0xffd070, 0xffa040, 0xff8030], additive: true, drag: 0.6, sizeJitter: 0.3 });
+    for (let i = this.rate('flame', 30, dt); i > 0; i--)
+      P.emit({ ...base, pos: { x: f.x + (Math.random() - 0.5) * 0.26, y: f.y + 0.12, z: f.z + (Math.random() - 0.5) * 0.26 }, vel: { x: W.x * lean, y: 1.05, z: W.z * lean }, spread: 0.12, life: [0.35, 0.65], size: [0.5, 0.08], sprite: ['flame0', 'flame1', 'flame2', 'flame3'], animate: true, color: [0xffd070, 0xffa040, 0xff8030], additive: true, drag: 0.6, sizeJitter: 0.3 });
+    // tall licking tongues
+    for (let i = this.rate('tongue', 7, dt); i > 0; i--)
+      P.emit({ ...base, pos: { x: f.x + (Math.random() - 0.5) * 0.12, y: f.y + 0.25, z: f.z + (Math.random() - 0.5) * 0.12 }, vel: { x: W.x * lean * 1.3, y: 1.7, z: W.z * lean * 1.3 }, spread: 0.08, life: [0.28, 0.42], size: [0.34, 0.05], sprite: ['flame1', 'flame2', 'flame3'], animate: true, color: [0xffe08a, 0xffb050], additive: true, drag: 0.4, stretch: 0.06 });
     for (let i = this.rate('core', 8, dt); i > 0; i--)
-      P.emit({ ...base, pos: { x: f.x, y: f.y + 0.2, z: f.z }, life: [0.2, 0.3], size: [0.85, 0.55], sprite: 'glow32', color: 0xff6a1a, alpha: 0.42, additive: true, sizeJitter: 0.2 });
+      P.emit({ ...base, pos: { x: f.x, y: f.y + 0.25, z: f.z }, life: [0.2, 0.3], size: [1.1, 0.7], sprite: 'glow32', color: 0xff6a1a, alpha: 0.5, additive: true, sizeJitter: 0.2 });
     for (let i = this.rate('spark', 9 + Math.max(0, Math.sin(t * 0.7)) * 8, dt); i > 0; i--)
       P.emit({ ...base, pos: { x: f.x, y: f.y + 0.35, z: f.z }, vel: { x: W.x * lean * 1.6, y: 1.6, z: W.z * lean * 1.6 }, spread: 0.6, up: 0.8, life: [0.9, 2.0], size: [0.035, 0.015], sprite: 'spark', color: [0xffc060, 0xff9a40, 0xffe090], additive: true, drag: 0.5, jitter: 0.08, gravity: -0.2 });
     for (let i = this.rate('smoke', 2.2, dt); i > 0; i--)

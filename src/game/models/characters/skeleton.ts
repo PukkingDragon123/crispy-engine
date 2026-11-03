@@ -15,14 +15,15 @@ import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
 import type { RigSpec, PartSpec, SocketSpec, V3 } from '../../../engine/voxel/Rig';
 import { TOON, Ramp } from '../style';
 import { defaultExpressions } from '../toon/humanoid';
+import { frogWigHat, FROG_WIG_TOP } from '../enemies/frog';
 
-export type HatId = 'stetson' | 'duck' | 'sombrero' | 'nemes' | 'tophat' | 'bandit';
+export type HatId = 'stetson' | 'duck' | 'sombrero' | 'nemes' | 'tophat' | 'bandit' | 'wig';
 export type OutfitId = 'bare' | 'punk' | 'duster' | 'poncho' | 'vest' | 'sheriff' | 'pharaoh';
 export interface CowboyLook {
   hat: HatId;
   outfit: OutfitId;
 }
-export const HAT_IDS: HatId[] = ['stetson', 'duck', 'sombrero', 'nemes', 'tophat', 'bandit'];
+export const HAT_IDS: HatId[] = ['stetson', 'duck', 'sombrero', 'nemes', 'tophat', 'bandit', 'wig'];
 export const OUTFIT_IDS: OutfitId[] = ['bare', 'punk', 'duster', 'poncho', 'vest', 'sheriff', 'pharaoh'];
 export const SUNDOWN_EXPRESSIONS = ['neutral', 'focus', 'smug', 'surprised', 'hurt', 'angry', 'laugh', 'wink', 'dead', 'determined'] as const;
 export const SUNDOWN_VS = 1 / 36;
@@ -825,11 +826,13 @@ function buildHat(id: HatId, o: OutfitId) {
       return tophat();
     case 'bandit':
       return banditHat();
+    case 'wig':
+      return frogWigHat(36); // Mama Frog's fabulous wig
     default:
       return stetson(o === 'sheriff' ? ramp(0x5a4a3c, 0x45382c, 0x726050, 0x2c2218) : TOON.hat, o === 'sheriff' ? TOON.black : TOON.red);
   }
 }
-const HAT_TOP: Record<HatId, number> = { stetson: 67, duck: 76, sombrero: 72, nemes: 64, tophat: 75, bandit: 66 };
+const HAT_TOP: Record<HatId, number> = { stetson: 67, duck: 76, sombrero: 72, nemes: 64, tophat: 75, bandit: 66, wig: FROG_WIG_TOP };
 
 // ================================================================== RIG
 /**

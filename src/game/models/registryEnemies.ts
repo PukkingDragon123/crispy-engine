@@ -82,6 +82,7 @@ export const ENEMY_MODELS: Record<string, ModelEntry> = {
   rain_frog_baby_v4: () => rainFrogBabyRig({ variant: 4 }),
   rain_frog_moth: () => desertMothRig(),
   rain_frog_wig: () => ({ model: frogWigHat(), voxelSize: FROG_WIG_VS }),
+  rain_frog_wig_hd: () => ({ model: frogWigHat(54), voxelSize: 1 / 54 }),
   thorny_lizard: () => thornyLizardRig(),
   thorny_lizard_v1: () => thornyLizardRig({ variant: 1 }),
   thorny_lizard_v2: () => thornyLizardRig({ variant: 2 }),

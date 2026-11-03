@@ -23,6 +23,7 @@ import type { RigSpec, PartSpec, SocketSpec, V3, RigInstance } from '../../../en
 import { TOON, Ramp } from '../style';
 import { defaultExpressions } from '../toon/humanoid';
 import { SUNDOWN_EXPRESSIONS } from './skeleton';
+import { frogWigHat, FROG_WIG_TOP } from '../enemies/frog';
 import type { CowboyLook, HatId, OutfitId } from './skeleton';
 import { Sc, Col, clamp, lerp, sstep, vadd, vsub, vmul, vdot, vcross, vlen, vnorm, distPoly, spline, resample, shadeRamps, splitOff } from './sculpt';
 
@@ -1361,12 +1362,14 @@ function buildHat(id: HatId, o: OutfitId) {
       return tophat();
     case 'bandit':
       return stetson(ramp(0x34302e, 0x242120, 0x4a4542, 0x141212), 0xb8bcc4, { gambler: true, studs: true, feather: TOON.red.base });
+    case 'wig':
+      return frogWigHat(54); // Mama Frog's fabulous wig
     default:
       if (o === 'sheriff') return stetson(ramp(0x5a4a3c, 0x45382c, 0x726050, 0x2c2218), TOON.black.base);
       return stetson(TOON.hat, 0x2a201c, { battered: true, studs: true, feather: 0x3a2a20 });
   }
 }
-const HAT_TOP: Record<HatId, number> = { stetson: 67.3, duck: 73.3, sombrero: 72.8, nemes: 64.6, tophat: 75.5, bandit: 66.2 };
+const HAT_TOP: Record<HatId, number> = { stetson: 67.3, duck: 73.3, sombrero: 72.8, nemes: 64.6, tophat: 75.5, bandit: 66.2, wig: FROG_WIG_TOP };
 
 // ================================================================== RIG
 const STRAP_OFF: Record<OutfitId, [Env, number]> = {
