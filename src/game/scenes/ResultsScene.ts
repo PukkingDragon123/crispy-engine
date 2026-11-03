@@ -1,7 +1,10 @@
 // End of a run: a lamplit table in the hideout. On it, a miniature voxel
 // diorama of the region you rode through (zones you never reached under dust
-// sheets), your trail pinned in red string, a skull where you fell. Pinned
-// above it, your WANTED poster fills in line by line and gets stamped.
+// sheets), your trail pinned in red string, a skull where you fell. Shot to
+// the wall above it, your WANTED poster fills in line by line and gets stamped.
+// The poster's portrait is Sundown photographed from his own 3D rig
+// (IconFactory, sepia print); the paper, the bullet holes and the rubber stamp
+// are shaded on the lit sheet; only the typography is drawn into a canvas.
 import * as THREE from 'three';
 import type { Engine, GameScene } from '../../engine/Engine';
 import type { RunState } from '../Ctx';
@@ -9,8 +12,13 @@ import type { SubArea } from '../world/RegionGen';
 import { MAT } from '../world/Heightfield';
 import { VoxelModel } from '../../engine/voxel/VoxelModel';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
+import { buildRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { TOON, bevelBox } from '../models/style';
+import { modelEntry } from '../models/lookup';
+import { loadSave } from '../meta/Save';
+import { IconFactory } from '../ui/IconFactory';
+import { PARCHMENT_GLSL } from '../ui/Choice';
 import { Ease } from '../../engine/Tween';
 import { nav } from '../Nav';
 
@@ -24,6 +32,8 @@ export interface RunResult {
   bosses: string[];
   heightAt(x: number, z: number): number;
   banked?: number;
+  /** the rig the player rode with (for the poster portrait); falls back to the saved look */
+  hero?: RigSpec | null;
 }
 
 const N = 88; // diorama columns per side
@@ -167,53 +177,94 @@ function tableModel() {
   return m;
 }
 
-export function paintPoster(res: RunResult, lines: number) {
-  const W = 360, H = 520;
-  const cv = document.createElement('canvas');
+const PW = 1.08, PH = 1.56; // poster sheet (m)
+const CW = 720, CH = 1040; // ink canvas (px)
+const INK = '#2a1a10';
+const STAMP_Y = 905; // stamp centre on the ink canvas (px)
+
+/** the player's own Sundown rig (passed in by the run, else the saved look) */
+function heroSpec(res: RunResult): RigSpec | null {
+  if (res.hero?.parts) return res.hero;
+  try {
+    const look = loadSave().look;
+    for (const k of [`cowboy_${look.hat}_${look.outfit}`, 'cowboy_stetson_duster']) {
+      const s = modelEntry(k)?.() as RigSpec | undefined;
+      if (s?.parts) return s;
+    }
+  } catch {
+    /* no portrait */
+  }
+  return null;
+}
+
+/** Sundown photographed from his own 3D rig (IconFactory), printed in sepia */
+function capturePortrait(renderer: THREE.WebGLRenderer, res: RunResult): HTMLCanvasElement | null {
+  const spec = heroSpec(res);
+  if (!spec) return null;
+  const mat = makeVoxelMaterial({ fog: false });
+  const f = new IconFactory(renderer);
+  try {
+    const r = new RigInstance(buildRigGeo(spec, spec.name + ':poster'), { material: mat, castShadow: false });
+    // a waist-up mugshot: the legs stay out of frame
+    for (const p of ['thigh_l', 'thigh_r', 'shin_l', 'shin_r']) r.setPartVisible(p, false);
+    r.setExpression(res.won ? 'smug' : 'determined');
+    const n = r.nodes;
+    if (n['jaw']) n['jaw'].rotation.x = r.exprJaw;
+    n['brow_l']?.rotation.set(0, 0, r.exprBrow[0]);
+    n['brow_r']?.rotation.set(0, 0, r.exprBrow[1]);
+    n['arm_r']?.rotation.set(-0.5, 0, -0.35);
+    n['fore_r']?.rotation.set(-1.3, 0, 0);
+    n['head']?.rotation.set(0.06, 0.22, 0);
+    r.root.updateMatrixWorld(true);
+    const shot = f.capture(r.root, { w: 120, h: 112, ss: 4, yaw: 0.42, pitch: 0.1, fill: 0.96, dy: 0.02, light: 'sunset', levels: 12, ink: '#2a160a', rim: '#ffe2a8' });
+    const c = shot.getContext('2d')!;
+    const id = c.getImageData(0, 0, shot.width, shot.height);
+    const d = id.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const l = (d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11) / 255;
+      const k = Math.min(1, Math.max(0, (l - 0.04) * 1.12));
+      d[i] = Math.min(255, 66 + k * 180);
+      d[i + 1] = Math.min(255, 38 + k * 152);
+      d[i + 2] = Math.min(255, 20 + k * 104);
+    }
+    c.putImageData(id, 0, 0);
+    return shot;
+  } catch (e) {
+    console.warn('[results] portrait capture failed', e);
+    return null;
+  } finally {
+    f.dispose();
+    mat.dispose();
+  }
+}
+
+/**
+ * The poster's ink: typography (Alagard) and the photographed portrait, on a
+ * transparent canvas. The paper, the stamp and the bullet holes are the shader.
+ */
+export function paintPoster(res: RunResult, lines: number, portrait: HTMLCanvasElement | null, cv = document.createElement('canvas')) {
+  const W = CW, H = CH;
   cv.width = W;
   cv.height = H;
   const c = cv.getContext('2d')!;
-  const P = 4;
-  for (let y = 0; y < H; y += P)
-    for (let x = 0; x < W; x += P) {
-      const e = Math.min(x, y, W - P - x, H - P - y);
-      const n = Math.sin(x * 0.37 + y * 0.11) * Math.cos(y * 0.23 - x * 0.07);
-      c.fillStyle = e < 8 ? '#9a6a38' : e < 16 ? '#cfae78' : n > 0.6 ? '#e2cb98' : '#ecd9ae';
-      c.fillRect(x, y, P, P);
-    }
+  c.clearRect(0, 0, W, H);
+  c.imageSmoothingEnabled = false;
   c.textAlign = 'center';
   c.textBaseline = 'top';
-  c.fillStyle = '#2a1a10';
-  c.font = '48px Alagard';
-  c.fillText('WANTED', W / 2, 22);
-  c.font = '16px Alagard';
-  c.fillText(res.won ? '— A LEGEND OF THE DUNES —' : '— DEAD OR ALIVE —', W / 2, 74);
-  // portrait box
-  c.fillStyle = '#d8c08c';
-  c.fillRect(W / 2 - 70, 98, 140, 120);
-  c.strokeStyle = '#2a1a10';
-  c.lineWidth = 4;
-  c.strokeRect(W / 2 - 70, 98, 140, 120);
-  // pixel skull portrait with a hat
-  const px = (x: number, y: number, w: number, h: number, col: string) => {
-    c.fillStyle = col;
-    c.fillRect(W / 2 - 70 + x * 4, 98 + y * 4, w * 4, h * 4);
-  };
-  px(7, 6, 21, 3, '#6a3a20');
-  px(11, 2, 13, 5, '#7a4a28');
-  px(11, 5, 13, 1, '#b0392a');
-  px(11, 9, 13, 11, '#f2dcb4');
-  px(13, 12, 3, 3, '#2a1a10');
-  px(19, 12, 3, 3, '#2a1a10');
-  px(14, 13, 1, 1, '#9dff3a');
-  px(20, 13, 1, 1, '#9dff3a');
-  px(17, 16, 1, 1, '#2a1a10');
-  px(13, 18, 9, 1, '#2a1a10');
-  for (let i = 0; i < 4; i++) px(14 + i * 2, 18, 1, 2, '#f2dcb4');
-  px(12, 21, 11, 3, '#b0392a');
-  c.fillStyle = '#2a1a10';
+  c.fillStyle = INK;
+  c.font = '96px Alagard';
+  c.fillText('WANTED', W / 2, 40);
   c.font = '32px Alagard';
-  c.fillText('SUNDOWN', W / 2, 228);
+  c.fillText(res.won ? '- A LEGEND OF THE DUNES -' : '- DEAD OR ALIVE -', W / 2, 146);
+  if (portrait) {
+    const pw = portrait.width * 3, ph = portrait.height * 3;
+    c.globalAlpha = 0.94;
+    c.drawImage(portrait, Math.round(W / 2 - pw / 2), 188, pw, ph);
+    c.globalAlpha = 1;
+  }
+  c.fillStyle = INK;
+  c.font = '64px Alagard';
+  c.fillText('SUNDOWN', W / 2, 532);
   const r = res.run;
   const mm = Math.floor(r.time / 60), ss = Math.floor(r.time % 60);
   const rows: [string, string][] = [
@@ -223,47 +274,120 @@ export function paintPoster(res: RunResult, lines: number) {
     ['Gold collected', String(Math.round(r.totalGold))],
     ['Bounty rank', String(r.rank)],
     ['Time in the saddle', `${mm}:${String(ss).padStart(2, '0')}`],
-    ['Bosses', res.bosses.length ? res.bosses.join(', ') : '—'],
+    ['Bosses', res.bosses.length ? res.bosses.join(', ') : '-'],
   ];
-  c.font = '16px Alagard';
+  const x0 = 64, x1 = W - 64;
   rows.slice(0, lines).forEach(([k, v], i) => {
-    const y = 276 + i * 26;
+    const y = 616 + i * 42;
+    c.font = '32px Alagard';
     c.textAlign = 'left';
     c.fillStyle = '#4a2a14';
-    c.fillText(k, 34, y);
+    c.fillText(k, x0, y);
+    const kw = c.measureText(k).width;
+    // long values (boss lists) step down a size rather than run off the sheet
+    let small = false;
+    let vw = c.measureText(v).width;
+    if (vw > x1 - x0 - kw - 40) {
+      small = true;
+      c.font = '16px Alagard';
+      vw = c.measureText(v).width;
+    }
     c.textAlign = 'right';
-    c.fillStyle = '#2a1a10';
-    c.fillText(v, W - 34, y);
-    c.fillStyle = 'rgba(42,26,16,0.25)';
-    c.fillRect(34, y + 19, W - 68, 2);
+    c.fillStyle = INK;
+    c.fillText(v, x1, y + (small ? 10 : 0));
+    // dot leaders, set in type
+    c.font = '32px Alagard';
+    c.textAlign = 'left';
+    c.fillStyle = 'rgba(42,26,16,0.55)';
+    const dot = c.measureText('. ').width;
+    const n = Math.floor((x1 - vw - 14 - (x0 + kw + 14)) / dot);
+    if (n > 0) c.fillText('. '.repeat(n), x0 + kw + 14, y);
   });
-  if (lines > rows.length) {
-    c.save();
-    c.translate(W / 2, 452);
-    c.rotate(-0.16);
-    c.globalAlpha = 0.85;
-    c.strokeStyle = res.won ? '#2a7a1a' : '#b02a1a';
-    c.fillStyle = c.strokeStyle;
-    c.lineWidth = 5;
-    c.font = '40px Alagard';
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    const word = res.won ? 'LEGEND' : 'CLAIMED';
-    const w = c.measureText(word).width + 30;
-    c.strokeRect(-w / 2, -28, w, 56);
-    c.fillText(word, 0, 2);
-    c.restore();
-  }
+  return cv;
+}
+
+/** the stamp's word (white; the shader inks, frames and presses it) */
+function paintStampWord(word: string) {
+  const m = document.createElement('canvas').getContext('2d')!;
+  m.font = '80px Alagard';
+  const cv = document.createElement('canvas');
+  cv.width = Math.ceil(m.measureText(word).width) + 60;
+  cv.height = 112;
+  const c = cv.getContext('2d')!;
+  c.imageSmoothingEnabled = false;
+  c.font = '80px Alagard';
+  c.fillStyle = '#ffffff';
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  c.fillText(word, cv.width / 2, cv.height / 2 + 4);
+  return cv;
+}
+
+function inkTexture(cv: HTMLCanvasElement) {
   const t = new THREE.CanvasTexture(cv);
   t.colorSpace = THREE.SRGBColorSpace;
   t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.anisotropy = 4;
   return t;
+}
+
+/** paper (shader) + ink map on a lit standard material, so the lamp and shadows still play on it */
+const POSTER_PAPER = /* glsl */ `
+{
+  vec2 pUv = vMapUv;
+  float pEdge = paperEdge(pUv, uAspect);
+  float pTear = paperTear(pUv, 0.02);
+  if (pEdge < pTear) discard;
+  vec3 pCol = parchment(pUv, uAspect, pEdge, pTear);
+  if (bulletHole(pUv, uAspect, vec2(0.045, 0.972), 0.03, pCol) < 0.5) discard;
+  if (bulletHole(pUv, uAspect, vec2(0.955, 0.972), 0.03, pCol) < 0.5) discard;
+  // it was folded in four in somebody's saddlebag
+  float fold = exp(-pow((pUv.y - 0.52) * 150.0, 2.0)) + 0.7 * exp(-pow((pUv.x - 0.5) * uAspect * 150.0, 2.0));
+  pCol *= 1.0 - 0.07 * fold;
+  vec3 pLin = pow(pCol, vec3(2.2));
+  vec4 pInk = texture2D(map, pUv);
+  float pPress = 0.8 + 0.2 * smoothstep(0.2, 0.6, pNoise(pUv * vec2(uAspect, 1.0) * 260.0));
+  pLin = mix(pLin, pInk.rgb * mix(vec3(1.0), pLin * 1.1, 0.2), pInk.a * pPress);
+  if (uStamp > 0.001) {
+    float st = rubberStamp(pUv, uAspect, uStampRect, uStampAng, uStampMap);
+    pLin = mix(pLin, uStampCol * mix(vec3(1.0), pLin, 0.25), st * 0.85 * uStamp);
+  }
+  diffuseColor.rgb *= pLin;
+}
+`;
+
+/** a sheet shot to the wall at its two top corners: it bows a little and the bottom corners curl out */
+function posterGeometry() {
+  const g = new THREE.PlaneGeometry(PW, PH, 14, 20);
+  const pos = g.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const xn = pos.getX(i) / (PW / 2), yn = pos.getY(i) / (PH / 2);
+    const low = Math.pow((1 - yn) / 2, 2.2);
+    const sag = Math.sin(((yn + 1) / 2) * Math.PI) * 0.01;
+    pos.setZ(i, sag * (1 - xn * xn) + 0.05 * low * xn * xn * xn * xn + 0.006 * Math.sin(xn * 3.1 + yn * 2.3));
+  }
+  g.computeVertexNormals();
+  return g;
 }
 
 export class ResultsScene implements GameScene {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(42, 1, 0.05, 200);
   private poster!: THREE.Mesh;
+  private inkCanvas = document.createElement('canvas');
+  private ink: THREE.CanvasTexture | null = null;
+  private stampTex: THREE.CanvasTexture | null = null;
+  private portrait: HTMLCanvasElement | null = null;
+  private paperU = {
+    uSeed: { value: Math.random() },
+    uAspect: { value: PW / PH },
+    uStamp: { value: 0 },
+    uStampAng: { value: 0.16 },
+    uStampRect: { value: new THREE.Vector4(0.5, 1 - STAMP_Y / CH, 0.12, 0.05) },
+    uStampCol: { value: new THREE.Color('#b02a1a') },
+    uStampMap: { value: null as THREE.Texture | null },
+  };
   private lines = 0;
   private t = 0;
   private ui: HTMLDivElement;
@@ -302,7 +426,7 @@ export class ResultsScene implements GameScene {
     const wall = new THREE.Mesh(new THREE.PlaneGeometry(14, 6), new THREE.MeshStandardMaterial({ color: 0x3a2414, roughness: 1 }));
     wall.position.set(0, 2, -2.2);
     s.add(wall);
-    this.poster = new THREE.Mesh(new THREE.PlaneGeometry(1.08, 1.56), new THREE.MeshStandardMaterial({ map: paintPoster(this.res, 0), roughness: 0.95 }));
+    this.poster = this.buildPoster();
     this.poster.position.set(0, 1.55, -2.15);
     this.poster.rotation.z = 0.03;
     s.add(this.poster);
@@ -343,9 +467,10 @@ export class ResultsScene implements GameScene {
       await eng.tweens.wait(2.2, true);
       for (let i = 1; i <= 8; i++) {
         this.lines = i;
-        const old = (this.poster.material as THREE.MeshStandardMaterial).map;
-        (this.poster.material as THREE.MeshStandardMaterial).map = paintPoster(this.res, i);
-        old?.dispose();
+        if (i <= 7) {
+          paintPoster(this.res, i, this.portrait, this.inkCanvas);
+          if (this.ink) this.ink.needsUpdate = true;
+        } else this.paperU.uStamp.value = 1; // the rubber stamp slams down
         eng.audio.play(i === 8 ? 'poster_slam' : 'page_turn', { volume: i === 8 ? 1 : 0.4 });
         if (i === 8) eng.tweens.run(0.25, (k) => (this.poster.scale.setScalar(1 + Math.sin(k * Math.PI) * 0.06)), Ease.outQuad, { real: true });
         await eng.tweens.wait(i === 7 ? 0.7 : 0.32, true);
@@ -354,8 +479,38 @@ export class ResultsScene implements GameScene {
     })();
   }
 
+  /** the WANTED sheet: shader paper on a curled, lit sheet + the ink canvas */
+  private buildPoster() {
+    this.portrait = capturePortrait(this.engine.renderer, this.res);
+    paintPoster(this.res, 0, this.portrait, this.inkCanvas);
+    this.ink = inkTexture(this.inkCanvas);
+    const word = this.res.won ? 'LEGEND' : 'CLAIMED';
+    const sc = paintStampWord(word);
+    this.stampTex = inkTexture(sc);
+    this.stampTex.minFilter = THREE.LinearFilter;
+    this.stampTex.generateMipmaps = false;
+    const u = this.paperU;
+    u.uStampMap.value = this.stampTex;
+    u.uStampRect.value.z = sc.width / 2 / CH;
+    u.uStampRect.value.w = sc.height / 2 / CH;
+    u.uStampCol.value.set(this.res.won ? '#2a7a1a' : '#b02a1a');
+    const mat = new THREE.MeshStandardMaterial({ map: this.ink, roughness: 0.93, metalness: 0 });
+    mat.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, u);
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float uAspect, uStamp, uStampAng;\nuniform vec4 uStampRect;\nuniform vec3 uStampCol;\nuniform sampler2D uStampMap;\n' + PARCHMENT_GLSL)
+        .replace('#include <map_fragment>', POSTER_PAPER);
+    };
+    mat.customProgramCacheKey = () => 'dustup-wanted-poster';
+    return new THREE.Mesh(posterGeometry(), mat);
+  }
+
   exit() {
     this.ui.remove();
+    this.ink?.dispose();
+    this.stampTex?.dispose();
+    (this.poster?.material as THREE.Material | undefined)?.dispose();
+    this.poster?.geometry.dispose();
   }
 
   update(_dt: number, rdt: number) {
