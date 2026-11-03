@@ -17,7 +17,7 @@ export const DEFAULT_BINDINGS: Record<Action, string[]> = {
   // HOLD through an A / D carve to drift, hold in the air + WASD to spin / flip
   push: ['ShiftLeft', 'ShiftRight'],
   drift: ['ShiftLeft', 'ShiftRight'],
-  boost: ['ControlLeft', 'KeyV'],
+  boost: ['KeyV'], // not Ctrl: Ctrl+W would close the browser tab
   grapple: ['KeyQ'],
   fire: ['Mouse0'],
   aim: ['Mouse2'],

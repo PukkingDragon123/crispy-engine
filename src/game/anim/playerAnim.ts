@@ -396,15 +396,25 @@ export class PlayerAnim {
   update(I: PlayerAnimIn) {
     const dt = I.dt;
     if (!this.ready) this.init(I.rig);
+    this.dustNow = false;
+    // a frozen frame (pause, zero-time hit-stop): hold the pose. Velocities are
+    // differences over dt, so stepping here would only feed the springs garbage.
+    if (!(dt > 0)) {
+      this.wantGlanceQuery = this.wantFidgetTwirl = false;
+      return;
+    }
     const b = I.board, n = I.rig.nodes, R = I.reload, t = I.time;
     const grounded = b.grounded, spd = b.speed, alive = I.alive;
     const sc = this.scale;
     const idt = 1 / Math.max(dt, 1e-4);
-    this.dustNow = false;
 
     // --------------------------------------------------------- derived input
-    const acc = this.v0.copy(b.vel).sub(this.prevVel).multiplyScalar(dt > 0 ? idt : 0);
+    const acc = this.v0.copy(b.vel).sub(this.prevVel).multiplyScalar(idt);
     this.prevVel.copy(b.vel);
+    if (!Number.isFinite(acc.x + acc.y + acc.z)) {
+      acc.set(0, 0, 0);
+      if (!Number.isFinite(this.prevVel.x + this.prevVel.y + this.prevVel.z)) this.prevVel.set(0, 0, 0);
+    }
     if (acc.lengthSq() > 4900) acc.setLength(70);
     const f = b.forward;
     const accX = acc.x * f.x + acc.z * f.z; // along the board (toward the nose = rider's left)

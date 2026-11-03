@@ -1580,7 +1580,7 @@ export class Enemies implements EnemyApi {
         const dy = Math.abs(e.pos.y - ppos.y);
         if (d < e.radius + 0.55 && dy < e.height) {
           const ps = pl.speed;
-          if (ps > 12 && e.ramCd <= 0) {
+          if (ps > 8.5 && e.ramCd <= 0) {
             e.ramCd = 0.6;
             const v = pl.board.vel;
             const vl = Math.hypot(v.x, v.z) || 1;

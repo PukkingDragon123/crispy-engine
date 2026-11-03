@@ -1004,7 +1004,7 @@ export class RunScene implements GameScene {
     this.windLoop?.setVolume(0.45 + near * 0.3, 0.3);
     // board slide audio
     const sp = this.player.speed;
-    this.slideLoop?.setVolume(this.player.board.grounded ? clamp(sp / 22, 0, 1) * 0.55 : 0, 0.08);
+    this.slideLoop?.setVolume(this.player.board.grounded ? clamp(sp / 13, 0, 1) * 0.55 : 0, 0.08);
     this.slideLoop?.setRate(0.8 + clamp(sp / 40, 0, 0.6));
     // board tracks in sand
     if (this.player.board.grounded && sp > 2 && this.player.board.lastSurface.kind !== 'water') {
@@ -1027,7 +1027,7 @@ export class RunScene implements GameScene {
     const pu = e.post.u;
     pu.uDamage.value = Math.max(0, pu.uDamage.value - rdt * 1.5);
     pu.uPoison.value = this.player.status.has('poison') ? 0.6 : Math.max(0, pu.uPoison.value - rdt);
-    pu.uRadial.value = clamp((sp - 18) / 20, 0, 0.6) + (this.player.board.boosting ? 0.25 : 0);
+    pu.uRadial.value = clamp((sp - 11) / 10, 0, 0.6) + (this.player.board.boosting ? 0.25 : 0);
     pu.uVignette.value = 0.32 + near * 0.35;
     // combo decay
     this.run.comboTimer -= dt;

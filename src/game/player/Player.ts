@@ -500,7 +500,7 @@ export class Player {
       } else this.ctx.fx.sandSpray(tail, { x: back.x * sp * 0.15 - Math.cos(b.heading) * b.lean * 4, y: 0, z: back.z * sp * 0.15 + Math.sin(b.heading) * b.lean * 4 }, amt * dt * 60 * 0.35);
     }
     // speed lines near the top of the (gun-range) speed band
-    this.ctx.fx.speedLines(this.ctx.camera, clamp((sp - 19) / 12, 0, 1) * (1 - this.cam.aim * 0.7) + (b.boosting ? 0.4 : 0));
+    this.ctx.fx.speedLines(this.ctx.camera, clamp((sp - 11) / 7, 0, 1) * (1 - this.cam.aim * 0.7) + (b.boosting ? 0.4 : 0));
   }
 
   // -------------------------------------------------------------------- aim

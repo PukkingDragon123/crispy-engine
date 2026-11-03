@@ -238,7 +238,7 @@ export class BoardMoves {
     if (l.score > 0 && l.quality !== 'sketchy') {
       // the trick already scored on its own; the bank multiplies it again
       this.awarded += l.score;
-      this.link(l.trickName.replace('PERFECT ', ''), l.score, 1 + (l.spins >= 2 ? 0.5 : 0) + l.flips * 0.5);
+      this.link(l.trickName.replace('PERFECT ', '') || 'AIR', l.score, 1 + (l.spins >= 2 ? 0.5 : 0) + l.flips * 0.5);
     } else if (l.quality === 'perfect') this.link('STOMPED', 30, 0.5);
   }
 
@@ -376,12 +376,13 @@ export class BoardMoves {
       big.show(true);
       small.show(true);
     }
-    // beside the rider, toward the camera's right, above the hip
+    // beside the rider on the open side of the over-the-shoulder view (camera-left),
+    // clear of the crosshair and the wave banner
     const cam = this.ctx.camera;
     _r.set(1, 0, 0).applyQuaternion(cam.quaternion);
     const p = this.b.pos;
-    big.anchor.set(p.x + _r.x * 1.35, p.y + 1.95, p.z + _r.z * 1.35);
-    small.anchor.set(p.x + _r.x * 1.35, p.y + 1.62, p.z + _r.z * 1.35);
+    big.anchor.set(p.x - _r.x * 1.45, p.y + 1.6, p.z - _r.z * 1.45);
+    small.anchor.set(p.x - _r.x * 1.45, p.y + 1.28, p.z - _r.z * 1.45);
     this.pulse = Math.max(0, this.pulse - dt * 4);
     big.hover = this.pulse;
     big.update(dt, cam);

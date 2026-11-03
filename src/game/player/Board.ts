@@ -196,6 +196,8 @@ export class Board {
   slashT = 9;
   /** this air started as a spin launch out of a drift */
   launchSpin = false;
+  /** the carve key held through a spin launch doesn't wind the spin until it is let go */
+  private spinLock = false;
   /** wall ride state (normal points out of the wall) */
   wall = { on: false, nx: 0, nz: 0, t: 0, c: null as Collider | null };
   private wallCd = 0;
@@ -284,6 +286,8 @@ export class Board {
   }
 
   step(dt: number, inp: BoardInput, env: BoardEnv) {
+    // a frozen frame (pause): nothing to integrate (the ground-follow divides by dt)
+    if (!(dt > 0)) return;
     this.clock += dt;
     this.landWin = Math.max(0, this.landWin - dt);
     this.wallCd = Math.max(0, this.wallCd - dt);
@@ -690,6 +694,7 @@ export class Board {
           const T = Math.max(0.35, (2 * this.vel.y) / t.gravity);
           const k = 3.2;
           this.spinYaw = ((dDir * half * Math.PI * k) / (1 - Math.exp(-k * T))) * 1.02;
+          this.spinLock = Math.abs(inp.fx) > 0.1;
           this.onSpinLaunch?.(half, dCharge);
         }
         this.onJump?.(charge, booster);
@@ -779,9 +784,11 @@ export class Board {
       // D spins clockwise (to the right), A counter-clockwise.
       const spinRate = 7.2 * (0.85 + 0.15 * mob);
       const wind = 1 - Math.exp(-9 * dt), bleed = Math.exp(-3.2 * dt);
+      if (this.spinLock && Math.abs(inp.fx) < 0.1) this.spinLock = false;
+      const sfx = this.spinLock ? 0 : inp.fx;
       if (trick && this.stumble <= 0) {
-        const ty = -inp.fx * spinRate, tp = inp.fz * spinRate * 0.95;
-        this.spinYaw = Math.abs(inp.fx) > 0.1 ? this.spinYaw + (ty - this.spinYaw) * wind : this.spinYaw * bleed;
+        const ty = -sfx * spinRate, tp = inp.fz * spinRate * 0.95;
+        this.spinYaw = Math.abs(sfx) > 0.1 ? this.spinYaw + (ty - this.spinYaw) * wind : this.spinYaw * bleed;
         this.spinPitch = Math.abs(inp.fz) > 0.1 ? this.spinPitch + (tp - this.spinPitch) * wind : this.spinPitch * bleed;
         this.grabbing = Math.abs(inp.fx) < 0.1 && Math.abs(inp.fz) < 0.1;
         if (this.grabbing) this.grabTime += dt;
@@ -1017,5 +1024,6 @@ export class Board {
     this.grabTime = 0;
     this.airTime = 0;
     this.launchSpin = false;
+    this.spinLock = false;
   }
 }
