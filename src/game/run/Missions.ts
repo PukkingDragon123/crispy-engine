@@ -399,12 +399,8 @@ export class Missions {
       n.t += dt;
       const nd = n.rig.nodes;
       if (n.kind === 'merchant') {
-        const near = n.rig.root.position.distanceTo(this.d.player.pos) < 12;
-        if (nd['jaw']) nd['jaw'].rotation.x = near ? Math.abs(Math.sin(n.t * 9)) * 0.25 : 0;
-        if (nd['arm_r']) nd['arm_r'].rotation.set(near ? -2.4 + Math.sin(n.t * 8) * 0.3 : 0, 0, near ? -0.3 : 0);
-        if (nd['head']) nd['head'].rotation.y = Math.sin(n.t * 0.7) * 0.3;
-        if (nd['torso']) nd['torso'].rotation.x = Math.sin(n.t * 1.3) * 0.03 + 0.08;
-        n.rig.setExpression(near ? 'laugh' : 'neutral');
+        // Old Mother Tamsin's idle + shyness (hides in her shell when aimed/shot at) live in the shop
+        this.d.shop.animateMerchant(n.rig, dt, this.d.player.pos);
       } else {
         if (nd['head']) nd['head'].rotation.set(Math.sin(n.t * 0.9) * 0.1, Math.sin(n.t * 0.5) * 0.25, 0);
         if (nd['jaw']) nd['jaw'].rotation.x = Math.abs(Math.sin(n.t * 4)) * 0.15;

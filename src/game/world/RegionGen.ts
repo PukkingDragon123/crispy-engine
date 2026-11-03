@@ -914,18 +914,33 @@ function placeLandmark(ctx: ThemeCtx, zn: ZoneDef, type: LandmarkType) {
   const { rng, field, noise } = ctx;
   const info = LANDMARK_INFO[type];
   const R = zn.r;
-  for (let k = 0; k < 40; k++) {
+  const half = Math.max(info.size[0], info.size[1]) * 0.5 + 4;
+  // small scatter may be cleared away for the building; set pieces may not
+  const SMALL = new Set(['cactus', 'bush', 'tumbleweed', 'deadBush', 'dryGrass', 'rock', 'boulder', 'ore', 'pot', 'boneScatter', 'skull', 'palm', 'reeds', 'obeliskBroken', 'mineCart', 'tntCrate', 'ruinWall', 'chest']);
+  let best: { x: number; z: number } | null = null;
+  let bestSoft = 1e9;
+  for (let k = 0; k < 60; k++) {
     const a = rng.range(0, Math.PI * 2), r = rng.range(R * 0.45, R * 0.72);
     const x = zn.cx + Math.cos(a) * r, z = zn.cz + Math.sin(a) * r;
-    const half = Math.max(info.size[0], info.size[1]) * 0.5 + 4;
-    if (zn.anchors.some((o) => Math.hypot(o.x - x, o.z - z) < half + 4 && o.kind !== 'cactus' && o.kind !== 'bush' && o.kind !== 'tumbleweed')) continue;
-    // remove small scatter under the footprint
-    zn.anchors = zn.anchors.filter((o) => Math.hypot(o.x - x, o.z - z) > half + 1);
-    const rot = Math.atan2(zn.cz - z, zn.cx - x); // entrance faces zone center
-    flattenDisc(field, x, z, half, 1, MAT.DIRT, noise);
-    zn.anchors.push({ kind: 'landmark', x, z, rot, data: { type, name: info.name, mission: info.mission } });
-    return;
+    let hard = 0,
+      soft = 0;
+    for (const o of zn.anchors) {
+      if (Math.hypot(o.x - x, o.z - z) >= half + 4) continue;
+      if (SMALL.has(o.kind)) soft++;
+      else hard++;
+    }
+    if (hard > 0 || soft >= bestSoft) continue;
+    best = { x, z };
+    bestSoft = soft;
+    if (soft === 0) break;
   }
+  if (!best) return;
+  const { x, z } = best;
+  // clear the scatter off the footprint and its yard
+  zn.anchors = zn.anchors.filter((o) => Math.hypot(o.x - x, o.z - z) >= half + 4 || !SMALL.has(o.kind));
+  const rot = Math.atan2(zn.cz - z, zn.cx - x); // entrance faces zone center
+  flattenDisc(field, x, z, half, 1, MAT.DIRT, noise);
+  zn.anchors.push({ kind: 'landmark', x, z, rot, data: { type, name: info.name, mission: info.mission } });
 }
 
 function flattenDisc(field: Heightfield, cx: number, cz: number, r: number, strength: number, mat: number, noise: Noise) {

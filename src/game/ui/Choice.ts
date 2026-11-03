@@ -40,7 +40,7 @@ vec3 parchment(vec2 uv, float aspect, float edge, float tear){
   col *= 0.95 + 0.05 * pFbm(q * vec2(150.0, 40.0));
   float fox = smoothstep(0.68, 0.88, pFbm(q * 8.0 + 7.0));
   col = mix(col, vec3(0.66, 0.47, 0.27), fox * 0.32);
-  col *= 1.0 - 0.3 * step(0.988, pHash(floor(q * 240.0)));
+  col *= 1.0 - 0.16 * step(0.993, pHash(floor(q * 240.0)));
   float rim = smoothstep(tear + 0.075, tear, edge);
   col = mix(col, vec3(0.55, 0.36, 0.18), rim * 0.6);
   float burn = smoothstep(tear + 0.02, tear, edge);
@@ -219,7 +219,9 @@ function noticeMaterial(o: ChoiceOption, W = 512, H = 704) {
     fragmentShader: NOTICE_FS,
     transparent: true,
     depthTest: false,
-    depthWrite: false,
+    // the sheet writes its depth so the ink-outline pass outlines the paper,
+    // not the world behind it
+    depthWrite: true,
     side: THREE.DoubleSide,
   });
 }

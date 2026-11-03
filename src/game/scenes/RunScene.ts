@@ -824,6 +824,7 @@ export class RunScene implements GameScene {
       bosses: this.bossNames,
       heightAt: this.world.groundAt,
       banked: awardRun(this.run, this.codexKills),
+      hero: this.player.rig.geo.spec,
     };
     eng.tweens.after(2.6, () => {
       void eng.setScene(

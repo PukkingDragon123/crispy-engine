@@ -65,6 +65,7 @@ const _c = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
 const _kj = new THREE.Vector3();
+const _f = new THREE.Vector3();
 const _kr = new THREE.Vector3();
 
 // ================================================================== Old Mother Tamsin, the puppet
@@ -484,6 +485,7 @@ interface Body {
 const G = 10.5;
 const RESTITUTION = 0.32;
 const FRICTION = 0.6;
+const SLOP = 0.004;
 const CORNERS: [number, number, number][] = [];
 for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) CORNERS.push([x, y, z]);
 
@@ -551,6 +553,7 @@ export class Shop {
   private scolded = false;
   private unsub: (() => void)[] = [];
   private gq = new THREE.Quaternion();
+  private herHeight = 1.53;
 
   constructor(private ctx: Ctx, private input: Input, private cam: CameraRig) {
     ctx.scene.add(this.group);
@@ -643,6 +646,7 @@ export class Shop {
     this.shotCd = 0;
     this.her = this.findHer(rugAt, merchantPos);
     const her = this.her;
+    this.herHeight = (her?.rig?.geo.spec.meta?.height as number | undefined) ?? 1.53;
     // ---- where everything goes: rug in front of her, the camera on the customer side
     const C = new THREE.Vector3();
     let yaw: number;
@@ -739,7 +743,8 @@ export class Shop {
     let best: Tamsin | null = null, bd = 10;
     for (const p of this.puppets.values()) {
       if (!p.root.parent) continue;
-      const d = p.root.position === merchantPos ? 0 : p.root.position.distanceTo(rugAt);
+      // nearest to this rug wins (the caller's merchantPos may belong to another post)
+      const d = p.root.position.distanceTo(rugAt) - (p.root.position === merchantPos ? 0.5 : 0);
       if (d < bd) {
         bd = d;
         best = p;
@@ -761,24 +766,109 @@ export class Shop {
     return null;
   }
 
-  /** the low, warm three-quarter shot of her behind the rug */
+  /**
+   * The low, warm three-quarter shot of her behind the rug: about 30° off her
+   * nose, four metres out, a metre up. Tries both sides, then closer and a little higher, and
+   * keeps the first spot with a clear view of her head and the rug (no post,
+   * wall or hunter in the lens).
+   */
   private planShot() {
     const H = this.pivot, a = this.fwdAng;
     const F = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
     const L = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a));
-    const at = (s: number) => H.clone().addScaledVector(F, 2.95).addScaledVector(L, 1.65 * s);
-    let side = 1;
-    if (this.hunter) {
-      // keep the hunter out of the lens: the side whose camera spot is farther from him
-      side = at(1).distanceToSquared(this.hunter) >= at(-1).distanceToSquared(this.hunter) ? 1 : -1;
-    }
-    const pos = at(side);
-    pos.y = Math.max(this.ctx.world.groundAt(pos.x, pos.z), H.y) + 1.0;
+    const spot = (s: number, k: number, lift: number) => {
+      const p = H.clone().addScaledVector(F, 1.05 + 2.4 * k).addScaledVector(L, 2.0 * k * s);
+      p.y = Math.max(this.ctx.world.groundAt(p.x, p.z), H.y) + lift;
+      return p;
+    };
+    let pref = 1;
+    if (this.hunter) pref = spot(1, 1, 1).distanceToSquared(this.hunter) >= spot(-1, 1, 1).distanceToSquared(this.hunter) ? 1 : -1;
+    const head = H.clone();
+    head.y += 1.2;
+    const rug = this.group.position.clone();
+    rug.y += 0.2;
+    let pos: THREE.Vector3 | null = null, side = pref;
+    search: for (const kk of [1, 0.8, 0.62])
+      for (const s of [pref, -pref])
+        for (const lift of [1.0, 1.35]) {
+          const p = spot(s, kk, lift);
+          if (this.clearView(p, head) && this.clearView(p, rug)) {
+            pos = p;
+            side = s;
+            break search;
+          }
+        }
+    if (!pos) pos = spot(pref, 0.62, 1.7); // crowded: look down over whatever is in the way
     this.camMain.pos.copy(pos);
     this.camMain.look.copy(H).addScaledVector(F, 0.47).addScaledVector(L, 0.1 * side);
     this.camMain.look.y = H.y + 0.66;
-    this.camMain.fov = 46;
+    // fit her (hat to toes) and the rug inside the letterboxed frame
+    // (where the wares land: across the rug, a little toward the customer)
+    const g = this.group, wx = Math.min(this.rugHalf.x, 1.05);
+    const subject = [
+      H.clone().add(_a.set(0, this.herHeight + 0.06, 0)),
+      H.clone().addScaledVector(F, 0.3),
+      g.localToWorld(new THREE.Vector3(-wx, this.rugTop, 0.3)),
+      g.localToWorld(new THREE.Vector3(wx, this.rugTop, 0.3)),
+      g.localToWorld(new THREE.Vector3(-wx, this.rugTop, -0.62)),
+      g.localToWorld(new THREE.Vector3(wx, this.rugTop, -0.62)),
+    ];
+    this.camMain.fov = this.fitShot(pos, subject, this.camMain.look);
     this.focus.copy(this.camMain.look);
+  }
+
+  /**
+   * Re-aim `look` (in place) at the middle of the subject points as seen from
+   * `pos`, and return the vertical fov (deg) that holds them all inside the
+   * letterbox band with a little air.
+   */
+  private fitShot(pos: THREE.Vector3, pts: THREE.Vector3[], look: THREE.Vector3) {
+    const aspect = this.ctx.engine.width / Math.max(1, this.ctx.engine.height);
+    const fwd = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3(), d = new THREE.Vector3();
+    let hx = 0, hy = 0;
+    for (let pass = 0; pass < 4; pass++) {
+      fwd.subVectors(look, pos).normalize();
+      right.crossVectors(fwd, UP).normalize();
+      up.crossVectors(right, fwd);
+      let y0 = Infinity, y1 = -Infinity, x0 = Infinity, x1 = -Infinity;
+      for (const p of pts) {
+        d.subVectors(p, pos);
+        const z = Math.max(0.25, d.dot(fwd));
+        const ty = d.dot(up) / z, tx = d.dot(right) / z;
+        y0 = Math.min(y0, ty);
+        y1 = Math.max(y1, ty);
+        x0 = Math.min(x0, tx);
+        x1 = Math.max(x1, tx);
+      }
+      hx = (x1 - x0) / 2;
+      hy = (y1 - y0) / 2;
+      const dist = look.distanceTo(pos);
+      look.copy(pos).addScaledVector(fwd, dist).addScaledVector(up, ((y0 + y1) / 2) * dist).addScaledVector(right, ((x0 + x1) / 2) * dist);
+    }
+    // the letterbox leaves the middle 78% of the height
+    const t = Math.max(hy / 0.78, hx / aspect) * 1.1;
+    return clamp((2 * Math.atan(t) * 180) / Math.PI, 36, 58);
+  }
+
+  /** no prop, wall, dune or hunter between the lens and a point */
+  private clearView(from: THREE.Vector3, to: THREE.Vector3) {
+    const d = _a.copy(to).sub(from);
+    const len = d.length();
+    if (len < 0.1) return true;
+    d.multiplyScalar(1 / len);
+    const hit = { t: -1, c: null as unknown as null, nx: 0, nz: 0 };
+    this.ctx.world.colliders.raycast(from.x, from.y, from.z, d.x, d.y, d.z, Math.max(0.1, len - 0.3), hit);
+    if (hit.t >= 0) return false;
+    const g = this.ctx.world.field.raycast(from.x, from.y, from.z, d.x, d.y, d.z, len - 0.2);
+    if (g >= 0) return false;
+    if (this.hunter) {
+      // the hunter's body (a capsule from his boots to his hat)
+      const c = _b.copy(this.hunter);
+      c.y += 0.9;
+      const t = clamp(_c.copy(c).sub(from).dot(d), 0, len);
+      if (_c.copy(from).addScaledVector(d, t).distanceTo(c) < 0.6) return false;
+    }
+    return true;
   }
 
   /** orbit around her from a to b (never through the building behind her) */
@@ -966,9 +1056,10 @@ export class Shop {
     }
     this.focusK = damp(this.focusK, hb && this.phase !== 'leave' ? 1 : 0, 2.4, h);
     const f = this.focusK * this.focusK * (3 - 2 * this.focusK);
-    const P1 = _a.copy(this.camMain.pos).lerp(this.focus, 0.3 * f);
-    const L1 = _b.copy(this.camMain.look).lerp(this.focus, 0.6 * f);
-    const fov1 = this.camMain.fov - 8 * f;
+    // ease in on the hovered ware, but keep her in the shot behind it
+    const P1 = _a.copy(this.camMain.pos).lerp(this.focus, 0.22 * f);
+    const L1 = _b.copy(this.camMain.look).lerp(this.focus, 0.42 * f);
+    const fov1 = this.camMain.fov - 6 * f;
     const e = smoother(this.camK);
     this.orbit(this.camFrom.pos, P1, e, this.shot.pos);
     const el = smoother(this.camK * 1.25);
@@ -1049,7 +1140,7 @@ export class Shop {
     b.v.copy(b.slot).sub(b.p).multiplyScalar(1 / T);
     b.v.y += 0.5 * G * T;
     b.q.setFromEuler(new THREE.Euler(rnd.next() * 6.28, rnd.next() * 6.28, rnd.next() * 6.28));
-    b.w.set(rnd.range(-9, 9), rnd.range(-6, 6), rnd.range(-9, 9));
+    b.w.set(rnd.range(-5, 5), rnd.range(-3, 3), rnd.range(-5, 5));
     b.asleep = false;
     this.ctx.sfx('whoosh', this.group.localToWorld(_w.copy(b.p)), 0.12, 1.7);
   }
@@ -1061,7 +1152,10 @@ export class Shop {
   }
 
   private floorAt(x: number, z: number) {
-    return Math.abs(x) <= this.rugHalf.x && Math.abs(z) <= this.rugHalf.y ? this.rugTop : 0;
+    if (Math.abs(x) <= this.rugHalf.x && Math.abs(z) <= this.rugHalf.y) return this.rugTop;
+    // off the rug: the real sand, measured from the rug's plane
+    const w = this.group.localToWorld(_f.set(x, 0, z));
+    return clamp(this.ctx.world.groundAt(w.x, w.z) - w.y, -0.3, 0.4);
   }
 
   /** an impulse j (m/s, local) at local point at (null: the centre) */
@@ -1145,42 +1239,50 @@ export class Shop {
     b.q.set(b.q.x + _q.x, b.q.y + _q.y, b.q.z + _q.z, b.q.w + _q.w).normalize();
     const floor = this.floorAt(b.p.x, b.p.z);
     let pen = 0, contacts = 0, impact = 0;
-    const r = _a, vc = _b, rn = _c, t1 = _v, t2 = _w;
+    const r = _a.set(0, 0, 0), vc = _b, rn = _c, t1 = _v, t2 = _w;
+    // one contact at the mean of the corners under the floor: a face rests
+    // without spurious torque, an edge or a corner still tips and tumbles
     for (const c of CORNERS) {
-      r.set(c[0] * b.he.x, c[1] * b.he.y, c[2] * b.he.z).applyQuaternion(b.q);
-      const py = b.p.y + r.y;
-      if (py >= floor) continue;
+      t1.set(c[0] * b.he.x, c[1] * b.he.y, c[2] * b.he.z).applyQuaternion(b.q);
+      const d = floor - (b.p.y + t1.y);
+      if (d <= -SLOP) continue; // corners a hair above the floor still share the load
       contacts++;
-      pen = Math.max(pen, floor - py);
-      vc.crossVectors(b.w, r).add(b.v);
-      if (vc.y >= 0) continue;
-      impact = Math.max(impact, -vc.y);
-      // normal impulse
-      rn.crossVectors(r, UP);
-      this.invI(b, rn, t1);
-      const kn = 1 + t2.crossVectors(t1, r).y;
-      const e = vc.y < -0.9 ? RESTITUTION : 0;
-      const jn = (-(1 + e) * vc.y) / kn;
-      b.v.y += jn;
-      b.w.addScaledVector(t1, jn);
-      // Coulomb friction against the sliding direction
-      vc.crossVectors(b.w, r).add(b.v);
-      vc.y = 0;
-      const vt = vc.length();
-      if (vt > 1e-5) {
-        vc.multiplyScalar(1 / vt);
-        rn.crossVectors(r, vc);
-        this.invI(b, rn, t1);
-        const kt = 1 + vc.dot(t2.crossVectors(t1, r));
-        const jt = Math.min(vt / kt, FRICTION * jn);
-        b.v.addScaledVector(vc, -jt);
-        b.w.addScaledVector(t1, -jt);
-      }
+      pen = Math.max(pen, d);
+      r.add(t1);
     }
     if (contacts) {
+      r.multiplyScalar(1 / contacts);
+      vc.crossVectors(b.w, r).add(b.v);
+      if (vc.y < 0) {
+        impact = -vc.y;
+        // normal impulse
+        rn.crossVectors(r, UP);
+        this.invI(b, rn, t1);
+        const kn = 1 + t2.crossVectors(t1, r).y;
+        const e = vc.y < -0.9 ? RESTITUTION : 0;
+        const jn = (-(1 + e) * vc.y) / kn;
+        b.v.y += jn;
+        b.w.addScaledVector(t1, jn);
+        // Coulomb friction against the sliding direction
+        vc.crossVectors(b.w, r).add(b.v);
+        vc.y = 0;
+        const vt = vc.length();
+        if (vt > 1e-5) {
+          vc.multiplyScalar(1 / vt);
+          rn.crossVectors(r, vc);
+          this.invI(b, rn, t1);
+          const kt = 1 + vc.dot(t2.crossVectors(t1, r));
+          const jt = Math.min(vt / kt, FRICTION * jn);
+          b.v.addScaledVector(vc, -jt);
+          b.w.addScaledVector(t1, -jt);
+        }
+      }
       b.p.y += pen * 0.8;
-      b.v.multiplyScalar(1 - Math.min(1, 1.6 * h));
-      b.w.multiplyScalar(1 - Math.min(1, 2.6 * h));
+      // rolling resistance; a ware lying on a face settles quickly instead of rocking
+      const flat = contacts >= 3;
+      b.v.x *= 1 - Math.min(1, (flat ? 4 : 1.6) * h);
+      b.v.z *= 1 - Math.min(1, (flat ? 4 : 1.6) * h);
+      b.w.multiplyScalar(1 - Math.min(1, (flat ? 9 : 3.5) * h));
       if (impact > 1.1 && b.clack <= 0) {
         b.clack = 0.12;
         const wp = this.group.localToWorld(_v.set(b.p.x, floor, b.p.z));
@@ -1191,9 +1293,9 @@ export class Shop {
         if (!b.landed || impact > 2.4) this.ctx.fx.dust({ x: wp.x, y: wp.y + 0.03, z: wp.z }, 0.2 + Math.min(0.2, impact * 0.04), P.sand0, 2);
       }
       b.landed = true;
-      if (contacts >= 3 && b.v.lengthSq() < 0.004 && b.w.lengthSq() < 0.12) {
+      if (flat && b.v.lengthSq() < 0.01 && b.w.lengthSq() < 0.3) {
         b.still += h;
-        if (b.still > 0.3) {
+        if (b.still > 0.25) {
           b.asleep = true;
           b.v.set(0, 0, 0);
           b.w.set(0, 0, 0);
@@ -1201,15 +1303,18 @@ export class Shop {
         }
       } else b.still = 0;
     } else b.still = 0;
-    // a soft lip around the rug keeps knocked wares within reach
-    const lx = this.rugHalf.x + 0.3, lz = this.rugHalf.y + 0.25;
-    if (Math.abs(b.p.x) > lx) {
-      b.p.x = Math.sign(b.p.x) * lx;
-      b.v.x *= -0.3;
-    }
-    if (Math.abs(b.p.z) > lz) {
-      b.p.z = Math.sign(b.p.z) * lz;
-      b.v.z *= -0.3;
+    // a soft lip around the rug keeps knocked wares within reach (only once
+    // they are down: her pack is outside it and they fly in over the lip)
+    if (b.landed && b.p.y < this.rugTop + 0.5) {
+      const lx = this.rugHalf.x + 0.12, lz = this.rugHalf.y + 0.1;
+      if (Math.abs(b.p.x) > lx) {
+        b.p.x = Math.sign(b.p.x) * lx;
+        b.v.x *= -0.3;
+      }
+      if (Math.abs(b.p.z) > lz) {
+        b.p.z = Math.sign(b.p.z) * lz;
+        b.v.z *= -0.3;
+      }
     }
   }
 
