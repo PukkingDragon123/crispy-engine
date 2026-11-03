@@ -1076,7 +1076,7 @@ export class MenuScene implements GameScene {
     for (let i = this.rate('spark', 9 + Math.max(0, Math.sin(t * 0.7)) * 8, dt); i > 0; i--)
       P.emit({ ...base, pos: { x: f.x, y: f.y + 0.35, z: f.z }, vel: { x: W.x * lean * 1.6, y: 1.6, z: W.z * lean * 1.6 }, spread: 0.6, up: 0.8, life: [0.9, 2.0], size: [0.035, 0.015], sprite: 'spark', color: [0xffc060, 0xff9a40, 0xffe090], additive: true, drag: 0.5, jitter: 0.08, gravity: -0.2 });
     for (let i = this.rate('smoke', 2.2, dt); i > 0; i--)
-      P.emit({ ...base, pos: { x: f.x, y: f.y + 0.8, z: f.z }, vel: { x: W.x * 0.7 * this.gust, y: 0.7, z: W.z * 0.7 * this.gust }, spread: 0.1, life: [2.2, 3.4], size: [0.18, 0.9], sprite: ['puff0', 'puff1', 'puff2', 'puff3'], color: [0x9a8a82, 0xae9e94, 0x8a7a72], alpha: 0.16, drag: 0.4, rot: 6, rotSpeed: 0.5, fadeIn: 0.3 });
+      P.emit({ ...base, pos: { x: f.x, y: f.y + 0.8, z: f.z }, vel: { x: W.x * 0.32 * this.gust, y: 0.95, z: W.z * 0.32 * this.gust - 0.1 }, spread: 0.08, life: [1.8, 2.6], size: [0.1, 0.5], sprite: ['puff0', 'puff1', 'puff2', 'puff3'], color: [0x9a8a82, 0xae9e94, 0x8a7a72], alpha: 0.32, drag: 0.3, rot: 6, rotSpeed: 0.5, fadeIn: 0.25 });
     // a log settles: a pop of sparks
     if (Math.random() < dt * 0.25) {
       P.emit({ ...base, pos: { x: f.x, y: f.y + 0.25, z: f.z }, count: 16, spread: 1.6, up: 2.2, life: [0.6, 1.4], size: [0.04, 0.012], sprite: 'spark', color: [0xffe0a0, 0xffa040], additive: true, drag: 0.8, gravity: 2.5 });
@@ -1098,25 +1098,25 @@ export class MenuScene implements GameScene {
     const W = MS.MENU_WIND;
     const g = this.gust;
     // grains streaming off the brink behind the camp
-    for (let i = this.rate('brink', 55 * g, dt); i > 0; i--) {
+    for (let i = this.rate('brink', 80 * g, dt); i > 0; i--) {
       const x = -8 + Math.random() * 16, z = brinkZ(x);
       const sp = 1.2 + Math.random() * 1.6 * g;
       P.emit({ pos: { x, y: this.gy(x, z) + 0.04, z }, vel: { x: W.x * sp, y: 0.25 + Math.random() * 0.3, z: W.z * sp - 0.3 }, count: 1, spread: 0.2, life: [1.2, 2.4], size: [0.045, 0.03], sprite: ['grain0', 'grain1', 'grain2', 'grain3', 'grain4', 'grain5'], color: [0xf4d7a0, 0xe6bb7c, 0xfde6b8], gravity: 0.45, drag: 0.35 });
     }
     // low saltation over the plateau and the apron
-    for (let i = this.rate('salt', 30 * g, dt); i > 0; i--) {
+    for (let i = this.rate('salt', 45 * g, dt); i > 0; i--) {
       const x = -9 + Math.random() * 14, z = -2 + Math.random() * 9;
       P.emit({ pos: { x, y: this.gy(x, z) + 0.03, z }, vel: { x: W.x * 2.2 * g, y: 0.35, z: W.z * 2.2 * g }, count: 1, spread: 0.25, life: [0.5, 1.1], size: [0.022, 0.018], sprite: ['grain0', 'grain2', 'grain4'], color: [0xf0d29a, 0xe0b06e], gravity: 2.4, ground: true, bounce: 0.3, drag: 0.3 });
     }
     // drifting sand sheets
     for (let i = this.rate('sheet', 2.2 * g, dt); i > 0; i--) {
       const x = -10 + Math.random() * 6, z = -2 + Math.random() * 8;
-      P.emit({ pos: { x, y: this.gy(x, z) + 0.12, z }, vel: { x: W.x * 1.8 * g, y: 0.05, z: W.z * 1.8 * g }, count: 1, spread: 0.2, life: [2.2, 3.4], size: [0.5, 1.6], sprite: ['puff0', 'puff1', 'cloud0'], color: [0xf2d0a0, 0xe8bf8c], alpha: 0.16, drag: 0.2, rot: 6, rotSpeed: 0.3, fadeIn: 0.3 });
+      P.emit({ pos: { x, y: this.gy(x, z) + 0.08, z }, vel: { x: W.x * 1.8 * g, y: 0.05, z: W.z * 1.8 * g }, count: 1, spread: 0.2, life: [1.6, 2.6], size: [0.22, 0.75], sprite: ['puff0', 'puff1', 'puff2'], color: [0xf2d0a0, 0xe8bf8c], alpha: 0.3, drag: 0.2, rot: 6, rotSpeed: 0.3, fadeIn: 0.3 });
     }
     // spindrift plumes off the far crests
     for (const c of this.crests)
       if (Math.random() < dt * 0.9 * g)
-        P.emit({ pos: c, vel: { x: W.x * 3.5 * g, y: 0.6, z: W.z * 3.5 * g }, count: 1, spread: 0.6, life: [3, 5], size: [1.2, 5], sprite: ['cloud0', 'cloud1', 'cloud2'], color: [0xf6c8a0, 0xe8b490], alpha: 0.2, drag: 0.15, rot: 6, rotSpeed: 0.2, fadeIn: 0.35 });
+        P.emit({ pos: c, vel: { x: W.x * 3.5 * g, y: 0.5, z: W.z * 3.5 * g }, count: 1, spread: 0.6, life: [2.4, 3.6], size: [0.7, 2.4], sprite: ['cloud0', 'cloud1', 'cloud2'], color: [0xf6c8a0, 0xe8b490], alpha: 0.32, drag: 0.15, rot: 6, rotSpeed: 0.2, fadeIn: 0.35 });
     // dust motes in the warm light
     for (let i = this.rate('mote', 7, dt); i > 0; i--) {
       const x = -3.5 + Math.random() * 8, z = 0.5 + Math.random() * 5.5;

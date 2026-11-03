@@ -751,12 +751,15 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     eng.audio.play('paper_flutter', { volume: 0.7 });
     eng.audio.play('whoosh_big', { volume: 0.35, pitch: 0.5 });
     // a slow push-in on the flapping sheet while he walks up out of the sun (his shadow climbs the paper)
+    // (he stops a couple of metres out, behind the camera: only his shadow is on the paper yet)
     walkAmt = 0.85;
     const from = actor.root.position.clone();
+    const stop = Q.clone().addScaledVector(nP, 2.4);
+    stop.y = gy(stop);
     await runFor(4.6, (k, t) => {
       const e = ease(k);
       shot(pc.clone().addScaledVector(nP, 1.05 - e * 0.32).addScaledVector(lat, -0.22 + e * 0.08).add(new THREE.Vector3(0, 0.05 - e * 0.12, 0)), pc.clone().add(new THREE.Vector3(0, -0.06 * e, 0)), 38 - e * 4, true);
-      actor.root.position.lerpVectors(from, S0, Math.min(1, t / 4.4));
+      actor.root.position.lerpVectors(from, stop, Math.min(1, t / 4.4));
       if (t > 2.0 && t < 2.05) eng.audio.play('paper_flutter', { volume: 0.5, pitch: 1.2 });
     });
     walkAmt = 0;
@@ -766,14 +769,18 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
       const lookAt = pc.clone().add(new THREE.Vector3(0, -PH * 0.36 + e * PH * 0.5, 0));
       shot(pc.clone().addScaledVector(nP, 0.68).addScaledVector(lat, -0.12).add(new THREE.Vector3(0, -0.2 + e * 0.32, 0)), lookAt, 34, true);
     });
-    // over his right shoulder: the bone hand reaches in and closes on the sheet
-    const ap0 = actor.root.position.clone();
+    // over his right shoulder: he steps up, the bone hand reaches in and closes on the sheet
+    const ap0 = S0.clone();
+    ap0.y = gy(ap0);
     shot(ap0.clone().addScaledVector(nP, 0.72).addScaledVector(lat, 0.8).add(new THREE.Vector3(0, shoulderY + 0.12, 0)), pc.clone().addScaledVector(lat, 0.05), 44, false);
+    walkAmt = 0.7;
+    await runFor(0.8, (k) => actor.root.position.lerpVectors(stop, ap0, ease(k)));
+    walkAmt = 0;
     armPose = 'reach';
     armSpeed = 4;
     actor.setExpression('focus');
     eng.audio.play('skeleton_rattle', { volume: 0.4 });
-    await runFor(1.1, () => {});
+    await runFor(1.0, () => {});
     if (poster && !skipped) {
       poster.grab(handW.clone());
       eng.audio.play('paper_flutter', { volume: 0.8, pitch: 0.8 });

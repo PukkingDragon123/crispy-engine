@@ -345,7 +345,7 @@ export class AnubisTrial {
     // --- light: low cold ambience, a moon through roof slits, brazier fires, the god's glow
     this.hemi = new THREE.HemisphereLight(0x2a4a70, 0x06080c, 0.55);
     s.add(this.hemi);
-    const moon = new THREE.DirectionalLight(0x9cc4ff, 1.25);
+    const moon = new THREE.DirectionalLight(0x9cc4ff, 0.9);
     const tgt = V(0, 0, 8);
     moon.position.copy(tgt).addScaledVector(MOON_DIR, -48);
     moon.target.position.copy(tgt);
@@ -1315,7 +1315,7 @@ export class AnubisTrial {
     const ph = this.phase;
     const inHall = ph !== 'descent' && ph !== 'gate';
     this.mirror.visible = inHall || this.gateOpen > 0.6;
-    this.hemi.intensity = inHall ? 0.42 : 0.6;
+    this.hemi.intensity = inHall ? 0.42 : 0.3;
     for (const s of this.shafts) {
       s.k = damp(s.k, s.target, 1.2, dt);
       s.mat.uniforms.uDensity.value = s.k;
