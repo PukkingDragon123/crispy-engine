@@ -890,6 +890,9 @@ function applyTheme(ctx: ThemeCtx, zn: ZoneDef) {
       break;
     }
   }
+  // a ghost town: a short street of abandoned, caved-in buildings (spiders and loot inside)
+  const TOWN: ThemeId[] = ['flats', 'outpost', 'glassdunes', 'hollows', 'mesas', 'bones', 'obelisks', 'stormapproach', 'pyramidbase'];
+  if (TOWN.includes(zn.theme)) ghostTown(ctx, zn);
   // a lush oasis in the zones that can hold one (water, reeds, palms, flowers, a resting spot)
   const OASIS: Partial<Record<ThemeId, number>> = { flats: 9, glassdunes: 11, mesas: 10, palmshore: 10 };
   if (OASIS[zn.theme]) placeOasis(ctx, zn, OASIS[zn.theme]!);
@@ -995,6 +998,51 @@ function placeOasis(ctx: ThemeCtx, zn: ZoneDef, R: number) {
   ring('oasisFlowers', 8, 1.16, 1.55);
   ring('lilyPads', 4, 0.25, 0.7, (a) => (a.data = { y: level - 0.02 }));
   ring('rock', 3, 1.0, 1.15, (a) => (a.scale = rng.range(0.5, 0.8)));
+}
+
+/**
+ * A ghost town: 2-4 ruined buildings (shacks and a false-front saloon / sheriff /
+ * store) facing each other across a short dirt street, with broken fences,
+ * hitching posts and a leaning signpost.
+ */
+function ghostTown(ctx: ThemeCtx, zn: ZoneDef) {
+  const { rng, field, noise } = ctx;
+  const mo = mouths(ctx, zn);
+  const startZ = zn.cz - zn.r * 0.45;
+  for (let k = 0; k < 70; k++) {
+    const a = rng.range(0, Math.PI * 2), r = rng.range(zn.r * 0.25, zn.r * 0.68);
+    const x = zn.cx + Math.cos(a) * r, z = zn.cz + Math.sin(a) * r;
+    const dir = rng.range(0, Math.PI);
+    const ux = Math.cos(dir), uz = Math.sin(dir), nx = -uz, nz = ux;
+    const n = 2 + rng.int(0, 2);
+    const lots: { x: number; z: number; side: number }[] = [];
+    for (let i = 0; i < n; i++) {
+      const along = (i - (n - 1) / 2) * 10.5 + rng.range(-1, 1);
+      const side = i % 2 ? 1 : -1;
+      lots.push({ x: x + ux * along + nx * side * 7, z: z + uz * along + nz * side * 7, side });
+    }
+    if (lots.some((l) => Math.hypot(l.x - zn.cx, l.z - zn.cz) > zn.r - 8)) continue;
+    if (lots.some((l) => mo.some((m) => Math.hypot(m.x - l.x, m.z - l.z) < 18))) continue;
+    if (zn.index === 0 && lots.some((l) => Math.hypot(l.x - zn.cx, l.z - startZ) < 16)) continue;
+    if (lots.some((l) => zn.anchors.some((o) => !SMALL_SCATTER.has(o.kind) && o.kind !== 'deadBush' && o.kind !== 'dryGrass' && Math.hypot(o.x - l.x, o.z - l.z) < (o.kind === 'landmark' ? 24 : 9)))) continue;
+    for (const l of lots) {
+      zn.anchors = zn.anchors.filter((o) => Math.hypot(o.x - l.x, o.z - l.z) >= 8 || !SMALL_SCATTER.has(o.kind));
+      flattenDisc(field, l.x, l.z, 5.5, 0.8, MAT.DIRT, noise);
+    }
+    const fronts = rng.shuffle(['saloonFacade', 'sheriffFacade', 'storeFacade']);
+    lots.forEach((l, i) => {
+      // front (+Z) faces the street
+      const rot = Math.atan2(-nx * l.side, -nz * l.side);
+      zn.anchors.push({ kind: i === 1 ? fronts[0] : i === 3 ? fronts[1] : 'shack', x: l.x, z: l.z, rot, scale: 1 });
+    });
+    // the street's leftovers
+    for (let i = 0; i < 4; i++) {
+      const along = rng.range(-1, 1) * n * 5, side = rng.chance(0.5) ? 1 : -1;
+      const px = x + ux * along + nx * side * 2.6, pz = z + uz * along + nz * side * 2.6;
+      zn.anchors.push({ kind: rng.pick(['hitchingPost', 'fenceBroken', 'wagonWheel', 'whiskeyBarrel', 'signpost']), x: px, z: pz, rot: dir + rng.range(-0.3, 0.3) });
+    }
+    return;
+  }
 }
 
 /**
