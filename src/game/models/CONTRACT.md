@@ -29,8 +29,10 @@ Every old note about resolution, the pixel-art pass, ramps, outlines, textures, 
 - Author directly on the final grid. **No resampling or downsampling conversions, and no automatic texture/shading
   passes.** Delete those pipelines from your module.
 - Colour: small palette. Each material gets base + shade + highlight (+1 accent). Mostly flat colour regions with
-  hand-placed shading (slightly darker undersides/recesses, an optional highlight row on top edges). **No per-voxel
-  noise, dithering, blotch or grain.** The renderer's AO and lighting do the rest.
+  hand-placed shading (slightly darker undersides/recesses, an optional highlight row on top edges). No random
+  per-voxel noise or dithering. Surface texture (wood grain, rust, weathering, paint wear, stone bedding) comes from
+  the material library `src/game/models/materials.ts`: few tones, features running along the grain so the mesher
+  still merges long runs. The renderer's AO and lighting do the rest.
 - Palette: warm, stylized, slightly saturated (cartoon western/Egypt), not gritty. Bone `#f2dcb4` / shade `#d6b78a` /
   highlight `#fff1d6`; socket dark `#4a2c1a`. Shared ramps live in `src/game/models/style.ts` (`TOON`) — use them.
 - Details: few, bold, meaningful, readable at 15 m (hat band, buckle, bandana knot, stitches as 1-voxel lines, rivets).
