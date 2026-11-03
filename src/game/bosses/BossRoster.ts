@@ -1,15 +1,17 @@
 // Which boss shows up on which wave. The Avatar of Khonsu opens at wave 5 (and
 // returns at 35 / 65), minibosses every 5th wave (rotating, tiering up), Sethos
-// at 50 / 75 / 100. The Dust Marshal recurs (escapes at tiers 1-2).
+// at 50 / 85 / 100; at 75 Khonsu comes back as the desert itself. The Dust Marshal recurs (escapes at tiers 1-2).
 import type { Boss, BossDeps } from './Boss';
 import { BigBertha, DustMarshal, Sunroller, Pharaoh, Sandworm } from './Minibosses';
 import { Sethos } from './Sethos';
 import { KhonsuAvatar } from './Khonsu';
 import { Thornback } from './Thornback';
+import { KhonsuSandAvatar } from './KhonsuSand';
 
 export function makeBoss(d: BossDeps, wave: number): Boss {
   if (wave >= 100) return new Sethos(d, 3);
-  if (wave === 75) return new Sethos(d, 2);
+  if (wave === 85) return new Sethos(d, 2);
+  if (wave === 75) return new KhonsuSandAvatar(d);
   if (wave === 50) return new Sethos(d, 1);
   const tier = 1 + Math.floor(wave / 35);
   // the first boss is always the Avatar of Khonsu; he returns stronger at 35 and 65
