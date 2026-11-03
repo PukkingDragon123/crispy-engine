@@ -563,6 +563,7 @@ export function synergyTags(def: UpgradeDef, lv: number) {
   const text = `${def.name} ${def.desc(Math.max(1, lv))} ${def.id}`;
   const out: string[] = [];
   for (const [re, tag] of TAG_RULES) if (re.test(text) && !out.includes(tag)) out.push(tag);
+  if (def.learn) out.unshift('SKILL');
   if (def.god && out.length < 5) out.push(def.god.toUpperCase());
   return out.slice(0, 5);
 }
@@ -664,11 +665,12 @@ function paintDetail(o: Offer, d: CardDetail) {
       });
     };
     // header: rarity · category · god
-    centre(`${rar.name.toUpperCase()}  ·  ${CAT_LABEL[def.cat] ?? ''}${def.god ? '  ·  ' + def.god.toUpperCase() : ''}`, 30, RAR_INK[def.rarity] ?? INK);
+    if (def.learn) centre(`NEW SKILL  ·  KEY [${def.learn}]${def.god ? '  ·  ' + def.god.toUpperCase() : ''}`, 32, '#16664a');
+    else centre(`${rar.name.toUpperCase()}  ·  ${CAT_LABEL[def.cat] ?? ''}${def.god ? '  ·  ' + def.god.toUpperCase() : ''}`, 30, RAR_INK[def.rarity] ?? INK);
     gap(4);
     centre(def.name.toUpperCase(), 54, INK);
     // levels: a line, then a row of real gems (3D, placed by the panel)
-    const lvText = def.cat === 'evolution' ? 'EVOLUTION  ·  ONE OF A KIND' : def.maxLv === 1 ? 'SINGLE LEVEL' : o.fromLv === 0 ? `NEW  ·  LEVEL 1 OF ${def.maxLv}` : `LEVEL ${o.fromLv} → ${o.toLv}  OF ${def.maxLv}`;
+    const lvText = def.learn ? 'A TAROT SKILL  ·  YOURS FOR GOOD' : def.cat === 'evolution' ? 'EVOLUTION  ·  ONE OF A KIND' : def.maxLv === 1 ? 'SINGLE LEVEL' : o.fromLv === 0 ? `NEW  ·  LEVEL 1 OF ${def.maxLv}` : `LEVEL ${o.fromLv} → ${o.toLv}  OF ${def.maxLv}`;
     centre(lvText, 30, INK_SOFT);
     ops.push({ h: 50 * s, draw: (y) => (pipY = (y + 25 * s) / H) });
     // the stat changes, current → new, coloured by whether it helps

@@ -20,6 +20,7 @@ import { Spring } from '../../engine/Tween';
 import type { Input } from '../../engine/Input';
 import { damp } from '../../engine/math/rand';
 import { RankUpCine, CineHero, LightPillar } from './RankUpCine';
+import { GlyphRings } from '../fx/SerketSpirit';
 import type { CameraRig } from '../player/CameraRig';
 
 type Entrance = 'pop' | 'spin' | 'pillar';
@@ -54,12 +55,15 @@ interface Card {
   panelOpen: boolean;
   pillar: LightPillar | null;
   pillarK: number;
+  /** learn-a-skill cards: a ring of 3D hieroglyphs orbits them */
+  glyphs: GlyphRings | null;
   fly: { t: number; from: THREE.Vector3; ctrl: THREE.Vector3; to: THREE.Vector3 } | null;
   crumble: number;
   crumbleFrom: THREE.Vector3 | null;
 }
 
 const PRE = 0.32; // pillar ignites before the card rises
+const JADE = 0x8dffd0;
 const SAND = [0xf6dfb0, 0xeccb8f, 0xe0b373, 0xcf9a5a];
 const GRAIN = ['grain0', 'grain1', 'grain2', 'grain3', 'grain4', 'grain5'];
 const PUFF = ['puff0', 'puff1', 'puff2', 'puff3', 'cloud0'];
@@ -252,7 +256,9 @@ export class CardPicker {
       this.hitGroup.add(homeHit);
       homeHit.updateMatrixWorld(true);
       const r = o.def.rarity;
-      const entrance: Entrance = r === 'common' || r === 'uncommon' ? 'pop' : r === 'rare' ? 'spin' : 'pillar';
+      const learn = !!o.def.learn;
+      // a new skill is a big moment: it always rises on Serket's jade light
+      const entrance: Entrance = learn ? 'pillar' : r === 'common' || r === 'uncommon' ? 'pop' : r === 'rare' ? 'spin' : 'pillar';
       const dur = entrance === 'pop' ? 0.55 : entrance === 'spin' ? 0.85 : PRE + 1.0;
       const card: Card = {
         i,
@@ -279,8 +285,9 @@ export class CardPicker {
         side: S.c.x < -0.02 ? -1 : 1,
         panel: new Spring(0, 170, 17),
         panelOpen: false,
-        pillar: entrance === 'pillar' ? new LightPillar(this.group, ground, home.y - gy + 1.4, RARITY[r].hex, 1.25 * L.sc) : null,
+        pillar: entrance === 'pillar' ? new LightPillar(this.group, ground, home.y - gy + 1.4, learn ? JADE : RARITY[r].hex, 1.25 * L.sc) : null,
         pillarK: 0,
+        glyphs: learn ? new GlyphRings(this.group, [{ radius: 0.6 * L.sc, y: 0, count: 12, speed: 1.1, tilt: [0.32, 0.06] }], 2.0) : null,
         fly: null,
         crumble: -1,
         crumbleFrom: null,
@@ -296,6 +303,7 @@ export class CardPicker {
   private kill(c: Card) {
     c.card.dispose();
     c.pillar?.dispose();
+    c.glyphs?.dispose();
     c.homeHit.removeFromParent();
   }
 
@@ -500,6 +508,7 @@ export class CardPicker {
             ctx.sfx('divine_chime', g, 0.8);
             ctx.sfx('loot_reveal', g, 0.7);
           }
+          if (c.offer.def.learn) ctx.sfx('divine_power', g, 0.7, 1.1);
           if (r === 'legendary' || r === 'mythic') {
             cine.kick(0.5);
             ctx.sfx('quake_rumble', g, 0.8);
@@ -592,10 +601,23 @@ export class CardPicker {
       c.panel.update(want, Math.min(rdt, 1 / 30));
       c.card.setPanel(c.panel.x, c.side);
     }
-    for (const c of this.cards) if (c.pillar) {
-      c.pillar.k = c.pillarK;
-      c.pillar.update();
+    for (const c of this.cards) {
+      if (c.pillar) {
+        c.pillar.k = c.pillarK;
+        c.pillar.update();
+      }
+      this.orbit(c, rdt, c.ready ? 1 : 0);
     }
+  }
+
+  /** the hieroglyph ring around a learn card follows it (assembles once it is home) */
+  private orbit(c: Card, rdt: number, want: number) {
+    const g = c.glyphs;
+    if (!g) return;
+    g.group.position.copy(c.mesh.position);
+    g.appear = Math.max(0, Math.min(1, g.appear + (want ? rdt * 1.4 : -rdt * 3)));
+    g.fade = c.crumble >= 0 ? Math.max(0, 1 - c.crumble * 2) : c.fly ? Math.max(0, 1 - c.fly.t * 3) : 1;
+    g.update(rdt);
   }
 
   private animateFly(rdt: number) {
@@ -624,6 +646,7 @@ export class CardPicker {
         c.pillar.k = c.pillarK;
         c.pillar.update();
       }
+      this.orbit(c, rdt, 0);
     } else if (this.resolveAt >= 0 && this.cine.t >= this.resolveAt) {
       this.resolveAt = -1;
       this.finish(c);
@@ -654,6 +677,7 @@ export class CardPicker {
         c.pillar.k = c.pillarK;
         c.pillar.update();
       }
+      this.orbit(c, rdt, 0);
       if (k >= 1) {
         this.kill(c);
         this.dying.splice(i, 1);

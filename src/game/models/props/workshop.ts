@@ -1108,3 +1108,80 @@ export function craneRig(seed = 17): RigSpec {
     meta: { spout: [28.5 * FV, 0, 0] },
   };
 }
+
+// =====================================================================
+// THE HIDEOUT'S NAVIGATION HANDLES
+// =====================================================================
+/** A carved direction sign for the hideout's camera carousel, the arrow you click to look left or right.
+ *  1/64: a hand-adzed pine board with a swallowtail end, a worn red-oxide groove, brass tacks and a three-turn
+ *  twine binding with a dangling tail, capped with a forged iron arrowhead riveted through a collar.
+ *  Points +X (dir 1) or -X (dir -1), front faces +Z, pivot at the centre. Every voxel carries a little
+ *  self-light (EMISSIVE) so it stays readable as UI in the dark corners. */
+export function arrowSign(dir: 1 | -1 = 1): StaticModel & { meta: { length: number } } {
+  const m = new VoxelModel('arrow_sign');
+  const E = VF.EMISSIVE;
+  // ---- the board: thick pine, slightly bowed and uneven, swallowtail notch at the tail
+  const bow = (x: number) => Math.sin((x + 20) * 0.11) * 0.45;
+  fill(m, (x, y, z) => {
+    const px = x + 0.5, py = y + 0.5 - bow(x + 0.5), pz = z + 0.5;
+    let d = dRBox(px, py, pz, -6, 0, 0, 14.5, 5.6, 1.7, 1.1) + lump(x, y, z, 0.45, 3) * 0.35;
+    d = Math.max(d, -(px + 14.2 + Math.abs(py) * 1.05)); // the swallowtail
+    return d;
+  }, [[-21, -7, -3], [9, 7, 3]], 1, (x, y, z, d) => {
+    const along = Math.floor((x + 40) / 7), across = Math.floor((y + 0.5 - bow(x + 0.5)) * 0.9 + 20);
+    let c = mul(0xa8743e, 0.92 + h01(across, along, 5) * 0.14);
+    if (h01(across, Math.floor((x + 40) / 11), 9) > 0.8) c = mul(c, 0.84); // grain streaks
+    if (d > -0.9) c = mul(c, 0.9); // worn darker at the arrises
+    if (h01(x, y, z) > 0.985) c = mul(c, 0.6); // a pinhole or two
+    return c;
+  }, E);
+  // the groove down the middle, filled with old red oxide paint (worn away in places)
+  for (let x = -12; x <= 4; x++)
+    for (const z of [1, -2]) {
+      const y = Math.round(bow(x + 0.5) - 0.5);
+      if (!m.has(x, y, z)) continue;
+      m.del(x, y, z);
+      if (h01(x, 7, z) > 0.25) m.set(x, y, z - Math.sign(z + 0.5), 0x8a3a22, E);
+    }
+  // brass tacks
+  for (const [tx, ty] of [[-15, 3.6], [-15, -3.6], [2.5, 4], [2.5, -4]] as const)
+    for (const tz of [1.9, -1.9]) egg(m, [tx, ty + bow(tx), tz], [1.1, 1.1, 0.8], (x, y) => (y + 0.5 > ty + bow(tx) ? BRASS_HI : BRASS), VF.METAL | E);
+  // ---- three turns of twine near the tail, a knot and a short tail hanging down
+  for (const x0 of [-11.2, -9.6, -8]) {
+    const b = bow(x0);
+    fill(m, (x, y, z) => {
+      const px = x + 0.5, py = y + 0.5 - b, pz = z + 0.5;
+      const shell = Math.abs(dRBox(px, py, pz, x0, 0, 0, 0.6, 6.2, 2.3, 1.2)) - 0.55;
+      return Math.max(shell, Math.abs(px - x0) - 0.75);
+    }, [[x0 - 1, -8, -4], [x0 + 1, 8, 4]], 1, (x, y, z) => (mod(y + z + Math.round(x0), 3) === 0 ? 0x9a8458 : 0xd2bc86), VF.SOFTAO | E);
+  }
+  egg(m, [-9.6, -6.6 + bow(-9.6), 2.4], [1.6, 1.4, 1.2], 0xc8b07a, VF.SOFTAO | E);
+  rod(m, [-9.6, -7.2 + bow(-9.6), 2.6], [-10.8, -11, 2.9], 0.6, 0.5, (x, y) => (mod(y, 2) ? 0xd2bc86 : 0xb8a070), VF.SOFTAO | E);
+  egg(m, [-10.9, -11.4, 2.9], [0.9, 0.9, 0.9], 0xb8a070, VF.SOFTAO | E);
+  // ---- the forged iron head: a riveted collar over the board's end, then a broad bevelled blade
+  fill(m, (x, y, z) => dRBox(x + 0.5, y + 0.5, z + 0.5, 9.2, bow(9), 0, 2.6, 6.9, 2.5, 1) + lump(x, y, z, 0.8, 7) * 0.25, [[5, -9, -4], [13, 9, 4]], 1, (x, y, z, d) => (d > -0.8 && h01(x + 34, y, z) > 0.7 ? 0x6a4a32 : h01((x >> 1) + 68, y >> 1, z) > 0.82 ? 0x7a4a2a : 0x3c3e44), VF.METAL | E);
+  for (const ry of [3.6, -3.6]) for (const rz of [2.6, -2.6]) egg(m, [9.2, ry + bow(9), rz], [1, 1, 0.7], 0x8a8c90, VF.METAL | E);
+  const half = (x: number) => (x < 11.5 ? 0 : 9.6 * Math.pow(Math.max(0, 1 - (x - 11.5) / 13.5), 0.82)); // slightly convex flanks
+  fill(m, (x, y, z) => {
+    const px = x + 0.5, py = y + 0.5 - bow(px), pz = z + 0.5;
+    const hh = half(px);
+    if (hh <= 0) return 1;
+    const t = Math.abs(py) / hh; // 0 on the spine, 1 at the edge
+    const th = 0.5 + 1.7 * (1 - t); // thick spine, ground-thin edges
+    return Math.max(Math.abs(py) - hh, Math.abs(pz) - th, 11.5 - px);
+  }, [[11, -11, -3], [26, 11, 3]], 1, (x, y, z) => {
+    const px = x + 0.5, py = y + 0.5 - bow(px);
+    const t = Math.abs(py) / Math.max(0.5, half(px));
+    if (t > 0.78) return mul(0xb8bcc2, 0.94 + h01(x + 102, y, z) * 0.1); // the bright ground edge
+    if (Math.abs(py) < 0.7) return 0x5a5c62; // the spine
+    if (h01((x >> 1) + 136, y >> 1, z) > 0.86) return 0x7a4a2a; // a freckle of rust
+    return mul(0x3e4148, 0.92 + h01(x + 85, y, z) * 0.12);
+  }, VF.METAL | E);
+  let out = m;
+  if (dir < 0) {
+    out = new VoxelModel('arrow_sign_l');
+    m.forEach((x, y, z, c, f) => out.set(-1 - x, y, z, c, f));
+  }
+  const b = out.bounds();
+  return { model: out, voxelSize: DV, meta: { length: (b.maxX - b.minX + 1) * DV } };
+}
