@@ -1097,6 +1097,7 @@ export class RunScene implements GameScene {
       speed: p.speed,
       rank: this.run.rank,
       bountyFrac: this.run.bounty / this.run.bountyToNext,
+      bountyTotal: this.run.totalBounty,
       gold: this.run.gold,
       wave: d.wave,
       waveTime: d.timeLeft,

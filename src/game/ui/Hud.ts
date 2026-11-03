@@ -22,6 +22,8 @@ export interface HudState {
   speed: number;
   rank: number;
   bountyFrac: number;
+  /** bounty collected this hunt (shown as a running count, not a bar) */
+  bountyTotal?: number;
   gold: number;
   wave: number;
   waveTime: number;
@@ -107,6 +109,8 @@ export class Hud {
   private lastHp = -1;
   // purse
   private goldShown = 0;
+  private bountyShown = 0;
+  private bountyPop = 0;
   private goldPop = 0;
   private rankPop = 0;
   private lastRank = 1;
@@ -456,9 +460,15 @@ export class Hud {
       const bounce = Math.round(Math.sin(this.rankPop * Math.PI) * 4);
       this.blit(star, x, y - bounce);
       text(c, String(s.rank), x + star.width / 2, y + 8 - bounce, UI.wood.o, 16, 'center', false);
+      // the bounty is a purse of reward money, counted up like a wanted poster's figure
+      const bt = Math.round(s.bountyTotal ?? 0);
+      if (bt > this.bountyShown + 0.5) this.bountyPop = 1;
+      this.bountyShown += (bt - this.bountyShown) * Math.min(1, dt * 7);
+      if (Math.abs(bt - this.bountyShown) < 0.5) this.bountyShown = bt;
+      this.bountyPop = Math.max(0, this.bountyPop - dt * 3);
       text(c, 'BOUNTY', x + 38, y + 1, UI.textDim, 16);
-      this.blit(barFrame(120, 11), x + 38, y + 15);
-      drawBarFill(c, x + 38, y + 15, 120, 11, s.bountyFrac, UI.venom);
+      const lift = Math.round(this.bountyPop * 3);
+      text(c, '$' + Math.round(this.bountyShown).toLocaleString('en-US'), x + 38, y + 14 - lift, this.bountyPop > 0.2 ? '#fff3d6' : UI.brass.h, 16);
       // gold purse
       this.goldShown += (s.gold - this.goldShown) * Math.min(1, dt * 8);
       if (Math.abs(s.gold - this.goldShown) < 0.5) this.goldShown = s.gold;
