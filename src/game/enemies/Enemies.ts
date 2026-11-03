@@ -13,7 +13,21 @@ import type { StatSheet } from '../combat/Stats';
 import { clamp, damp, dampAngle, rnd, wrapAngle } from '../../engine/math/rand';
 import { P } from '../../engine/voxel/palette';
 import { Spring } from '../../engine/Tween';
-import { EnemyAnim, animateEnemy, AnimEnv } from '../anim/enemyAnim';
+import { EnemyAnim, animateEnemy, AnimEnv, GETUP } from '../anim/enemyAnim';
+
+/** attacks that fire something: they wind up with a muzzle glint and share the ranged fairness cap */
+const RANGED = new Set(['burst', 'fan', 'ring', 'spiral', 'snipe', 'lob', 'volley', 'stream']);
+/** hit sources that are damage-over-time ticks (no flinch, no poise, no impact fx) */
+const DOT = new Set(['poison', 'bleed', 'burn']);
+/** multi-kill tiers: kills inside the chain window → callout */
+const MULTI: [number, string, string][] = [
+  [2, 'DOUBLE KILL', '#ffe28a'],
+  [3, 'TRIPLE KILL', '#ffd36b'],
+  [4, 'QUAD KILL', '#ffb84a'],
+  [5, 'RAMPAGE', '#ff9a3a'],
+  [7, 'MASSACRE', '#ff6a3a'],
+  [10, 'UNSTOPPABLE', '#ff4a5a'],
+];
 
 type Skel = 'humanoid' | 'beetle' | 'scorpion' | 'bird' | 'quad' | 'worm' | 'snake' | 'lizard' | 'other';
 
@@ -190,9 +204,26 @@ export class Enemy implements EnemyLike {
   name: string;
   flying?: boolean;
   status = new StatusSet();
-  state: 'spawn' | 'move' | 'windup' | 'strike' | 'recover' | 'stagger' | 'hidden' | 'charge' | 'leap' | 'dive' | 'burrow' | 'erupt' | 'wrap' = 'spawn';
+  state: 'spawn' | 'move' | 'windup' | 'strike' | 'recover' | 'stagger' | 'down' | 'hidden' | 'charge' | 'leap' | 'dive' | 'burrow' | 'erupt' | 'wrap' = 'spawn';
   stateT = 0;
   atk: AttackDef | null = null;
+  /** the wind-up time of the current attack (its def, stretched for fairness: early waves, shots from off-screen) */
+  wind = 0.5;
+  /** the pre-shot muzzle glint has fired for this wind-up */
+  glinted = false;
+  /** stagger meter: every hit fills it by its share of max hp, it drains over time; full → stagger */
+  poise = 0;
+  /** knockdown: fell forward (+1) or onto its back (-1), roll side, seconds on the ground before getting up */
+  downDir = -1;
+  downSide = 1;
+  downDur = 1;
+  /** last hit for the animation: 0..1 weight (tap → heavy blow) and whether it was a headshot */
+  hitHeavy = 0;
+  hitHead = false;
+  /** stink-cloud cough cooldown */
+  coughCd = 0;
+  /** poison stacks last shown as a venom count */
+  venomShown = 0;
   cds: number[];
   scale: number;
   dmgMul: number;
@@ -345,6 +376,15 @@ export class Enemies implements EnemyApi {
   /** lingering acid pools */
   hazards: Hazard[] = [];
   wave = 1;
+  /** fairness: melee / ranged wind-ups in flight this frame (capped so a crowd can't all swing at once) */
+  private busyMelee = 0;
+  private busyRanged = 0;
+  /** camera forward on the ground plane (shots from outside the view wind up longer) */
+  private camFX = 0;
+  private camFZ = 1;
+  /** multi-kill chain: count, time of the last kill, best tier announced, settle timer */
+  private mk = { n: 0, t: -99, shown: 0, pending: 0 };
+  private coughSfxT = 0;
   private grid = new Map<number, Enemy[]>();
   private laserMat = new THREE.LineBasicMaterial({ color: 0xff3020, transparent: true, opacity: 0.85 });
 
@@ -434,12 +474,14 @@ export class Enemies implements EnemyApi {
       if (t < 0) t = (-b + sq) / (2 * a);
       if (t < 0 || t > bestT) continue;
       const y = o.y + d.y * t;
-      const yb = e.pos.y - 0.1, yt = e.pos.y + e.height;
+      // knocked flat: the body lies low along the sand
+      const hgt = e.state === 'down' ? e.height * 0.45 : e.height;
+      const yb = e.pos.y - 0.1, yt = e.pos.y + hgt;
       if (y < yb || y > yt) {
         // check head sphere for shots from above
         continue;
       }
-      const rel = (y - e.pos.y) / e.height;
+      const rel = (y - e.pos.y) / hgt;
       const lateral = (o.x + d.x * t - cx) * Math.cos(e.yaw) - (o.z + d.z * t - cz) * Math.sin(e.yaw);
       let part = 'torso';
       let head = false;
@@ -584,8 +626,9 @@ export class Enemies implements EnemyApi {
         if (rnd.chance(0.3)) ctx.fx.number({ x: pp.x, y: pp.y + 0.4, z: pp.z }, 'x', 0xaaaaaa, 0.7);
       }
     }
-    // flipped scarabs take bonus
+    // flipped scarabs take bonus; anything knocked flat takes a little more (ground and pound)
     if (e.flipped > 0) mult *= 2;
+    if (e.state === 'down' && !DOT.has(hit.source)) mult *= 1.25;
     // mariachi buff makes allies tougher? no — buff = speed/damage only
     const pl = this.player;
     const res = resolveHit(pl.stats, { ...hit, mult: (hit.mult ?? 1) * mult }, {
@@ -607,19 +650,16 @@ export class Enemies implements EnemyApi {
     const dl = Math.hypot(dx, dz) || 1;
     e.hitX = dx / dl;
     e.hitZ = dz / dl;
-    e.squash.kick(-4);
+    e.squash.kick(DOT.has(hit.source) ? -1.5 : -4);
+    e.hitHead = !!hit.headshot;
     // knockback
     if (hit.knock) {
       const k = (hit.knock * (e.def.ai === 'tank' ? 0.3 : 1)) / e.scale;
       e.vel.x += e.hitX * k * 2.2;
       e.vel.z += e.hitZ * k * 2.2;
     }
-    // stagger on big hits
-    if (amt > e.maxHp * 0.25 && e.def.ai !== 'tank' && e.state !== 'charge' && e.state !== 'leap') {
-      e.state = 'stagger';
-      e.stateT = 0;
-      this.clearTelegraph(e);
-    }
+    // flinch weight, poise break → stagger, heavy blows → knockdown
+    this.react(e, hit, amt);
     // feedback
     const pp = point ?? new THREE.Vector3(e.pos.x, e.pos.y + e.height * 0.6, e.pos.z);
     const kind = hit.source === 'poison' ? 'poison' : hit.headshot && e.def.hitKind !== 'chitin' ? 'bone' : e.def.hitKind;
@@ -636,8 +676,17 @@ export class Enemies implements EnemyApi {
       if (hit.status?.some((s) => s.id === 'poison')) ctx.events.emit('groundMark', pp.x, pp.z, 0.35, 3);
       else if (e.def.hitKind === 'flesh') ctx.events.emit('groundMark', pp.x + e.hitX * 0.8, pp.z + e.hitZ * 0.8, 0.4, 2);
     }
-    const col = res.superCrit ? 0xff4a2a : res.crit ? 0xffd040 : hit.source === 'poison' ? 0x9dff3a : hit.source === 'burn' ? 0xffa040 : hit.source === 'bleed' ? 0xe04040 : 0xffffff;
-    ctx.fx.number({ x: pp.x, y: pp.y + 0.3, z: pp.z }, amt, col, res.crit ? 1.3 : hit.headshot ? 1.2 : hit.source === 'poison' ? 0.75 : 1);
+    const venom = hit.source === 'scorpion';
+    const col = res.superCrit ? 0xff4a2a : res.crit ? 0xffd040 : venom ? 0xb4ff52 : hit.source === 'swarm' ? 0xd8e070 : hit.source === 'poison' ? 0x9dff3a : hit.source === 'burn' ? 0xffa040 : hit.source === 'bleed' ? 0xe04040 : 0xffffff;
+    ctx.fx.number({ x: pp.x, y: pp.y + 0.3, z: pp.z }, amt, col, res.crit ? 1.3 : hit.headshot ? 1.2 : venom ? 1.1 : hit.source === 'poison' ? 0.75 : hit.source === 'swarm' ? 0.8 : 1);
+    // venom: a sting froths green bubbles (more the deeper the poison), and every 5th stack pops the count
+    if (venom && e.hp > 0) {
+      const st = e.status.stacks('poison');
+      ctx.fx.bubbles({ x: pp.x, y: pp.y + 0.1, z: pp.z }, Math.min(9, 2 + Math.floor(st / 3)));
+      ctx.particles.emit({ pos: pp, count: 1, life: [0.13, 0.16], size: [0.32, 0.6], sprite: 'venomSplat', color: 0xffffff, additive: true, rot: 6.28 });
+      if (Math.floor(st / 5) > Math.floor(e.venomShown / 5)) ctx.fx.number({ x: e.pos.x, y: e.pos.y + e.height + 0.5, z: e.pos.z }, 'x' + Math.floor(st), 0x9dff3a, 0.95, 1.1);
+      e.venomShown = st;
+    }
     if (res.superCrit) ctx.toast('SHATTER!', '#ff6a3a');
     for (const c of res.combos) this.combo(e, c);
     // DOOM
@@ -686,6 +735,232 @@ export class Enemies implements EnemyApi {
       ctx.events.emit('combo', c, e);
       if (c !== 'shatter' || rnd.chance(0.5)) ctx.fx.number({ x: e.pos.x, y: e.pos.y + e.height + 0.6, z: e.pos.z }, '!', STATUS_INFO.mark.color, 1.1);
     }
+  }
+
+  // ------------------------------------------------------------- hit reactions
+  /**
+   * How a living enemy answers a hit. Every hit flinches it (the animation reads
+   * hitX/hitZ/hitHeavy/hitHead). Hits fill its poise; a full meter staggers it
+   * out of whatever it was winding up. Heavy blows (blasts, counters, grapple
+   * kicks, rams, the ult) knock light and medium bodies flat; a plain kick
+   * bowls over anything small.
+   */
+  private react(e: Enemy, hit: Hit, amt: number) {
+    const src = hit.source;
+    if (DOT.has(src) || e.hp <= 0) return;
+    const knock = hit.knock ?? 0;
+    const heavy = src === 'explosion' || src === 'counter' || src === 'grapple' || src === 'board' || src === 'ult' || knock >= 9;
+    const share = amt / Math.max(1, e.maxHp);
+    e.hitHeavy = heavy ? 1 : clamp(0.22 + share * 2.6, 0.22, 0.85);
+    e.poise += share * (src === 'swarm' ? 0.45 : 1) + (heavy ? 0.45 : src === 'melee' ? 0.25 : 0.04);
+    const s = e.state;
+    if (s === 'down') return;
+    // committed moves ride through hits, except a counter or a blast swatting a pounce / charge
+    if (s === 'charge' || s === 'leap' || s === 'dive' || s === 'wrap' || s === 'burrow' || s === 'hidden' || s === 'spawn' || s === 'erupt') {
+      if (!((s === 'leap' || s === 'charge') && (src === 'counter' || src === 'explosion' || src === 'grapple'))) return;
+    }
+    const small = e.def.hp <= 60 && e.def.ai !== 'tank';
+    if ((heavy || (src === 'melee' && small)) && this.canFall(e, src)) {
+      this.knockdown(e, e.hitX, e.hitZ, src);
+      return;
+    }
+    if (e.poise >= this.poiseCap(e) || (heavy && s !== 'stagger')) this.stagger(e, heavy ? 0.7 : 0.45);
+  }
+
+  private poiseCap(e: Enemy) {
+    const ai = e.def.ai;
+    const tough = ai === 'tank' || ai === 'charger' || ai === 'constrictor' || ai === 'burrower';
+    return (tough ? 0.75 : 0.4) * (e.alpha ? 1.6 : 1);
+  }
+
+  /** can this body be knocked flat? (long bodies, flyers and bosses can't; heavies only by a counter / the ult) */
+  private canFall(e: Enemy, src: string) {
+    if (e.flying || e.isBoss || e.focus) return src === 'counter' && !e.flying && !e.isBoss;
+    const sk = e.skel;
+    if (sk === 'snake' || sk === 'worm' || sk === 'bird' || sk === 'other') return false;
+    if (e.def.ai === 'tank' || e.def.ai === 'charger' || e.alpha) return src === 'counter' || src === 'ult' || (src === 'explosion' && !e.alpha && e.def.ai !== 'charger');
+    return true;
+  }
+
+  /** stagger for `dur` seconds: interrupts the wind-up, drops the telegraph */
+  stagger(target: EnemyLike, dur = 0.45) {
+    if (!(target instanceof Enemy) || !target.alive) return;
+    const e = target;
+    if (e.state === 'down' || e.state === 'wrap' || e.state === 'burrow' || e.state === 'hidden' || e.state === 'spawn') return;
+    // stagger ends at stateT 0.45: keep whichever leaves the longer stagger
+    const was = e.state === 'stagger' ? e.stateT : 0.45;
+    e.state = 'stagger';
+    e.stateT = Math.min(was, 0.45 - dur);
+    e.poise = 0;
+    e.glow = 0;
+    this.clearTelegraph(e);
+  }
+
+  /** knocked flat: tossed along the push, lies a beat, then gets back up (animation: enemyAnim downPose) */
+  knockdown(target: EnemyLike, dx: number, dz: number, src = 'explosion') {
+    if (!(target instanceof Enemy) || !target.alive) return;
+    const e = target;
+    const sy = Math.sin(e.yaw), cy = Math.cos(e.yaw);
+    const lz = dx * sy + dz * cy;
+    const lx = dx * cy - dz * sy;
+    if (this.wrapping === e) this.releaseWrap(e, true, 0.5);
+    e.state = 'down';
+    e.stateT = 0;
+    e.poise = 0;
+    e.glow = 0;
+    e.downDir = lz >= 0 ? 1 : -1;
+    e.downSide = lx >= 0 ? -1 : 1;
+    e.downDur = (src === 'counter' ? 1.45 : src === 'explosion' ? 1.15 : src === 'melee' ? 0.75 : 0.95) + rnd.next() * 0.3;
+    const toss = src === 'explosion' ? 6.5 : src === 'counter' ? 5.5 : src === 'board' || src === 'ult' ? 5.2 : src === 'grapple' ? 4.6 : 3.4;
+    e.vel.y = Math.max(e.vel.y, toss / Math.sqrt(e.scale));
+    e.squash.kick(6);
+    e.anim.downImp = false;
+    this.clearTelegraph(e);
+  }
+
+  /**
+   * Stink: a coughing fit doubles it over and breaks its wind-up. Cooldown
+   * inside, so a cloud can call it every tick.
+   */
+  cough(target: EnemyLike, power = 1) {
+    if (!(target instanceof Enemy) || !target.alive) return false;
+    const e = target;
+    const s = e.state;
+    if (e.coughCd > 0 || e.flying || s === 'down' || s === 'spawn' || s === 'burrow' || s === 'hidden' || s === 'wrap' || s === 'charge' || s === 'leap' || s === 'erupt') return false;
+    if (e.skel === 'worm') return false;
+    e.coughCd = 1.5 + rnd.next() * 1.1;
+    e.anim.coughT = 0;
+    if (s === 'windup' || s === 'move' || s === 'recover' || s === 'strike') this.stagger(e, 0.5 * power);
+    const ctx = this.ctx;
+    const fx = Math.sin(e.yaw), fz = Math.cos(e.yaw);
+    const mouth = { x: e.pos.x + fx * e.radius * 0.7, y: e.pos.y + e.height * (e.skel === 'humanoid' ? 0.8 : 0.6), z: e.pos.z + fz * e.radius * 0.7 };
+    ctx.particles.emit({ pos: mouth, count: 3, vel: { x: fx * 1.6, y: 0.4, z: fz * 1.6 }, spread: 0.6, life: [0.5, 1], size: [0.14, 0.5], sprite: ['puff0', 'puff1'], color: [0x9dbf4a, 0x7fae3a, 0xb8d070], alpha: 0.55, drag: 2.5, rot: 6, rotSpeed: 0.8 });
+    ctx.particles.emit({ pos: mouth, count: 5, vel: { x: fx * 3, y: 0.8, z: fz * 3 }, spread: 1.2, life: [0.25, 0.5], size: [0.05, 0.03], sprite: 'dot3', color: [0xc8e070, 0x8a7a3a, 0x9dff3a], gravity: 12, ground: true });
+    if (this.now - this.coughSfxT > 0.22) {
+      this.coughSfxT = this.now;
+      const hk = e.def.hitKind;
+      if (hk === 'bone') ctx.sfx('skeleton_rattle', mouth, 0.4, 1.35 + rnd.next() * 0.2);
+      else if (e.skel === 'humanoid') ctx.sfx('husk_groan', mouth, 0.38, 1.45 + rnd.next() * 0.25);
+      else if (e.skel === 'quad') ctx.sfx('jackal_growl', mouth, 0.35, 1.5);
+      else ctx.sfx('scarab_squish', mouth, 0.3, 1.3);
+    }
+    return true;
+  }
+
+  /** multi-kill chain: callouts settle a beat after the last kill so a blast reads as one big number */
+  private countKill() {
+    const mk = this.mk;
+    if (this.now - mk.t > 1.25) {
+      mk.n = 0;
+      mk.shown = 0;
+    }
+    mk.n++;
+    mk.t = this.now;
+    if (mk.n >= 2) mk.pending = 0.16;
+  }
+
+  private announceMulti() {
+    const mk = this.mk;
+    let tier = -1;
+    for (let i = 0; i < MULTI.length; i++) if (mk.n >= MULTI[i][0]) tier = i;
+    if (tier < 0 || tier < mk.shown) return;
+    mk.shown = tier + 1;
+    const [, name, color] = MULTI[tier];
+    const ctx = this.ctx;
+    const n = mk.n;
+    ctx.toast(name, color, n >= 5 ? `${n} in one breath` : undefined, n >= 7);
+    ctx.sfx('sting_positive', null, Math.min(0.75, 0.36 + n * 0.05), 0.9 + Math.min(10, n) * 0.06);
+    ctx.sfx('qte_good', null, 0.32, 1.05 + Math.min(10, n) * 0.05);
+    if (n >= 4) ctx.sfx('gold_burst', null, 0.4, 1.1);
+    if (n >= 5) ctx.sfx('divine_chime', null, 0.45, 1.2);
+    if (n >= 7) {
+      ctx.engine.slowMo(0.45, 30);
+      ctx.engine.tweens.after(0.3, () => ctx.engine.slowMo(1, 6), true);
+    }
+    ctx.events.emit('multiKill', n, name);
+  }
+
+  // ------------------------------------------------------------- telegraphs
+  /**
+   * Readable tells while an attack winds up: a glinting red wedge on the sand
+   * where a melee lunge will land, a landing circle for pounces, a lane for
+   * charges, the blast circle of a fuse, and a muzzle glint (+ hammer click)
+   * a fixed beat before anything fires.
+   */
+  private telegraphFx(e: Enemy, a: AttackDef, W: number, ppos: THREE.Vector3, pvel: THREE.Vector3, dt: number) {
+    const ctx = this.ctx;
+    const k = clamp(e.stateT / W, 0, 1);
+    if (RANGED.has(a.kind)) {
+      const lead = Math.min(0.34, W * 0.55);
+      if (!e.glinted && e.stateT >= W - lead) {
+        e.glinted = true;
+        this.glint(e, a);
+      }
+      return;
+    }
+    if (e.focus) return;
+    const camD = ctx.camera.position.distanceTo(e.pos);
+    if (camD > 60) return;
+    const P = ctx.particles;
+    const fx = Math.sin(e.yaw), fz = Math.cos(e.yaw);
+    const heat = k > 0.7 ? [0xff3a1a, 0xff6a2a, 0xffd0a0] : [0xffb040, 0xff8a2a, 0xffe0a0];
+    const dot = (x: number, z: number, edge: boolean) => {
+      const y = ctx.world.groundAt(x, z) + 0.06;
+      P.emit({ pos: { x, y, z }, count: 1, vel: { x: 0, y: edge ? 0.15 : 0.35, z: 0 }, life: edge ? [0.14, 0.2] : [0.18, 0.3], size: edge ? [0.11, 0.07] : [0.08, 0.03], sprite: edge ? 'dot3' : 'grain0', additive: edge, color: heat, sizeJitter: 0.2 });
+    };
+    const rate = dt * (40 + 80 * k);
+    let n = Math.floor(rate) + (rnd.chance(rate % 1) ? 1 : 0);
+    if (a.kind === 'melee') {
+      // the lunge wedge: a crisp arc at full reach, sparks filling in as it coils
+      const L = (a.range + 0.6) * Math.max(1, e.scale * 0.9) + e.radius;
+      const half = 0.55;
+      while (n-- > 0) {
+        const edge = rnd.chance(0.55);
+        const th = (rnd.next() * 2 - 1) * half;
+        const r = edge ? L : e.radius + Math.sqrt(rnd.next()) * (L - e.radius) * (0.4 + 0.6 * k);
+        const lx = Math.sin(th) * r, lz = Math.cos(th) * r;
+        dot(e.pos.x + fx * lz + fz * lx, e.pos.z + fz * lz - fx * lx, edge);
+      }
+    } else if (a.kind === 'leap' && e.def.ai !== 'constrictor') {
+      // where the pounce lands (follows the hunter's lead, like the strike does)
+      const cx = ppos.x + pvel.x * 0.4, cz = ppos.z + pvel.z * 0.4;
+      const R = 1.5 + e.radius;
+      while (n-- > 0) {
+        const th = rnd.next() * Math.PI * 2;
+        const edge = rnd.chance(0.75);
+        const r = edge ? R : Math.sqrt(rnd.next()) * R * k;
+        dot(cx + Math.cos(th) * r, cz + Math.sin(th) * r, edge);
+      }
+    } else if (a.kind === 'charge') {
+      // the lane it will tear down
+      const L = 14;
+      const wdt = e.radius + 0.5;
+      while (n-- > 0) {
+        const s = rnd.next() * L * (0.3 + 0.7 * k);
+        const side = rnd.sign() * wdt;
+        dot(e.pos.x + fx * s + fz * side, e.pos.z + fz * s - fx * side, true);
+      }
+    } else if (a.kind === 'explode') {
+      const R = (a.radius ?? 3.5) * e.scale;
+      while (n-- > 0) {
+        const th = rnd.next() * Math.PI * 2;
+        dot(e.pos.x + Math.cos(th) * R, e.pos.z + Math.sin(th) * R, true);
+      }
+    }
+  }
+
+  /** the beat before a shot: a hard star glint at the muzzle and a hammer click for guns */
+  private glint(e: Enemy, a: AttackDef) {
+    const ctx = this.ctx;
+    const at = new THREE.Vector3();
+    const ok = this.socketWorld(e, 'muzzle', at) ?? this.socketWorld(e, 'mouth', at) ?? (e.skel === 'lizard' ? this.socketWorld(e, 'eye_tip_l', at) : null) ?? this.socketWorld(e, 'hand_r', at);
+    if (!ok) at.set(e.pos.x + Math.sin(e.yaw) * e.radius, e.pos.y + e.height * 0.7, e.pos.z + Math.cos(e.yaw) * e.radius);
+    const col = a.proj === 'venom' ? 0xc8ff5a : a.proj === 'blood' ? 0xff6a5a : a.proj === 'curse' ? 0xd8b0ff : 0xfff2c0;
+    const P = ctx.particles;
+    P.emit({ pos: at, count: 1, life: [0.24, 0.24], size: [0.75, 0.15], sprite: 'star4', additive: true, color: col, screen: true, sizeJitter: 0, rot: 0.4 });
+    P.emit({ pos: at, count: 1, life: [0.16, 0.16], size: [0.55, 0.1], sprite: 'glow16', additive: true, color: col, alpha: 0.8, screen: true, sizeJitter: 0 });
+    ctx.fx.light(at, col, 2.5, 0.14, 5);
+    if (a.proj === 'bullet' || a.proj === 'dynamite' || !a.proj) ctx.sfx('rev_hammer', at, 0.5, a.kind === 'snipe' ? 0.7 : 0.82 + rnd.next() * 0.08);
   }
 
   /** knock a limb off and send it flying (gore / bone pop) */
@@ -890,6 +1165,8 @@ export class Enemies implements EnemyApi {
       const lz = dx * Math.sin(e.yaw) + dz * Math.cos(e.yaw);
       const dur = e.skel === 'humanoid' ? 1.35 : e.skel === 'quad' ? 1.4 : e.skel === 'worm' ? 1.6 : e.skel === 'snake' ? 1.7 : e.skel === 'lizard' ? 1.15 : e.skel === 'bird' ? 1.3 : e.skel === 'beetle' ? 1.1 : e.skel === 'scorpion' ? 1.2 : 0.6;
       e.anim.die(lz >= 0 ? -1 : 1, rnd.chance(0.5) ? 1 : -1, dur);
+      // finished off while lying in the sand: it just goes still where it fell
+      if (e.state === 'down') e.anim.dieWhereLying(e.downDir, e.downSide);
       e.vel.x += dx * 2;
       e.vel.z += dz * 2;
       this.dying.push(e);
@@ -966,6 +1243,8 @@ export class Enemies implements EnemyApi {
       ctx.engine.tweens.after(0.35, () => ctx.engine.slowMo(1, 4), true);
       ctx.shake(0.5);
     }
+    // a bomber blowing itself up is not the hunter's kill
+    if (!(e.state === 'strike' && e.atk?.kind === 'explode')) this.countKill();
     ctx.events.emit('enemyKilled', e, hit);
   }
 
@@ -1006,39 +1285,60 @@ export class Enemies implements EnemyApi {
       if (d > 2.9 + e.radius || Math.abs(e.pos.y + e.height * 0.5 - origin.y) > 2.2) continue;
       if ((dx * f.x + dz * f.z) / (d || 1) < 0.2 && d > 1.2) continue;
       const en = e instanceof Enemy ? e : null;
-      const counter = !!en && en.state === 'windup' && en.atk?.kind === 'melee' && en.stateT > en.atk.windup * 0.3;
+      // the counter window: most of a melee / whip / pounce / charge wind-up, and a pounce or charge already in flight
+      const k = en?.atk?.kind;
+      const counter = !!en && ((en.state === 'windup' && (k === 'melee' || k === 'whip' || k === 'leap' || k === 'charge') && en.stateT > en.wind * 0.18) || en.state === 'leap' || en.state === 'charge');
       const hit: Hit = {
         base: counter ? 60 : 22,
         kind: 'phys',
         source: counter ? 'counter' : 'melee',
-        knock: counter ? 12 : 7,
+        knock: counter ? 14 : 7,
         dirX: dx / (d || 1),
         dirZ: dz / (d || 1),
         forceCrit: counter,
         status: counter ? [{ id: 'stun', stacks: 1, dur: 1.2 }, { id: 'armorBreak', stacks: 1, dur: 4 }] : [{ id: 'stun', stacks: 1, dur: 0.25, chance: 0.5 }],
       };
+      const at = new THREE.Vector3(e.pos.x, e.pos.y + e.height * 0.6, e.pos.z);
+      this.damage(e, hit, at, new THREE.Vector3(dx, 0, dz).normalize());
       if (counter && en) {
         countered = true;
-        en.state = 'stagger';
-        en.stateT = -0.6;
-        this.clearTelegraph(en);
+        // a big counter can't be shrugged off: if it didn't go down, it reels
+        if (en.alive && en.state !== 'down') this.stagger(en, 1.05);
+        this.counterFx(at, dx / (d || 1), dz / (d || 1));
+      } else {
+        // a boot connecting: dust off the body, a little smear of grit
+        ctx.particles.emit({ pos: at, count: 6, vel: { x: (dx / (d || 1)) * 4, y: 1.2, z: (dz / (d || 1)) * 4 }, spread: 2.5, life: [0.25, 0.5], size: [0.2, 0.5], sprite: ['puff0', 'puff1'], color: [0xe6cf9f, 0xd8b98a], alpha: 0.6, drag: 3, rot: 6 });
       }
-      this.damage(e, hit, new THREE.Vector3(e.pos.x, e.pos.y + e.height * 0.6, e.pos.z), new THREE.Vector3(dx, 0, dz).normalize());
       hits++;
     }
     if (countered) {
       ctx.toast('COUNTER!', '#ffd040');
       ctx.sfx('counter_clang', origin, 1);
+      ctx.sfx('kick', origin, 1, 0.85);
       ctx.sfx('qte_perfect', null, 0.5);
-      ctx.engine.slowMo(0.2, 40);
-      ctx.engine.tweens.after(0.3, () => ctx.engine.slowMo(1, 6), true);
-      ctx.shake(0.4);
+      ctx.sfx('time_slow', null, 0.45);
+      ctx.engine.hitStop(0.09, 0.02);
+      ctx.engine.slowMo(0.15, 40);
+      ctx.engine.tweens.after(0.5, () => ctx.engine.slowMo(1, 5), true);
+      ctx.engine.flash(0xfff0c0, 0.3, 0.22);
+      ctx.shake(0.45);
       ctx.events.emit('counter');
     } else if (hits > 0) {
       ctx.sfx('kick', origin, 0.9);
-      ctx.engine.hitStop(0.05);
-      ctx.shake(0.2);
+      ctx.sfx('punch', origin, 0.45, 1.1);
+      ctx.engine.hitStop(0.06);
+      ctx.shake(0.22);
     } else ctx.sfx('melee_whoosh', origin, 0.6);
+  }
+
+  /** the counter's impact: a ring of gold sparks blown out along the kick, grit and a flash */
+  private counterFx(at: THREE.Vector3, dx: number, dz: number) {
+    const P = this.ctx.particles;
+    P.emit({ pos: at, count: 26, vel: { x: dx * 7, y: 1.5, z: dz * 7 }, spread: 9, life: [0.16, 0.4], size: [0.07, 0.015], sprite: 'spark', additive: true, color: [0xffe080, 0xfff6c0, 0xffb040], stretch: 0.035, gravity: 5 });
+    P.emit({ pos: at, count: 5, spread: 3, life: [0.25, 0.45], size: [0.35, 0.05], sprite: 'star4', additive: true, color: [0xfff2c0, 0xffd36b], drag: 2 });
+    P.emit({ pos: at, count: 1, life: [0.1, 0.12], size: [1.2, 2.2], sprite: 'glow32', additive: true, color: 0xfff0c0, alpha: 0.55 });
+    P.emit({ pos: at, count: 10, vel: { x: dx * 6, y: 1, z: dz * 6 }, spread: 3, life: [0.35, 0.7], size: [0.3, 0.8], sprite: ['puff0', 'puff1'], color: [0xe6cf9f, 0xd8b98a], alpha: 0.6, drag: 3, rot: 6 });
+    this.ctx.fx.light(at, 0xffd080, 5, 0.18, 8);
   }
 
   private grappleKick(e: EnemyLike) {
@@ -1081,6 +1381,25 @@ export class Enemies implements EnemyApi {
       if (!l) this.grid.set(k, (l = []));
       l.push(e);
     }
+    // fairness bookkeeping: who is already swinging / aiming right now
+    let bm = 0, br = 0;
+    for (const e of this.list) {
+      if (!e.alive || !e.atk || (e.state !== 'windup' && e.state !== 'strike')) continue;
+      if (e.atk.kind === 'melee') bm++;
+      else if (RANGED.has(e.atk.kind)) br++;
+    }
+    this.busyMelee = bm;
+    this.busyRanged = br;
+    const cq = ctx.camera.quaternion;
+    _v.set(0, 0, -1).applyQuaternion(cq);
+    const cfl = Math.hypot(_v.x, _v.z) || 1;
+    this.camFX = _v.x / cfl;
+    this.camFZ = _v.z / cfl;
+    // multi-kill callouts settle a beat after the last kill
+    if (this.mk.pending > 0) {
+      this.mk.pending -= dt;
+      if (this.mk.pending <= 0) this.announceMulti();
+    }
     // mariachi buff sources
     const bands = this.list.filter((e) => e.alive && e.def.special === 'buffAura' && e.state !== 'spawn');
     for (let i = this.list.length - 1; i >= 0; i--) {
@@ -1096,6 +1415,8 @@ export class Enemies implements EnemyApi {
       e.contactCd -= dt;
       e.ramCd -= dt;
       e.flipped = Math.max(0, e.flipped - dt);
+      e.poise = Math.max(0, e.poise - dt * 0.4);
+      e.coughCd -= dt;
       for (let k = 0; k < e.cds.length; k++) e.cds[k] -= dt;
       e.buffT = Math.max(0, e.buffT - dt);
       for (const b of bands) if (b !== e && b.pos.distanceTo(e.pos) < 12) e.buffT = Math.max(e.buffT, 0.5);
@@ -1106,7 +1427,11 @@ export class Enemies implements EnemyApi {
         if (e.alive && tick.bleed > 0) this.damage(e, { base: tick.bleed, kind: 'phys', source: 'bleed', canCrit: e.status.stacks('curse') > 0 });
         if (e.alive && tick.burn > 0) this.damage(e, { base: tick.burn, kind: 'magic', source: 'burn', canCrit: false });
         if (!e.alive) continue;
-        if (e.status.has('poison') && rnd.chance(0.5)) ctx.fx.bubbles({ x: e.pos.x, y: e.pos.y + e.height * 0.7, z: e.pos.z }, 1);
+        if (e.status.has('poison')) {
+          // the deeper the venom, the harder it froths
+          const st = e.status.stacks('poison');
+          if (rnd.chance(0.4 + Math.min(0.55, st * 0.03))) ctx.fx.bubbles({ x: e.pos.x, y: e.pos.y + e.height * 0.7, z: e.pos.z }, st >= 14 ? 3 : st >= 6 ? 2 : 1);
+        }
         if (e.status.has('burn')) ctx.fx.flames({ x: e.pos.x, y: e.pos.y + e.height * 0.5, z: e.pos.z }, 1, e.scale);
       }
       // tint by status (subtle)
@@ -1169,6 +1494,7 @@ export class Enemies implements EnemyApi {
       }
       this.animate(e, dt, time);
     }
+    this.proj.speedMul = clamp(0.78 + this.wave * 0.022, 0.78, 1);
     this.proj.update(dt);
     this.updateHazards(dt);
     this.updateDying(dt, time);
@@ -1494,6 +1820,37 @@ export class Enemies implements EnemyApi {
       e.yaw = dampAngle(e.yaw, face, 4, dt);
       return;
     }
+    // ---- knocked flat: tumble along the push, thud into the sand, lie there, get back up
+    if (e.state === 'down') {
+      e.vel.x *= Math.exp(-2.4 * dt);
+      e.vel.z *= Math.exp(-2.4 * dt);
+      e.pos.x += e.vel.x * dt;
+      e.pos.z += e.vel.z * dt;
+      if (e.vel.y > 0 || e.pos.y > ground + 0.02) {
+        e.vel.y -= 24 * dt;
+        e.pos.y += e.vel.y * dt;
+        if (e.pos.y <= ground) {
+          e.pos.y = ground;
+          if (e.vel.y < -2.5 && ctx.camera.position.distanceTo(e.pos) < 50) {
+            const p = { x: e.pos.x, y: ground + 0.1, z: e.pos.z };
+            ctx.fx.dust(p, 0.75 * e.scale, P.sand0, 4);
+            ctx.fx.sandBurst(p, 0.55 * e.scale);
+            ctx.sfx('board_land', p, 0.45, 0.72 + rnd.next() * 0.12);
+            e.squash.kick(-5);
+          }
+          e.vel.y = 0;
+        }
+      } else e.pos.y = ground;
+      // skidding on its back ploughs a furrow of sand
+      const sk = Math.hypot(e.vel.x, e.vel.z);
+      if (sk > 1.8 && e.pos.y <= ground + 0.05 && rnd.chance(dt * 24)) ctx.fx.sandSpray({ x: e.pos.x, y: ground + 0.05, z: e.pos.z }, { x: e.vel.x * 0.15, y: 0.6, z: e.vel.z * 0.15 }, 0.8);
+      if (e.stateT > e.downDur + GETUP) {
+        e.state = 'move';
+        e.stateT = -0.35; // a breath before it can swing again
+        e.vel.set(0, 0, 0);
+      }
+      return;
+    }
     if (stunned) {
       e.vel.multiplyScalar(Math.exp(-6 * dt));
       e.pos.addScaledVector(e.vel, dt);
@@ -1610,14 +1967,16 @@ export class Enemies implements EnemyApi {
     // ---- attacks in progress
     if (e.state === 'windup' && e.atk) {
       const a = e.atk;
+      const W = e.wind;
       if (d.ai === 'constrictor' && Math.floor(e.stateT / 0.2) !== Math.floor((e.stateT - dt) / 0.2)) ctx.sfx('skeleton_rattle', e.pos, 0.55, 1.7 + rnd.next() * 0.2);
-      e.glow = clamp(e.stateT / a.windup, 0, 1) * 1.5;
+      e.glow = clamp(e.stateT / W, 0, 1) * 1.5;
       e.yaw = dampAngle(e.yaw, face, a.kind === 'snipe' ? 6 : 10, dt);
       e.vel.multiplyScalar(Math.exp(-8 * dt));
-      if (a.kind === 'snipe') this.drawLaser(e, ppos, e.stateT / a.windup);
+      if (a.kind === 'snipe') this.drawLaser(e, ppos, e.stateT / W);
       if (a.kind === 'explode') e.flash = Math.sin(e.stateT * 40) > 0 ? 0.8 : 0;
       if (d.ai === 'constrictor' && rnd.chance(dt * 18)) this.rattleDust(e);
-      if (e.stateT >= a.windup * (a.kind === 'melee' ? 1 / buff : 1)) this.strike(e, a, ppos, dist);
+      this.telegraphFx(e, a, W, ppos, pvel, dt);
+      if (e.stateT >= W * (a.kind === 'melee' ? 1 / buff : 1)) this.strike(e, a, ppos, dist);
       if (!e.flying) e.pos.y = ground;
       return;
     }
@@ -1850,6 +2209,21 @@ export class Enemies implements EnemyApi {
         if (d.ai === 'pack' && a.kind !== 'howl' && !e.biteToken) continue;
         if (foc && a.kind === 'leap' && d.ai === 'constrictor') continue; // snakes only coil around the hunter
         if (a.kind !== 'melee' && a.kind !== 'explode' && a.kind !== 'aura' && a.kind !== 'music' && a.kind !== 'howl' && !this.lineOfSight(e, ppos)) continue;
+        // fairness: only so many swings / shots wind up at once, and nobody fires the moment it arrives
+        const ranged = RANGED.has(a.kind);
+        if (!foc && a.kind === 'melee' && this.busyMelee >= Math.min(6, 2 + Math.floor(this.wave / 7))) continue;
+        if (!foc && ranged && (this.busyRanged >= Math.min(9, 3 + Math.floor(this.wave / 5)) || e.life < 1.3)) continue;
+        if (a.kind === 'melee') this.busyMelee++;
+        else if (ranged) this.busyRanged++;
+        // wind-up: early waves telegraph a little longer while the tells are learned; shots, pounces and
+        // charges from outside the view wind up longer still (the glint / click / marker give time to react)
+        let W = a.windup * (1 + Math.max(0, 6 - this.wave) * 0.04);
+        if (ranged || a.kind === 'leap' || a.kind === 'charge') {
+          const cx = e.pos.x - ctx.camera.position.x, cz = e.pos.z - ctx.camera.position.z;
+          if ((cx * this.camFX + cz * this.camFZ) / (Math.hypot(cx, cz) || 1) < 0.55) W *= 1.4;
+        }
+        e.wind = W;
+        e.glinted = false;
         e.cds[k] = a.cooldown * (0.85 + rnd.next() * 0.3);
         e.atk = a;
         e.state = 'windup';
@@ -1858,12 +2232,12 @@ export class Enemies implements EnemyApi {
         if (d.ai === 'constrictor' && a.kind === 'leap') {
           // the rattle: a red warning ring where it means to land, dust shaking off the tail
           const gy = ctx.world.groundAt(ppos.x, ppos.z);
-          ctx.fx.ring({ x: ppos.x + pvel.x * 0.4, y: gy + 0.15, z: ppos.z + pvel.z * 0.4 }, 0xff4a2a, 5.5, a.windup);
+          ctx.fx.ring({ x: ppos.x + pvel.x * 0.4, y: gy + 0.15, z: ppos.z + pvel.z * 0.4 }, 0xff4a2a, 5.5, W);
           ctx.sfx('giant_scorpion_hiss', e.pos, 0.55, 1.5);
         }
         e.squash.kick(a.kind === 'melee' ? 5 : 3);
         if (a.kind === 'melee' || a.kind === 'explode' || a.kind === 'charge' || a.kind === 'leap') {
-          ctx.particles.emit({ pos: { x: e.pos.x, y: e.pos.y + e.height + 0.45, z: e.pos.z }, count: 1, vel: { x: 0, y: 0.8, z: 0 }, life: [a.windup, a.windup], size: [0.5, 0.5], sprite: 'dg_!', color: a.kind === 'explode' ? 0xff4020 : 0xffd040, screen: true, sizeJitter: 0 });
+          ctx.particles.emit({ pos: { x: e.pos.x, y: e.pos.y + e.height + 0.45, z: e.pos.z }, count: 1, vel: { x: 0, y: 0.8, z: 0 }, life: [W, W], size: [0.5, 0.5], sprite: 'dg_!', color: a.kind === 'explode' ? 0xff4020 : 0xffd040, screen: true, sizeJitter: 0 });
         }
         if (a.kind === 'explode') ctx.sfx('dynamite_fuse', e.pos, 0.8);
         if (d.id === 'jackal' && a.kind === 'leap') ctx.sfx('jackal_attack', e.pos, 0.7);

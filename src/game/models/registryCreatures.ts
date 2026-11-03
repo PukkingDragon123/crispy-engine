@@ -28,3 +28,10 @@ export const TOAD_MODELS: Record<string, ModelEntry> = {
   toadlet_v2: () => toadletRig({ variant: 2 }),
   toadlet_v3: () => toadletRig({ variant: 3 }),
 };
+
+// ---- the travelling trading post (creatures/caravanTortoise.ts): Ozymandias, a giant
+// tortoise carrying the shop on his back (Old Mother Tamsin rides at socket `rider`)
+import { caravanTortoiseRig } from './creatures/caravanTortoise';
+export const CARAVAN_MODELS: Record<string, ModelEntry> = {
+  caravan_tortoise: () => caravanTortoiseRig(),
+};

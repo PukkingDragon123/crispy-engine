@@ -18,6 +18,13 @@ export interface WaveSpec {
   alphaGuaranteed?: boolean;
 }
 
+/** surge / breather cycle (s) */
+const PULSE = 14;
+const smooth01 = (t: number) => {
+  const k = t < 0 ? 0 : t > 1 ? 1 : t;
+  return k * k * (3 - 2 * k);
+};
+
 const THEMES = [
   { name: 'SCARAB STAMPEDE', types: ['scarab', 'bombScarab'], mult: 1.6, from: 4 },
   { name: 'BONE POSSE', types: ['gunslinger', 'sharpshooter', 'shotgunner', 'mariachi'], mult: 1.1, from: 10 },
@@ -39,6 +46,10 @@ export class WaveDirector {
   spec: WaveSpec | null = null;
   private spawnAcc = 0;
   private alphaDone = false;
+  /** groups spawned this wave (the opening ones come in closer, for instant action) */
+  private groups = 0;
+  /** enemy types already introduced this run (a new type gets the spotlight on its first wave) */
+  private met = new Set<string>();
   goldenDone = false;
   paused = false;
   cap = 180;
@@ -68,6 +79,7 @@ export class WaveDirector {
     this.phase = 'intro';
     this.timer = 0;
     this.alphaDone = false;
+    this.groups = 0;
     this.ctx.run.wave = n;
     this.onWaveStart?.(this.spec);
   }
@@ -77,6 +89,8 @@ export class WaveDirector {
     if (!this.spec) return;
     this.phase = this.spec.boss !== 'none' ? 'boss' : 'combat';
     this.timer = 0;
+    // open hot: the first pack is already on its way
+    if (this.spec.boss === 'none') this.spawnAcc = Math.max(this.spawnAcc, 1.6);
     if (this.spec.boss !== 'none') this.boss = this.spawnBoss?.(this.wave, this.spec.boss === 'major') ?? null;
   }
 
@@ -92,8 +106,11 @@ export class WaveDirector {
     const sc = waveScale(n);
     // budget: alive target + spawn rate
     const bossWave = this.phase === 'boss';
-    const target = Math.min(this.cap, Math.round((10 + n * 1.7) * (this.spec.theme?.mult ?? 1) * (bossWave ? 0.45 : 1)));
-    const rate = (0.9 + n * 0.09) * (bossWave ? 0.4 : 1);
+    // pacing: surges and breathers (~14 s cycle) instead of a flat trickle
+    const ph = (this.timer % PULSE) / PULSE;
+    const pulse = bossWave ? 0.5 : ph < 0.45 ? Math.sin((ph / 0.45) * Math.PI * 0.5) : 1 - smooth01((ph - 0.45) / 0.55);
+    const target = Math.min(this.cap, Math.round((10 + n * 1.7) * (this.spec.theme?.mult ?? 1) * (bossWave ? 0.45 : 1) * (0.78 + 0.34 * pulse)));
+    const rate = (0.9 + n * 0.09) * (bossWave ? 0.4 : 1) * (0.45 + 1.1 * pulse);
     if (this.enemies.alive < target) this.spawnAcc += rate * dt;
     while (this.spawnAcc >= 1) {
       this.spawnAcc -= 1;
@@ -151,12 +168,17 @@ export class WaveDirector {
       if (t.length) roster = t;
     }
     if (!roster.length) return;
-    // weights fade early types slightly as waves progress
-    const def = rnd.weighted(roster, (d) => d.weight * (d.firstWave === 1 ? clamp(1.4 - n * 0.008, 0.6, 1.4) : 1));
+    // weights fade early types slightly as waves progress; a type new this wave gets the spotlight
+    const def = rnd.weighted(roster, (d) => d.weight * (d.firstWave === 1 ? clamp(1.4 - n * 0.008, 0.6, 1.4) : 1) * (d.firstWave === n && d.id !== 'goldenScarab' ? 4 : 1));
     const [g0, g1] = def.group ?? [1, 2];
     const count = Math.round(rnd.range(g0, g1) * (1 + n * 0.012));
-    const p = this.spawnPoint(def.ai === 'sniper' ? 34 : 24, def.ai === 'sniper' ? 52 : 46);
+    const open = this.groups++ < 2 && def.ai !== 'sniper';
+    const p = this.spawnPoint(def.ai === 'sniper' ? 34 : open ? 17 : 24, def.ai === 'sniper' ? 52 : open ? 28 : 46);
     if (!p) return;
+    if (!this.met.has(def.id)) {
+      this.met.add(def.id);
+      if (def.firstWave > 1 && def.firstWave >= n - 1) this.ctx.toast(`NEW BOUNTY: ${def.name.toUpperCase()}`, '#e0b373', def.weakness);
+    }
     const alphaRoll = rnd.next() < alphaChance && n >= 4;
     for (let i = 0; i < count; i++) {
       if (this.enemies.alive >= this.cap) break;

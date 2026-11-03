@@ -33,8 +33,18 @@ export interface AnimEnv {
   camDist: number;
 }
 
+/** knockdown get-up time (s) after the lie; the enemy manager ends the 'down' state with it */
+export const GETUP = 0.75;
+
 /** per-enemy animation memory */
 export class EnemyAnim {
+  /** hit shove: the whole body is pushed a step along each hit (local x / z, springs back) */
+  pushX = new SpringF(0, 3.4, 0.42);
+  pushZ = new SpringF(0, 3.4, 0.42);
+  /** coughing fit timer (stink cloud), -1 idle */
+  coughT = -1;
+  /** knockdown: the thud into the sand has played */
+  downImp = false;
   gait = Math.random();
   wave = Math.random() * 10;
   spd = 0;
@@ -102,6 +112,14 @@ export class EnemyAnim {
     this.dDur = dur;
     this.impact = false;
     this.impactDone = false;
+  }
+
+  /** killed while already knocked flat: skip the collapse and go still where it lies */
+  dieWhereLying(dir: number, side: number) {
+    this.dDir = dir;
+    this.dSide = side;
+    this.dT = Math.min(0.9, this.dDur * 0.75);
+    this.impactDone = true;
   }
 }
 
@@ -176,6 +194,34 @@ function O(e: Enemy, name: string, x: number, y: number, z: number) {
   e.posOff[i * 3 + 1] += y;
   e.posOff[i * 3 + 2] += z;
 }
+/** ease an already-written joint rotation toward a target pose by weight w */
+function blendS(e: Enemy, name: string, x: number, y: number, z: number, w: number) {
+  const i = e.batch.partIndex[name];
+  if (i === undefined) return;
+  e.rot[i * 3] = lerp(e.rot[i * 3], x, w);
+  e.rot[i * 3 + 1] = lerp(e.rot[i * 3 + 1], y, w);
+  e.rot[i * 3 + 2] = lerp(e.rot[i * 3 + 2], z, w);
+}
+
+/** knockdown timeline: fall (bowled over, decelerating into the sand), lie, get up (0..1) */
+function downPhase(e: Enemy) {
+  const T = e.stateT;
+  const fall = 1 - Math.pow(1 - clamp01(T / 0.3), 2.2);
+  const up = clamp01((T - e.downDur) / GETUP);
+  return { T, fall, up };
+}
+
+/** the thud the moment a knocked-down body hits the sand */
+function downImpact(e: Enemy, a: EnemyAnim, env: AnimEnv, fall: number, kind: 'sand' | 'chitin' | 'bone' | 'fur' | 'blood') {
+  if (fall < 0.98 || a.downImp) return;
+  a.downImp = true;
+  a.bounce.kick(-5);
+  if (env.fx && env.camDist < 42) {
+    env.fx.burst(e.pos.x, e.pos.y + 0.1, e.pos.z, 'sand', 0.9 * e.scale);
+    if (kind !== 'sand') env.fx.burst(e.pos.x, e.pos.y + 0.25, e.pos.z, kind, 0.35);
+  }
+}
+
 function rootIndex(e: Enemy) {
   return 0;
 }
@@ -257,17 +303,24 @@ export function animateEnemy(e: Enemy, env: AnimEnv) {
   a.turn = damp(a.turn, dy / Math.max(dt, 1e-3), 6, dt);
   a.breath += dt * (a.low > 0.5 ? 2.4 : 1.25);
 
-  // new hit → directional flinch impulse (push direction in local space)
+  // new hit → directional flinch impulse (push direction in local space), weighted by how hard it landed:
+  // the torso snaps along the hit, a side hit twists it away, a headshot whips the head back, and the
+  // whole body is shoved a step
   if (e.hitT < a.prevHitT && e.hitT < 0.05) {
     const lx = e.hitX * cy - e.hitZ * sy;
     const lz = e.hitX * sy + e.hitZ * cy;
     const lost = a.prevHp > 0 ? clamp01((a.prevHp - e.hp) / e.maxHp) : 0.1;
-    const k = 4 + lost * 26;
+    const hv = e.hitHeavy;
+    const k = 4 + lost * 26 + hv * 7;
     a.flP.kick(lz * k);
     a.flR.kick(-lx * k);
-    a.flY.kick((Math.random() - 0.5) * k * 0.6);
-    a.headP.kick(lz * k * 0.6);
-    a.bounce.kick(-2.5 - lost * 6);
+    a.flY.kick(-lx * k * 0.45 + (Math.random() - 0.5) * k * 0.3);
+    a.headP.kick(lz * k * (e.hitHead ? 1.7 : 0.6));
+    if (e.hitHead) a.headY.kick(-lx * k * 0.8);
+    a.bounce.kick(-2.5 - lost * 6 - hv * 2);
+    const shove = 0.9 + hv * 2.6 + lost * 3;
+    a.pushX.kick(lx * shove);
+    a.pushZ.kick(lz * shove);
   }
   a.prevHitT = e.hitT;
   a.prevHp = e.hp;
@@ -276,6 +329,8 @@ export function animateEnemy(e: Enemy, env: AnimEnv) {
   a.flY.step(0, dt);
   a.bounce.step(0, dt);
   a.recoil.step(0, dt);
+  a.pushX.step(0, dt);
+  a.pushZ.step(0, dt);
   if (e.state === 'stagger' && a.prevState !== 'stagger') {
     a.flP.kick(-7);
     a.flR.kick((Math.random() - 0.5) * 8);
@@ -309,13 +364,13 @@ export function animateEnemy(e: Enemy, env: AnimEnv) {
   }
   if (a.tauntT >= 0) {
     a.tauntT += dt;
-    const busy = e.state === 'windup' || e.state === 'stagger' || e.state === 'charge' || e.state === 'leap' || e.state === 'dive' || e.state === 'wrap';
+    const busy = e.state === 'windup' || e.state === 'stagger' || e.state === 'down' || e.state === 'charge' || e.state === 'leap' || e.state === 'dive' || e.state === 'wrap';
     if (a.tauntT > 1.6 || (busy && !a.dying)) a.tauntT = -1;
   }
 
   // attack envelope
   const atk = e.atk;
-  const ap = attackPhase(e.state, e.stateT, atk?.windup ?? 0.5, 0.35, _ap);
+  const ap = attackPhase(e.state, e.stateT, e.state === 'windup' ? e.wind : atk?.windup ?? 0.5, 0.35, _ap);
   if (e.state === 'strike' && atk && (atk.kind === 'burst' || atk.kind === 'fan' || atk.kind === 'volley' || atk.kind === 'snipe' || atk.kind === 'spiral' || atk.kind === 'ring')) {
     const shots = atk.kind === 'burst' ? Math.min(atk.count ?? 1, 1 + Math.floor(e.stateT / 0.12)) : 1;
     if (shots > a.shots) {
@@ -355,10 +410,34 @@ export function animateEnemy(e: Enemy, env: AnimEnv) {
       a.gait += dt * (1 + a.spd);
       if (a.dying) a.sink = easeInCubic(a.dT / a.dDur) * e.height;
   }
+  // the hit shove: the whole body slides a step along the blow and springs back
+  if (!a.dying && e.state !== 'down') RO(e, a.pushX.x, 0, a.pushZ.x);
+  // coughing fit (stink cloud): doubled over, hacking, a hand up at the mouth
+  let hack = 0;
+  if (a.coughT >= 0 && !a.dying) {
+    a.coughT += dt;
+    const k = a.coughT / 1.05;
+    if (k >= 1 || e.state === 'down') a.coughT = -1;
+    else {
+      const w = Math.sin(k * PI);
+      hack = Math.pow(Math.max(0, Math.sin(a.coughT * 19)), 3) * w;
+      if (e.skel === 'humanoid') {
+        A(e, 'torso', 0.36 * w + hack * 0.32, 0, 0);
+        A(e, 'head', 0.2 * w + hack * 0.4, 0, 0);
+        blendS(e, 'arm_l', -2.05, 0.35, -0.25, w * 0.9);
+        blendS(e, 'fore_l', -1.75, 0, 0, w * 0.9);
+        RO(e, 0, -0.03 * w, 0);
+      } else {
+        RR(e, hack * 0.22 + 0.08 * w, 0, Math.sin(a.coughT * 9) * 0.05 * w);
+        A(e, 'head', hack * 0.35, 0, 0);
+        A(e, 'neck', hack * 0.3, 0, 0);
+      }
+    }
+  }
   // jaw scream / chatter shared by every skeleton with a jaw
   const scream = e.state === 'windup' ? ap.antic * 0.55 : e.hitT < 0.2 ? (1 - e.hitT / 0.2) * 0.5 : 0;
   const chatter = e.def.id === 'husk' ? Math.max(0, Math.sin(t * 7 + e.quirk * 20)) * 0.12 : 0;
-  e.jaw = damp(e.jaw, scream + chatter + (a.low > 0.5 ? 0.12 : 0) + (a.dying ? 0.35 : 0), 14, dt);
+  e.jaw = damp(e.jaw, scream + chatter + hack * 0.7 + (e.state === 'down' ? 0.3 : 0) + (a.low > 0.5 ? 0.12 : 0) + (a.dying ? 0.35 : 0), 14, dt);
   A(e, 'jaw', e.jaw);
   if (a.dying) a.dT += dt;
 }
@@ -378,6 +457,8 @@ function humanoid(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   const low = a.low;
   // ---- death collapse
   if (a.dying) return humanoidDeath(e, a, env, M);
+  // ---- knocked flat, then back on its feet
+  if (st === 'down') return humanoidDown(e, a, env, M);
 
   // ---- locomotion
   const sp = a.spd;
@@ -839,6 +920,57 @@ function humanoidDeath(e: Enemy, a: EnemyAnim, env: AnimEnv, M: Metrics) {
   void dt;
 }
 
+/**
+ * Knockdown: bowled over about the feet (face-down or onto the back, away from
+ * the blow), legs kicking as it lands, a limp beat in the sand, then the get-up:
+ * hands planted (push-up from the front, propped behind from the back), knees
+ * tucked under, up through a crouch and a dazed head shake.
+ */
+function humanoidDown(e: Enemy, a: EnemyAnim, env: AnimEnv, M: Metrics) {
+  const { T, fall, up } = downPhase(e);
+  const D = e.downDir, side = e.downSide;
+  downImpact(e, a, env, fall, e.def.hitKind === 'bone' ? 'bone' : e.def.hitKind === 'flesh' ? 'blood' : 'sand');
+  const ug = smoother(up);
+  const lieW = 1 - smooth(up / 0.4); // how much of the limp lying pose remains
+  const kneel = Math.sin(clamp01(up / 0.9) * PI); // deepest crouch partway up
+  const effort = Math.sin(clamp01(up / 0.7) * PI); // arms and back working hardest early
+  const settle = a.downImp ? wobble(T - 0.3, 2.4, 6) * lieW : 0;
+  // the whole body topples about the feet, then rises back through the crouch
+  a.tilt = D * (1.5 * fall * (1 - ug) + settle * 0.05);
+  a.roll = side * 0.14 * fall * lieW;
+  a.lift = fall * lieW * e.radius * 0.3 + Math.max(0, a.bounce.x) * 0.02;
+  // legs: kicking as it lands, one knee drawn up while it lies, tucked under the hips to stand
+  const hipDrop = M.hipY * kneel * 0.62;
+  const ik = twoBoneIK(M.thigh, M.shin, 0.04, Math.max(0.05, M.hipY - hipDrop), 1);
+  for (let s = 0; s < 2; s++) {
+    const sideSign = s === 0 ? 1 : -1;
+    const flail = Math.exp(-T * 4) * Math.sin(T * 26 + s * 2.1) * 0.55 * fall;
+    const lyT = -0.3 - (s === 0 ? 0.6 : 0.08) + flail;
+    const lyS = (s === 0 ? 1.15 : 0.3) - flail * 0.5;
+    S(e, s === 0 ? 'thigh_l' : 'thigh_r', lerp(ik.upper, lyT * fall, lieW), 0, sideSign * (0.07 + 0.14 * lieW * fall));
+    S(e, s === 0 ? 'shin_l' : 'shin_r', lerp(ik.lower, lyS * fall, lieW), 0, 0);
+  }
+  RO(e, 0, -hipDrop * (1 - lieW), 0);
+  // torso: limp in the sand, then a sit-up (from the back) or a push-up arch (face down)
+  const tP = (D < 0 ? 0.6 : -0.35) * effort * (1 - lieW * 0.5) + settle * 0.15 + a.flP.x * 0.3 - D * 0.25 * (1 - fall);
+  S(e, 'torso', tP, side * 0.25 * lieW * fall, side * 0.12 * lieW * fall);
+  // head: lolled to the side while down, shaking itself clear once upright
+  const daze = smooth((up - 0.55) / 0.2) * (1 - smooth((up - 0.94) / 0.06));
+  const hP = (D < 0 ? -0.25 : 0.2) * lieW * fall + effort * (D < 0 ? 0.25 : -0.4) + a.flP.x * 0.3;
+  S(e, 'head', hP, side * 0.75 * lieW * fall + Math.sin(T * 17) * 0.38 * daze, side * 0.2 * lieW * fall);
+  // arms: thrown up by the blow, flung wide on the sand, then planted to push up
+  const throwUp = (1 - fall) * 1.2;
+  const push = Math.sin(clamp01(up / 0.62) * PI);
+  const pushX = D > 0 ? -1.45 : 0.75;
+  const wide = 1.15 * lieW * fall;
+  S(e, 'arm_l', lerp(-0.45 * fall - throwUp * 1.6 + Math.exp(-T * 3) * Math.sin(T * 21) * 0.3 * fall, pushX, push), 0, wide + 0.15);
+  S(e, 'arm_r', lerp(-0.7 * fall - throwUp * 1.4, pushX, push), 0, -wide - 0.15);
+  S(e, 'fore_l', lerp(-0.55, -0.15, push), 0, 0);
+  S(e, 'fore_r', lerp(-0.35, -0.15, push), 0, 0);
+  S(e, 'hat', -0.7 * fall * lieW, 0, 0.45 * fall * lieW);
+  S(e, 'coat', 0.3 * fall * lieW, 0, 0);
+}
+
 // ============================================================= quadruped (sand wolf)
 function quad(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   const t = env.time, dt = env.dt;
@@ -849,6 +981,7 @@ function quad(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   const gallop = clamp01((sp - 4.5) / 2.5);
   if (!a.tail) a.tail = new ChainFollower(3, 3.2, 0.42);
   if (a.dying) return quadDeath(e, a, env);
+  if (st === 'down') return quadDown(e, a, env);
   // gait: walk → trot → gallop
   const duty = lerp(sp < 1.6 ? 0.68 : 0.5, 0.36, gallop);
   const legLen = e.def.height * 0.55;
@@ -975,6 +1108,38 @@ function quad(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   S(e, 'ear_r', pin, 0, -twitch);
 }
 
+/** knockdown: bowled onto its side, legs paddling at the air, then a scrambling heave back up */
+function quadDown(e: Enemy, a: EnemyAnim, env: AnimEnv) {
+  const { T, fall, up } = downPhase(e);
+  downImpact(e, a, env, fall, 'fur');
+  const t = env.time;
+  const lieW = 1 - smoother(up);
+  const side = e.downSide;
+  const scramble = Math.sin(up * PI);
+  a.roll = side * 1.42 * fall * lieW;
+  a.lift = fall * lieW * e.radius * 0.55 + scramble * 0.12 * e.scale;
+  const paddle = (Math.exp(-T * 2.5) * 0.8 + 0.15) * fall * lieW;
+  let i = 0;
+  for (const k of ['fl', 'fr', 'bl', 'br']) {
+    const ph = t * (12 + scramble * 10) + i * 1.7;
+    const sw = Math.sin(ph) * (paddle * 0.7 + scramble * 0.6);
+    const front = k[0] === 'f';
+    S(e, 'leg_' + k, -sw - (front ? 0.3 : -0.2) * lieW * fall, 0, 0);
+    S(e, 'shin_' + k, (front ? 0.6 : -0.5) * (lieW * fall * 0.6 + scramble * 0.4) + Math.max(0, Math.sin(ph + 1)) * 0.4 * scramble, 0, 0);
+    S(e, 'paw_' + k, 0.3 * lieW, 0, 0);
+    i++;
+  }
+  RO(e, 0, -e.def.height * 0.12 * scramble, 0);
+  S(e, 'chest', -0.15 * fall * lieW, 0, 0);
+  S(e, 'neck', -0.3 * fall * lieW + scramble * 0.3 + a.flP.x * 0.4, side * 0.4 * lieW, 0);
+  const daze = smooth((up - 0.6) / 0.25) * (1 - smooth((up - 0.92) / 0.08));
+  S(e, 'head', 0.2 * lieW, Math.sin(T * 16) * 0.35 * daze, side * 0.3 * lieW);
+  S(e, 'jaw', 0.35 + Math.sin(t * 9) * 0.1 * lieW);
+  for (let n = 1; n <= 3; n++) S(e, 'tail' + n, 0.2 * lieW + Math.sin(t * 7 + n) * 0.2 * paddle, 0, 0);
+  S(e, 'ear_l', 0.6 * lieW, 0, 0);
+  S(e, 'ear_r', 0.6 * lieW, 0, 0);
+}
+
 function quadDeath(e: Enemy, a: EnemyAnim, env: AnimEnv) {
   const t = a.dT;
   deathFx(e, a, env, 'fur');
@@ -1091,8 +1256,17 @@ function insect(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase, pairs: 3 
   const sp = a.spd;
   const moving = clamp01(sp / 0.5);
   const scorp = pairs === 4;
-  const flipped = e.flipped > 0;
   const dead = a.dying;
+  // knockdown: flipped onto its back legs-up, then a kick and a roll back onto its feet
+  let downFlip = 0;
+  if (st === 'down' && !dead) {
+    const { fall, up } = downPhase(e);
+    downImpact(e, a, env, fall, 'chitin');
+    downFlip = fall * (1 - smoother(up));
+    a.roll = e.downSide * PI * downFlip;
+    a.lift = downFlip * e.def.height * 0.85 * e.scale + Math.sin(up * PI) * 0.22 * e.scale + Math.max(0, a.bounce.x) * 0.02;
+  }
+  const flipped = e.flipped > 0 || downFlip > 0.4;
   const frantic = kind === 'explode' && st === 'windup';
   const legLen = e.def.height * (scorp ? 0.6 : 0.8);
   const duty = scorp ? 0.6 : 0.55;
@@ -1392,6 +1566,8 @@ function lizard(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
     ['br', 'r2', G.br, -1, false],
   ];
   let flipK = 0;
+  // knockdown: tossed onto its back, legs scrabbling at the sky, then it rights itself
+  let downK = 0;
   if (dead) {
     flipK = easeOutBack(clamp01(a.dT / 0.35), 1.2);
     a.roll = flipK * PI;
@@ -1400,6 +1576,12 @@ function lizard(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
       a.impact = true;
       a.impactDone = true;
     }
+  } else if (st === 'down') {
+    const { fall, up } = downPhase(e);
+    downImpact(e, a, env, fall, 'chitin');
+    downK = fall * (1 - smoother(up));
+    a.roll = e.downSide * PI * downK;
+    a.lift = downK * e.def.height * 0.8 * e.scale + Math.sin(up * PI) * 0.18 * e.scale;
   }
   for (const [k, alt, off, sgn, front] of legs) {
     const l = leg(a.gait + off, 0.5, _leg);
@@ -1415,6 +1597,9 @@ function lizard(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
     if (dead) {
       yaw += Math.sin(t * 22 + off * 9) * 0.5 * Math.exp(-a.dT * 2);
       lift += sgn * (0.4 + smooth((a.dT - 0.4) / 0.6) * 0.6);
+    } else if (downK > 0) {
+      yaw += Math.sin(t * 24 + off * 9) * 0.55 * downK;
+      lift += sgn * (0.35 + Math.sin(t * 19 + off * 7) * 0.4) * downK;
     }
     footfall(e, a, env, front ? (sgn > 0 ? 0 : 1) : sgn > 0 ? 2 : 3, l.stance && moving > 0.5, front ? 0.18 : -0.15, sgn * 0.18, 0.28, 0.5);
     S(e, 'leg_' + k, 0, yaw, lift);

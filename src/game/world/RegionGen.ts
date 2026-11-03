@@ -902,7 +902,7 @@ function applyTheme(ctx: ThemeCtx, zn: ZoneDef) {
 
 export type LandmarkType = 'tradingPost' | 'outlawFort' | 'mineHeadframe' | 'ranchBarn' | 'sheriffOffice' | 'saloon';
 export const LANDMARK_INFO: Record<LandmarkType, { name: string; size: [number, number]; mission: string }> = {
-  tradingPost: { name: 'Trading Post', size: [18, 14], mission: 'merchant' },
+  tradingPost: { name: 'Trading Post', size: [12, 12], mission: 'merchant' },
   outlawFort: { name: 'Outlaw Fort', size: [34, 30], mission: 'clearFort' },
   mineHeadframe: { name: 'Abandoned Mine', size: [16, 16], mission: 'mining' },
   ranchBarn: { name: 'Dusty Ranch', size: [24, 18], mission: 'camelRescue' },

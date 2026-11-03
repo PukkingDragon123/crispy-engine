@@ -28,6 +28,7 @@ import type { Ctx } from '../Ctx';
 import type { Input } from '../../engine/Input';
 import type { CameraRig, CineShot } from '../player/CameraRig';
 import type { RigInstance } from '../../engine/voxel/Rig';
+import type { Collider } from '../world/Colliders';
 import * as PM from '../models/props';
 import { modelEntry } from '../models/lookup';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
@@ -46,6 +47,9 @@ export interface MerchantHooks {
   stock?: () => Ware[];
   /** something else owns the screen (a mission cinematic, a notice, the hunter is dead) */
   busy?: () => boolean;
+  /** the caravan tortoise: Tamsin's rig riding on his back, and the camp he walks round */
+  rider?: RigInstance | null;
+  home?: THREE.Vector3;
 }
 
 const ARRIVE_R = 13; // ride inside this to be greeted
@@ -73,10 +77,22 @@ const LINES = {
   arrive: ['Oh! Only you, bone-friend. Come, come, look at my things.', 'Such a racket! Ah, a customer. Then it was worth it.', 'You nearly scraped my shell, dearie. Buy something.'],
 };
 
+/** Ozymandias: slow, ancient, a little pompous, kind underneath */
+const LINES_C: typeof LINES = {
+  hello: ['Welcome to the only shop that walks.', 'Everything I own is on my back. Most of it is for sale.', 'Hrrm. Take your time. I always do.'],
+  poor: ['No gold, no goods. Even a tortoise knows that.', 'Come back heavier, little bones.', 'I have patience. Not that much.'],
+  thanks: ['Hrrm. A fine choice.', 'Sold. I will walk a little lighter.', 'Mind how you carry it, little bones.'],
+  bye: ['Safe roads, little bones.', 'I will be around. Slowly.', 'Off you go. I will catch up in a century.'],
+  shot: ['Hrrm! I felt that through the shell.', 'Not at the shop, rider!', 'I have outlived better shots than you.'],
+  arrive: ['Hrrm. A rider. Slow down, the pots rattle.', 'Ahh... a customer. I have walked nine hundred years for this.', 'Whoa there. Mind the rug, I am unrolling it.'],
+};
+const VOICE_T = { title: TITLE, lines: LINES };
+const VOICE_C = { title: 'OZYMANDIAS', lines: LINES_C };
+
 /** what she says about the ware you are looking at (a fresh line each time) */
 const COMMENT: Record<string, string[]> = {
-  bandage: ['Clean linen. Mostly clean.', 'Wraps a scratch, hides a hole.', 'My third husband swore by these.'],
-  goldBandage: ['Pharaoh-grade linen, dearie.', 'Wrapped a king once. He never complained.', 'Still smells of myrrh. And of king.'],
+  bandage: ['Clean linen. Mostly clean.', 'Wraps a scratch, hides a hole.', 'Rolled by hand on a moving shell.'],
+  goldBandage: ['Pharaoh-grade linen.', 'Wrapped a king once. He never complained.', 'Still smells of myrrh. And of king.'],
   dagger: ['Sharp end goes away from you.', 'A little of you for a lot of oomph.', 'Cursed? Only on Tuesdays.'],
   smoke: ['Pop it and you were never here.', 'Smells of burnt sage and debts.', 'For leaving parties early.'],
   shield: ['Tin, but very confident tin.', 'Stops a bullet. Probably two.', 'A sheriff swapped it for soup.'],
@@ -158,6 +174,7 @@ const _c = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
 const _kj = new THREE.Vector3();
+const _tw = new THREE.Vector3();
 const _l = new THREE.Vector3();
 /** uniform Catmull-Rom through pts (clamped ends), u in [0, pts.length - 1] */
 function catmull(pts: THREE.Vector3[], u: number, out: THREE.Vector3) {
@@ -278,14 +295,14 @@ class Tamsin {
   center(out: THREE.Vector3) {
     const s = this.n.shell;
     if (s) return s.localToWorld(out.set(0, 0.4, -0.06));
-    out.copy(this.root.position).y += 0.75;
+    this.root.localToWorld(out.set(0, 0.75, 0));
     return out;
   }
   /** world-space centre of her head (only meaningful while she is out) */
   headPos(out: THREE.Vector3) {
     const h = this.n.head;
     if (h) return h.localToWorld(out.set(0, 0.13, 0.2));
-    out.copy(this.root.position).y += 1.35;
+    this.root.localToWorld(out.set(0, 1.35, 0.2));
     return out;
   }
 
@@ -370,7 +387,7 @@ class Tamsin {
       s.vx += (rnd.next() - 0.5) * 5 * s.amp;
       s.vz += (rnd.next() - 0.5) * 5 * s.amp;
     }
-    const p = this.root.position;
+    const p = this.root.getWorldPosition(_tw); // (she may be riding on someone's back)
     this.ctx.sfx('board_land', p, 0.32, 1.35);
     this.ctx.fx.dust({ x: p.x, y: p.y + 0.08, z: p.z }, 0.42, P.sand0, 4);
     this.grumble(0.12);
@@ -384,7 +401,7 @@ class Tamsin {
     this.tremble = Math.max(0, this.tremble - dt * 1.2);
     if (this.grumbleAt >= 0) {
       this.grumbleAt -= dt;
-      if (this.grumbleAt < 0) this.ctx.sfx('camel_grunt', this.root.position, 0.42, 0.72);
+      if (this.grumbleAt < 0) this.ctx.sfx('camel_grunt', this.root.getWorldPosition(_tw), 0.42, 0.72);
     }
     const ch = this.ch, f = this.from, mt = this.mt;
     switch (this.mode) {
@@ -570,7 +587,501 @@ class Tamsin {
     }
     this.rig?.setExpression('neutral');
   }
+
+  // ---- the merchant surface the shop talks to (shared with the caravan)
+  readonly kind = 'tamsin' as const;
+  /** root -> rug centre (m) */
+  readonly rugDist = 1.05;
+  halt = false;
+  faceYaw(_yaw: number | null) {}
+  /** the top of what the shop shot must hold (her hat... her headscarf) */
+  framingTop(out: THREE.Vector3) {
+    return this.root.localToWorld(out.set(0, 1.59, 0));
+  }
+  /** the top of her pack (rolled rugs and pouches), world space */
+  packPoint(out: THREE.Vector3, lateral: number) {
+    return this.root.localToWorld(out.set(lateral, 47 * TVS - this.ch.drop * this.dropM, -10 * TVS));
+  }
+  /** where the hunter's coins land (her claws) */
+  coinPoint(out: THREE.Vector3) {
+    return this.root.localToWorld(out.set(0, 0.95, 0.4));
+  }
+  /** the arrival scene: the board skids in and she ducks */
+  startle() {
+    this.threat(1);
+    this.hold = true;
+  }
+  readyToGreet() {
+    return this.mode === 'out';
+  }
 }
+
+// ================================================================== Ozymandias, the walking shop
+// A giant old tortoise with the trading post on his back. He plods a slow loop
+// round his camp (diagonal-pair gait, the load swaying, the goods swinging on
+// springs), stops and turns to face a customer, and when there is danger he
+// pulls everything in and drops onto his plastron, the whole pack rattling,
+// then peeks out, eyes first. Old Mother Tamsin rides on his shell and copies
+// him: she ducks when he does and pops back out on her own.
+const PEEK_C = 0.72;
+const LEGS: [string, number, number][] = [
+  // leg, gait phase offset, side (+1 left)
+  ['fl', 0, 1],
+  ['br', 0, -1],
+  ['fr', 0.5, -1],
+  ['bl', 0.5, 1],
+];
+
+class Caravan {
+  readonly kind = 'caravan' as const;
+  readonly n: Record<string, THREE.Object3D | undefined> = {};
+  private rest: Record<string, THREE.Vector3> = {};
+  private restRot: Record<string, THREE.Euler> = {};
+  private ret: Record<string, THREE.Vector3> = {};
+  private dropM = 0.8;
+  mode: Mode = 'out';
+  private mt = 0;
+  private calm = 0;
+  private calmNeed = 2.5;
+  private peekHold = 1;
+  private from: Channels = { neck: 0, limb: 0, tail: 0, drop: 0, tuck: 0 };
+  readonly ch: Channels = { neck: 0, limb: 0, tail: 0, drop: 0, tuck: 0 };
+  private thumped = false;
+  private sq = 0;
+  private sqV = 0;
+  private heave = 0;
+  private heaveV = 0;
+  private hy = 0;
+  private hp = 0;
+  private jaw = 0;
+  private talkT = 0;
+  private nodT = 0;
+  private shakeT = 0;
+  private stompT = 0;
+  private blinkT = 3;
+  private blinkOn = 0;
+  private t = rnd.next() * 10;
+  private grumbleCd = 0;
+  private grumbleAt = -1;
+  private swings: Swing[] = [];
+  // walking
+  private home: THREE.Vector3;
+  private wp = new THREE.Vector3();
+  private wpA = rnd.next() * Math.PI * 2;
+  private pauseT = 2;
+  private gait = 0;
+  private walk = 0;
+  private yawTarget: number | null = null;
+  private col: Collider | null = null;
+  private colAt = new THREE.Vector3(1e9, 0, 0);
+  /** Old Mother Tamsin on his back */
+  readonly rider: Tamsin | null;
+  lookAt: THREE.Vector3 | null = null;
+  near = false;
+  hold = false;
+  halt = false;
+  onOut: (() => void) | null = null;
+  armed = true;
+  awayT = 0;
+  dwell = 0;
+  readonly lastHunter = new THREE.Vector3(NaN, 0, 0);
+  readonly rugDist: number;
+  private front: number;
+  private headY: number;
+  private pack: THREE.Vector3;
+
+  constructor(private ctx: Ctx, readonly rig: RigInstance, readonly root: THREE.Object3D, meta: any, home: THREE.Vector3 | null, rider: RigInstance | null) {
+    for (const p of rig.geo.parts) {
+      this.n[p.name] = rig.nodes[p.name];
+      this.rest[p.name] = p.offset.clone();
+      this.restRot[p.name] = p.rest.clone();
+    }
+    const r = meta?.retract ?? {};
+    for (const k of Object.keys(r)) this.ret[k] = new THREE.Vector3(r[k][0], r[k][1], r[k][2]);
+    if (typeof meta?.shellDrop === 'number') this.dropM = meta.shellDrop;
+    this.rugDist = meta?.rugDist ?? 4.2;
+    this.front = meta?.front ?? 3.1;
+    this.headY = meta?.headY ?? 2.0;
+    const pk = meta?.pack ?? [0, 3.2, 0];
+    this.pack = new THREE.Vector3(pk[0], pk[1], pk[2]);
+    const swing: string[] = Array.isArray(meta?.swing) ? meta.swing : [];
+    swing.forEach((name, i) => {
+      const o = this.n[name];
+      if (!o) return;
+      const amp = name.startsWith('lantern') ? 1.5 : name === 'kettle' ? 1.3 : name === 'sign' ? 0.5 : name.startsWith('bag') ? 0.45 : 1;
+      this.swings.push({ o, x: 0, z: 0, vx: 0, vz: 0, amp, ph: i * 1.9, head: false });
+    });
+    this.home = (home ?? root.position).clone();
+    this.pickWaypoint();
+    this.rider = rider ? new Tamsin(ctx, rider, rider.root, rider.geo.spec.meta ?? {}) : null;
+  }
+
+  get hidden() {
+    return this.mode === 'hiding' || this.mode === 'hidden';
+  }
+  private get yaw() {
+    return this.root.rotation.y;
+  }
+  center(out: THREE.Vector3) {
+    const s = this.n.shell;
+    if (s) return s.localToWorld(out.set(0, 0.75, -0.05));
+    out.copy(this.root.position).y += 1.7;
+    return out;
+  }
+  /** between his eyes */
+  headPos(out: THREE.Vector3) {
+    const h = this.n.head;
+    if (h) return h.localToWorld(out.set(0, 0.17, 0.47));
+    out.copy(this.root.position).y += this.headY;
+    return out;
+  }
+  framingTop(out: THREE.Vector3) {
+    return this.headPos(out).add(_a.set(0, 0.55, 0));
+  }
+  packPoint(out: THREE.Vector3, lateral: number) {
+    return this.root.localToWorld(out.set(this.pack.x + lateral, this.pack.y - this.ch.drop * this.dropM, this.pack.z));
+  }
+  coinPoint(out: THREE.Vector3) {
+    if (this.rider) return this.rider.coinPoint(out);
+    return this.packPoint(out, 0);
+  }
+  faceYaw(yaw: number | null) {
+    this.yawTarget = yaw;
+  }
+  readyToGreet() {
+    const turned = this.yawTarget === null || Math.abs(wrapPi(this.yawTarget - this.yaw)) < 0.25;
+    return this.mode === 'out' && turned && (!this.rider || this.rider.mode === 'out');
+  }
+  /** the arrival scene: he plants his feet and turns; Tamsin ducks on his back */
+  startle() {
+    this.halt = true;
+    if (this.rider) {
+      this.rider.threat(1);
+      this.rider.hold = true;
+    }
+  }
+
+  threat(level = 1) {
+    this.calm = 0;
+    this.calmNeed = 2 + rnd.next() * 1.2;
+    this.rider?.threat(level);
+    if (this.hidden) {
+      if (level >= 1 && this.mode === 'hidden' && this.grumbleCd <= 0) this.grumble(0.05);
+      return;
+    }
+    this.setMode('hiding');
+  }
+  coax(peekHold = 0.4) {
+    this.hold = false;
+    this.rider?.coax(peekHold);
+    if (!this.hidden) return;
+    this.setMode('peek');
+    this.peekHold = peekHold;
+  }
+  outIn() {
+    const r = this.rider ? this.rider.outIn() : 0;
+    switch (this.mode) {
+      case 'out':
+        return r;
+      case 'emerging':
+        return Math.max(r, 1.2 - this.mt);
+      case 'peek':
+        return Math.max(r, Math.max(0, 0.55 + this.peekHold - this.mt) + 1.2);
+      default:
+        return Math.max(r, 1.2 + this.calmNeed);
+    }
+  }
+  say(mood: 'neutral' | 'laugh' | 'squinty', dur = 1.2) {
+    this.talkT = dur;
+    void mood;
+  }
+  nod() {
+    this.nodT = 0.9;
+  }
+  shake() {
+    this.shakeT = 1.0;
+    this.rider?.shake();
+  }
+  /** a slow, heavy greeting: a nod and a lifted forefoot; Tamsin waves her cane */
+  wave(d = 1.6) {
+    this.nodT = 0.9;
+    this.stompT = 1.1;
+    this.rider?.wave(d);
+  }
+  heaveKick() {
+    this.heaveV += 0.7;
+    for (const s of this.swings) s.vx -= 2.2 * s.amp;
+    this.rider?.heaveKick();
+  }
+
+  private setMode(m: Mode) {
+    this.mode = m;
+    this.mt = 0;
+    Object.assign(this.from, this.ch);
+    this.thumped = this.ch.drop > 0.95;
+    if (m === 'hiding' && this.thumped) this.grumble(0.08);
+  }
+  private grumble(delay: number) {
+    if (this.grumbleCd > 0) return;
+    this.grumbleCd = 1.6;
+    this.grumbleAt = delay;
+  }
+  /** the shell hits the sand: squash, the whole pack rattles, a cloud of dust */
+  private thump() {
+    this.sqV += 1.1;
+    for (const s of this.swings) {
+      s.vx += (rnd.next() - 0.5) * 7 * s.amp;
+      s.vz += (rnd.next() - 0.5) * 7 * s.amp;
+    }
+    const p = this.root.position;
+    this.ctx.sfx('board_land', p, 0.6, 0.6);
+    this.ctx.sfx('skeleton_rattle', p, 0.5, 0.75);
+    this.ctx.fx.dust({ x: p.x, y: p.y + 0.2, z: p.z }, 1.5, P.sand0, 9);
+    this.grumble(0.2);
+  }
+
+  private pickWaypoint() {
+    this.wpA += 0.55 + rnd.next() * 0.35;
+    const r = 5.5 + rnd.next() * 2; // inside the cleared camp disc (RegionGen flattens ~10 m)
+    this.wp.set(this.home.x + Math.cos(this.wpA) * r, 0, this.home.z + Math.sin(this.wpA) * r);
+  }
+
+  /** a solid, bullet-stopping body that walks with him */
+  private moveCollider() {
+    const p = this.root.position;
+    if (this.col && Math.hypot(p.x - this.colAt.x, p.z - this.colAt.z) < 0.3) return;
+    const cols = this.ctx.world.colliders;
+    if (this.col) cols.remove(this.col);
+    const c = this.center(_v);
+    this.col = cols.circle(c.x, c.z, 1.75, p.y, p.y + 2.7, { tag: 'caravan', solid: true, bullets: true });
+    this.colAt.copy(p);
+  }
+
+  update(dt: number) {
+    if (dt <= 0) return;
+    this.t += dt;
+    this.mt += dt;
+    this.grumbleCd -= dt;
+    if (this.grumbleAt >= 0) {
+      this.grumbleAt -= dt;
+      if (this.grumbleAt < 0) this.ctx.sfx('camel_grunt', this.root.position, 0.6, 0.5);
+    }
+    // ---- the shell channels (slower and heavier than Tamsin's)
+    const ch = this.ch, f = this.from, mt = this.mt;
+    switch (this.mode) {
+      case 'hiding':
+        ch.neck = mix(f.neck, 1, Ease.outCubic(c01(mt / 0.3)));
+        ch.limb = mix(f.limb, 1, Ease.outCubic(c01((mt - 0.05) / 0.32)));
+        ch.tail = mix(f.tail, 1, Ease.outCubic(c01((mt - 0.08) / 0.3)));
+        ch.tuck = mix(f.tuck, 1, Ease.outQuad(c01((mt - 0.1) / 0.4)));
+        ch.drop = mix(f.drop, 1, Ease.inQuad(c01((mt - 0.28) / 0.2)));
+        if (!this.thumped && ch.drop >= 1) {
+          this.thumped = true;
+          this.thump();
+        }
+        if (mt > 0.8) {
+          this.mode = 'hidden';
+          this.mt = 0;
+        }
+        break;
+      case 'hidden':
+        ch.neck = ch.limb = ch.tail = ch.drop = ch.tuck = 1;
+        if (!this.hold) this.calm += dt;
+        if (this.calm >= this.calmNeed) {
+          this.setMode('peek');
+          this.peekHold = 0.8 + rnd.next() * 0.6;
+        }
+        break;
+      case 'peek':
+        ch.neck = mix(f.neck, PEEK_C, Ease.outCubic(c01(mt / 0.55)));
+        ch.tuck = mix(f.tuck, 0, Ease.outCubic(c01(mt / 0.45)));
+        ch.limb = ch.tail = ch.drop = 1;
+        if (mt > 0.55 + this.peekHold) this.setMode('emerging');
+        break;
+      case 'emerging':
+        ch.neck = mix(f.neck, 0, Ease.outBack(c01(mt / 0.7)));
+        ch.tuck = 0;
+        ch.drop = mix(f.drop, 0, Ease.inOutQuad(c01((mt - 0.15) / 0.55)));
+        ch.limb = mix(f.limb, 0, Ease.outCubic(c01((mt - 0.15) / 0.55)));
+        ch.tail = mix(f.tail, 0, Ease.outCubic(c01((mt - 0.45) / 0.5)));
+        if (mt > 1.2) {
+          this.mode = 'out';
+          this.mt = 0;
+          this.sqV -= 0.4;
+          this.pauseT = Math.max(this.pauseT, 1.5);
+          const cb = this.onOut;
+          this.onOut = null;
+          cb?.();
+        }
+        break;
+      default:
+        ch.neck = ch.limb = ch.tail = ch.drop = ch.tuck = 0;
+    }
+    for (let s = 0; s < 2; s++) {
+      const h = dt / 2;
+      this.sqV += (-140 * this.sq - 9 * this.sqV) * h;
+      this.sq += this.sqV * h;
+      this.heaveV += (-30 * this.heave - 5 * this.heaveV) * h;
+      this.heave += this.heaveV * h;
+    }
+    // ---- walking his loop round the camp
+    const root = this.root;
+    const out = this.mode === 'out';
+    let moving = false, turning = 0;
+    const hunter = this.lookAt;
+    if (out && this.yawTarget !== null) {
+      const d = wrapPi(this.yawTarget - root.rotation.y);
+      const step = Math.sign(d) * Math.min(Math.abs(d), 0.9 * dt);
+      root.rotation.y += step;
+      turning = Math.abs(d) > 0.02 ? 1 : 0;
+    } else if (out && !this.halt) {
+      this.pauseT -= dt;
+      const blocked = hunter && Math.hypot(hunter.x - root.position.x, hunter.z - root.position.z) < 4.6 && _b.set(hunter.x - root.position.x, 0, hunter.z - root.position.z).normalize().dot(_c.set(Math.sin(root.rotation.y), 0, Math.cos(root.rotation.y))) > 0.5;
+      if (blocked) this.pauseT = Math.max(this.pauseT, 0.8);
+      if (this.pauseT <= 0) {
+        const dx = this.wp.x - root.position.x, dz = this.wp.z - root.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 1.2) {
+          this.pickWaypoint();
+          if (rnd.chance(0.4)) this.pauseT = 2.5 + rnd.next() * 3.5;
+        } else {
+          const want = Math.atan2(dx, dz);
+          const d = wrapPi(want - root.rotation.y);
+          root.rotation.y += Math.sign(d) * Math.min(Math.abs(d), 0.4 * dt);
+          const v = 0.42 * Math.max(0.25, Math.cos(Math.min(Math.abs(d), 1.4)));
+          root.position.x += Math.sin(root.rotation.y) * v * dt;
+          root.position.z += Math.cos(root.rotation.y) * v * dt;
+          moving = true;
+          this.gait += (v * dt) / 1.1;
+        }
+      }
+    }
+    if (turning) this.gait += dt * 0.55;
+    root.position.y = this.ctx.world.groundAt(root.position.x, root.position.z);
+    this.walk = damp(this.walk, moving ? 1 : turning ? 0.6 : 0, 3, dt);
+    if (!moving && !turning) this.gait += (Math.round(this.gait * 2) / 2 - this.gait) * Math.min(1, dt * 2); // settle onto both feet
+    this.moveCollider();
+    // ---- gestures and looking
+    this.talkT -= dt;
+    this.nodT -= dt;
+    this.shakeT -= dt;
+    this.stompT -= dt;
+    const S = this.n.shell;
+    let ty = Math.sin(this.t * 0.21) * 0.3, tp = 0.05 + Math.sin(this.t * 0.17) * 0.05;
+    if (hunter && S && !moving) {
+      const loc = S.worldToLocal(_v.copy(hunter));
+      const lx = loc.x, ly = loc.y - 1.1, lz = loc.z - 2.4;
+      ty = clamp(Math.atan2(lx, lz), -0.7, 0.7);
+      tp = clamp(-Math.atan2(ly, Math.hypot(lx, lz)), -0.35, 0.3);
+    }
+    if (this.hidden) ty = tp = 0;
+    if (this.mode === 'peek') {
+      ty = Math.sin(mt * 2.2) * 0.25;
+      tp = -0.05;
+    }
+    this.hy = damp(this.hy, ty, 2.2, dt);
+    this.hp = damp(this.hp, tp, 2.2, dt);
+    const gp = this.gait * Math.PI * 2;
+    let headYaw = this.hy, headPitch = this.hp + Math.sin(gp * 2) * 0.035 * this.walk;
+    if (this.nodT > 0) headPitch += Math.sin((0.9 - this.nodT) * 9) * 0.16 * Math.min(1, this.nodT * 2.5);
+    if (this.shakeT > 0) headYaw += Math.sin((1.0 - this.shakeT) * 11) * 0.22 * Math.min(1, this.shakeT * 2.5);
+    const outK = 1 - ch.neck;
+    const talking = this.talkT > 0 && !this.hidden;
+    this.jaw = damp(this.jaw, talking ? 0.06 + Math.abs(Math.sin(this.t * 7.5)) * 0.2 : 0.01, 14, dt);
+    // blinks (slow, heavy lids), shut tight inside the shell, a wary squint when peeking
+    this.blinkT -= dt;
+    if (this.blinkT <= 0) {
+      this.blinkOn = 0.22;
+      this.blinkT = 3 + rnd.next() * 4;
+    }
+    this.blinkOn -= dt;
+    const lidK = this.hidden ? 1 : this.mode === 'peek' ? 0.45 : this.blinkOn > 0 ? Math.sin((this.blinkOn / 0.22) * Math.PI) : talking ? 0.12 : 0;
+    // ---- pose
+    const n = this.n, R = this.rest;
+    if (S && R.shell) {
+      const bob = (1 - Math.abs(Math.cos(gp * 2))) * 0.03 * this.walk;
+      S.position.copy(R.shell);
+      S.position.y += bob - ch.drop * this.dropM;
+      S.scale.set(1 + this.sq * 0.4, 1 - this.sq, 1 + this.sq * 0.4);
+      S.rotation.set(this.heave * 0.5 + Math.sin(gp * 2 + 0.6) * 0.012 * this.walk, 0, Math.sin(gp) * 0.022 * this.walk);
+    }
+    this.place('neck', ch.neck);
+    n.neck?.rotation.set(ch.tuck * 0.25 + Math.sin(this.t * 0.9) * 0.02 * outK, headYaw * 0.35 * (1 - ch.tuck), 0);
+    n.head?.rotation.set(headPitch + ch.tuck * 0.3, headYaw * 0.65 * (1 - ch.tuck), 0);
+    if (n.jaw) n.jaw.rotation.x = this.jaw;
+    for (const [lid, eye] of [['lid_l', 'eye_l'], ['lid_r', 'eye_r']]) {
+      const lo = n[lid], rr = this.restRot[lid];
+      if (lo && rr) lo.rotation.set(mix(rr.x, -0.05, lidK), rr.y, rr.z);
+      n[eye]?.rotation.set(0, clamp((ty - this.hy) * 1.2, -0.35, 0.35), 0);
+    }
+    for (const [leg, off, side] of LEGS) {
+      const up = n['leg_' + leg], ft = n['foot_' + leg];
+      const ph = (this.gait + off) * Math.PI * 2;
+      const swingPh = Math.sin(ph) > 0 ? Math.sin(ph) : 0; // lifting half of the cycle
+      const a = this.walk * (1 - ch.limb);
+      let lift = swingPh * a;
+      if (leg === 'fl' && this.stompT > 0) lift = Math.max(lift, Math.sin(((1.1 - this.stompT) / 1.1) * Math.PI) * (1 - ch.limb));
+      this.place('leg_' + leg, ch.limb);
+      if (up) {
+        up.position.y += lift * 0.07;
+        up.rotation.set(Math.cos(ph) * 0.2 * a - lift * 0.12, 0, side * lift * 0.06);
+      }
+      ft?.rotation.set(lift * 0.38 + ch.limb * 0.55, 0, 0);
+    }
+    this.place('tail', ch.tail);
+    if (n.tail) n.tail.rotation.set(0, Math.sin(gp) * 0.18 * this.walk + Math.sin(this.t * 0.7) * 0.05, 0);
+    // the load swings: springs that lag behind his sway and kick on every footfall
+    const roll = S ? S.rotation.z : 0;
+    for (const s of this.swings) {
+      const rr = this.restRot[s.o.name];
+      const tx = Math.sin(this.t * 0.8 + s.ph) * 0.02 * s.amp - this.heave * 0.4;
+      const tz = -roll * 2.4 * s.amp;
+      s.vx += (-28 * (s.x - tx) - 2.4 * s.vx) * dt;
+      s.vz += (-28 * (s.z - tz) - 2.4 * s.vz) * dt;
+      s.x = clamp(s.x + s.vx * dt, -0.7, 0.7);
+      s.z = clamp(s.z + s.vz * dt, -0.7, 0.7);
+      s.o.rotation.set((rr?.x ?? 0) + s.x, rr?.y ?? 0, (rr?.z ?? 0) + s.z);
+    }
+    // ---- Tamsin rides along
+    const rd = this.rider;
+    if (rd) {
+      if (this.hidden && !rd.hidden) rd.threat(1);
+      rd.lookAt = this.lookAt;
+      rd.near = this.near && !this.hidden;
+      rd.update(dt);
+    }
+  }
+
+  private place(name: string, k: number) {
+    const o = this.n[name], r = this.rest[name], d = this.ret[name];
+    if (o && r) o.position.copy(r).addScaledVector(d ?? _l.set(0, 0, 0), d ? k : 0);
+  }
+
+  restPose() {
+    for (const [k, o] of Object.entries(this.n)) {
+      if (!o) continue;
+      o.position.copy(this.rest[k]);
+      o.rotation.copy(this.restRot[k]);
+      o.scale.set(1, 1, 1);
+    }
+    this.rider?.restPose();
+  }
+
+  /** where the customer stands to trade (the interact prompt follows him) */
+  frontPoint(out: THREE.Vector3) {
+    const a = this.root.rotation.y;
+    out.set(this.root.position.x + Math.sin(a) * (this.front + 1.8), 0, this.root.position.z + Math.cos(a) * (this.front + 1.8));
+    out.y = this.ctx.world.groundAt(out.x, out.z);
+    return out;
+  }
+
+  dispose() {
+    if (this.col) this.ctx.world.colliders.remove(this.col);
+    this.col = null;
+  }
+}
+
+type Merchant = Tamsin | Caravan;
 
 // ================================================================== the wares as rigid bodies
 type BodyState = 'wait' | 'free' | 'held' | 'sold' | 'pack' | 'gone';
@@ -639,7 +1150,7 @@ function itemObject(key: string, mat: THREE.Material): { obj: THREE.Group; he: T
 }
 
 interface Arrival {
-  her: Tamsin;
+  her: Merchant;
   hooks: MerchantHooks;
   t: number;
   /** the board has stopped and the world is held */
@@ -669,8 +1180,8 @@ export class Shop {
   private t = 0;
   private phase: 'off' | 'arrive' | 'browse' | 'leave' = 'off';
   private pt = 0;
-  private puppets = new Map<object, Tamsin>();
-  private her: Tamsin | null = null;
+  private puppets = new Map<object, Merchant>();
+  private her: Merchant | null = null;
   private borrowed = false;
   private hunter: THREE.Vector3 | null = null;
   private shot: CineShot = { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 46, roll: 0 };
@@ -689,7 +1200,6 @@ export class Shop {
   private scolded = false;
   private unsub: (() => void)[] = [];
   private gq = new THREE.Quaternion();
-  private herHeight = 1.53;
   // arrival cutscene
   private arrival: Arrival | null = null;
   private inputWas = true;
@@ -730,7 +1240,7 @@ export class Shop {
   }
 
   /** the open shop (or its arrival scene) is driving this puppet */
-  private owns(p: Tamsin) {
+  private owns(p: Merchant) {
     return (this.active || !!this.arrival) && this.her === p;
   }
 
@@ -743,14 +1253,19 @@ export class Shop {
     if (hunter) this.hunter = hunter;
     let p = this.puppets.get(rig);
     if (!p) {
-      p = new Tamsin(this.ctx, rig, rig.root, rig.geo.spec.meta ?? {});
+      const meta = rig.geo.spec.meta ?? {};
+      p = meta.caravan ? new Caravan(this.ctx, rig, rig.root, meta, hooks?.home ?? null, hooks?.rider ?? null) : new Tamsin(this.ctx, rig, rig.root, meta);
       this.puppets.set(rig, p);
     }
     if (this.owns(p)) return; // the shop / its arrival scene drives her
     const h = Math.min(dt, 1 / 20);
     if (h <= 0) return;
     const d = hunter ? hunter.distanceTo(rig.root.position) : 99;
-    if (d < 25 && this.aimedAt(p)) p.threat(0.5);
+    if (p.kind === 'caravan') {
+      // the big fellow only minds a gun really pointed at him, and outlaws nearby
+      if (d < 25 && this.cam.aim > 0.5 && this.aimedAt(p)) p.threat(0.5);
+      if (this.danger(p.root.position, 16)) p.threat(0.6);
+    } else if (d < 25 && this.aimedAt(p)) p.threat(0.5);
     p.near = d < 12;
     p.lookAt = hunter && d < 14 ? _w.copy(hunter).add(_a.set(0, 1.45, 0)) : null;
     p.update(h);
@@ -761,7 +1276,7 @@ export class Shop {
    * Ride into her radius slowly, or head straight for her, and the arrival
    * scene plays. Riding past at speed, or anything going on, and it does not.
    */
-  private watchArrival(p: Tamsin, hunter: THREE.Vector3, hooks: MerchantHooks, h: number) {
+  private watchArrival(p: Merchant, hunter: THREE.Vector3, hooks: MerchantHooks, h: number) {
     const H = p.root.position;
     const d = Math.hypot(hunter.x - H.x, hunter.z - H.z);
     // velocity: the board's own, else from his last position
@@ -796,59 +1311,103 @@ export class Shop {
     return this.danger(hunter);
   }
 
-  /** a boss is up, or an outlaw is within CALM_R of the hunter */
-  private danger(hunter: THREE.Vector3) {
+  /** a boss is up, or an outlaw is within r of the point */
+  private danger(at: THREE.Vector3, r = CALM_R) {
     for (const b of this.bosses) if (b.alive === false) this.bosses.delete(b);
     if (this.bosses.size) return true;
     for (const e of this.ctx.enemies.list) {
       if (!e.alive) continue;
       if (e.isBoss) return true;
-      if (Math.hypot(e.pos.x - hunter.x, e.pos.z - hunter.z) <= CALM_R) return true;
+      if (Math.hypot(e.pos.x - at.x, e.pos.z - at.z) <= r) return true;
     }
     return false;
   }
 
+  /** where the customer stands to trade with a walking merchant (null: a standing one) */
+  merchantFront(rig: RigInstance, out: THREE.Vector3) {
+    const p = this.puppets.get(rig);
+    return p instanceof Caravan ? p.frontPoint(out) : null;
+  }
+
+  /** her (his) lines and name */
+  private get voice() {
+    return this.her?.kind === 'caravan' ? VOICE_C : VOICE_T;
+  }
+
   // ---------------------------------------------------------------- the arrival scene
-  private startArrival(her: Tamsin, hooks: MerchantHooks) {
+  private startArrival(her: Merchant, hooks: MerchantHooks) {
     const ctx = this.ctx, eng = ctx.engine;
     her.armed = false;
     her.awayT = 0;
     her.dwell = 0;
     this.her = her;
     this.borrowed = false;
-    this.herHeight = (her.rig?.geo.spec.meta?.height as number | undefined) ?? 1.53;
-    const H = her.root.position, a = her.root.rotation.y;
-    const F = new THREE.Vector3(Math.sin(a), 0, Math.cos(a)), L = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a));
-    this.pivot.copy(H);
-    this.fwdAng = a;
-    // the post's door is 1.6 m to her right (Missions' layout); the big
-    // TRADING POST sign hangs on the false front above it
-    const door = H.clone().addScaledVector(L, -1.6);
-    const sign = door.clone().addScaledVector(F, -2.33);
-    sign.y = H.y + 6.3;
+    const H = her.root.position;
     const cam = this.cam.camera;
     const p0 = cam.position.clone();
     cam.getWorldDirection(_v);
     const l0 = p0.clone().addScaledVector(_v, 6);
-    // a high beat in front of the porch, looking up at the sign...
-    const pSign = door.clone().addScaledVector(F, 5).addScaledVector(L, -2);
-    pSign.y = Math.max(H.y, this.ctx.world.groundAt(pSign.x, pSign.z)) + 4.6;
-    // ...then down and across to a low close-up on her
-    const look = H.clone().addScaledVector(F, 0.15);
-    look.y = H.y + 0.72;
-    let pNear: THREE.Vector3 | null = null;
-    for (const k of [1, 0.8])
-      for (const s of [1, -1]) {
+    let keys: { P: THREE.Vector3[]; L: THREE.Vector3[]; F: number[] };
+    if (her.kind === 'caravan') {
+      // he plants his feet and turns to face the rider
+      const hp = this.hunter ?? p0;
+      const a = Math.atan2(hp.x - H.x, hp.z - H.z);
+      her.faceYaw(a);
+      const F = new THREE.Vector3(Math.sin(a), 0, Math.cos(a)), L = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a));
+      const s0 = Math.sign(_a.copy(p0).sub(H).dot(L)) || 1;
+      // a beat alongside his load: lantern, saddlebag and pots swinging past the lens...
+      const pGoods = H.clone().addScaledVector(L, s0 * 2.7).addScaledVector(F, 0.4);
+      pGoods.y = H.y + 3.0;
+      const lGoods = H.clone().addScaledVector(L, s0 * 1.0).addScaledVector(F, 1.1);
+      lGoods.y = H.y + 3.4;
+      // ...then round to his face
+      const face = H.clone().addScaledVector(F, 3.0);
+      face.y = H.y + 2.0;
+      let pNear: THREE.Vector3 | null = null;
+      for (const s of [s0, -s0]) {
         if (pNear) break;
-        const q = H.clone().addScaledVector(F, 2.1 * k).addScaledVector(L, 0.9 * k * s);
-        q.y = Math.max(H.y, ctx.world.groundAt(q.x, q.z)) + 0.78;
-        if (this.clearView(q, look)) pNear = q;
+        const q = H.clone().addScaledVector(F, 5.4).addScaledVector(L, s * 0.9);
+        q.y = Math.max(H.y, this.ctx.world.groundAt(q.x, q.z)) + 1.75;
+        if (this.clearView(q, face)) pNear = q;
       }
-    if (!pNear) {
-      pNear = H.clone().addScaledVector(F, 1.9).addScaledVector(L, 0.6);
-      pNear.y = H.y + 1.1;
+      if (!pNear) {
+        pNear = H.clone().addScaledVector(F, 5.2).addScaledVector(L, s0 * 0.9);
+        pNear.y = H.y + 2.4;
+      }
+      this.pivot.copy(H);
+      this.fwdAng = a;
+      keys = { P: [p0, pGoods, pNear], L: [l0, lGoods, face], F: [cam.fov, 52, 42] };
+    } else {
+      const a = her.root.rotation.y;
+      const F = new THREE.Vector3(Math.sin(a), 0, Math.cos(a)), L = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a));
+      this.pivot.copy(H);
+      this.fwdAng = a;
+      // the post's door is 1.6 m to her right (Missions' layout); the big
+      // TRADING POST sign hangs on the false front above it
+      const door = H.clone().addScaledVector(L, -1.6);
+      const sign = door.clone().addScaledVector(F, -2.33);
+      sign.y = H.y + 6.3;
+      // a high beat in front of the porch, looking up at the sign...
+      const pSign = door.clone().addScaledVector(F, 5).addScaledVector(L, -2);
+      pSign.y = Math.max(H.y, this.ctx.world.groundAt(pSign.x, pSign.z)) + 4.6;
+      // ...then down and across to a low close-up on her
+      const look = H.clone().addScaledVector(F, 0.15);
+      look.y = H.y + 0.72;
+      let pNear: THREE.Vector3 | null = null;
+      for (const k of [1, 0.8])
+        for (const s of [1, -1]) {
+          if (pNear) break;
+          const q = H.clone().addScaledVector(F, 2.1 * k).addScaledVector(L, 0.9 * k * s);
+          q.y = Math.max(H.y, ctx.world.groundAt(q.x, q.z)) + 0.78;
+          if (this.clearView(q, look)) pNear = q;
+        }
+      if (!pNear) {
+        pNear = H.clone().addScaledVector(F, 1.9).addScaledVector(L, 0.6);
+        pNear.y = H.y + 1.1;
+      }
+      keys = { P: [p0, pSign, pNear], L: [l0, sign, look], F: [cam.fov, 50, 38] };
     }
-    this.arrival = { her, hooks, t: 0, modal: false, P: [p0, pSign, pNear], L: [l0, sign, look], F: [cam.fov, 50, 38], coaxed: false, outAt: -1 };
+    this.arrival = { her, hooks, t: 0, modal: false, ...keys, coaxed: false, outAt: -1 };
     this.shot.pos.copy(p0);
     this.shot.look.copy(l0);
     this.shot.fov = cam.fov;
@@ -862,9 +1421,8 @@ export class Shop {
     this.greeted = false;
     this.pendingLine = null;
     this.warm = 0;
-    // the board skids in; startled, she ducks into her shell
-    her.threat(1);
-    her.hold = true;
+    // the board skids in; startled, she ducks into her shell (on his back, if he is the shop)
+    her.startle();
     ctx.sfx('sand_spray', this.hunter ?? H, 0.7, 0.9);
   }
 
@@ -920,10 +1478,10 @@ export class Shop {
     her.lookAt = this.hunter ? _w.copy(this.hunter).add(_a.set(0, 1.4, 0)) : null;
     her.near = false;
     her.update(h);
-    if (A.coaxed && A.outAt < 0 && her.mode === 'out') {
+    if (A.coaxed && A.outAt < 0 && her.readyToGreet()) {
       A.outAt = A.t;
       this.greeted = true;
-      this.speak(rnd.pick(LINES.arrive), 'laugh');
+      this.speak(rnd.pick(this.voice.lines.arrive), 'laugh');
       her.wave(1.7);
       ctx.sfx('merchant_greet', her.root.position, 1);
     }
@@ -949,6 +1507,8 @@ export class Shop {
     const eng = this.ctx.engine;
     A.her.coax(0.5);
     A.her.lookAt = null;
+    A.her.halt = false;
+    A.her.faceYaw(null);
     this.cam.setCine(null);
     eng.letterbox(false, 0.4);
     eng.input.enabled = this.inputWas;
@@ -999,7 +1559,7 @@ export class Shop {
   private speak(text: string, mood: 'neutral' | 'laugh' | 'squinty' = 'neutral') {
     const her = this.her;
     if (!her) {
-      this.ctx.toast(TITLE, '#ffd36b', text);
+      this.ctx.toast(this.voice.title, '#ffd36b', text);
       return;
     }
     if (this.speech) {
@@ -1060,7 +1620,7 @@ export class Shop {
     this.speechT = 0;
   }
 
-  private aimedAt(p: Tamsin) {
+  private aimedAt(p: Merchant) {
     const o = _b, d = _c;
     this.cam.aimRay(o, d);
     const hit = (c: THREE.Vector3, r: number) => {
@@ -1068,7 +1628,7 @@ export class Shop {
       if (t < 0 || t > 30) return false;
       return _a.copy(o).addScaledVector(d, t).distanceTo(c) < r;
     };
-    if (hit(p.center(_v), 0.6)) return true;
+    if (hit(p.center(_v), p.kind === 'caravan' ? 1.6 : 0.6)) return true;
     return !p.hidden && hit(p.headPos(_v), 0.26);
   }
 
@@ -1081,7 +1641,8 @@ export class Shop {
       const close = this.hunter ? this.hunter.distanceTo(c) < 7 : false;
       const t = _a.copy(c).sub(o).dot(d);
       const miss = t > 0 && t < 40 ? _a.copy(o).addScaledVector(d, t).distanceTo(c) : 99;
-      if (close || miss < 2.2) p.threat(1);
+      const big = p.kind === 'caravan';
+      if ((close && (!big || this.hunter!.distanceTo(c) < 11)) || miss < (big ? 3 : 2.2)) p.threat(1);
     }
   }
 
@@ -1098,11 +1659,12 @@ export class Shop {
   // ---------------------------------------------------------------- the shop
   /** open at a rug position in front of the merchant; resolves when the player leaves */
   open(rugAt: THREE.Vector3, facing: number, wares: Ware[], merchantPos: THREE.Vector3, _opts?: unknown): Promise<void> {
-    const viaArrival = !!_opts && typeof _opts === 'object' && (_opts as { her?: Tamsin }).her instanceof Tamsin ? (_opts as { her: Tamsin }).her : null;
+    const o = _opts as { her?: unknown } | undefined;
+    const viaArrival = o && (o.her instanceof Tamsin || o.her instanceof Caravan) ? o.her : null;
     return this.begin(rugAt, facing, wares, merchantPos, viaArrival);
   }
 
-  private begin(rugAt: THREE.Vector3, facing: number, wares: Ware[], merchantPos: THREE.Vector3, arrivedHer: Tamsin | null): Promise<void> {
+  private begin(rugAt: THREE.Vector3, facing: number, wares: Ware[], merchantPos: THREE.Vector3, arrivedHer: Merchant | null): Promise<void> {
     const ctx = this.ctx;
     const eng = ctx.engine;
     if (this.arrival) this.abortArrival();
@@ -1131,14 +1693,13 @@ export class Shop {
     this.shotCd = 0;
     this.her = arrivedHer ?? this.findHer(rugAt, merchantPos);
     const her = this.her;
-    this.herHeight = (her?.rig?.geo.spec.meta?.height as number | undefined) ?? 1.53;
     // ---- where everything goes: rug in front of her, the camera on the customer side
     const C = new THREE.Vector3();
     let yaw: number;
     if (her) {
       const H = her.root.position;
       const a = her.root.rotation.y;
-      C.copy(H).add(_a.set(Math.sin(a), 0, Math.cos(a)).multiplyScalar(1.05));
+      C.copy(H).add(_a.set(Math.sin(a), 0, Math.cos(a)).multiplyScalar(her.rugDist));
       yaw = a + Math.PI;
       this.pivot.copy(H);
       this.fwdAng = a;
@@ -1178,14 +1739,21 @@ export class Shop {
         /* no rug: wares go on the sand */
       }
     }
-    if (this.rug) g.add(this.rug);
-    else this.rugTop = 0;
+    if (this.rug) {
+      g.add(this.rug);
+      this.rug.scale.set(1, 1, 0.02); // rolled up; it unrolls toward the customer
+      this.ctx.sfx('bandage', C, 0.5, 0.8);
+    } else this.rugTop = 0;
+    if (her) {
+      her.halt = true; // a walking merchant stays put while you shop
+      her.faceYaw(null);
+    }
     // ---- the wares wait inside her pack
     if (her) {
       her.coax();
       her.lookAt = null;
     }
-    this.tumbleAt = (her ? her.outIn() : 0) + 0.45;
+    this.tumbleAt = Math.max((her ? her.outIn() : 0) + 0.45, 1.0);
     const nW = wares.length;
     this.bodies = wares.map((w, i) => {
       const spot = spotMaterial();
@@ -1240,15 +1808,15 @@ export class Shop {
     this.phase = 'browse';
     if (!this.greeted) {
       this.greeted = true;
-      this.pendingLine = { text: rnd.pick(LINES.hello), mood: 'laugh', at: (her ? her.outIn() : 0) + 0.15 };
+      this.pendingLine = { text: rnd.pick(this.voice.lines.hello), mood: 'laugh', at: (her ? her.outIn() : 0) + 0.15 };
     }
     return new Promise((res) => (this.done = res));
   }
 
   /** her puppet nearest the rug (or, with no hook installed, her rig found in the scene) */
-  private findHer(rugAt: THREE.Vector3, merchantPos: THREE.Vector3): Tamsin | null {
+  private findHer(rugAt: THREE.Vector3, merchantPos: THREE.Vector3): Merchant | null {
     this.borrowed = false;
-    let best: Tamsin | null = null, bd = 10;
+    let best: Merchant | null = null, bd = 10;
     for (const p of this.puppets.values()) {
       if (!p.root.parent) continue;
       // nearest to this rug wins (the caller's merchantPos may belong to another post)
@@ -1284,21 +1852,23 @@ export class Shop {
     const H = this.pivot, a = this.fwdAng;
     const F = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
     const L = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a));
+    const big = this.her?.kind === 'caravan';
+    const rd = this.her ? this.her.rugDist : 1.05;
     const spot = (s: number, k: number, lift: number) => {
-      const p = H.clone().addScaledVector(F, 1.05 + 2.4 * k).addScaledVector(L, 2.0 * k * s);
+      const p = H.clone().addScaledVector(F, rd + 2.4 * k).addScaledVector(L, 2.0 * k * s);
       p.y = Math.max(this.ctx.world.groundAt(p.x, p.z), H.y) + lift;
       return p;
     };
     let pref = 1;
     if (this.hunter) pref = spot(1, 1, 1).distanceToSquared(this.hunter) >= spot(-1, 1, 1).distanceToSquared(this.hunter) ? 1 : -1;
-    const head = H.clone();
-    head.y += 1.2;
+    const head = this.her ? this.her.headPos(new THREE.Vector3()) : H.clone().add(_a.set(0, 1.2, 0));
+    if (!big) head.y = H.y + 1.2;
     const rug = this.group.position.clone();
     rug.y += 0.2;
     let pos: THREE.Vector3 | null = null, side = pref;
     search: for (const kk of [1, 0.8, 0.62])
       for (const s of [pref, -pref])
-        for (const lift of [1.0, 1.35]) {
+        for (const lift of big ? [1.35, 1.75] : [1.0, 1.35]) {
           const p = spot(s, kk, lift);
           if (this.clearView(p, head) && this.clearView(p, rug)) {
             pos = p;
@@ -1308,14 +1878,14 @@ export class Shop {
         }
     if (!pos) pos = spot(pref, 0.62, 1.7); // crowded: look down over whatever is in the way
     this.camMain.pos.copy(pos);
-    this.camMain.look.copy(H).addScaledVector(F, 0.47).addScaledVector(L, 0.1 * side);
-    this.camMain.look.y = H.y + 0.66;
+    this.camMain.look.copy(H).addScaledVector(F, rd * 0.45).addScaledVector(L, 0.1 * side);
+    this.camMain.look.y = H.y + (big ? 1.2 : 0.66);
     // fit her (hat to toes) and the rug inside the letterboxed frame
     // (where the wares land: across the rug, a little toward the customer)
     const g = this.group, wx = Math.min(this.rugHalf.x, 1.05);
     const subject = [
-      H.clone().add(_a.set(0, this.herHeight + 0.06, 0)),
-      H.clone().addScaledVector(F, 0.3),
+      this.her ? this.her.framingTop(new THREE.Vector3()) : H.clone().add(_a.set(0, 1.65, 0)),
+      big ? H.clone().addScaledVector(F, rd - 1.2) : H.clone().addScaledVector(F, 0.3),
       g.localToWorld(new THREE.Vector3(-wx, this.rugTop, 0.3)),
       g.localToWorld(new THREE.Vector3(wx, this.rugTop, 0.3)),
       g.localToWorld(new THREE.Vector3(-wx, this.rugTop, -0.62)),
@@ -1404,6 +1974,7 @@ export class Shop {
     this.tip.remove();
     this.bar.remove();
     this.rugSpot?.m.dispose();
+    for (const p of this.puppets.values()) if (p instanceof Caravan) p.dispose();
   }
 
   /** start leaving: a farewell beat (she waves her cane), wares back in her pack, then the dolly back to the saddle */
@@ -1418,9 +1989,9 @@ export class Shop {
     this.pendingLine = null;
     this.ridingPose(this.camHome);
     if (this.her && !this.her.hidden) {
-      this.speak(rnd.pick(LINES.bye), 'laugh');
+      this.speak(rnd.pick(this.voice.lines.bye), 'laugh');
       this.her.wave(2.0);
-    } else this.ctx.toast(TITLE, '#ffd36b', rnd.pick(LINES.bye));
+    } else this.ctx.toast(this.voice.title, '#ffd36b', rnd.pick(this.voice.lines.bye));
     let i = 0;
     for (const b of this.bodies) {
       if (b.state === 'wait') {
@@ -1455,6 +2026,8 @@ export class Shop {
     if (this.her) {
       if (this.borrowed) this.her.restPose();
       this.her.lookAt = null;
+      this.her.halt = false;
+      this.her.faceYaw(null);
       // the arrival scene only comes back once he has ridden off and stayed away
       this.her.armed = false;
       this.her.awayT = 0;
@@ -1477,7 +2050,7 @@ export class Shop {
     if (b.state !== 'held' && b.state !== 'free') return;
     if (ctx.run.gold < b.ware.price) {
       ctx.sfx('ui_error', null, 0.8);
-      this.speak(rnd.pick(LINES.poor), 'squinty');
+      this.speak(rnd.pick(this.voice.lines.poor), 'squinty');
       this.kick(b, _v.set(0, 1.6, 0), null);
       this.her?.shake();
       return;
@@ -1505,7 +2078,7 @@ export class Shop {
     const her = this.her;
     if (her && this.hunter) {
       const from = this.satchel(new THREE.Vector3());
-      const to = her.center(new THREE.Vector3()).add(_a.set(Math.sin(this.fwdAng) * 0.38, 0.2, Math.cos(this.fwdAng) * 0.38));
+      const to = her.coinPoint(new THREE.Vector3());
       const T = 0.6, g = 14;
       const vel = to.clone().sub(from).multiplyScalar(1 / T);
       vel.y += 0.5 * g * T;
@@ -1513,7 +2086,7 @@ export class Shop {
       this.coinsAt = T;
       this.coinsTo.copy(to);
     }
-    this.speak(rnd.pick(LINES.thanks), 'laugh');
+    this.speak(rnd.pick(this.voice.lines.thanks), 'laugh');
     her?.nod();
     this.updateBar();
   }
@@ -1528,10 +2101,9 @@ export class Shop {
     return out.copy(cam.position).addScaledVector(_a, 0.7).add(_b.set(0, -0.55, 0));
   }
 
-  /** the top of her pack (rolled rugs and pouches), world space */
+  /** the top of the merchant's pack, world space */
   private packPoint(out: THREE.Vector3, lateral: number) {
-    const her = this.her;
-    if (her) return her.root.localToWorld(out.set(lateral, 47 * TVS - her.ch.drop * 8 * TVS, -10 * TVS));
+    if (this.her) return this.her.packPoint(out, lateral);
     return out.copy(this.pivot).add(_a.set(lateral, 1.2, 0));
   }
 
@@ -1560,6 +2132,7 @@ export class Shop {
     }
     for (const b of this.bodies) if (b.state === 'wait' && this.phase === 'browse' && this.pt >= b.launch) this.launch(b);
     this.simulate(h);
+    this.unrollRug();
     // ---- hover / buy / shoot
     this.hoverLock -= h;
     this.shotCd -= h;
@@ -1657,6 +2230,21 @@ export class Shop {
     this.handheld(e);
   }
 
+  /** the rug unrolls from the merchant's side toward you, and rolls back up when you leave */
+  private unrollRug() {
+    const rug = this.rug;
+    if (!rug) return;
+    const k = this.phase === 'leave' ? 1 - c01((this.pt - 0.75) / 0.5) : c01((this.pt - 0.1) / 0.75);
+    const e = Math.max(0.02, Ease.inOutQuad(k));
+    const half = this.rugHalf.y + 0.04;
+    rug.scale.z = e;
+    rug.position.z = half * (1 - e);
+    if (e > 0.03 && e < 0.98 && rnd.chance(0.5)) {
+      const w = this.group.localToWorld(_v.set((rnd.next() - 0.5) * this.rugHalf.x * 2, 0.05, half * (1 - 2 * e)));
+      this.ctx.particles.emit({ pos: { x: w.x, y: w.y, z: w.z }, count: 1, vel: { x: 0, y: 0.3, z: 0 }, spread: 0.4, life: [0.5, 1.0], size: [0.12, 0.35], sprite: ['puff0', 'puff1'], color: [P.sand0, P.sand1], alpha: 0.6, drag: 3, rot: 6, rotSpeed: 1 });
+    }
+  }
+
   /** the rug's light pools, in view space, just before it draws */
   private lightRug(camera: THREE.Camera) {
     const S = this.rugSpot?.u.uSpots.value;
@@ -1736,7 +2324,7 @@ export class Shop {
     this.ctx.fx.dust({ x: start.x, y: start.y, z: start.z }, 0.22, P.sand1, 2);
     this.group.worldToLocal(start);
     b.p.copy(start);
-    const T = 0.64 + rnd.next() * 0.14;
+    const T = (this.her?.kind === 'caravan' ? 0.95 : 0.64) + rnd.next() * 0.14; // a longer fall from his tall pack
     b.v.copy(b.slot).sub(b.p).multiplyScalar(1 / T);
     b.v.y += 0.5 * G * T;
     b.q.setFromEuler(new THREE.Euler(rnd.next() * 6.28, rnd.next() * 6.28, rnd.next() * 6.28));
@@ -2011,7 +2599,7 @@ export class Shop {
         this.scolded = true;
         her.onOut = () => {
           if (!this.active || this.her !== her) return;
-          this.speak(rnd.pick(LINES.shot), 'squinty');
+          this.speak(rnd.pick(this.voice.lines.shot), 'squinty');
           her.shake();
         };
       }

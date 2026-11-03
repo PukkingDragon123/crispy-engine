@@ -70,15 +70,15 @@ export interface EnemyDef {
 export const ENEMIES: Record<string, EnemyDef> = {
   husk: {
     id: 'husk', name: 'Sand Husk', title: 'Dried & Dangerous', rig: 'husk', rigAlpha: 'husk_alpha',
-    hp: 30, armor: 0, physRes: 0, magicRes: 0, statusRes: { burn: -0.5 }, speed: 3.6, radius: 0.45, height: 1.75,
-    ai: 'chaser', attacks: [{ kind: 'melee', range: 1.9, cooldown: 1.4, windup: 0.45, dmg: 9 }, { kind: 'vortex', range: 9, cooldown: 7, windup: 1, dmg: 6, radius: 7, alphaOnly: true }],
-    contact: 5, bounty: 3, gold: [0, 2], hitKind: 'linen', weakness: 'Burns easily. Crumbles to headshots.',
+    hp: 24, armor: 0, physRes: 0, magicRes: 0, statusRes: { burn: -0.5 }, speed: 3.6, radius: 0.45, height: 1.75,
+    ai: 'chaser', attacks: [{ kind: 'melee', range: 1.9, cooldown: 1.5, windup: 0.55, dmg: 8 }, { kind: 'vortex', range: 9, cooldown: 7, windup: 1, dmg: 6, radius: 7, alphaOnly: true }],
+    contact: 3, bounty: 3, gold: [0, 2], hitKind: 'linen', weakness: 'Burns easily. Crumbles to headshots.',
     firstWave: 1, weight: 10, group: [3, 6], burnMul: 1.6, lore: 'Outlaws Set buried alive, now hungry for the living. They claw out of the dunes when the storm sings.',
   },
   gunslinger: {
     id: 'gunslinger', name: 'Skeletal Gunslinger', title: 'Quickest Draw in the Afterlife', rig: 'gunslinger', rigAlpha: 'gunslinger_alpha',
     hp: 26, armor: 5, physRes: 0, magicRes: 0.1, statusRes: { bleed: 1 }, speed: 5, radius: 0.42, height: 1.85,
-    ai: 'ranged', attacks: [{ kind: 'burst', range: 30, minRange: 10, cooldown: 2.6, windup: 0.55, dmg: 7, count: 3, speed: 22, proj: 'bullet' }, { kind: 'spiral', range: 26, cooldown: 7, windup: 0.8, dmg: 6, count: 24, speed: 14, proj: 'bullet', alphaOnly: true }],
+    ai: 'ranged', attacks: [{ kind: 'burst', range: 30, minRange: 10, cooldown: 3, windup: 0.7, dmg: 6, count: 3, speed: 20, proj: 'bullet' }, { kind: 'spiral', range: 26, cooldown: 7, windup: 0.8, dmg: 6, count: 24, speed: 14, proj: 'bullet', alphaOnly: true }],
     contact: 4, bounty: 6, gold: [1, 3], hitKind: 'bone', weakness: 'Skulls shatter: headshots deal massive damage. Immune to bleeding.',
     firstWave: 2, weight: 6, group: [1, 3], lore: 'Six-shooters bound to Set by a crooked deal. They still argue about who drew first.',
   },
@@ -92,14 +92,14 @@ export const ENEMIES: Record<string, EnemyDef> = {
   jackal: {
     id: 'jackal', name: 'Jackal Warrior', title: 'Fangs of the Weighing', rig: 'jackal', rigAlpha: 'jackal_alpha',
     hp: 60, armor: 20, physRes: 0.1, magicRes: 0.1, statusRes: {}, speed: 7.2, radius: 0.48, height: 2.05,
-    ai: 'leaper', attacks: [{ kind: 'melee', range: 2.4, cooldown: 1.3, windup: 0.4, dmg: 12, status: [{ id: 'bleed', stacks: 1, dur: 3 }] }, { kind: 'leap', range: 12, minRange: 5, cooldown: 4.5, windup: 0.5, dmg: 16 }],
+    ai: 'leaper', attacks: [{ kind: 'melee', range: 2.4, cooldown: 1.3, windup: 0.4, dmg: 12, status: [{ id: 'bleed', stacks: 1, dur: 3 }] }, { kind: 'leap', range: 12, minRange: 5, cooldown: 4.5, windup: 0.6, dmg: 16 }],
     contact: 6, bounty: 10, gold: [1, 4], hitKind: 'flesh', weakness: 'Round shield blocks frontal gunfire (−65%). Flank them, use scorpions or explosions.',
     firstWave: 9, weight: 4, frontGuard: 0.35, lore: 'Anubis\'s temple guard, bribed by Set with stolen gold. Their kohl never smudges.',
   },
   scarab: {
     id: 'scarab', name: 'Scarab Swarmer', title: 'Many Legs, No Manners', rig: 'scarab', rigAlpha: 'scarab_alpha',
     hp: 14, armor: 15, physRes: 0.25, magicRes: 0, statusRes: {}, speed: 9, radius: 0.35, height: 0.55,
-    ai: 'swarm', attacks: [{ kind: 'melee', range: 1.3, cooldown: 1, windup: 0.25, dmg: 5 }],
+    ai: 'swarm', attacks: [{ kind: 'melee', range: 1.3, cooldown: 1.1, windup: 0.32, dmg: 5 }],
     contact: 4, bounty: 1.5, gold: [0, 1], hitKind: 'chitin', weakness: 'Shells shrug off bullets; explosions flip them belly-up for big damage.',
     firstWave: 4, weight: 6, group: [6, 10], lore: 'Khepri\'s little rollers, fed on Set\'s chaos until they forgot the sun.',
   },
@@ -120,7 +120,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
   outlaw: {
     id: 'outlaw', name: 'Dune Outlaw', title: 'Wanted: For Everything', rig: 'outlaw_rider', rigAlpha: 'outlaw_rider_alpha',
     hp: 45, armor: 10, physRes: 0, magicRes: 0, statusRes: {}, speed: 15, radius: 0.5, height: 1.85,
-    ai: 'rider', attacks: [{ kind: 'fan', range: 26, cooldown: 2.4, windup: 0.5, dmg: 6, count: 5, spread: 0.5, speed: 20, proj: 'bullet' }, { kind: 'lob', range: 22, cooldown: 6, windup: 0.7, dmg: 18, count: 1, speed: 13, proj: 'dynamite', alphaOnly: true }],
+    ai: 'rider', attacks: [{ kind: 'fan', range: 26, cooldown: 2.6, windup: 0.6, dmg: 6, count: 5, spread: 0.5, speed: 20, proj: 'bullet' }, { kind: 'lob', range: 22, cooldown: 6, windup: 0.7, dmg: 18, count: 1, speed: 13, proj: 'dynamite', alphaOnly: true }],
     contact: 8, bounty: 9, gold: [2, 6], hitKind: 'flesh', weakness: 'Fast on a board. Grapple them or ram them at speed.',
     firstWave: 11, weight: 3, lore: 'Set\'s posse. They ride sand like water and shoot like they mean it.',
   },
@@ -128,7 +128,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
   bomberHusk: {
     id: 'bomberHusk', name: 'Bomber Husk', title: 'Has a Short Fuse', rig: 'bomber_husk', rigAlpha: 'bomber_husk_alpha',
     hp: 22, armor: 0, physRes: 0, magicRes: 0, statusRes: {}, speed: 6.2, radius: 0.45, height: 1.75,
-    ai: 'bomber', attacks: [{ kind: 'explode', range: 2.2, cooldown: 99, windup: 0.55, dmg: 28, radius: 4 }],
+    ai: 'bomber', attacks: [{ kind: 'explode', range: 2.2, cooldown: 99, windup: 0.7, dmg: 28, radius: 4 }],
     contact: 0, bounty: 4, gold: [0, 2], hitKind: 'linen', weakness: 'Pop it early — the blast hurts its friends too.',
     firstWave: 5, weight: 3, special: 'chainExplode', lore: 'Dynamite was cheaper than loyalty. He did not read the label.',
   },
@@ -163,7 +163,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
   shotgunner: {
     id: 'shotgunner', name: 'Scattergun Sam', title: 'Wide Load', rig: 'shotgunner', rigAlpha: 'shotgunner_alpha',
     hp: 58, armor: 12, physRes: 0.05, magicRes: 0, statusRes: {}, speed: 4.4, radius: 0.55, height: 1.85,
-    ai: 'ranged', attacks: [{ kind: 'fan', range: 16, minRange: 4, cooldown: 2.8, windup: 0.6, dmg: 6, count: 9, spread: 0.9, speed: 17, proj: 'bullet' }],
+    ai: 'ranged', attacks: [{ kind: 'fan', range: 16, minRange: 4, cooldown: 2.8, windup: 0.72, dmg: 6, count: 9, spread: 0.9, speed: 17, proj: 'bullet' }],
     contact: 6, bounty: 9, gold: [1, 4], hitKind: 'flesh', weakness: 'Devastating up close. Keep your distance or kick him.',
     firstWave: 16, weight: 2, lore: 'Loads nails, bolts and spite into both barrels.',
   },
@@ -183,7 +183,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
   tumbleweedBandit: {
     id: 'tumbleweedBandit', name: 'Tumbleweed Bandit', title: 'Master of Disguise (Questionable)', rig: 'tumbleweed_bandit', rigAlpha: 'tumbleweed_bandit_alpha',
     hp: 40, armor: 4, physRes: 0, magicRes: 0, statusRes: { burn: -1 }, speed: 7, radius: 0.6, height: 1.4,
-    ai: 'ambusher', attacks: [{ kind: 'burst', range: 18, cooldown: 2.2, windup: 0.35, dmg: 7, count: 4, speed: 22, proj: 'bullet' }],
+    ai: 'ambusher', attacks: [{ kind: 'burst', range: 18, cooldown: 2.4, windup: 0.5, dmg: 7, count: 4, speed: 21, proj: 'bullet' }],
     contact: 5, bounty: 8, gold: [1, 5], hitKind: 'wood', weakness: 'Burns like kindling. That tumbleweed is staring at you.', burnMul: 2,
     firstWave: 9, weight: 1.5, lore: 'Nobody suspects the tumbleweed. Everybody should.',
   },
@@ -212,7 +212,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
   sandWolf: {
     id: 'sandWolf', name: 'Sand Wolf', title: 'Hunts in Threes, Laughs in Fours', rig: 'sand_wolf', rigAlpha: 'sand_wolf_alpha',
     hp: 34, armor: 6, physRes: 0, magicRes: 0, statusRes: {}, speed: 9.5, radius: 0.55, height: 1.0,
-    ai: 'pack', attacks: [{ kind: 'melee', range: 1.9, cooldown: 1.1, windup: 0.3, dmg: 8, status: [{ id: 'bleed', stacks: 1, dur: 3 }] }, { kind: 'leap', range: 9, minRange: 3.5, cooldown: 4.2, windup: 0.45, dmg: 13 }, { kind: 'howl', range: 30, minRange: 6, cooldown: 14, windup: 1.1, dmg: 0, radius: 22, alphaOnly: true }],
+    ai: 'pack', attacks: [{ kind: 'melee', range: 1.9, cooldown: 1.2, windup: 0.36, dmg: 8, status: [{ id: 'bleed', stacks: 1, dur: 3 }] }, { kind: 'leap', range: 9, minRange: 3.5, cooldown: 4.2, windup: 0.55, dmg: 13 }, { kind: 'howl', range: 30, minRange: 6, cooldown: 14, windup: 1.1, dmg: 0, radius: 22, alphaOnly: true }],
     contact: 5, bounty: 4, gold: [0, 2], hitKind: 'flesh', weakness: 'Packs circle behind you, then pounce. Keep moving and thin the pack before it closes in.',
     firstWave: 6, weight: 3, group: [3, 5], lore: 'Born from the dust of Set\'s storm. They howl at the moon because Khonsu owes them money.',
   },
@@ -227,7 +227,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
   thornyLizard: {
     id: 'thornyLizard', name: 'Thorny Devil', title: 'Cries Blood, Sheds No Tears', rig: 'thorny_lizard', rigAlpha: 'thorny_lizard_alpha',
     hp: 32, armor: 22, physRes: 0.1, magicRes: 0, statusRes: { bleed: 1 }, speed: 7.5, radius: 0.5, height: 0.5,
-    ai: 'skitter', attacks: [{ kind: 'stream', range: 13, minRange: 3, cooldown: 4.2, windup: 0.95, dmg: 4, count: 10, speed: 11, proj: 'blood', status: [{ id: 'bleed', stacks: 1, dur: 3 }] }, { kind: 'melee', range: 1.5, cooldown: 1.2, windup: 0.25, dmg: 6 }],
+    ai: 'skitter', attacks: [{ kind: 'stream', range: 13, minRange: 3, cooldown: 4.2, windup: 0.95, dmg: 4, count: 10, speed: 11, proj: 'blood', status: [{ id: 'bleed', stacks: 1, dur: 3 }] }, { kind: 'melee', range: 1.5, cooldown: 1.2, windup: 0.32, dmg: 6 }],
     contact: 6, bounty: 4, gold: [0, 2], hitKind: 'chitin', weakness: 'The push-ups mean it is about to squirt blood from its eyes. Sidestep the stream.', thorns: 3,
     firstWave: 7, weight: 2.5, group: [2, 4], variants: ['thorny_lizard', 'thorny_lizard_v1', 'thorny_lizard_v2'],
     lore: 'Puffs up, does push-ups at you, then cries blood in your eye. Rude, but impressive. Alphas cry acid.',
@@ -284,7 +284,7 @@ export function waveScale(wave: number) {
   const w = wave - 1;
   return {
     hp: 1 + w * 0.085 + Math.pow(w / 22, 2.2),
-    dmg: 1 + w * 0.03 + Math.pow(w / 40, 2),
+    dmg: (1 + w * 0.03 + Math.pow(w / 40, 2)) * (wave <= 5 ? 0.75 + wave * 0.05 : 1),
     speed: 1 + Math.min(0.35, w * 0.0045),
     count: 1 + w * 0.06,
     alphaChance: Math.min(0.08, 0.004 + w * 0.0011),

@@ -56,10 +56,24 @@ export class Projectiles {
     ctx.scene.add(this.batch.mesh);
   }
 
+  /**
+   * Straight-flying enemy shots (bullets, needles, pebbles, curses) are scaled by this:
+   * the enemy manager eases it from ~0.8 on the first waves up to 1, so early shots are
+   * easy to read and side-step. Arcing shots keep their solved trajectories.
+   */
+  speedMul = 1;
+
   spawn(p: Partial<Proj> & { kind: ProjKind; x: number; y: number; z: number; vx: number; vy: number; vz: number; dmg: number }) {
     if (this.list.length > 2200) this.list.shift();
     const L = LOOK[p.kind];
-    this.list.push({ r: L.size * 0.45, life: 6, grav: L.grav, owner: 'enemy', grazed: false, spin: 0, ...p } as Proj);
+    const q = { r: L.size * 0.45, life: 6, grav: L.grav, owner: 'enemy', grazed: false, spin: 0, ...p } as Proj;
+    if (q.owner === 'enemy' && q.grav === 0 && this.speedMul !== 1) {
+      q.vx *= this.speedMul;
+      q.vy *= this.speedMul;
+      q.vz *= this.speedMul;
+      q.life /= this.speedMul;
+    }
+    this.list.push(q);
   }
 
   /** helper: fire pattern from a point toward a target */

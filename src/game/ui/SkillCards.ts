@@ -759,8 +759,6 @@ function paintDetail(o: Offer, d: CardDetail) {
 /** the ledger: a sculpted board carrying the full typeset details and a row of real level gems */
 export class DetailPanel {
   group = new THREE.Group();
-  /** invisible plane for picking (hover stays while the pointer reads the ledger) */
-  hit: THREE.Mesh;
   private mat: VoxelMaterial;
   private gemMat: VoxelMaterial;
   private textMat: THREE.MeshBasicMaterial;
@@ -786,9 +784,6 @@ export class DetailPanel {
     txt.renderOrder = 2;
     this.group.add(txt);
     this.owned.push(this.mat, this.gemMat, this.textMat, tex, geo);
-    this.hit = new THREE.Mesh(new THREE.PlaneGeometry(PANEL_W, PANEL_H), new THREE.MeshBasicMaterial({ visible: false }));
-    this.group.add(this.hit);
-    this.owned.push(this.hit.geometry, this.hit.material as THREE.Material);
     // the level pips as real cut gems, set into the parchment under the level line
     const n = Math.min(8, o.def.maxLv);
     const col = RARITY[o.def.rarity].hex;

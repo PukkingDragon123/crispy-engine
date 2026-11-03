@@ -15,7 +15,7 @@ import type { Props, PropInst } from '../world/Props';
 import type { CameraRig } from '../player/CameraRig';
 import type { Qte } from '../ui/Qte';
 import type { Choice } from '../ui/Choice';
-import { Shop, merchantStock } from '../ui/Shop';
+import { Shop, merchantStock, type MerchantHooks } from '../ui/Shop';
 import { Interactions, Interactable, Chest, ChestTier } from './Interact';
 import type { Inventory } from '../player/Items';
 import { modelEntry } from '../models/lookup';
@@ -47,6 +47,10 @@ interface Npc {
   eyes: RigEyes | null;
   kind: 'merchant' | 'camel';
   t: number;
+  /** the trading post this merchant belongs to, its trade prompt and its shop hooks */
+  lm?: PropInst;
+  inter?: Interactable;
+  hooks?: MerchantHooks;
 }
 
 interface Active {
@@ -81,35 +85,63 @@ export class Missions {
       const door = ent ? this.d.props.landmarkPoint(lm, ent[0], ent[1]) : this.d.props.landmarkPoint(lm, 0, (fp?.[1] ?? 12) * 0.5 + 2);
       const type = lm.extra.type as string;
       const name = lm.anchor.data?.name ?? type;
-      if (type === 'tradingPost') this.spawnMerchant(lm, door);
       const inter: Interactable = {
-        pos: door,
+        pos: door.clone(),
         radius: 7,
-        label: type === 'tradingPost' ? 'Trade with the Merchant' : `Enter ${name}`,
+        label: type === 'tradingPost' ? 'Trade with Ozymandias' : `Enter ${name}`,
         enabled: true,
-        promptY: 2.4,
+        promptY: type === 'tradingPost' ? 3.2 : 2.4,
         use: () => void this.enter(lm, inter, door),
       };
       this.d.inter.add(inter);
+      if (type === 'tradingPost') this.spawnMerchant(lm, door, inter);
     }
   }
 
-  private spawnMerchant(lm: PropInst, door: THREE.Vector3) {
+  /**
+   * The trading post is Ozymandias, a giant tortoise carrying the shop on his
+   * back, plodding round his campfire with Old Mother Tamsin riding on his
+   * shell. (If his model is missing, Tamsin keeps the shop on foot by the camp.)
+   */
+  private spawnMerchant(lm: PropInst, door: THREE.Vector3, inter: Interactable) {
     const ctx = this.d.ctx;
-    const face = Math.atan2(lm.anchor.x - door.x, lm.anchor.z - door.z) + Math.PI; // facing away from the building
-    const side = new THREE.Vector3(Math.cos(face), 0, -Math.sin(face));
-    const mk = (key: string, kind: Npc['kind'], at: THREE.Vector3, yaw: number) => {
+    const out = new THREE.Vector3(door.x - lm.anchor.x, 0, door.z - lm.anchor.z).normalize();
+    const face = Math.atan2(out.x, out.z);
+    const rigOf = (key: string) => {
       const spec = modelEntry(key)?.() as RigSpec | undefined;
-      if (!spec?.parts) return;
-      const rig = new RigInstance(buildRigGeo(spec, key + ':npc'), { material: makeVoxelMaterial() });
-      rig.root.position.set(at.x, ctx.world.groundAt(at.x, at.z), at.z);
-      rig.root.rotation.y = yaw;
-      ctx.scene.add(rig.root);
-      const eyes = rig.nodes['eye_l'] ? new RigEyes(rig, 'organic', kind === 'camel' ? 0x2a1a10 : 0x3a2a1a) : null;
-      this.npcs.push({ rig, eyes, kind, t: rnd.next() * 10 });
+      return spec?.parts ? new RigInstance(buildRigGeo(spec, key + ':npc'), { material: makeVoxelMaterial() }) : null;
     };
-    mk('merchant', 'merchant', door.clone().addScaledVector(side, 1.6), face);
-    mk('camel', 'camel', door.clone().addScaledVector(side, 4.2).add(new THREE.Vector3(Math.sin(face) * -1, 0, Math.cos(face) * -1)), face + 1.2);
+    const home = new THREE.Vector3(lm.anchor.x, 0, lm.anchor.z);
+    const giant = rigOf('caravan_tortoise');
+    const tamsin = rigOf('merchant');
+    if (giant) {
+      // he starts beside his fire, side-on, already on his rounds
+      const at = home.clone().addScaledVector(out, 6.5);
+      giant.root.position.set(at.x, ctx.world.groundAt(at.x, at.z), at.z);
+      giant.root.rotation.y = face + Math.PI / 2;
+      ctx.scene.add(giant.root);
+      if (tamsin) giant.attach('rider', tamsin.root);
+      this.npcs.push({ rig: giant, eyes: null, kind: 'merchant', t: rnd.next() * 10, lm, inter, hooks: this.shopHooks({ rider: tamsin, home }) });
+      return;
+    }
+    if (tamsin) {
+      const at = door.clone();
+      tamsin.root.position.set(at.x, ctx.world.groundAt(at.x, at.z), at.z);
+      tamsin.root.rotation.y = face;
+      ctx.scene.add(tamsin.root);
+      this.npcs.push({ rig: tamsin, eyes: null, kind: 'merchant', t: rnd.next() * 10, lm, inter, hooks: this.shopHooks({}) });
+    }
+  }
+
+  /** what the shop needs to stage a merchant's arrival scene and run his shop */
+  private shopHooks(extra: Partial<MerchantHooks>): MerchantHooks {
+    const d = this.d;
+    return {
+      board: d.player.board,
+      stock: () => merchantStock(d.ctx, (id) => d.items.add(id), () => d.player.heal(d.player.maxHp), () => d.card()),
+      busy: () => this.busy || d.choice.active || !d.player.alive,
+      ...extra,
+    };
   }
 
   /** walk-in cinematic, then the landmark's offer */
@@ -129,9 +161,11 @@ export class Missions {
         const fwd = new THREE.Vector3(door.x - lm.anchor.x, 0, door.z - lm.anchor.z).normalize();
         const rugAt = door.clone().addScaledVector(fwd, 2.2);
         const facing = Math.atan2(-fwd.x, -fwd.z);
-        const merchant = this.npcs.find((n) => n.kind === 'merchant');
+        // this post's own merchant (he may have wandered round his camp)
+        const merchant = this.npcs.find((n) => n.kind === 'merchant' && n.lm === lm) ?? this.npcs.find((n) => n.kind === 'merchant');
         if (merchant) merchant.t = 0;
-        await this.d.shop.open(rugAt, facing, merchantStock(ctx, (id) => this.d.items.add(id), () => this.d.player.heal(this.d.player.maxHp), () => this.d.card()), merchant?.rig.root.position ?? door);
+        const at = merchant ? merchant.rig.root.position : rugAt;
+        await this.d.shop.open(at.clone(), facing, merchantStock(ctx, (id) => this.d.items.add(id), () => this.d.player.heal(this.d.player.maxHp), () => this.d.card()), merchant?.rig.root.position ?? door);
         return;
       }
       // crane shot around the landmark
@@ -399,8 +433,10 @@ export class Missions {
       n.t += dt;
       const nd = n.rig.nodes;
       if (n.kind === 'merchant') {
-        // Old Mother Tamsin's idle + shyness (hides in her shell when aimed/shot at) live in the shop
-        this.d.shop.animateMerchant(n.rig, dt, this.d.player.pos);
+        // the merchant's walk, idle, shyness (hiding in the shell from danger) and his
+        // arrival cutscene all live in the shop; the trade prompt follows him round
+        this.d.shop.animateMerchant(n.rig, dt, this.d.player.pos, n.hooks);
+        if (n.inter) this.d.shop.merchantFront(n.rig, n.inter.pos);
       } else {
         if (nd['head']) nd['head'].rotation.set(Math.sin(n.t * 0.9) * 0.1, Math.sin(n.t * 0.5) * 0.25, 0);
         if (nd['jaw']) nd['jaw'].rotation.x = Math.abs(Math.sin(n.t * 4)) * 0.15;

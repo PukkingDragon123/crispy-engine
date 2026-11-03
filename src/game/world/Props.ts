@@ -195,7 +195,10 @@ const KINDS: Record<string, KindDef> = {
 const RIM_KINDS = new Set(['rimStone', 'rimGate']);
 
 const LANDMARKS: Record<string, () => SM> = {
-  tradingPost: () => P.tradingPost(1),
+  // the trading post is a giant travelling tortoise now (Ozymandias, spawned by
+  // Missions); his landmark is just the campfire he plods round, so the mission
+  // scan and the escort routes still find "the trading post"
+  tradingPost: () => ({ ...P.campfire(3), meta: { entrance: [0, 3], footprint: [6, 6], height: 1.5, caravanCamp: true } }),
   outlawFort: () => P.outlawFort(2),
   mineHeadframe: () => P.mineHeadframe(3),
   ranchBarn: () => P.ranchBarn(4),

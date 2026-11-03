@@ -196,6 +196,10 @@ class ShockRing {
 
   update(k: number, p: Particles, eye: THREE.Vector3) {
     // k: 0..1 life of the wave
+    if (k >= 1) {
+      this.curtain.visible = this.disc.visible = false;
+      return;
+    }
     const e = outCubic(k);
     this.r = 0.3 + e * SHOCK_R;
     this.fade = (1 - sm((k - 0.45) / 0.55)) * Math.min(1, k * 12);
@@ -225,7 +229,7 @@ class ShockRing {
       if (Math.random() < 0.7) {
         const a = Math.random() * Math.PI * 2;
         const x = a0.x + Math.cos(a) * this.r, z = a0.z + Math.sin(a) * this.r;
-        if (Math.hypot(x - eye.x, z - eye.z) > 4) p.emit({ pos: { x, y: this.groundAt(x, z) + 0.2, z }, count: 1, vel: { x: Math.cos(a) * 1.5, y: 0.6, z: Math.sin(a) * 1.5 }, life: [0.7, 1.3], size: [0.5, 1.6], sprite: PUFF, color: SAND, alpha: 0.6, drag: 2, rot: 6, rotSpeed: 0.6 });
+        if (Math.hypot(x - eye.x, z - eye.z) > 4) p.emit({ pos: { x, y: this.groundAt(x, z) + 0.2, z }, count: 1, vel: { x: Math.cos(a) * 1.5, y: 0.6, z: Math.sin(a) * 1.5 }, life: [0.7, 1.3], size: [0.4, 1.1], sprite: PUFF, color: SAND, alpha: 0.6, drag: 2, rot: 6, rotSpeed: 0.6 });
       }
     }
   }
@@ -464,11 +468,12 @@ class SandSpiral {
         if (al < 0.03) continue;
         const dx = x - eye.x, dy = y - eye.y, dz = z - eye.z;
         const d2 = dx * dx + dy * dy + dz * dz;
-        const col = SAND[i % SAND.length];
-        if (i % 13 === 0) {
-          if (d2 > 2.6 && b < 0.05) this.batch.push(x, y, z, PUFF[i % PUFF.length], 0.22 + hf * 0.3, 0.22 + hf * 0.3, this.a[i] + this.t * 0.4, col, al * 0.5);
-        } else if (i % 5 === 0) this.glow.push(x, y, z, i % 2 ? 'glow8' : 'star4', 0.08, 0.08, 0, i % 3 ? 0xffd890 : JADE, al * 0.9);
-        else if (d2 > 0.3) this.batch.push(x, y, z, GRAIN[i % GRAIN.length], 0.06 + (i % 3) * 0.022, 0.06 + (i % 3) * 0.022, 0, col, al);
+        if (i % 5 === 0) this.glow.push(x, y, z, i % 2 ? 'glow8' : 'star4', 0.07, 0.07, 0, i % 3 ? 0xffd890 : JADE, al * 0.9);
+        else if (d2 > 2.2 && al > 0.15) {
+          // opaque grains that fade by shrinking (dithered alpha up close reads as ink noise)
+          const sz = (0.032 + (i % 3) * 0.013) * (0.35 + 0.65 * al);
+          this.batch.push(x, y, z, GRAIN[i % GRAIN.length], sz, sz, 0, SAND[i % SAND.length], 1);
+        }
       }
     }
     this.batch.end(fog);
@@ -1065,7 +1070,7 @@ export class RankUpCine {
       this.lightA.color.setHex(0x7dff3a);
       this.lightA.distance = 2.6;
       this.lightA.position.copy(ps[0]).lerp(ps[ps.length - 1], 0.5);
-      this.lightA.intensity = k * (2.4 + Math.sin(this.t * 17) * 0.4);
+      this.lightA.intensity = k * (1.5 + Math.sin(this.t * 17) * 0.3);
     }
     // anime eye-fire: jade wisps streaming back off each socket
     if (Math.random() < rdt * 40)

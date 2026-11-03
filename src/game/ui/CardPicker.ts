@@ -78,7 +78,7 @@ const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
-const HINT_CARDS = 'HOVER for details · CLICK to claim · RIGHT-DRAG to turn · R reroll · B banish';
+const hintCards = (rerolls: number) => `HOVER for details · CLICK or 1–4 to claim · RIGHT-DRAG to turn · R reroll (${rerolls}) · B banish`;
 
 export interface PickerOpts {
   /** the run camera rig (smooth hand-back after the pick) */
@@ -405,7 +405,10 @@ export class CardPicker {
       for (const c of this.cards) c.t0 = Math.min(c.t0, T - c.dur - 0.01);
       return;
     }
-    if (cine.inCards && this.hint.textContent === 'CLICK to skip') this.hint.textContent = HINT_CARDS;
+    if (cine.inCards) {
+      const ht = hintCards(this.up.rerolls);
+      if (this.hint.textContent !== ht) this.hint.textContent = ht;
+    }
     // keyboard picks
     for (let i = 0; i < this.cards.length; i++) if (inp.wasPressed('Digit' + (i + 1)) && allReady) return this.pick(this.cards[i]);
     if (inp.wasPressed('KeyR') && this.up.rerolls > 0 && allReady) {
@@ -420,19 +423,14 @@ export class CardPicker {
       else this.release();
       return;
     }
-    // ---- hover: the hovered card's own surface (it lifts away) or any card's resting spot
+    // ---- hover: by each card's fixed resting spot, so a card lifting toward you (and its open
+    // ledger, which may cover a neighbour) never steals or flickers the hover
     this.ray.setFromCamera(new THREE.Vector2(inp.ndcX, inp.ndcY), ctx.camera);
     const targets: THREE.Object3D[] = [];
     for (const c of this.cards) if (c.ready) targets.push(c.homeHit);
-    const hv = this.hovered;
-    if (hv && hv.ready) {
-      hv.mesh.updateMatrixWorld(true);
-      targets.push(hv.card.hit);
-      if (hv.card.panel && hv.panel.x > 0.5) targets.push(hv.card.panel.hit);
-    }
     const hits = this.ray.intersectObjects(targets, false);
     const top = hits[0]?.object;
-    const h = top ? (this.cards.find((c) => c.homeHit === top || c.card.hit === top || c.card.panel?.hit === top) ?? null) : null;
+    const h = top ? (this.cards.find((c) => c.homeHit === top) ?? null) : null;
     if (h !== this.hovered) {
       if (h) ctx.sfx('card_hover', null, 0.5);
       this.hovered = h;
@@ -457,7 +455,7 @@ export class CardPicker {
     if (inp.wasPressed('Mouse0') && h && h.ready) return this.pick(h);
     // the head follows the hovered card
     cine.gaze = this.hovered ? this.hovered.mesh.position : null;
-    this.animate(rdt, hits[0] && h === this.hovered && top === h?.card.hit ? hits[0].point : null);
+    this.animate(rdt, hits[0] && h ? hits[0].point : null);
   }
 
   /** where the hovered card (and its open ledger) comes to rest: closer, readable, inside the frame */
@@ -501,7 +499,7 @@ export class CardPicker {
           m.visible = true;
           const g = c.ground;
           p.emit({ pos: g, count: 22, spread: 3.5, up: 5, life: [0.5, 1.1], size: [0.07, 0.04], sprite: GRAIN, color: SAND, gravity: 11, drag: 1, ground: true, bounce: 0.15 });
-          p.emit({ pos: g, count: 7, spread: 1.8, up: 1.2, life: [0.8, 1.6], size: [0.6, 1.7], sprite: PUFF, color: SAND, alpha: 0.75, drag: 2.4, rot: 6, rotSpeed: 0.7, jitter: 0.3 });
+          p.emit({ pos: g, count: 5, spread: 1.8, up: 1.2, life: [0.8, 1.6], size: [0.5, 1.3], sprite: PUFF, color: SAND, alpha: 0.75, drag: 2.4, rot: 6, rotSpeed: 0.7, jitter: 0.3 });
           ctx.sfx('card_erupt', g, 0.8, 0.95 + c.i * 0.05);
           if (c.entrance === 'spin') ctx.sfx('trick_spin', g, 0.5, 1.1);
           if (c.entrance === 'pillar') {
@@ -572,7 +570,7 @@ export class CardPicker {
       c.hover = damp(c.hover, c === this.hovered ? 1 : 0, 9, rdt);
       const hs = c.hover * c.hover * (3 - 2 * c.hover);
       if (!this.dragging || this.dragging !== c) c.flipCur = damp(c.flipCur, c.flip, 9, rdt);
-      const local = c === this.hovered && hitPoint ? _v2.copy(hitPoint).sub(m.position) : _v2.set(0, 0, 0);
+      const local = c === this.hovered && hitPoint ? _v2.copy(hitPoint).sub(c.home) : _v2.set(0, 0, 0);
       c.tiltY = damp(c.tiltY, local.dot(this.sx) * 0.5 * c.hover, 10, rdt);
       c.tiltX = damp(c.tiltX, -local.dot(this.sy) * 0.4 * c.hover, 10, rdt);
       const fc = this.focusC(c, _v);
@@ -670,7 +668,7 @@ export class CardPicker {
           m.localToWorld(_v);
           p.emit({ pos: _v, count: 1, vel: { x: 0, y: -0.3, z: 0 }, spread: 0.5, life: [0.6, 1.1], size: [0.05, 0.03], sprite: GRAIN, color: SAND, gravity: 9, drag: 0.4, ground: true, bounce: 0.08 });
         }
-        if (Math.random() < 0.25) p.emit({ pos: m.position, count: 1, spread: 0.4, life: [0.7, 1.3], size: [0.35, 0.9], sprite: PUFF, color: SAND, alpha: 0.5, drag: 2, rot: 6, rotSpeed: 0.5, jitter: 0.3 });
+        if (Math.random() < 0.12) p.emit({ pos: m.position, count: 1, spread: 0.4, life: [0.6, 1.0], size: [0.25, 0.6], sprite: PUFF, color: SAND, alpha: 0.8, drag: 2, rot: 6, rotSpeed: 0.5, jitter: 0.3 });
       }
       if (c.pillar) {
         c.pillarK = Math.max(0, c.pillarK - rdt * 2.5);

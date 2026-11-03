@@ -24,7 +24,7 @@ import * as THREE from 'three';
 import { Reflector } from 'three/examples/jsm/objects/Reflector.js';
 import type { Engine, GameScene } from '../../engine/Engine';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
-import { VoxelModel } from '../../engine/voxel/VoxelModel';
+import { VoxelModel, VF } from '../../engine/voxel/VoxelModel';
 import { buildRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { makeVoxelMaterial, sharedVoxelMaterial } from '../../engine/render/VoxelMaterial';
 import * as PM from '../models/props';
@@ -109,6 +109,7 @@ const HERO_R = 0.26;
 const ORDER = ['ride', 'bench', 'garage', 'wardrobe', 'book', 'hearth', 'gramophone'];
 /** the open strip of floor Sundown walks along between stations */
 const LANE_Z = 0.25;
+const UP = new THREE.Vector3(0, 1, 0);
 
 const MAMA_LINES = [
   "There's my boy. Come warm your bones by the fire, sugar.",
@@ -396,8 +397,6 @@ export class HubScene implements GameScene {
   private phase = 0;
   private moveK = 0;
   private runK = 0;
-  private walkTo: { x: number; z: number; face?: number; then?: () => void } | null = null;
-  private introT = 0;
   private lastStep = [0, 0];
   private headYaw = 0;
   private headPitch = 0;
@@ -949,7 +948,7 @@ export class HubScene implements GameScene {
       // the reflection pass reuses this frame's shadow maps instead of re-rendering them
       // (and the on-screen UI never shows up in the glass)
       const reflect = glass.onBeforeRender;
-      const ui = () => [this.ui, this.sub?.mesh, this.ttl?.set.root].filter((o): o is THREE.Object3D => !!o);
+      const ui = (): THREE.Object3D[] => [this.ui, this.sub?.mesh, this.ttl?.set.root].filter((o) => !!o) as THREE.Object3D[];
       glass.onBeforeRender = function (this: Reflector, r: THREE.WebGLRenderer, ...rest: unknown[]) {
         const au = r.shadowMap.autoUpdate;
         r.shadowMap.autoUpdate = false;
@@ -1472,10 +1471,10 @@ export class HubScene implements GameScene {
     this.bubbleText = text;
     this.bubbleT = 0;
     this.mamaTalk = 1.4 + text.length * 0.045;
-    this.engine.audio.play('squeak', { volume: 0.45, pitch: 0.55 + Math.random() * 0.1 });
+    this.engine.audio.play('squeak', { volume: 0.4, pitch: 0.42 + Math.random() * 0.08 });
   }
 
-  /** use a station (Sundown is already standing at it) */
+  /** use a station (Sundown is standing at it) */
   private use(st: Station) {
     const eng = this.engine;
     switch (st.id) {
@@ -1497,10 +1496,11 @@ export class HubScene implements GameScene {
         this.active = st;
         this.codex();
         break;
+      case 'hearth':
       case 'mama':
         this.mamaLine = (this.mamaLine + 1) % MAMA_LINES.length;
         this.say(MAMA_LINES[this.mamaLine]);
-        this.mamaCd = 12;
+        this.mamaCd = 14;
         break;
       case 'duck':
         this.duckSquash = 1;
@@ -1518,14 +1518,91 @@ export class HubScene implements GameScene {
     }
   }
 
-  /** walk over to a station, then use it */
-  private go(st: Station) {
-    this.walkTo = { x: st.stand.x, z: st.stand.y, face: st.face, then: () => this.use(st) };
+  // ======================================================================= the carousel
+  /** the station the camera is on */
+  private get here(): Station {
+    return this.stations[this.idx] ?? this.stations[0];
+  }
+  /** the camera has settled and Sundown is standing at the station */
+  private get arrived() {
+    return !this.mv && this.route.length === 0;
+  }
+
+  /** one station left (-1) or right (+1) */
+  private step(d: number) {
+    const n = this.stations.length;
+    if (!n || this.intro) return;
+    this.go((((this.idx + d) % n) + n) % n);
+    const a = this.arrows.find((q) => q.dir === Math.sign(d));
+    if (a) a.push = 1;
+  }
+
+  /** swing the camera over to a station on an eased arc while Sundown walks there */
+  private go(i: number | Station, intro = false) {
+    const st = typeof i === 'number' ? this.stations[i] : i;
+    if (!st) return;
+    if (this.panel) this.closePanel();
+    this.idx = this.stations.indexOf(st);
+    if (intro) {
+      // in from the street, through the barn doors
+      this.pos.set(-6.9, 0.55);
+      this.yaw = Math.PI / 2;
+      this.route = [new THREE.Vector2(-5.4, 0.36), new THREE.Vector2(-4.45, LANE_Z), ...st.via.map((v) => v.clone()), st.stand.clone()];
+    } else this.route = this.planRoute(st);
+    let len = 0;
+    let prev = this.pos;
+    for (const p of this.route) {
+      len += p.distanceTo(prev);
+      prev = p;
+    }
+    const shot = this.shotOf(st);
+    const dist = this.baseP.distanceTo(shot.pos);
+    const dur = intro ? 4.6 : THREE.MathUtils.clamp(1.25 + dist * 0.2 + len * 0.07, 1.5, 3.0);
+    this.speed = THREE.MathUtils.clamp(len / Math.max(0.5, dur * 0.85), 1.05, 3.3);
+    // the arc bows toward the open middle of the room and lifts a little (under the tie beams)
+    const c = this.baseP.clone().lerp(shot.pos, 0.5).lerp(new THREE.Vector3(0.2, 1.7, 1.0), 0.35);
+    c.y += 0.12 + dist * 0.04;
+    if (intro) c.set(-5.6, 1.85, 1.05);
+    c.set(THREE.MathUtils.clamp(c.x, -4.3, 4.3), Math.min(c.y, 2.12), THREE.MathUtils.clamp(c.z, -2.8, 2.9));
+    this.mv = { t: 0, dur, p0: this.baseP.clone(), l0: this.baseL.clone(), f0: this.camera.fov, c, intro };
+    if (!intro) this.engine.audio.play('paper_flutter', { volume: 0.18, pitch: 0.7 });
+  }
+
+  /** E / Enter / the prompt: use the station he's standing at */
+  private act() {
+    if (this.intro || this.panel || !this.arrived) return;
+    this.use(this.here);
+  }
+
+  /** back out along the walk-in he's on to the lane, along it, then in to the new stand */
+  private planRoute(to: Station) {
+    const P = this.pos;
+    const chainOf = (s: Station) => [...s.via, s.stand];
+    if (Math.abs(P.y - LANE_Z) < 0.15) return chainOf(to).map((v) => v.clone());
+    let best: Station | null = null, bi = 0, bd = 1e9;
+    for (const s of this.stations) {
+      const ch = chainOf(s);
+      for (let k = 0; k < ch.length - 1; k++) {
+        const a = ch[k], b = ch[k + 1];
+        const abx = b.x - a.x, aby = b.y - a.y;
+        const u = clamp01(((P.x - a.x) * abx + (P.y - a.y) * aby) / (abx * abx + aby * aby || 1e-6));
+        const d = Math.hypot(P.x - a.x - abx * u, P.y - a.y - aby * u);
+        if (d < bd) {
+          bd = d;
+          best = s;
+          bi = k;
+        }
+      }
+    }
+    if (!best || bd > 0.7) return [new THREE.Vector2(P.x, LANE_Z), ...chainOf(to).map((v) => v.clone())];
+    const ch = chainOf(best);
+    if (best === to) return ch.slice(bi + 1).map((v) => v.clone());
+    return [...ch.slice(0, bi + 1).reverse(), ...chainOf(to)].map((v) => v.clone());
   }
 
   exit() {
     this.panel?.remove();
-    for (const el of [this.tip, this.bank, this.title, this.prompt, this.hint, this.bubble]) el.remove();
+    for (const el of [this.tip, this.bank, this.title, this.prompt, this.hint, this.bubble, ...this.arrows.map((a) => a.label)]) el.remove();
     this.wind?.stop(0.5);
     this.fireLoop?.stop(0.3);
     document.body.style.cursor = 'default';
@@ -1542,118 +1619,191 @@ export class HubScene implements GameScene {
     this.mirror?.dispose();
     this.envRT?.dispose();
     this.icons?.dispose();
+    this.sub?.dispose();
+    for (const set of this.titles.values()) for (const m of set.letters) m.geometry.dispose();
+    this.titleMat?.dispose();
+    for (const a of this.arrows) {
+      a.mat.dispose();
+      a.mesh.geometry.dispose();
+    }
     if ((window as any).__hub === this) (window as any).__hub = null;
   }
 
-  // ======================================================================= locomotion
-  private collide(p: THREE.Vector2) {
-    for (let it = 0; it < 3; it++)
-      for (const w of this.walls) {
-        const cx = Math.max(w.x0, Math.min(p.x, w.x1)), cz = Math.max(w.z0, Math.min(p.y, w.z1));
-        const dx = p.x - cx, dz = p.y - cz;
-        const d = Math.hypot(dx, dz);
-        if (d >= HERO_R) continue;
-        if (d > 1e-5) {
-          p.x = cx + (dx / d) * HERO_R;
-          p.y = cz + (dz / d) * HERO_R;
-        } else {
-          // inside: push out along the shallowest side
-          const l = p.x - w.x0, r = w.x1 - p.x, b = p.y - w.z0, f = w.z1 - p.y;
-          const m = Math.min(l, r, b, f);
-          if (m === l) p.x = w.x0 - HERO_R;
-          else if (m === r) p.x = w.x1 + HERO_R;
-          else if (m === b) p.y = w.z0 - HERO_R;
-          else p.y = w.z1 + HERO_R;
+  // ======================================================================= locomotion (he walks the route; no free walking)
+  private locomote(rdt: number) {
+    const want = new THREE.Vector2();
+    if (this.route.length) {
+      const tgt = this.route[0];
+      const dx = tgt.x - this.pos.x, dz = tgt.y - this.pos.y;
+      const d = Math.hypot(dx, dz);
+      const last = this.route.length === 1;
+      if (d < (last ? 0.035 : 0.28)) {
+        this.route.shift();
+        if (!this.route.length) {
+          this.faceTo = this.here.face;
+          this.onArrive(this.here);
         }
       }
-  }
-
-  private locomote(rdt: number) {
-    const inp = this.engine.input;
-    const intro = this.introT < 4.2;
-    const busy = !!this.panel || intro;
-    // desired velocity: keys (camera-relative), or walking to a target
-    const want = new THREE.Vector2();
-    let ix = 0, iz = 0;
-    if (!busy) {
-      ix = (inp.isDown('KeyD') || inp.isDown('ArrowRight') ? 1 : 0) - (inp.isDown('KeyA') || inp.isDown('ArrowLeft') ? 1 : 0);
-      iz = (inp.isDown('KeyW') || inp.isDown('ArrowUp') ? 1 : 0) - (inp.isDown('KeyS') || inp.isDown('ArrowDown') ? 1 : 0);
+      if (this.route.length) {
+        const sp = last ? Math.min(this.speed, d * 2.6 + 0.06) : this.speed;
+        want.set(dx, dz).multiplyScalar(sp / Math.max(d, 1e-4));
+      }
     }
-    const run = !busy && (inp.isDown('ShiftLeft') || inp.isDown('ShiftRight'));
-    if (ix || iz) {
-      this.walkTo = null;
-      const f = new THREE.Vector3();
-      this.camera.getWorldDirection(f);
-      const fw = new THREE.Vector2(f.x, f.z).normalize();
-      const rt = new THREE.Vector2(-fw.y, fw.x);
-      want.addScaledVector(fw, iz).addScaledVector(rt, ix).normalize().multiplyScalar(run ? 2.9 : 1.55);
-    } else if (this.walkTo) {
-      const dx = this.walkTo.x - this.pos.x, dz = this.walkTo.z - this.pos.y;
-      const d = Math.hypot(dx, dz);
-      if (d < 0.06 || (d < 0.3 && this.vel.length() < 0.05)) {
-        const w = this.walkTo;
-        this.walkTo = null;
-        if (w.face !== undefined) this.faceTo = w.face;
-        if (w.then) this.pendingUse = { t: 0.35, f: w.then };
-      } else want.set(dx, dz).multiplyScalar(Math.min(intro ? 1.3 : 1.7, d * 3) / d);
-    }
-    this.vel.x = damp(this.vel.x, want.x, 9, rdt);
-    this.vel.y = damp(this.vel.y, want.y, 9, rdt);
+    this.vel.x = damp(this.vel.x, want.x, 6, rdt);
+    this.vel.y = damp(this.vel.y, want.y, 6, rdt);
     const before = this.pos.clone();
     this.pos.addScaledVector(this.vel, rdt);
-    if (!intro) this.collide(this.pos);
-    // keep the measured speed honest after collisions
+    // settle exactly onto the stand
+    if (!this.route.length && !this.intro) this.pos.lerp(this.here.stand, 1 - Math.exp(-rdt * 4));
     const moved = this.pos.clone().sub(before).length() / Math.max(rdt, 1e-4);
-    const sp = Math.min(moved, this.vel.length());
+    const sp = Math.min(moved, this.vel.length() + 0.05);
     // heading
     let tgtYaw = this.yaw;
-    if (sp > 0.12) tgtYaw = Math.atan2(this.vel.x, this.vel.y);
+    if (sp > 0.12 && this.route.length) tgtYaw = Math.atan2(this.vel.x, this.vel.y);
     else if (this.faceTo !== null) tgtYaw = this.faceTo;
-    if (sp > 0.12) this.faceTo = null;
     let dy = tgtYaw - this.yaw;
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-    this.yaw += dy * (1 - Math.exp(-rdt * (sp > 0.12 ? 9 : 6)));
+    this.yaw += dy * (1 - Math.exp(-rdt * (sp > 0.12 ? 9 : 5)));
     this.moveK = damp(this.moveK, Math.min(1, sp / 1.2), 8, rdt);
     this.runK = damp(this.runK, Math.min(1, Math.max(0, (sp - 1.6) / 1.2)), 5, rdt);
+    this.atK = damp(this.atK, this.route.length ? 0 : 1, this.route.length ? 8 : 3, rdt);
     // gait phase: a stance covers 2·amp at body speed
     const amp = 0.17 + 0.11 * this.runK;
     const duty = 0.62 - 0.14 * this.runK;
-    this.phase += (Math.max(sp, 0) * duty) / (2 * amp) * rdt;
+    this.phase += ((Math.max(sp, 0) * duty) / (2 * amp)) * rdt;
     // footsteps
     for (let k = 0; k < 2; k++) {
       const f = (this.phase + k * 0.5) % 1;
       if (this.moveK > 0.35 && f < this.lastStep[k]) this.engine.audio.play('footstep_sand', { volume: (this.pos.x < HX.CABIN_OPEN.garageX ? 0.22 : 0.14) + this.runK * 0.1, pitch: this.pos.x < HX.CABIN_OPEN.garageX ? 1.0 : 1.35 });
       this.lastStep[k] = f;
     }
-    if (this.pendingUse) {
-      this.pendingUse.t -= rdt;
-      if (this.pendingUse.t <= 0) {
-        const f = this.pendingUse.f;
-        this.pendingUse = null;
-        f();
-      }
-    }
     this.heroHolder.position.set(this.pos.x, 0, this.pos.y);
     this.heroHolder.rotation.y = this.yaw;
     return { amp, duty, sp };
   }
   private faceTo: number | null = null;
-  private pendingUse: { t: number; f: () => void } | null = null;
 
-  /** procedural walk: exact two-bone leg IK on planted feet, counter-swinging arms, hips, spine and a head that looks */
+  /** he's there: Mama greets him at the hearth */
+  private onArrive(st: Station) {
+    if (st.id === 'hearth' && this.mamaCd <= 0) {
+      this.mamaLine = this.mamaLine === 0 && !this.bubbleText ? 0 : (this.mamaLine + 1) % MAMA_LINES.length;
+      this.say(MAMA_LINES[this.mamaLine]);
+      this.mamaCd = 16 + Math.random() * 6;
+    }
+  }
+
+  /** world-space hand targets (and elbow poles, in the torso frame) for the pose at a station */
+  private poseTargets(st: Station, t: number) {
+    const H = this.heroHolder;
+    const n = this.hero!.nodes;
+    const W = (x: number, y: number, z: number) => H.localToWorld(new THREE.Vector3(x, y, z));
+    const out: { l: THREE.Vector3 | null; r: THREE.Vector3 | null; poleL?: THREE.Vector3; poleR?: THREE.Vector3 } = { l: null, r: null };
+    const belt = (s: number) => W(s * 0.165, 0.77, 0.085);
+    const hip = (s: number) => W(s * 0.2, 0.8, -0.01);
+    const brim = () => (n['head'] ? n['head'].localToWorld(new THREE.Vector3(-0.085, 0.33, 0.21)) : W(-0.1, 1.75, 0.2));
+    /** 0 → 1 → 0 once per period: up over [a, b], down over [c, d] */
+    const pulse = (period: number, a: number, b: number, c: number, d: number) => {
+      const p = t % period;
+      return sstep(a, b, p) * (1 - sstep(c, d, p));
+    };
+    switch (st.pose) {
+      case 'door': {
+        // looking out at the dunes, one thumb in his belt; now and then he tugs his hat brim to the sunset
+        const w = pulse(7.5, 1.0, 1.6, 3.4, 4.1);
+        out.r = belt(-1).lerp(brim(), w);
+        out.l = belt(1);
+        out.poleR = new THREE.Vector3(-1, -0.4 + w * 0.3, -0.3 + w * 0.5);
+        out.poleL = new THREE.Vector3(1, -0.2, -0.4);
+        break;
+      }
+      case 'bench': {
+        // leaning on the bench, hands spread on the top; every few seconds he reaches in to fiddle with the gun
+        const y = (st.surf ?? 0.9) + 0.03, r = st.reach ?? 0.4;
+        out.l = W(0.22, y, r);
+        const w = pulse(5.2, 1.0, 1.5, 3.4, 3.9);
+        out.r = W(-0.2, y, r + 0.02).lerp(W(-0.05 + Math.sin(t * 9) * 0.012, y + 0.05 + Math.abs(Math.sin(t * 4.5)) * 0.02, r + 0.18), w);
+        break;
+      }
+      case 'board': {
+        // waxing the board on the sawhorses: slow circles with the right hand, the left braced on the rail
+        const y = st.surf ?? 0.75, r = st.reach ?? 0.5;
+        const a = t * 3.2;
+        out.r = W(-0.12 + Math.cos(a) * 0.07, y + 0.01, r - 0.04 + Math.sin(a) * 0.05);
+        out.l = W(0.22, y + 0.01, r - 0.08);
+        break;
+      }
+      case 'mirror': {
+        // hands on hips, looking himself over; now and then a hat adjustment
+        out.l = hip(1);
+        out.r = hip(-1);
+        out.poleL = new THREE.Vector3(1, 0.15, -0.25);
+        out.poleR = new THREE.Vector3(-1, 0.15, -0.25);
+        const w = pulse(6.5, 2.0, 2.5, 3.9, 4.4);
+        if (w > 0) {
+          out.r.lerp(brim(), w);
+          out.poleR.set(-1, -0.2, 0.1);
+        }
+        break;
+      }
+      case 'book': {
+        // a hand on the lectern, turning pages: lift from the right page, over the spine, down on the left, back
+        const b = H.worldToLocal(st.at.clone());
+        const p = t % 4.4;
+        const e = ease(clamp01((p - 1.2) / 0.85)) * (1 - ease(clamp01((p - 2.5) / 0.7)));
+        const x = -0.11 + 0.22 * e;
+        out.r = W(b.x + x, b.y + 0.03 + Math.sin(Math.PI * e) * 0.1, b.z + Math.sin(Math.PI * e) * 0.03);
+        out.l = W(b.x + 0.18, b.y + 0.01, b.z - 0.07);
+        break;
+      }
+      case 'hearth': {
+        // hands out to the fire, palms to the warmth; now and then he rubs them together
+        const rub = pulse(5, 1.2, 1.4, 2.6, 2.8);
+        const s = Math.sin(t * 15) * 0.03 * rub;
+        out.l = W(0.09 - 0.05 * rub, 1.08, 0.4 + s);
+        out.r = W(-0.09 + 0.05 * rub, 1.08, 0.4 - s);
+        out.poleL = new THREE.Vector3(0.8, -0.6, -0.3);
+        out.poleR = new THREE.Vector3(-0.8, -0.6, -0.3);
+        break;
+      }
+      case 'music': {
+        if (this.music) {
+          // snapping his fingers to the record, the other thumb in his belt
+          const b = Math.abs(Math.sin(t * Math.PI * 1.75));
+          out.r = W(-0.26, 1.2 + b * 0.04, 0.16);
+          out.l = belt(1);
+          out.poleR = new THREE.Vector3(-1, -0.5, -0.2);
+        } else {
+          out.r = belt(-1);
+          out.l = belt(1);
+        }
+        break;
+      }
+    }
+    return out;
+  }
+
+  /** procedural walk (exact two-bone leg IK on planted feet), then a station pose: hands on IK targets, lean, weight shift, a head that looks */
   private animateHero(g: { amp: number; duty: number }, t: number, rdt: number) {
     const h = this.hero;
     const spec = this.heroSpec;
     if (!h || !spec) return;
     const n = h.nodes;
     const mk = this.moveK, rk = this.runK;
+    const st = this.here;
+    const P = this.atK;
+    const pose = st.pose;
+    const groove = pose === 'music' && this.music ? P : 0;
+    const beat = t * Math.PI * 1.75; // ~105 bpm
     const hipY = (spec.meta?.hipY as number) ?? 0.67, kneeY = (spec.meta?.kneeY as number) ?? 0.36;
     const l1 = hipY - kneeY, l2 = kneeY;
-    // pelvis height: settle a little into the knees, bob twice a cycle, breathe when still
-    const drop = -0.022 - 0.03 * rk - 0.012 * mk;
+    this.heroHolder.updateMatrixWorld(true);
+    // pelvis: settle a little into the knees, bob twice a cycle, breathe when still; shift the weight (or sway to the record)
+    const shiftX = P * 0.016 * Math.sin(t * 0.45) * (1 - groove) + groove * Math.sin(beat) * 0.03;
+    const crouch = P * (pose === 'board' ? 0.06 : pose === 'bench' ? 0.025 : pose === 'hearth' ? 0.015 : 0) + groove * Math.abs(Math.sin(beat)) * 0.014;
+    const drop = -0.022 - 0.03 * rk - 0.012 * mk - crouch;
     const bob = (0.016 + 0.02 * rk) * mk * Math.cos(this.phase * Math.PI * 4);
     const breathe = Math.sin(t * 1.5) * 0.004 * (1 - mk);
-    h.root.position.y = drop + bob + breathe;
+    h.root.position.set(shiftX, drop + bob + breathe, 0);
     const lift = 0.07 + 0.06 * rk;
     const legs: [string, string, number, number][] = [['thigh_l', 'shin_l', 0, 1], ['thigh_r', 'shin_r', 0.5, -1]];
     const sweeps = [0, 0];
@@ -1663,7 +1813,7 @@ export class HubScene implements GameScene {
       const thigh = n[th], shin = n[sh];
       if (!thigh || !shin) return;
       const hipX = thigh.position.x;
-      const fx = hipX * 0.9 + side * 0.012 * (1 - mk);
+      const fx = hipX * 0.9 + side * (0.012 + 0.03 * P) * (1 - mk) - shiftX;
       const fz = L.sweep * g.amp * mk + 0.02;
       const fy = L.lift * lift * mk;
       legIK(fx - hipX, fy - (hipY + h.root.position.y), fz, l1, l2, 0.6, this.lp);
@@ -1671,66 +1821,86 @@ export class HubScene implements GameScene {
       shin.rotation.set(this.lp.knee, 0, this.lp.roll);
     });
     const [sL, sR] = sweeps;
-    const pose = this.panel ? this.active?.pose ?? 'idle' : 'idle';
-    if (n['pelvis']) n['pelvis'].rotation.set(0, -0.12 * sL, 0.035 * Math.sin(this.phase * Math.PI * 2) * mk + Math.sin(t * 0.37) * 0.012 * (1 - mk));
-    let lean = 0.03 + 0.06 * mk + 0.1 * rk + Math.sin(t * 1.5) * 0.008 * (1 - mk);
-    if (pose === 'bench' || pose === 'board') lean += 0.2;
-    if (pose === 'book') lean += 0.12;
-    if (pose === 'mirror') lean -= 0.05;
-    if (n['torso']) n['torso'].rotation.set(lean, 0.17 * sL, -0.02 * Math.sin(this.phase * Math.PI * 2) * mk);
-    // arms: swing against the legs, carried higher when running; reach for the work at a station
+    if (n['pelvis']) n['pelvis'].rotation.set(0, -0.12 * sL, 0.035 * Math.sin(this.phase * Math.PI * 2) * mk + Math.sin(t * 0.37) * 0.012 * (1 - mk) - shiftX * 1.6);
+    const LEAN: Record<HeroPose, number> = { door: -0.02, bench: 0.3, board: 0.42, mirror: -0.06, book: 0.18, hearth: 0.12, music: 0.02 };
+    const lean = 0.03 + 0.06 * mk + 0.1 * rk + Math.sin(t * 1.5) * 0.008 * (1 - mk) + P * LEAN[pose] + groove * 0.03;
+    const twist = P * (pose === 'mirror' ? Math.sin(t * 0.5) * 0.14 : pose === 'door' ? -0.08 : 0) + groove * Math.sin(beat * 0.5) * 0.1;
+    if (n['torso']) n['torso'].rotation.set(lean, 0.17 * sL + twist, -0.02 * Math.sin(this.phase * Math.PI * 2) * mk + groove * Math.sin(beat * 0.5) * 0.04);
+    // arms: the walking swing, bent toward the pose's IK targets as he settles in
     const swing = 0.42 + 0.35 * rk;
-    let al = -swing * sR + 0.04, ar = -swing * sL + 0.04, fl = -0.2 - 0.6 * rk - 0.18 * Math.max(0, -al), fr = -0.2 - 0.6 * rk - 0.18 * Math.max(0, -ar);
-    let zl = 0.07 + Math.sin(t * 0.9) * 0.01, zr = -0.07 - Math.sin(t * 0.9 + 1) * 0.01;
-    if (pose === 'bench' || pose === 'board') {
-      al = ar = -0.62;
-      fl = fr = -0.85;
-      zl = 0.18;
-      zr = -0.18;
-    } else if (pose === 'book') {
-      ar = -0.75;
-      fr = -0.9;
-      zr = -0.1;
-    } else if (pose === 'mirror') {
-      // hands on the hips, looking himself over
-      al = 0.28;
-      ar = 0.28;
-      zl = 0.62;
-      zr = -0.62;
-      fl = fr = -1.45;
-    }
-    const set = (k: string, x: number, z: number) => {
-      const o = n[k];
-      if (!o) return;
-      o.rotation.x = damp(o.rotation.x, x, 12, rdt);
-      o.rotation.z = damp(o.rotation.z, z, 12, rdt);
+    const al = -swing * sR + 0.04, ar = -swing * sL + 0.04;
+    const fl = -0.2 - 0.6 * rk - 0.18 * Math.max(0, -al), fr = -0.2 - 0.6 * rk - 0.18 * Math.max(0, -ar);
+    const zl = 0.07 + Math.sin(t * 0.9) * 0.01, zr = -0.07 - Math.sin(t * 0.9 + 1) * 0.01;
+    h.root.updateMatrixWorld(true);
+    const tg = P > 0.01 ? this.poseTargets(st, t) : null;
+    const torso = n['torso'];
+    if (tg && torso) this.m4.copy(torso.matrixWorld).invert();
+    const k = 1 - Math.exp(-rdt * 14);
+    const arm = (side: 'l' | 'r', ex: number, ez: number, fx: number) => {
+      const A = n['arm_' + side], F = n['fore_' + side];
+      if (!A || !F) return;
+      this.qa.setFromEuler(this.eu.set(ex, 0, ez));
+      this.qb.setFromEuler(this.eu.set(fx, 0, 0));
+      const T = tg?.[side];
+      if (T && torso) {
+        const tl = T.clone().applyMatrix4(this.m4);
+        const pole = (side === 'l' ? tg!.poleL : tg!.poleR) ?? new THREE.Vector3(side === 'l' ? 0.6 : -0.6, -0.2, -1);
+        armIK(A.position, tl, pole, this.armL1, this.armL2, this.v3.set(0, 0.3, 1), this.qc, this.qd);
+        this.qa.slerp(this.qc, P);
+        this.qb.slerp(this.qd, P);
+      }
+      A.quaternion.slerp(this.qa, k);
+      F.quaternion.slerp(this.qb, k);
     };
-    set('arm_l', al, zl);
-    set('arm_r', ar, zr);
-    set('fore_l', fl, 0);
-    set('fore_r', fr, 0);
+    arm('l', al, zl, fl);
+    arm('r', ar, zr, fr);
     // the duster's skirt trails the stride
     if (n['coat']) n['coat'].rotation.set(0.05 * mk + 0.12 * rk + Math.abs(sL) * 0.05, 0, 0.03 * Math.sin(this.phase * Math.PI * 2) * mk);
-    // head: look at what's interesting (the station in reach, Mama, the camera when idle)
-    const look = new THREE.Vector3();
-    if (this.panel && this.active) look.copy(this.active.id === 'wardrobe' && this.mirror ? this.mirror.position : this.active.at);
-    else if (this.near) look.copy(this.near.at);
-    else if (this.pos.distanceTo(new THREE.Vector2(this.mamaHead.x, this.mamaHead.z)) < 2.2) look.copy(this.mamaHead);
-    else look.set(this.pos.x + Math.sin(this.yaw + Math.sin(t * 0.21) * 0.6) * 3, 1.55 + Math.sin(t * 0.33) * 0.15, this.pos.y + Math.cos(this.yaw + Math.sin(t * 0.21) * 0.6) * 3);
+    // head: down the road while walking; at a station, the work, the mirror, the dunes, the fire, Mama when she talks
+    const look = this.v1.set(this.pos.x + Math.sin(this.yaw + Math.sin(t * 0.21) * 0.4) * 3, 1.5, this.pos.y + Math.cos(this.yaw + Math.sin(t * 0.21) * 0.4) * 3);
+    if (P > 0.01) {
+      const H = this.heroHolder;
+      const pl = this.v2;
+      switch (pose) {
+        case 'door':
+          H.localToWorld(pl.set(Math.sin(t * 0.17) * 1.6, 1.62, 7));
+          break;
+        case 'bench':
+          this.gunHolder.getWorldPosition(pl);
+          break;
+        case 'board':
+          pl.copy(this.boardBench.position);
+          break;
+        case 'mirror':
+          pl.copy(st.at).add(this.v3.set(0, Math.sin(t * 0.7) * 0.05, 0));
+          break;
+        case 'book':
+          pl.copy(st.at);
+          break;
+        case 'hearth':
+          if (this.mamaTalk > 0.2 || Math.sin(t * 0.23) > 0.55) pl.copy(this.mamaHead).add(this.v3.set(0, -0.2, 0));
+          else pl.copy(this.firePos);
+          break;
+        case 'music':
+          if (this.music) H.localToWorld(pl.set(Math.sin(t * 0.3) * 0.8, 1.6, 3));
+          else pl.copy(st.at);
+          break;
+      }
+      look.lerp(pl, P);
+    }
     const dx = look.x - this.pos.x, dz = look.z - this.pos.y;
     let ly = Math.atan2(dx, dz) - this.yaw;
     ly = Math.atan2(Math.sin(ly), Math.cos(ly));
     const lpch = Math.atan2(1.62 - look.y, Math.hypot(dx, dz));
-    this.headYaw = damp(this.headYaw, Math.max(-0.95, Math.min(0.95, ly)) - 0.17 * sL, 5, rdt);
-    this.headPitch = damp(this.headPitch, Math.max(-0.4, Math.min(0.5, lpch)) - lean * 0.6 + (pose === 'book' ? 0.25 : 0), 5, rdt);
-    if (n['head']) n['head'].rotation.set(this.headPitch, this.headYaw, Math.sin(t * 0.5) * 0.02);
+    this.headYaw = damp(this.headYaw, Math.max(-0.95, Math.min(0.95, ly)) - 0.17 * sL - twist * 0.6, 5, rdt);
+    this.headPitch = damp(this.headPitch, Math.max(-0.4, Math.min(0.62, lpch)) - lean * 0.6, 5, rdt);
+    if (n['head']) n['head'].rotation.set(this.headPitch + groove * Math.sin(beat * 2) * 0.07, this.headYaw, Math.sin(t * 0.5) * 0.02 + groove * Math.sin(beat) * 0.05);
     h.root.updateMatrixWorld(true);
   }
 
   // ======================================================================= frame
   update(_dt: number, rdt: number) {
     this.t += rdt;
-    this.introT += rdt;
     const t = this.t;
     const eng = this.engine;
     const inp = eng.input;
@@ -1740,72 +1910,215 @@ export class HubScene implements GameScene {
     }
     const g = this.locomote(rdt);
     this.animateHero(g, t, rdt);
+    // ------------------------------------------------ the camera, then the UI that rides with it
+    this.updateCamera(t, rdt);
+    this.placeUI(t, rdt);
+    this.updateTitle(rdt);
 
-    // ------------------------------------------------ stations: what's in reach, hover, click, use
-    let best: Station | null = null, bd = 1e9;
-    if (!this.panel && this.introT > 4.2)
-      for (const st of this.stations) {
-        const d = Math.hypot(st.stand.x - this.pos.x, st.stand.y - this.pos.y);
-        if (d < st.r && d < bd) {
-          best = st;
-          bd = d;
-        }
-      }
-    this.near = best;
-    if (!this.panel) {
+    // ------------------------------------------------ left / right, use; the arrow signs, the stations, the duck under the mouse
+    const free = !this.panel && !this.intro;
+    if (free) {
+      if (inp.wasPressed('KeyA') || inp.wasPressed('ArrowLeft')) this.step(-1);
+      else if (inp.wasPressed('KeyD') || inp.wasPressed('ArrowRight')) this.step(1);
+      if (inp.wasPressed('KeyE') || inp.hit('interact') || inp.wasPressed('Space')) this.act();
+    }
+    let arrowDir = 0;
+    let hit: Station | null = null;
+    let duck = false;
+    if (free) {
       this.ray.setFromCamera(new THREE.Vector2(inp.ndcX, inp.ndcY), this.camera);
-      let h: Station | null = null;
-      const objs = this.stations.flatMap((s) => s.objs);
-      const hits = this.ray.intersectObjects(objs, true);
-      if (hits.length) {
-        let o: THREE.Object3D | null = hits[0].object;
-        while (o && !h) {
-          const oo = o;
-          h = this.stations.find((s) => s.objs.includes(oo)) ?? null;
-          o = o.parent;
+      const ah = this.ray.intersectObjects(this.arrows.filter((a) => a.grp.visible).map((a) => a.mesh), false);
+      if (ah.length) arrowDir = this.arrows.find((a) => a.mesh === ah[0].object)?.dir ?? 0;
+      else {
+        const hits = this.ray.intersectObjects(this.stations.flatMap((s) => s.objs), true);
+        if (hits.length) {
+          let o: THREE.Object3D | null = hits[0].object;
+          while (o && !hit) {
+            if (o === this.duck) duck = true;
+            const oo = o;
+            hit = this.stations.find((s) => s.objs.includes(oo)) ?? null;
+            o = o.parent;
+          }
+          if (o === this.duck) duck = true;
         }
       }
-      if (h !== this.hovered) {
-        if (h) eng.audio.play('ui_hover', { volume: 0.3 });
-        this.hovered = h;
-        document.body.style.cursor = h ? 'pointer' : 'default';
-      }
-      if (h) {
-        this.tip.textContent = h.label;
-        this.tip.style.display = 'block';
-        this.tip.style.left = `${inp.mouseX + 16}px`;
-        this.tip.style.top = `${inp.mouseY + 12}px`;
-      } else this.tip.style.display = 'none';
-      if (inp.wasPressed('Mouse0') && this.introT > 4.2) {
-        if (h) this.go(h);
-        else {
-          // click the floor: walk there
-          const hit = new THREE.Vector3();
-          if (this.ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit) && hit.x > WALK.x0 && hit.x < WALK.x1 && hit.z > WALK.z0 && hit.z < WALK.z1 + 0.3) this.walkTo = { x: hit.x, z: Math.min(hit.z, WALK.z1) };
-        }
-      }
-      if (this.near && (inp.hit('interact') || inp.wasPressed('KeyE'))) this.go(this.near);
+    }
+    const hoverKey = arrowDir ? 'a' + arrowDir : duck ? 'duck' : (hit?.id ?? '');
+    if (hoverKey !== this.hoverKey) {
+      if (hoverKey) eng.audio.play('ui_hover', { volume: 0.25 });
+      this.hoverKey = hoverKey;
+      document.body.style.cursor = hoverKey ? 'pointer' : 'default';
+    }
+    this.hoverArrow = arrowDir;
+    const tipText = arrowDir ? '' : duck ? 'Squeeze the duck' : hit ? (hit === this.here ? hit.verb : 'Go to the ' + hit.short.toLowerCase()) : '';
+    if (tipText) {
+      this.tip.textContent = tipText;
+      this.tip.style.display = 'block';
+      this.tip.style.left = `${inp.mouseX + 16}px`;
+      this.tip.style.top = `${inp.mouseY + 12}px`;
     } else this.tip.style.display = 'none';
-    // prompt over the station in reach
-    if (this.near && !this.panel && !this.walkTo) {
-      const p = this.near.at.clone().project(this.camera);
-      if (p.z < 1) {
-        this.prompt.style.display = 'block';
-        this.prompt.style.left = `${((p.x + 1) / 2) * eng.width}px`;
-        this.prompt.style.top = `${((1 - p.y) / 2) * eng.height}px`;
-        const key = this.touch ? 'TAP' : 'E';
-        this.prompt.innerHTML = `<span style="display:inline-block;padding:0 7px;margin-right:7px;background:#e8d4a4;color:#2a1a10;border:3px solid #2a1408;box-shadow:0 3px 0 #2a1408">${key}</span>${this.near.label.split(' — ')[0]}`;
-      } else this.prompt.style.display = 'none';
-    } else this.prompt.style.display = 'none';
+    if (free && inp.wasPressed('Mouse0')) {
+      if (arrowDir) this.step(arrowDir);
+      else if (duck && this.here.id === 'gramophone') this.use({ ...this.here, id: 'duck' });
+      else if (hit) {
+        if (hit === this.here) this.act();
+        else this.go(hit);
+      }
+    }
+    // ------------------------------------------------ the action prompt under the shot
+    const showPrompt = free && this.arrived;
+    this.prompt.style.opacity = showPrompt ? '1' : '0';
+    this.prompt.style.pointerEvents = showPrompt ? 'auto' : 'none';
+    const st = this.here;
+    const verb = st.id === 'gramophone' ? (this.music ? 'Hush the record' : 'Play a record') : st.verb;
+    const key = this.touch ? 'TAP' : 'E';
+    const html = `<span style="display:inline-block;padding:1px 9px;margin-right:10px;background:#e8d4a4;color:#2a1a10;border:3px solid #2a1408;box-shadow:0 3px 0 #2a1408">${key}</span>${verb.toUpperCase()}`;
+    if (this.prompt.innerHTML !== html) this.prompt.innerHTML = html;
 
     // ------------------------------------------------ the house breathes
     this.animateLife(t, rdt);
     this.particles.update(rdt, this.scene.fog as THREE.Fog);
     this.stepMoveArt();
-
-    // ------------------------------------------------ cinematic camera
-    this.updateCamera(t, rdt);
   }
+  private hoverKey = '';
+
+  /** the two carved arrow signs ride at the screen's edges, a hand's breadth in front of the lens */
+  private buildUI() {
+    const s = this.scene;
+    s.add(this.ui);
+    for (const dir of [-1, 1] as const) {
+      const sm = safe(() => WS.arrowSign(dir));
+      const g = geoOf(sm, 'center');
+      if (!sm || !g) continue;
+      const mat = makeVoxelMaterial({ emissiveStrength: 0.42 });
+      const mesh = new THREE.Mesh(g, mat);
+      mesh.renderOrder = 6;
+      const grp = new THREE.Group();
+      grp.add(mesh);
+      grp.visible = false;
+      this.ui.add(grp);
+      this.arrowScale = 0.19 / sm.meta.length;
+      const label = document.createElement('div');
+      label.style.cssText = "position:absolute;z-index:7;pointer-events:auto;cursor:pointer;transform:translate(-50%,0);font-family:'Alagard';font-size:15px;color:#fff3d6;text-shadow:0 2px 0 #2a1408,0 0 8px #000;white-space:nowrap;opacity:0";
+      label.onmousedown = (e) => e.stopPropagation();
+      label.onclick = () => this.step(dir);
+      this.engine.overlay.appendChild(label);
+      this.arrows.push({ dir, grp, mesh, mat, hover: 0, push: 0, label });
+    }
+    this.titleMat = makeVoxelMaterial({ emissiveStrength: 0.38 });
+    for (const st of this.stations) this.titles.set(st.id, voxelTitle(st.title, 0.08, this.titleMat));
+    this.sub = new FloatText3D('', { size: 0.03, px: 48, cps: 34, wrap: 60, align: 'left', hdr: 1.15, color: '#fff3d6', glow: '#ffb070' });
+    this.sub.show(false);
+    s.add(this.sub.mesh);
+  }
+
+  private placeUI(t: number, rdt: number) {
+    const cam = this.camera;
+    this.ui.position.copy(cam.position);
+    this.ui.quaternion.copy(cam.quaternion);
+    this.ui.updateMatrixWorld(true);
+    const show = !this.panel && !this.intro;
+    this.uiK = damp(this.uiK, show ? 1 : 0, show ? 3.5 : 9, rdt);
+    const d = 0.95;
+    const halfH = d * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2), halfW = halfH * cam.aspect;
+    const n = this.stations.length;
+    for (const a of this.arrows) {
+      a.hover = damp(a.hover, this.hoverArrow === a.dir ? 1 : 0, 10, rdt);
+      a.push = Math.max(0, a.push - rdt * 2.6);
+      // an idle nudge in the way it points, a kick when used
+      const nudge = Math.pow(Math.max(0, Math.sin(t * 2.2 + (a.dir > 0 ? 0 : 1.7))), 8) * 0.014;
+      const kick = Math.sin(Math.min(1, a.push) * Math.PI) * 0.03;
+      const len = 0.19 * (1 + a.hover * 0.1);
+      const x = a.dir * (halfW - len * 0.62 - 0.03 + nudge + kick + (1 - this.uiK) * 0.35);
+      a.grp.position.set(x, -halfH * 0.06 + Math.sin(t * 1.3 + a.dir) * 0.005, -d);
+      a.grp.rotation.set(0.12 + Math.sin(t * 0.8 + a.dir) * 0.04, -a.dir * 0.34 + Math.sin(t * 0.6) * 0.03, Math.sin(t * 0.9 + a.dir * 2) * 0.03 - a.push * a.dir * 0.12);
+      a.grp.scale.setScalar(this.arrowScale * (1 + a.hover * 0.1 + kick * 2));
+      a.grp.visible = this.uiK > 0.02;
+      a.mat.userData.fx.value.z = a.hover * 1.3 + a.push * 0.8;
+      // the neighbour's name under the sign
+      const nb = this.stations[(((this.idx + a.dir) % n) + n) % n];
+      const txt = a.dir < 0 ? '◀ ' + nb.short : nb.short + ' ▶';
+      if (a.label.textContent !== txt) a.label.textContent = txt;
+      const p = this.ui.localToWorld(this.v3.set(x - a.dir * 0.01, -halfH * 0.06 - 0.075, -d)).project(cam);
+      a.label.style.left = `${((p.x + 1) / 2) * this.engine.width}px`;
+      a.label.style.top = `${((1 - p.y) / 2) * this.engine.height}px`;
+      a.label.style.opacity = String(this.uiK * (0.75 + a.hover * 0.25));
+      a.label.style.pointerEvents = this.uiK > 0.5 ? 'auto' : 'none';
+    }
+  }
+
+  /** the station's name flips up in gilded letters in the shot's empty third, the subtitle types itself under it */
+  private updateTitle(rdt: number) {
+    const want = !this.panel && !this.intro && this.arrived ? this.here : null;
+    const tt = this.ttl;
+    if (tt) {
+      if (tt.st !== want && tt.out < 0) tt.out = 0;
+      tt.t += rdt;
+      if (tt.out >= 0) tt.out += rdt;
+      let gone = tt.out >= 0;
+      tt.set.letters.forEach((m, i) => {
+        if (tt.out >= 0) {
+          const k = clamp01((tt.out - i * 0.018) / 0.28);
+          m.rotation.set(ease(k) * 1.5, 0, 0);
+          m.scale.setScalar(Math.max(0.001, 1 - ease(k)));
+          if (k < 1) gone = false;
+        } else {
+          const k = clamp01((tt.t - 0.12 - i * 0.05) / 0.55);
+          m.rotation.set(-(1 - backOut(k)) * 1.45, Math.sin(this.t * 1.1 + i * 0.6) * 0.06 * k, 0);
+          m.position.y = -(1 - Math.min(1, k * 1.4)) * 0.03;
+          m.scale.setScalar(Math.max(0.001, Math.min(1, k * 2.5)));
+        }
+      });
+      if (gone) {
+        tt.set.root.removeFromParent();
+        this.ttl = null;
+      }
+    }
+    if (!this.ttl && want) {
+      const set = this.titles.get(want.id);
+      if (set) {
+        const shot = this.shotOf(want);
+        const fwd = shot.look.clone().sub(shot.pos).normalize();
+        const right = fwd.clone().cross(UP).normalize();
+        const up = right.clone().cross(fwd).normalize();
+        const D = 1.3;
+        const halfH = D * Math.tan(THREE.MathUtils.degToRad(shot.fov) / 2), halfW = halfH * this.camera.aspect;
+        const [sx, sy, side] = want.slot;
+        const sc = Math.min(1, (halfW * 0.92) / Math.max(0.01, set.width));
+        const anchor = shot.pos.clone().addScaledVector(fwd, D).addScaledVector(right, sx * halfW).addScaledVector(up, sy * halfH);
+        // +X along the screen's right, +Y up, +Z back at the lens; turned in a few degrees so the carving shows
+        const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, fwd.clone().negate()));
+        q.multiply(new THREE.Quaternion().setFromAxisAngle(UP, side === 'left' ? 0.16 : -0.16));
+        set.root.quaternion.copy(q);
+        set.root.scale.setScalar(sc);
+        set.root.position.copy(anchor).addScaledVector(up, -set.capH * sc * 1.05).addScaledVector(right, side === 'left' ? 0 : -set.width * sc);
+        for (const m of set.letters) {
+          m.rotation.set(-1.45, 0, 0);
+          m.scale.setScalar(0.001);
+        }
+        this.scene.add(set.root);
+        this.ttl = { st: want, t: 0, out: -1, anchor, q, up, right, set };
+        this.sub?.setText(want.sub);
+        this.sub?.show(true);
+      }
+    }
+    if (this.ttl?.out !== undefined && this.ttl.out >= 0) this.sub?.show(false);
+    if (!this.ttl) this.sub?.show(false);
+    // the subtitle types itself out under the letters (FloatText3D billboards; it is pinned here, without its bob)
+    if (this.sub) {
+      this.sub.update(rdt, this.camera);
+      const tt2 = this.ttl;
+      if (tt2) {
+        const w = this.sub.mesh.scale.x;
+        const sc = tt2.set.root.scale.x;
+        const p = tt2.set.root.position.clone().addScaledVector(tt2.up, -0.034);
+        if (tt2.st.slot[2] === 'left') p.addScaledVector(tt2.right, w / 2 + 0.004);
+        else p.addScaledVector(tt2.right, tt2.set.width * sc - w / 2);
+        this.sub.mesh.position.copy(p);
+      }
+    }
+  }
+
 
   private animateLife(t: number, rdt: number) {
     const eng = this.engine;
@@ -1904,131 +2217,212 @@ export class HubScene implements GameScene {
       const pn = this.pinch.root;
       pn.scale.setScalar(0.8 * (1 + Math.sin(t * 2.1) * 0.012));
     }
-    this.animateMama(t, rdt);
+    this.animateToads(t, rdt);
   }
 
-  /** Mama Frog rocks, breathes, blinks, watches Sundown, and talks when he comes near */
-  private animateMama(t: number, rdt: number) {
-    if (this.chair?.nodes['chair']) this.chair.nodes['chair'].rotation.x = Math.sin(t * 1.05) * 0.055;
+
+  /**
+   * Mama Toad rocks in her chair, breathes, pumps her throat, knits, blinks with
+   * her lower lids, looks up over her spectacles when he comes to the hearth, and
+   * talks. The toadlets breathe, blink, watch him and now and then hop.
+   */
+  private animateToads(t: number, rdt: number) {
+    if (this.chair?.nodes['chair']) this.chair.nodes['chair'].rotation.x = Math.sin(t * 1.05) * 0.05;
     const m = this.mama;
-    const heroNear = Math.hypot(this.pos.x - this.mamaHead.x, this.pos.y - this.mamaHead.z) < 1.9;
+    const atHearth = this.here.id === 'hearth' && this.atK > 0.5;
     this.mamaCd -= rdt;
+    const heroHead = this.v4.set(this.pos.x, 1.55, this.pos.y);
     if (m) {
       const n = m.nodes;
       const talk = this.mamaTalk > 0 ? 1 : 0;
       this.mamaTalk = Math.max(0, this.mamaTalk - rdt);
-      // breathing: belly and throat swell slowly; the throat puffs with each phrase
-      const br = Math.sin(t * 1.6);
-      if (n['belly']) n['belly'].scale.setScalar(1 + br * 0.025);
-      const puff = talk ? 0.12 + Math.abs(Math.sin(t * 7)) * 0.18 : Math.max(0, Math.sin(t * 0.55) - 0.85) * 1.6;
-      if (n['throat']) n['throat'].scale.setScalar(1 + puff);
-      if (n['body']) n['body'].scale.set(1 + br * 0.008, 1 - br * 0.006, 1 + br * 0.008);
-      // blinks: lids come down as the globes sink and flatten
+      // breathing: the flanks swell; the throat pumps quick and shallow, deeper as she speaks, a slow gulp now and then
+      const br = Math.sin(t * 1.4);
+      if (n['body']) n['body'].scale.set(1 + br * 0.012, 1 + br * 0.005, 1 + br * 0.008);
+      if (n['belly']) n['belly'].scale.setScalar(1 + br * 0.02);
+      const pump = Math.max(0, Math.sin(t * 7.5)) * 0.05 + (talk ? Math.abs(Math.sin(t * 6)) * 0.1 : 0) + Math.max(0, Math.sin(t * 0.5) - 0.92) * 2;
+      if (n['throat']) n['throat'].scale.set(1 + pump * 0.6, 1 + pump, 1 + pump * 0.7);
+      // the needles work in a little rhythm; she pauses when she talks or looks up at him
+      this.mamaLook = damp(this.mamaLook, atHearth ? 1 : 0, 2, rdt);
+      this.knitK = damp(this.knitK, talk ? 0.15 : atHearth ? 0.55 : 1, 3, rdt);
+      const kn = t * 5.2, kk = this.knitK;
+      if (n['fore_r']) n['fore_r'].rotation.set(Math.sin(kn) * 0.09 * kk, Math.cos(kn) * 0.07 * kk, Math.sin(kn) * 0.04 * kk);
+      if (n['fore_l']) n['fore_l'].rotation.set(-Math.sin(kn + 0.6) * 0.04 * kk, -Math.cos(kn) * 0.03 * kk, 0);
+      if (n['knit']) n['knit'].rotation.set(Math.sin(t * 0.9) * 0.03 + Math.sin(kn) * 0.015 * kk, 0, 0);
+      // her head lifts to look at him over her spectacles, nods along as she talks
+      const ml = this.mamaLook;
+      if (n['head']) n['head'].rotation.set(-0.07 * ml + (talk ? Math.sin(t * 4.2) * 0.03 : 0) + Math.sin(t * 0.3) * 0.01, Math.sin(t * 0.21) * 0.03 + ml * 0.05, ml * 0.04 + Math.sin(t * 0.4) * 0.012);
+      if (n['jaw']) n['jaw'].rotation.x = talk ? Math.max(0, Math.sin(t * 11)) * 0.075 + 0.015 : damp(n['jaw'].rotation.x, 0, 8, rdt);
       this.mamaBlink -= rdt;
-      if (this.mamaBlink < -0.13) this.mamaBlink = 2.2 + Math.random() * 3.5;
-      const bl = this.mamaBlink < 0 ? Math.sin((-this.mamaBlink / 0.13) * Math.PI) : 0;
-      for (const e of ['eye_l', 'eye_r']) if (n[e]) n[e].scale.set(1, 1 - bl * 0.8, 1 - bl * 0.25);
-      // head: turn to Sundown when he's close, a fond tilt, a nod while talking
-      const local = new THREE.Vector3(this.pos.x, 1.3, this.pos.y);
-      m.root.parent?.updateWorldMatrix(true, false);
-      const inv = new THREE.Matrix4().copy(m.root.matrixWorld).invert();
-      local.applyMatrix4(inv);
-      const want = heroNear ? Math.max(-0.6, Math.min(0.6, Math.atan2(local.x, local.z))) : Math.sin(t * 0.13) * 0.25;
+      if (this.mamaBlink < -0.24) this.mamaBlink = 2.5 + Math.random() * 3.5;
+      const bl = this.mamaBlink < 0 ? Math.sin((-this.mamaBlink / 0.24) * Math.PI) : 0;
+      let look: THREE.Vector3 | null = null;
+      if (ml > 0.3) look = heroHead;
+      else if (n['knit']) look = n['knit'].getWorldPosition(this.v5);
+      this.toadEyes(m, this.mamaSpec?.meta ?? {}, bl, look);
       if (n['head']) {
-        n['head'].rotation.y = damp(n['head'].rotation.y, want, 3, rdt);
-        n['head'].rotation.z = damp(n['head'].rotation.z, (heroNear ? 0.14 : 0.05) + Math.sin(t * 0.4) * 0.04, 2, rdt);
-        n['head'].rotation.x = talk ? Math.sin(t * 5.5) * 0.04 : damp(n['head'].rotation.x, 0, 3, rdt);
+        n['head'].getWorldPosition(this.mamaHead);
+        this.mamaHead.y += 0.3;
       }
-      if (n['jaw']) n['jaw'].rotation.x = talk ? Math.max(0, Math.sin(t * 13)) * 0.16 + 0.02 : damp(n['jaw'].rotation.x, 0, 8, rdt);
-      if (n['leg_fl']) n['leg_fl'].rotation.x = Math.sin(t * 0.8) * 0.05 - (talk ? 0.25 + Math.sin(t * 4) * 0.12 : 0);
     }
-    // she pipes up when he comes over
-    if (heroNear && this.mamaCd <= 0 && !this.panel && this.introT > 4.2) {
+    // she pipes up now and then while he's with her
+    if (atHearth && this.mamaCd <= 0 && !this.panel) {
       this.mamaLine = (this.mamaLine + 1 + Math.floor(Math.random() * 2)) % MAMA_LINES.length;
       this.say(MAMA_LINES[this.mamaLine]);
-      this.mamaCd = 14 + Math.random() * 6;
+      this.mamaCd = 15 + Math.random() * 6;
     }
     // the speech bubble types itself out over her head
     if (this.bubbleText && (this.mamaTalk > 0 || this.bubbleT < 2)) {
       this.bubbleT += rdt;
-      const n = Math.min(this.bubbleText.length, Math.floor(this.bubbleT * 38));
-      const p = this.mamaHead.clone().add(new THREE.Vector3(0, 0.3, 0)).project(this.camera);
-      if (p.z < 1 && Math.abs(p.x) < 1.1) {
+      const nn = Math.min(this.bubbleText.length, Math.floor(this.bubbleT * 38));
+      const p = this.mamaHead.clone().project(this.camera);
+      if (p.z < 1 && Math.abs(p.x) < 1.1 && Math.abs(p.y) < 1.1) {
         this.bubble.style.display = 'block';
         this.bubble.style.left = `${((p.x + 1) / 2) * this.engine.width}px`;
         this.bubble.style.top = `${((1 - p.y) / 2) * this.engine.height}px`;
-        this.bubble.textContent = this.bubbleText.slice(0, n);
+        this.bubble.textContent = this.bubbleText.slice(0, nn);
       } else this.bubble.style.display = 'none';
       if (this.mamaTalk <= 0 && this.bubbleT > 2) this.bubbleText = '';
     } else this.bubble.style.display = 'none';
-    // the babies breathe and blink
-    for (const b of this.babies) {
-      const n = b.rig.nodes;
-      const br = Math.sin(t * 2.3 + b.phase);
-      if (n['belly']) n['belly'].scale.setScalar(1 + br * 0.04);
-      if (n['throat']) n['throat'].scale.setScalar(1 + Math.max(0, Math.sin(t * 0.9 + b.phase) - 0.8) * 2);
+    // the toadlets
+    for (const b of this.toadlets) {
+      const r = b.rig, n = r.nodes;
+      const br = Math.sin(t * 2.2 + b.phase);
+      if (n['body']) n['body'].scale.set(1 + br * 0.015, 1, 1 + br * 0.01);
+      const pump = Math.max(0, Math.sin(t * 9 + b.phase)) * 0.08;
+      if (n['throat']) n['throat'].scale.set(1 + pump * 0.6, 1 + pump, 1 + pump * 0.7);
       b.blink -= rdt;
-      if (b.blink < -0.15) b.blink = 1.8 + Math.random() * 4;
-      const bl = b.blink < 0 ? Math.sin((-b.blink / 0.15) * Math.PI) : 0;
-      for (const e of ['eye_l', 'eye_r']) if (n[e]) n[e].scale.set(1, 1 - bl * 0.85, 1);
-      if (n['head']) n['head'].rotation.y = Math.sin(t * 0.3 + b.phase) * 0.3;
+      if (b.blink < -0.2) b.blink = 1.8 + Math.random() * 4;
+      const bl = b.blink < 0 ? Math.sin((-b.blink / 0.2) * Math.PI) : 0;
+      r.root.getWorldPosition(this.v5);
+      this.toadEyes(r, b.spec.meta ?? {}, bl, this.v5.distanceTo(heroHead) < 2.6 ? heroHead : null);
+      if (!b.floor) continue;
+      // now and then: turn, then a little hop to a new spot near home (never under his boots)
+      if (b.hopT < 0) {
+        b.hop -= rdt;
+        if (b.hop <= 0) {
+          const a = Math.random() * Math.PI * 2, rr = Math.random() * 0.16;
+          b.from.copy(r.root.position);
+          b.to.set(b.home.x + Math.cos(a) * rr, b.home.y, b.home.z + Math.sin(a) * rr);
+          if (Math.hypot(b.to.x - this.pos.x, b.to.z - this.pos.y) < 0.45) b.to.copy(b.home);
+          b.turn = b.from.distanceTo(b.to) > 0.02 ? Math.atan2(b.to.x - b.from.x, b.to.z - b.from.z) : b.yaw + (Math.random() - 0.5) * 1.6;
+          b.hopT = 0;
+        }
+      } else {
+        b.hopT += rdt;
+        let dyaw = b.turn - b.yaw;
+        dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
+        r.root.rotation.y = b.yaw + dyaw * ease(clamp01(b.hopT / 0.4));
+        const k = clamp01((b.hopT - 0.4) / 0.3);
+        r.root.position.lerpVectors(b.from, b.to, ease(k));
+        r.root.position.y = b.from.y + Math.sin(k * Math.PI) * 0.045;
+        r.root.rotation.x = -Math.sin(k * Math.PI) * 0.3;
+        if (n['body']) n['body'].scale.z *= 1 + Math.sin(k * Math.PI) * 0.12;
+        if (b.hopT > 0.8) {
+          b.hopT = -1;
+          b.yaw = b.yaw + dyaw;
+          r.root.rotation.x = 0;
+          b.hop = 6 + Math.random() * 10;
+        }
+      }
     }
+  }
+
+  /** golden eyes roll a little toward what they watch; the lower lids sweep up to blink and the globes sink */
+  private toadEyes(r: RigInstance, meta: Record<string, any>, bl: number, look: THREE.Vector3 | null) {
+    const n = r.nodes;
+    const B = meta.blink as { l: number[]; r: number[]; close: number } | undefined;
+    const gz = (meta.eyes?.gaze as number[] | undefined) ?? [0.74, 0.3, 0.6];
+    for (const side of ['l', 'r'] as const) {
+      const lid = n['lid_' + side], eye = n['eye_' + side];
+      if (B && lid) lid.quaternion.setFromAxisAngle(this.v3.fromArray(B[side]), bl * B.close);
+      if (!eye) continue;
+      let yaw = 0, pitch = 0;
+      if (look && eye.parent) {
+        const d = eye.parent.worldToLocal(this.v3.copy(look)).sub(eye.position);
+        const gx = side === 'l' ? gz[0] : -gz[0];
+        let dy = Math.atan2(d.x, d.z) - Math.atan2(gx, gz[2]);
+        dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+        yaw = THREE.MathUtils.clamp(dy, -0.28, 0.28);
+        pitch = THREE.MathUtils.clamp(-(Math.atan2(d.y, Math.hypot(d.x, d.z)) - Math.asin(THREE.MathUtils.clamp(gz[1], -1, 1))), -0.22, 0.22);
+      }
+      eye.rotation.x = damp(eye.rotation.x, pitch, 6, 1 / 60);
+      eye.rotation.y = damp(eye.rotation.y, yaw, 6, 1 / 60);
+      eye.scale.setScalar(1 - bl * 0.07);
+    }
+  }
+
+  /** the shot, its look solved on thirds for the live aspect */
+  private shotOf(st: Station) {
+    const s = st.shot;
+    if (s.subject && s.ndc) thirdsLook(s.pos, s.subject, s.ndc[0], s.ndc[1], s.fov, this.camera.aspect || 16 / 9, s.look);
+    return s;
   }
 
   private updateCamera(t: number, rdt: number) {
     const inp = this.engine.input;
-    const g = this.goal;
-    const hx = this.pos.x, hz = this.pos.y;
+    const P = this.baseP, L = this.baseL;
+    let fov = this.camera.fov;
+    this.slideK = damp(this.slideK, this.panel && this.active ? 1 : 0, 2.6, rdt);
     if (this.debugCam) {
-      g.pos.fromArray(this.debugCam.pos);
-      g.look.fromArray(this.debugCam.look);
-      g.fov = this.debugCam.fov ?? 50;
-      this.camPos.copy(g.pos);
-      this.camLook.copy(g.look);
-    } else if (this.panel && this.active?.shot) {
-      g.pos.copy(this.active.shot.pos);
-      g.look.copy(this.active.shot.look);
-      g.fov = this.active.shot.fov;
-      // the panel covers one side: slide the frame so the subject sits in the free half
-      const fwd = g.look.clone().sub(g.pos);
-      const dist = fwd.length();
-      const right = fwd.normalize().cross(new THREE.Vector3(0, 1, 0)).normalize();
-      const halfW = Math.tan(THREE.MathUtils.degToRad(g.fov) / 2) * this.camera.aspect * dist;
-      g.look.addScaledVector(right, (this.panelSide === 'right' ? 1 : -1) * halfW * 0.4);
-    } else if (this.introT < 4.2) {
-      // walk-in: from the street, through the barn doors, behind Sundown as he comes home
-      const k = Math.min(1, this.introT / 4.2);
-      g.pos.set(-9.6 + k * 6.0, 1.75 + k * 0.3, 2.3 + k * 0.2);
-      g.look.set(hx + 1.2, 1.15, hz - 0.6);
-      g.fov = 50;
+      P.fromArray(this.debugCam.pos);
+      L.fromArray(this.debugCam.look);
+      fov = this.debugCam.fov ?? 50;
     } else {
-      // the stage camera rides along the front of the room, a little behind and above Sundown
-      // a little to his left, so the room is seen on the diagonal (corner to hearth) like the reference photo
-      const cx = Math.max(-3.75, Math.min(3.5, hx * 0.8 - 0.42));
-      const cz = Math.max(0.55, Math.min(2.72, hz + 3.0));
-      const cy = Math.min(2.1, 1.95 + Math.max(0, hz + 0.4) * 0.16); // stays under the tie beams
-      g.pos.set(cx, cy, cz);
-      const lead = new THREE.Vector3(this.vel.x, 0, this.vel.y).multiplyScalar(0.28);
-      g.look.set(hx * 0.9 + 0.05, 0.98, hz - 0.45).add(lead);
-      // near a station, frame it with him
-      if (this.near) g.look.lerp(new THREE.Vector3(this.near.at.x, Math.min(this.near.at.y, 1.3), this.near.at.z), 0.32);
-      g.fov = 50;
-      // a slow drift and the mouse leaning the frame
-      const right = new THREE.Vector3().subVectors(g.look, g.pos).cross(new THREE.Vector3(0, 1, 0)).normalize();
-      g.pos.addScaledVector(right, Math.sin(t * 0.07) * 0.12 + inp.ndcX * 0.1);
-      g.pos.y += Math.sin(t * 0.09) * 0.03 + inp.ndcY * 0.05;
+      const shot = this.shotOf(this.here);
+      if (this.mv) {
+        // the swing: a quadratic arc from where the camera was, eased in and out; the look leads a touch and leans
+        // toward Sundown mid-move so he stays in the frame as he walks over; a breath of zoom on the way
+        const m = this.mv;
+        m.t += rdt;
+        const u = clamp01(m.t / m.dur);
+        const e = ease(u);
+        const a = (1 - e) * (1 - e), b = 2 * e * (1 - e), c = e * e;
+        P.set(m.p0.x * a + m.c.x * b + shot.pos.x * c, m.p0.y * a + m.c.y * b + shot.pos.y * c, m.p0.z * a + m.c.z * b + shot.pos.z * c);
+        L.lerpVectors(m.l0, shot.look, ease(Math.min(1, u * 1.12)));
+        L.lerp(this.v1.set(this.pos.x, 1.25, this.pos.y), Math.sin(Math.PI * u) * (m.intro ? 0.7 : 0.38));
+        fov = m.f0 + (shot.fov - m.f0) * e + Math.sin(Math.PI * u) * (m.intro ? 0 : 3);
+        if (u >= 1) {
+          this.mv = null;
+          if (m.intro) this.intro = false;
+        }
+      } else {
+        P.copy(shot.pos);
+        L.copy(shot.look);
+        fov = shot.fov;
+      }
+      // with a panel open, the frame slides so the subject sits in the free half
+      if (this.slideK > 0.001) {
+        const fwd = this.v1.subVectors(L, P);
+        const dist = fwd.length();
+        const right = fwd.normalize().cross(UP).normalize();
+        const halfW = Math.tan(THREE.MathUtils.degToRad(fov) / 2) * this.camera.aspect * dist;
+        L.addScaledVector(right, (this.panelSide === 'right' ? 1 : -1) * halfW * 0.4 * this.slideK);
+      }
     }
-    const intro = this.introT < 4.2;
-    const kp = 1 - Math.exp(-rdt * (intro ? 1.6 : this.panel ? 2.4 : 2.0));
-    this.camPos.lerp(g.pos, kp);
-    this.camLook.lerp(g.look, 1 - Math.exp(-rdt * (intro ? 2.2 : 3.2)));
-    const sway = new THREE.Vector3(Math.sin(t * 1.3) * 0.005 + Math.sin(t * 2.9) * 0.0025, Math.sin(t * 1.7) * 0.004 + Math.sin(t * 3.7) * 0.0015, 0);
+    // the mouse only leans the frame a little (parallax), with a slow breathing drift
+    this.par.x = damp(this.par.x, this.panel ? 0 : inp.ndcX, 2.5, rdt);
+    this.par.y = damp(this.par.y, this.panel ? 0 : inp.ndcY, 2.5, rdt);
+    const fwd = this.v1.subVectors(L, P).normalize();
+    const right = this.v2.crossVectors(fwd, UP).normalize();
+    this.camPos.copy(P).addScaledVector(right, this.par.x * 0.07 + Math.sin(t * 0.11) * 0.02).addScaledVector(UP, this.par.y * 0.04 + Math.sin(t * 0.15) * 0.012);
+    this.camLook.copy(L).addScaledVector(right, this.par.x * 0.025);
+    const sway = new THREE.Vector3(Math.sin(t * 1.3) * 0.004 + Math.sin(t * 2.9) * 0.002, Math.sin(t * 1.7) * 0.003 + Math.sin(t * 3.7) * 0.0012, 0);
     this.camera.position.copy(this.camPos).add(sway);
     this.camera.lookAt(this.camLook.clone().add(sway.multiplyScalar(1.5)));
     this.camera.rotateZ(Math.sin(t * 0.6) * 0.004);
-    this.camera.fov = damp(this.camera.fov, g.fov, 2.2, rdt);
+    this.camera.fov = fov;
     this.camera.updateProjectionMatrix();
     // the live mirror only renders while the camera is close enough to see it
     if (this.mirror) this.mirror.visible = this.camera.position.distanceTo(this.mirror.position) < 6.5;
   }
+  private slideK = 0;
+  private knitK = 1;
+  private mamaLook = 0;
+  private qd = new THREE.Quaternion();
+  private v1 = new THREE.Vector3();
+  private v2 = new THREE.Vector3();
+  private v3 = new THREE.Vector3();
+  private v4 = new THREE.Vector3();
+  private v5 = new THREE.Vector3();
 }

@@ -85,6 +85,25 @@ export const GUN_FEEL = {
   killStopHead: 0.075,
 };
 
+/**
+ * Board-slide dodge (hold drift + tap jump): a sideways hop off the rail of
+ * the board with brief i-frames, a jade afterimage trail and a lean into it.
+ * Anything that would have hit inside the i-frames is a PERFECT DODGE.
+ */
+export const DODGE = {
+  /** sideways shove (m/s) and hop (m/s up) */
+  side: 11,
+  hop: 4.4,
+  /** invulnerable for (s) */
+  iframes: 0.4,
+  cooldown: 0.85,
+  /** afterimages: count, spacing (s), fade time (s), start opacity */
+  ghosts: 3,
+  ghostGap: 0.06,
+  ghostLife: 0.34,
+  ghostAlpha: 0.42,
+};
+
 const DEG = Math.PI / 180;
 const _o = new THREE.Vector3();
 const _pt = new THREE.Vector3();
@@ -122,6 +141,15 @@ export class Player {
   meleeCd = 0;
   meleeAnim = 0;
   counterWindow = 0;
+  // board-slide dodge
+  dodgeCd = 0;
+  /** i-frame time left from a dodge (a hit landing inside it is a perfect dodge) */
+  dodgeT = 0;
+  private dodgeSide = 1;
+  private dodgeHold = false;
+  private perfectDodged = false;
+  private ghostQueue: number[] = [];
+  private ghosts: { g: THREE.Group; mat: THREE.MeshBasicMaterial; t: number }[] = [];
   // grapple
   grappleCd = 0;
   grappleLine: THREE.Line;
@@ -204,6 +232,14 @@ export class Player {
     // crits are rolled inside the enemy damage resolve: listen so the shot can feel them
     ctx.events.on('enemyHit', (_e: EnemyLike, hit: Hit, _amt: number, res: { crit?: boolean }) => {
       if (hit?.source === 'gun' && res?.crit) this.shotCrit = true;
+    });
+    // a landed counter: safe for a beat, the view punches in on the impact
+    ctx.events.on('counter', () => {
+      this.invuln = Math.max(this.invuln, 0.55);
+      this.cam.punch(-0.03, 0, -3.4, 0);
+      this.cam.addTrauma(0.22);
+      this.meleeCd = Math.min(this.meleeCd, 0.2);
+      this.express('smug', 1);
     });
   }
 
@@ -365,6 +401,14 @@ export class Player {
       bi.dirX = bi.dirZ = bi.throttle = 0;
       bi.jumpHeld = bi.jumpPressed = bi.jumpReleased = bi.drift = bi.boost = false;
     }
+    // board-slide dodge: hold drift, tap jump (the press is spent on the dodge, not a charged jump)
+    this.dodgeCd -= dt;
+    this.dodgeT = Math.max(0, this.dodgeT - dt);
+    if (this.alive && !stunned && bi.jumpPressed && bi.drift && this.dodgeCd <= 0) this.dodge(fx, fz, cf);
+    if (this.dodgeHold) {
+      if (!inp.held('jump')) this.dodgeHold = false;
+      bi.jumpHeld = bi.jumpPressed = bi.jumpReleased = false;
+    }
     const wasBoost = this.board.boosting;
     this.board.step(dt * this.status.slowMul(), bi, { surface: this.ctx.world.surface, normal: this.ctx.world.normal, slope: this.ctx.world.slope, colliders: this.ctx.world.colliders });
     if (this.board.boosting && !wasBoost) {
@@ -406,6 +450,7 @@ export class Player {
     }
     this.spreadDeg = this.coneDeg(this.fanning);
     this.animate(dt);
+    this.dodgeVisuals(dt);
     this.barrelSmoke(dt);
     if (this.ctx.faces) {
       this.eyes.lookAt(this.aimPoint);
@@ -948,6 +993,113 @@ export class Player {
     }
   }
 
+  // ------------------------------------------------------------- dodge
+  private dodgeLean = 1;
+  /** a sideways hop off the board's rail: shove + hop, i-frames, afterimages, sand flung off the edge */
+  private dodge(fx: number, fz: number, cf: { x: number; z: number }) {
+    const b = this.board;
+    const gy = this.ctx.world.groundAt(this.pos.x, this.pos.z);
+    if (!b.grounded && this.pos.y - gy > 0.7) return;
+    // sideways from the view: the held strafe key, else away from the last dodge
+    const side = fx !== 0 ? Math.sign(fx) : -this.dodgeSide;
+    this.dodgeSide = side;
+    let dx = -cf.z * side + cf.x * fz * 0.35, dz = cf.x * side + cf.z * fz * 0.35;
+    const dl = Math.hypot(dx, dz) || 1;
+    dx /= dl;
+    dz /= dl;
+    // kill any drift the wrong way, then the shove
+    const along = b.vel.x * dx + b.vel.z * dz;
+    if (along < 0) {
+      b.vel.x -= dx * along;
+      b.vel.z -= dz * along;
+    }
+    b.impulse.x += dx * DODGE.side;
+    b.impulse.z += dz * DODGE.side;
+    b.impulse.y += DODGE.hop;
+    this.dodgeLean = dx * -Math.cos(b.heading) + dz * Math.sin(b.heading) >= 0 ? 1 : -1;
+    this.dodgeCd = DODGE.cooldown;
+    this.dodgeT = DODGE.iframes;
+    this.invuln = Math.max(this.invuln, DODGE.iframes);
+    this.perfectDodged = false;
+    this.dodgeHold = true;
+    this.ghostQueue = [];
+    for (let i = 0; i < DODGE.ghosts; i++) this.ghostQueue.push(i * DODGE.ghostGap);
+    const ctx = this.ctx;
+    ctx.sfx('whoosh_big', this.pos, 0.55, 1.3);
+    ctx.sfx('sand_spray', this.pos, 0.6, 1.1);
+    ctx.sfx('board_jump', this.pos, 0.6, 1.15);
+    ctx.fx.sandSpray({ x: this.pos.x, y: gy + 0.05, z: this.pos.z }, { x: -dx * 5, y: 1.5, z: -dz * 5 }, 1.6);
+    ctx.particles.emit({ pos: { x: this.pos.x, y: gy + 0.15, z: this.pos.z }, count: 5, vel: { x: -dx * 2.5, y: 0.6, z: -dz * 2.5 }, spread: 1.2, life: [0.4, 0.8], size: [0.3, 0.8], sprite: ['puff0', 'puff1'], color: [0xe6cf9f, 0xd8b98a], alpha: 0.6, drag: 2.5, rot: 6 });
+    this.cam.punch(0, 0, 1.3, side * 0.025);
+    this.express('determined', 0.5);
+  }
+
+  /** something would have hit inside the dodge's i-frames: reward it */
+  private perfectDodge() {
+    if (this.perfectDodged) return;
+    this.perfectDodged = true;
+    const ctx = this.ctx;
+    const c = this.center(new THREE.Vector3());
+    this.dodgeT = Math.max(this.dodgeT, 0.15);
+    this.invuln = Math.max(this.invuln, 0.3);
+    ctx.toast('PERFECT DODGE', '#6fe3cf');
+    ctx.sfx('qte_good', null, 0.5, 1.25);
+    ctx.sfx('bullet_whiz', c, 0.6);
+    ctx.fx.sparkle(c, 0x6fe3cf, 10, 0.7);
+    ctx.engine.slowMo(0.35, 30);
+    ctx.engine.tweens.after(0.22, () => ctx.engine.slowMo(1, 6), true);
+    this.board.boostMeter = Math.min(1, this.board.boostMeter + 0.2);
+    ctx.run.ultCharge = Math.min(1, ctx.run.ultCharge + 0.01);
+    this.express('smug', 0.8);
+    ctx.events.emit('perfectDodge');
+  }
+
+  /** the lean into the dodge, and the jade afterimages left along its path */
+  private dodgeVisuals(dt: number) {
+    if (this.dodgeT > 0) {
+      const k = 1 - this.dodgeT / DODGE.iframes;
+      this.tilt.rotateZ(this.dodgeLean * 0.62 * Math.sin(Math.max(0, k) * Math.PI));
+    }
+    for (let i = this.ghostQueue.length - 1; i >= 0; i--) {
+      this.ghostQueue[i] -= dt;
+      if (this.ghostQueue[i] <= 0) {
+        this.ghostQueue.splice(i, 1);
+        this.spawnGhost();
+      }
+    }
+    for (let i = this.ghosts.length - 1; i >= 0; i--) {
+      const gh = this.ghosts[i];
+      gh.t += dt;
+      const k = gh.t / DODGE.ghostLife;
+      if (k >= 1) {
+        gh.g.removeFromParent();
+        gh.mat.dispose();
+        this.ghosts.splice(i, 1);
+        continue;
+      }
+      gh.mat.opacity = DODGE.ghostAlpha * (1 - k) * (1 - k);
+    }
+  }
+
+  /** freeze Sundown's current pose (rig, gun, board) into a fading jade afterimage */
+  private spawnGhost() {
+    const mat = new THREE.MeshBasicMaterial({ color: 0x8dffb8, vertexColors: true, transparent: true, opacity: DODGE.ghostAlpha, blending: THREE.AdditiveBlending, depthWrite: false });
+    const g = new THREE.Group();
+    this.root.updateMatrixWorld(true);
+    this.root.traverseVisible((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !(m.geometry as THREE.BufferGeometry).getAttribute('color')) return;
+      const c = new THREE.Mesh(m.geometry, mat);
+      c.matrixAutoUpdate = false;
+      c.matrix.copy(m.matrixWorld);
+      c.frustumCulled = false;
+      c.renderOrder = 2;
+      g.add(c);
+    });
+    this.ctx.scene.add(g);
+    this.ghosts.push({ g, mat, t: 0 });
+  }
+
   // ------------------------------------------------------------- grapple
   private updateGrapple(dt: number) {
     const g = this.board.grapple;
@@ -1031,7 +1183,12 @@ export class Player {
   // ------------------------------------------------------------- damage
   /** returns damage dealt */
   takeHit(hit: Hit, from?: THREE.Vector3): number {
-    if (!this.alive || this.invuln > 0) return 0;
+    if (!this.alive) return 0;
+    if (this.dodgeT > 0 && hit.source !== 'thorns') {
+      this.perfectDodge();
+      return 0;
+    }
+    if (this.invuln > 0) return 0;
     // dodge (board style): mobility-based
     if (rnd.next() < this.stats.get('dodge')) {
       this.ctx.fx.number({ x: this.pos.x, y: this.pos.y + 2.1, z: this.pos.z }, 'x', 0x6fe3cf, 0.8);
