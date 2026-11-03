@@ -636,8 +636,8 @@ export class HubScene implements GameScene {
       station({
         id: 'gramophone', label: 'Gramophone', title: 'THE GRAMOPHONE', short: 'GRAMOPHONE', sub: 'a little night music', verb: 'Music on / off',
         stand: new THREE.Vector2(0.8, -0.93), face: Math.PI, at: this.gramTop.clone(), r: 0.55, objs: [gr, this.duck], pose: 'music',
-        via: [new THREE.Vector2(0.86, LANE_Z)], slot: [0.92, 0.86, 'right'],
-        shot: { pos: new THREE.Vector3(1.95, 1.3, 0.42), look: new THREE.Vector3(), fov: 42, subject: new THREE.Vector3(0.8, 1.45, -0.93), ndc: [-0.3, 0.1] },
+        via: [new THREE.Vector2(0.86, LANE_Z)], slot: [-0.92, 0.86, 'left'],
+        shot: { pos: new THREE.Vector3(-0.9, 1.25, -1.15), look: new THREE.Vector3(), fov: 46, subject: new THREE.Vector3(0.8, 1.45, -0.93), ndc: [0.3, 0.42] },
       });
     }
     void fut;
@@ -687,18 +687,18 @@ export class HubScene implements GameScene {
       parent.add(tr.root);
       this.toadlets.push({ rig: tr, spec: ts, home: new THREE.Vector3(x, y, z), yaw: ry, phase: x * 3.1 + z, blink: 1 + Math.random() * 3, hop: 4 + Math.random() * 6, hopT: -1, from: new THREE.Vector3(x, y, z), to: new THREE.Vector3(x, y, z), turn: ry, floor });
     };
-    toadlet('toadlet', this.firePos.x - 0.08, 0, fpFront + 0.22, Math.PI + 0.35, true);
+    toadlet('toadlet', this.firePos.x - 0.02, 0, fpFront + 0.92, Math.PI + 0.4, true);
     toadlet('toadlet_v2', 1.62, 0.012, -0.78, -1.75, true);
-    toadlet('toadlet_v1', this.firePos.x + 0.74, 0, fpFront + 0.24, Math.PI - 0.6, true, s, 0.88);
+    toadlet('toadlet_v1', this.firePos.x + 0.55, 0, fpFront + 0.12, Math.PI - 0.5, true, s, 0.88);
     if (this.chair?.nodes['chair']) toadlet('toadlet_v1', -0.452, 0.8 - ((chSpec?.meta?.pivot as number[])?.[1] ?? 1.21), 0.02, 0.1, false, this.chair.nodes['chair']);
     if (this.chair) {
-      const stand = new THREE.Vector2(this.firePos.x + 0.3, fpFront + 0.7);
+      const stand = new THREE.Vector2(this.firePos.x + 0.42, fpFront + 0.45);
       this.mamaHead.set(CH_AT.x - 0.08, 1.0, CH_AT.z + 0.14);
       station({
         id: 'hearth', label: 'Mama Toad', title: 'THE HEARTH', short: 'HEARTH', sub: 'Mama Toad keeps the kettle on', verb: 'Chat with Mama',
         stand, face: Math.atan2(this.firePos.x - stand.x, this.firePos.z - stand.y), at: this.firePos.clone(), r: 0.8, objs: [this.chair.root], pose: 'hearth',
         via: [new THREE.Vector2(stand.x - 0.08, LANE_Z)], slot: [-0.92, 0.86, 'left'],
-        shot: { pos: new THREE.Vector3(1.32, 1.28, 0.42), look: new THREE.Vector3(), fov: 42, subject: new THREE.Vector3(CH_AT.x - 0.05, 0.98, CH_AT.z + 0.05), ndc: [-0.2, -0.06] },
+        shot: { pos: new THREE.Vector3(2.2, 1.24, 0.3), look: new THREE.Vector3(), fov: 42, subject: new THREE.Vector3(CH_AT.x - 0.02, 0.95, CH_AT.z + 0.05), ndc: [-0.33, -0.08] },
       });
     }
     // the wardrobe and the cheval mirror (the dressing corner by the right window)
@@ -763,13 +763,13 @@ export class HubScene implements GameScene {
       spot.target.position.copy(lp).add(new THREE.Vector3(-0.15, -1, 0.2));
       s.add(spot, spot.target);
       this.flick.push({ l: spot, base: spot.intensity, k: 0.015 });
-      put(B(() => HX.barStool(2, 'ok')), -1.0, -2.08, 0.4);
-      const bst = new THREE.Vector2(gp.x - 0.12, gp.z + 0.6);
+      put(B(() => HX.barStool(2, 'ok')), -0.42, -2.12, 0.4);
+      const bst = new THREE.Vector2(gp.x - 0.36, gp.z + 0.6);
       station({
         id: 'bench', label: 'Weapon Bench', title: 'THE WORKBENCH', short: 'WORKBENCH', sub: 'tune your iron', verb: 'Tune the gun',
         stand: bst, face: Math.PI, at: gp.clone(), r: 0.75, objs: [wb], pose: 'bench',
         via: [new THREE.Vector2(-1.15, LANE_Z), new THREE.Vector2(bst.x + 0.4, bst.y + 0.75)], slot: [0.92, 0.86, 'right'], surf: wbSm.meta.top, reach: 0.4,
-        shot: { pos: new THREE.Vector3(-0.42, 1.55, -0.5), look: new THREE.Vector3(), fov: 44, subject: new THREE.Vector3(bst.x, 1.45, bst.y), ndc: [-0.3, 0.1] },
+        shot: { pos: new THREE.Vector3(bst.x + 1.25, 1.55, bst.y + 1.55), look: new THREE.Vector3(), fov: 44, subject: new THREE.Vector3(bst.x, 1.45, bst.y), ndc: [-0.3, 0.1] },
       });
     }
 
