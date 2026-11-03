@@ -58,6 +58,10 @@ import { WagonRepair } from '../run/WagonRepair';
 import { NeckSlicer } from '../player/NeckSlicer';
 import { ZoneCine } from './ZoneCine';
 import { Tutorial } from '../run/Tutorial';
+import { Equipment } from '../player/Equipment';
+import { GearPickups } from '../run/GearLoot';
+import { GearHud } from '../ui/GearHud';
+import { registerExtraUpgrades, ExtraUpgradeEffects } from '../run/UpgradesExtra';
 import { unlock, technique } from '../player/Techniques';
 import { KhonsuAvatar } from '../bosses/Khonsu';
 import { ULT_INFO } from '../player/Ultimate';
@@ -83,6 +87,8 @@ export interface RunCarry {
   codex: Record<string, number>;
   bosses: string[];
   ult: string;
+  gear?: string[];
+  deadHand?: boolean;
 }
 
 function resolveRig(keys: string[], fallback: () => RigSpec): RigSpec {
@@ -169,6 +175,10 @@ export class RunScene implements GameScene {
   private pickerShown = false;
   private zoneCine: ZoneCine | null = null;
   tutorial: Tutorial | null = null;
+  equipment!: Equipment;
+  gearLoot!: GearPickups;
+  gearHud!: GearHud;
+  upFx2!: ExtraUpgradeEffects;
   private waveIntroT = 0;
   private gameOver = false;
   ready = false;
@@ -273,12 +283,18 @@ export class RunScene implements GameScene {
     void ULT_INFO;
     this.upgrades = new UpgradeManager(this.player.stats);
     this.upFx = new UpgradeEffects(this.ctx, this.upgrades, this.player, this.skills);
+    registerExtraUpgrades();
+    this.upFx2 = new ExtraUpgradeEffects(this.ctx, this.upgrades, this.player, this.skills);
+    this.equipment = new Equipment(this.ctx, this.player);
+    this.gearLoot = new GearPickups(this.ctx, this.player, this.equipment, e.input, this.hud);
+    this.gearHud = new GearHud(this.hud3d.scene, this.hud, this.equipment);
     this.picker = new CardPicker(this.ctx, this.upgrades, e.input, () => this.player.pos);
     this.inter = new Interactions(this.player);
     this.choice = new Choice(this.ctx, e.input);
     this.shop = new Shop(this.ctx, e.input, this.camRig);
     this.missions = new Missions({
       ctx: this.ctx, player: this.player, enemies: this.enemies, props: this.props, inter: this.inter, choice: this.choice, shop: this.shop, qte: this.qte, cam: this.camRig, items: this.items,
+      gearWares: () => this.gearLoot.shopWares(2),
       card: () => this.picker.request(),
       chest: (x, z, tier) => this.spawnChest(x, z, tier),
       addBounty: (v) => this.addBounty(v),
@@ -305,6 +321,8 @@ export class RunScene implements GameScene {
       this.codexKills = { ...cy.codex };
       this.bossNames = [...cy.bosses];
       this.ult.variant = cy.ult as any;
+      this.equipment.restore((cy.gear ?? []) as any);
+      this.equipment.deadHandSpent = !!cy.deadHand;
       e.tweens.after(1.6, () => this.hud3d.cutIn(SUBAREAS[this.opts.area].name.toUpperCase(), '#ffd36b', 'determined'), true);
     }
     this.trailEvents = new TrailEvents({
@@ -381,6 +399,10 @@ export class RunScene implements GameScene {
     this.engine.post.u.uDesat.value = 0;
     this.qte.dispose();
     this.engine.input.setWantLock(false);
+    this.gearLoot?.dispose();
+    this.gearHud?.dispose();
+    this.equipment?.dispose();
+    this.upFx2?.dispose();
     this.events.clear();
   }
 
@@ -590,6 +612,7 @@ export class RunScene implements GameScene {
         else this.hud.toast('POCKETS FULL', '#ff8a6a', ITEMS[l.item].name + ' left behind');
       }
       if (l.card) this.engine.tweens.after(0.7, () => this.picker.request());
+      this.gearLoot.onChest(ch.tier, at);
     });
     this.chests.push(c);
     this.inter.add(c.inter);
@@ -797,7 +820,9 @@ export class RunScene implements GameScene {
       history: [...this.upgrades.history],
       items: this.items.slots.map((x) => (x ? { ...x } : null)),
       hpFrac: this.player.hp / this.player.maxHp,
-      mods: this.player.stats.mods.filter((m) => !m.source.startsWith('up:') && m.source !== 'gun' && !m.source.startsWith('item:')),
+      mods: this.player.stats.mods.filter((m) => !m.source.startsWith('up:') && m.source !== 'gun' && !m.source.startsWith('item:') && !m.source.startsWith('gear:') && !m.source.startsWith('upx:')),
+      gear: this.equipment.snapshot(),
+      deadHand: this.equipment.deadHandSpent,
       codex: { ...this.codexKills },
       bosses: [...this.bossNames],
       ult: this.ult.variant,
@@ -878,10 +903,11 @@ export class RunScene implements GameScene {
       e.input.setWantLock(false);
       e.audio.play('book_open', { volume: 0.6 });
     }
-    const modal = this.choice.active || this.shop.active || this.ledger.open || !!this.colony?.modal || !!this.jerboa?.modal;
+    const modal = this.choice.active || this.shop.active || this.ledger.open || !!this.colony?.modal || !!this.jerboa?.modal || this.gearLoot.active;
     if (!modal && !this.picker.active && e.input.hit('pause')) this.setPaused(!this.pausedByUser);
     this.qte.update(rdt);
     this.picker.update(rdt);
+    this.gearLoot.update(dt, rdt);
     this.choice.update(rdt);
     this.shop.update(rdt);
     this.colony?.update(dt, rdt);
@@ -926,6 +952,8 @@ export class RunScene implements GameScene {
     }
     this.items.update(dt, e.input);
     this.upFx.update(dt);
+    this.upFx2.update(dt);
+    this.equipment.update(dt);
     this.garments.update(this.world.sa.wind.x * 3, this.world.sa.wind.z * 3, this.player.board.vel);
     this.enemies.update(dt, this.run.time);
     this.pickups.update(dt);
@@ -1078,6 +1106,7 @@ export class RunScene implements GameScene {
   postRender(renderer: THREE.WebGLRenderer) {
     if (!this.ready || this.trial) return;
     this.hud3d.update(this.lastRdt);
+    this.gearHud.update(this.lastRdt);
     this.hud3d.render(renderer);
   }
 

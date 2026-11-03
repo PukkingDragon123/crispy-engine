@@ -17,7 +17,7 @@ import { RARITY } from './Upgrades';
 import { Ease } from '../../engine/Tween';
 import { rnd } from '../../engine/math/rand';
 import { sharedVoxelMaterial } from '../../engine/render/VoxelMaterial';
-import { Equipment, GEAR, GEAR_IDS, GEAR_RARITY_ORDER, GearId, GearRarity, SLOT_INFO, buildGearDisplay, gearGlassMaterial, gearHex, gearPreview } from '../player/Equipment';
+import { Equipment, BOARD_SLOTS, GEAR, GEAR_IDS, GEAR_RARITY_ORDER, GearId, GearRarity, SLOT_INFO, buildGearDisplay, gearGlassMaterial, gearHex, gearPreview } from '../player/Equipment';
 import { makeGearCard, GearCard3D } from '../ui/GearCard';
 
 type ChestTier = 'wood' | 'silver' | 'gold' | 'divine';
@@ -154,7 +154,7 @@ export class GearPickups {
   // ------------------------------------------------------------------ world drops
   dropAt(id: GearId, at: { x: number; y: number; z: number }, o: { pop?: number; arm?: number } = {}) {
     const obj = new THREE.Group();
-    const show = buildGearDisplay(id, sharedVoxelMaterial, gearGlassMaterial(), 0.6);
+    const show = buildGearDisplay(id, sharedVoxelMaterial, gearGlassMaterial(), BOARD_SLOTS.includes(GEAR[id].slot) ? 1.1 : 0.6);
     obj.add(show);
     this.group.add(obj);
     const pop = o.pop ?? 6;

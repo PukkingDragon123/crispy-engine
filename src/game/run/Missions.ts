@@ -15,7 +15,7 @@ import type { Props, PropInst } from '../world/Props';
 import type { CameraRig } from '../player/CameraRig';
 import type { Qte } from '../ui/Qte';
 import type { Choice } from '../ui/Choice';
-import { Shop, merchantStock, type MerchantHooks } from '../ui/Shop';
+import { Shop, merchantStock, type MerchantHooks, type Ware } from '../ui/Shop';
 import { Interactions, Interactable, Chest, ChestTier } from './Interact';
 import type { Inventory } from '../player/Items';
 import { modelEntry } from '../models/lookup';
@@ -40,6 +40,8 @@ export interface MissionDeps {
   /** spawn a loot chest */
   chest(x: number, z: number, tier: ChestTier): Chest;
   addBounty(v: number): void;
+  /** gear pieces the merchant also sells */
+  gearWares?: () => Ware[];
 }
 
 interface Npc {
@@ -138,7 +140,7 @@ export class Missions {
     const d = this.d;
     return {
       board: d.player.board,
-      stock: () => merchantStock(d.ctx, (id) => d.items.add(id), () => d.player.heal(d.player.maxHp), () => d.card()),
+      stock: () => [...merchantStock(d.ctx, (id) => d.items.add(id), () => d.player.heal(d.player.maxHp), () => d.card()), ...(d.gearWares?.() ?? [])],
       busy: () => this.busy || d.choice.active || !d.player.alive,
       ...extra,
     };
@@ -165,7 +167,7 @@ export class Missions {
         const merchant = this.npcs.find((n) => n.kind === 'merchant' && n.lm === lm) ?? this.npcs.find((n) => n.kind === 'merchant');
         if (merchant) merchant.t = 0;
         const at = merchant ? merchant.rig.root.position : rugAt;
-        await this.d.shop.open(at.clone(), facing, merchantStock(ctx, (id) => this.d.items.add(id), () => this.d.player.heal(this.d.player.maxHp), () => this.d.card()), merchant?.rig.root.position ?? door);
+        await this.d.shop.open(at.clone(), facing, [...merchantStock(ctx, (id) => this.d.items.add(id), () => this.d.player.heal(this.d.player.maxHp), () => this.d.card()), ...(this.d.gearWares?.() ?? [])], merchant?.rig.root.position ?? door);
         return;
       }
       // crane shot around the landmark

@@ -1043,7 +1043,7 @@ function wing(tier: 1 | 2 | 3): VoxelModel {
 function wings(fit: GearFit, tier: 1 | 2 | 3): GearPiece[] {
   const B = fit.board;
   const l = wing(tier);
-  const at = (s: number): V3 => [s * Math.round(B.hw - 1), Math.round(B.bottom) - 1, Math.round(B.hl * 0.35)];
+  const at = (s: number): V3 => [s * Math.round(B.hw - 1), Math.round(B.bottom) + 1, Math.round(B.hl * 0.35)];
   return [piece('wing_l', 'board', at(1), l, { joint: 'wing' }), piece('wing_r', 'board', at(-1), mirrorModel(l), { joint: 'wing' })];
 }
 
@@ -1617,7 +1617,7 @@ let boardRef: { model: VoxelModel; voxelSize: number } | null = null;
  */
 export function gearDisplayParts(id: GearModelId, fit: GearFit = DEFAULT_FIT): DisplayPart[] {
   const P = fit.parts ?? referenceParts();
-  const pieces = gearPieces(id, fit);
+  const pieces = gearPieces(id, fit).filter((p) => p.joint !== 'jet'); // the flame core only shows while boosting
   const out: DisplayPart[] = [];
   // skinned pieces: centre each body part's group on its own bounds, then set pairs apart
   const groups = new Map<SkinPartName, { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number }>();

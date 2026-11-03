@@ -3,6 +3,7 @@
 // Pinch and his brood at sunset, the gods' statues, the oasis, the rib arch —
 // photographed through the CardStudio and cached. Photos are baked a step at a
 // time (call step() every frame while a pick is open) so nothing freezes.
+import { EXTRA_ART_FAMILY } from '../run/UpgradesExtra';
 import * as THREE from 'three';
 import { CardStudio, Shot } from './CardStudio';
 import { Kit, neckSlicerShot } from './TarotCards';
@@ -19,6 +20,7 @@ export const SKILL_ART: [number, number] = [240, 200];
 const ASPECT = SKILL_ART[0] / SKILL_ART[1];
 
 const FAMILY: Record<string, string> = {
+  ...EXTRA_ART_FAMILY,
   learnScorpionToss: 'brood', learnLocustSwarm: 'swarm', learnDungBomb: 'dung',
   venomRounds: 'venom', venomTank: 'venom', serketsKiss: 'venom',
   quickdraw: 'gun', hollowPoints: 'gun', grit: 'gun', steadyHand: 'gun', sixGunStorm: 'gunstorm',
