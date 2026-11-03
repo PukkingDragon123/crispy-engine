@@ -42,6 +42,8 @@ const TALES: Record<string, string> = {
 /** the short name on each trophy's brass plate */
 const PLATE: Record<string, string> = { khonsu: 'KHONSU', khonsuSand: 'KHONSU', sethos: 'SETHOS', setAvatar: 'SET', bertha: 'BERTHA', marshal: 'MARSHAL', sunroller: 'SUNROLLER', pharaoh: 'NEKH-AMUN', gulp: 'OLD GULP', ironclad: 'IRONCLAD', thornback: 'THORNBACK' };
 const WS_TV = 1 / 96;
+/** trophies go up from the middle of the wall outward */
+const SLOT_ORDER = [5, 4, 6, 3, 7, 2, 8, 1, 9, 0, 10];
 const UNBEATEN = ['Plenty of wall left.', 'Still out there. Not for long.', 'One day, the whole wall.', 'Every nail is a promise.'];
 
 interface BossRow {
@@ -272,7 +274,7 @@ export class HouseDecor {
     // empty slots get a nail waiting
     const beaten = this.bosses.filter((b) => b.beaten);
     this.slots.forEach((p, i) => {
-      if (i < beaten.length) return;
+      if (SLOT_ORDER.indexOf(i) < beaten.length) return;
       const n = new THREE.Mesh(nailGeo(), sharedVoxelMaterial);
       n.position.set(p.x, p.y + 0.13, WALL_Z);
       n.rotation.set(0.25, Math.PI, 0);
@@ -381,7 +383,7 @@ export class HouseDecor {
 
   /** a carved plaque on the wall, its name engraved, the boss's head (or the whole beast, pinned) on the boss */
   private mount(b: BossRow, ri: RigInstance, slot: number) {
-    const p = this.slots[slot];
+    const p = this.slots[SLOT_ORDER[slot] ?? slot];
     const pq = WS.trophyPlaque(31 + slot * 7);
     const [x0, y0, x1, y1, z] = pq.meta.plate;
     const g = geoOf(pq);

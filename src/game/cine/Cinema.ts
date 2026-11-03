@@ -444,7 +444,7 @@ export class Cinema {
     const big = !!o.title;
     const text = splitTitle(title.toUpperCase(), big ? 14 : 16);
     // a title standing in someone else's shot is sized to that shot
-    let lh = big ? 0.9 : 0.4;
+    let lh = big ? 0.9 : 0.6;
     if (big && cine && !o.at) {
       const dist = cine.look.distanceTo(cine.pos) * 0.55;
       const longest = Math.max(...text.split('\n').map((l) => l.length));
@@ -486,7 +486,7 @@ export class Cinema {
   private placeBeat(b: Beat) {
     const P = this.player.pos, yaw = this.cam.yaw;
     const f = _v.set(Math.sin(yaw), 0, Math.cos(yaw));
-    b.word.group.position.set(P.x + f.x * 5.4 + f.z * 0.25, P.y + 2.15, P.z + f.z * 5.4 - f.x * 0.25);
+    b.word.group.position.set(P.x + f.x * 4.4 + f.z * 0.25, P.y + 1.95, P.z + f.z * 4.4 - f.x * 0.25);
     const cam = this.ctx.camera;
     b.word.group.rotation.y = Math.atan2(cam.position.x - b.word.group.position.x, cam.position.z - b.word.group.position.z);
   }

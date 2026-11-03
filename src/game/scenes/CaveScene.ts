@@ -224,7 +224,18 @@ export class CaveScene implements GameScene {
     const look = this.opts.look ?? sv.look;
     const gun = this.opts.gun ?? sv.gun;
     const vis: PlayerVisuals = {
-      rig: resolveRig([`cowboy_${look.hat}_${look.outfit}`, 'cowboy_stetson_punk'], () => placeholderHumanoid()),
+      rig: (() => {
+        // the wardrobe can take the bandana mask or the shades off: build that look directly
+        const lk = look as { hat: string; outfit: string; mask?: boolean; shades?: boolean };
+        if (lk.mask === false || lk.shades === false) {
+          try {
+            return CH.skeletonCowboyRig({ hat: lk.hat, outfit: lk.outfit, mask: lk.mask, shades: lk.shades } as any);
+          } catch {
+            /* fall through to the registry look */
+          }
+        }
+        return resolveRig([`cowboy_${look.hat}_${look.outfit}`, 'cowboy_stetson_punk'], () => placeholderHumanoid());
+      })(),
       gun: (() => {
         try {
           const g = gun ? ((CH as any).revolverRig?.(gun) as RigSpec | undefined) : undefined;

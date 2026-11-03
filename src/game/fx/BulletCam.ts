@@ -692,7 +692,8 @@ export class BulletCam {
       if (front < -0.2) continue;
       const hi = typeof e.part === 'function' ? e.part('head') : -1;
       const hasHead = hi >= 0 && !e.hidden?.[hi] && e.batch?.geo?.parts?.[hi]?.parent >= 0;
-      const score = d * (1 + (1 - front) * 0.9) * (hasHead ? 1 : 1.8) * (e.alpha ? 2.6 : 1) * (d < 3.5 ? 1.5 : 1);
+      const low = e.height < 0.9 || e.skel === 'beetle' || e.skel === 'snake' || e.skel === 'lizard';
+      const score = d * (1 + (1 - front) * 0.9) * (hasHead ? 1 : 1.8) * (e.alpha ? 2.6 : 1) * (d < 4 ? 1.8 : d < 6 ? 1.2 : 1) * (low ? 1.6 : 1);
       if (score >= bs) continue;
       this.headOf(e, head);
       if (!this.clearLine(S, head, 0.35)) continue;
@@ -853,7 +854,7 @@ export class BulletCam {
     // ---- camera + grade
     this.camera(t, T, rdt);
     this.grade(t, T, rdt);
-    this.clearLens(this.p as any, 0.12, 0.9);
+    this.clearLens(this.p as any, 0.22, 0.9);
     this.clearLens(ctx.particles as any, 0.3, 1.0);
     if (t >= T.end) this.finish();
   }
@@ -986,13 +987,16 @@ export class BulletCam {
     // the line from the muzzle to the (moving) head: its far end keeps tracking the target until it is hit
     this.B.copy(this.M0).addScaledVector(this.D, d);
     const nose = this.B;
-    const heel = this.heel.copy(nose).addScaledVector(this.D, -BULLET_LEN);
-    const mid = this.mid.copy(nose).addScaledVector(this.D, -BULLET_LEN * 0.5);
+    // (it swells a touch as the lens pulls out to the side for the hit, so it still reads there)
+    const grow = 1 + 0.5 * sm((t - T.slow0) / P.slow);
+    const heel = this.heel.copy(nose).addScaledVector(this.D, -BULLET_LEN * grow);
+    const mid = this.mid.copy(nose).addScaledVector(this.D, -BULLET_LEN * 0.5 * grow);
     // spin on the rifling (slow enough to read in bullet time)
     this.spin += rdt * (t < T.snap ? 13 : 40);
     this.bulletSpin.visible = true;
     this.bulletSpin.position.copy(mid);
     this.bulletSpin.quaternion.setFromUnitVectors(Z, this.D);
+    this.bulletSpin.scale.setScalar(grow);
     this.bullet!.rotation.z = this.spin;
     // gone: off into the dunes after the snap
     if (t >= T.snap && t - T.snap > 0.35) {
@@ -1030,9 +1034,11 @@ export class BulletCam {
       const k = sat(1 - h / 1.7);
       if (k > 0 && Math.random() < 0.35 + k) {
         const n = Math.ceil(k * 4);
+        const eye = this.ctx.camera.position;
         for (const s of [-1, 1]) {
           const ox = R.x * s, oz = R.z * s;
           const gx = mid.x + ox * (0.05 + Math.random() * 0.25), gz = mid.z + oz * (0.05 + Math.random() * 0.25);
+          if (Math.hypot(gx - eye.x, gz - eye.z) < 0.7) continue;
           p.emit({ pos: { x: gx, y: this.ctx.world.groundAt(gx, gz) + 0.02, z: gz }, count: n, vel: { x: ox * (0.6 + k * 1.6) + this.D.x * 0.8, y: 0.9 + k * 2.4, z: oz * (0.6 + k * 1.6) + this.D.z * 0.8 }, spread: 0.6 + k, life: [0.6, 1.2], size: [0.02, 0.014], sprite: GRAIN, color: SAND, gravity: 6, drag: 0.8, ground: true, bounce: 0.1 });
           if (Math.random() < k * 0.5) p.emit({ pos: { x: gx, y: this.ctx.world.groundAt(gx, gz) + 0.05, z: gz }, count: 1, vel: { x: ox * 0.4, y: 0.4, z: oz * 0.4 }, spread: 0.2, life: [0.8, 1.4], size: [0.08, 0.3], sprite: PUFF, color: SAND, alpha: 0.5 * k, drag: 2, rot: 6, rotSpeed: 0.4 });
         }
@@ -1401,16 +1407,15 @@ export class BulletCam {
       chase.look.copy(this.B).addScaledVector(D, 2.4).addScaledVector(off, -0.6);
       chase.fov = lerp(52, 46, u);
       chase.roll = -th * 0.16;
-      // the witness: the camera lets the round go on alone, easing to a stop just short of the head
-      // and swinging on round it, so the entry, the round inside and the exit burst all read
+      // the witness: the camera lets the round go on alone and swings out to the side of the head,
+      // square to the shot, so the round coming in, the entry and the exit burst all read
       const wsc = tg.kind === 'skull' ? 1.7 : Math.max(1, tg.r / 0.13);
-      const thW = (1.07 + 0.75) * this.side;
-      const offW = this.offW.copy(U).multiplyScalar(Math.cos(thW)).addScaledVector(R, Math.sin(thW));
+      const offW = this.offW.copy(R).multiplyScalar(0.96 * this.side).addScaledVector(U, 0.28).normalize();
       const wit = this.witness;
-      wit.pos.copy(tg.head).addScaledVector(D, -0.72 * wsc).addScaledVector(offW, 0.52 * wsc);
-      wit.look.copy(tg.head).addScaledVector(D, -0.04 * wsc);
-      wit.fov = 44;
-      wit.roll = -thW * 0.06;
+      wit.pos.copy(tg.head).addScaledVector(D, 0.08 * wsc).addScaledVector(offW, 1.12 * wsc);
+      wit.look.copy(tg.head).addScaledVector(D, 0.1 * wsc).addScaledVector(UP, -0.04 * wsc);
+      wit.fov = 42;
+      wit.roll = -0.05 * this.side;
       if (!this.short && t < T.cut) {
         // full cut: hard cut to the muzzle in profile as the flash blooms
         copyPose(out, this.muzzleShot);
