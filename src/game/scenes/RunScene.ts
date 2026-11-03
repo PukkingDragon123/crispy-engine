@@ -174,6 +174,7 @@ export class RunScene implements GameScene {
   wagon: WagonRepair | null = null;
   slicer!: NeckSlicer;
   private pickerShown = false;
+  private cineHudHidden = false;
   private zoneCine: ZoneCine | null = null;
   tutorial: Tutorial | null = null;
   ruins: RuinNests | null = null;
@@ -923,6 +924,12 @@ export class RunScene implements GameScene {
       this.jerboa = null;
     }
     this.hud.suppressHint = this.picker.active || this.ult.active || modal || this.pausedByUser;
+    // cinematic moments own the screen: no HUD over the rank-up, the turtle-house visit or a gear reveal
+    const cineHud = this.picker.active || this.shop.active || this.gearLoot.active;
+    if (cineHud !== this.cineHudHidden) {
+      this.cineHudHidden = cineHud;
+      this.hud.setVisible(!cineHud);
+    }
     if (modal) {
       this.cloth.update(rdt * 0.2, e.realTime);
       this.camRig.update(rdt, this.player.pos, 0, false, 0);
@@ -931,10 +938,9 @@ export class RunScene implements GameScene {
     }
     // the upgrade cards own the screen: no hunter, buddy or HUD in front of them
     if (this.picker.active !== this.pickerShown) {
-      // the rank-up cinematic frames the hunter under an arch of cards: only Pinch and the HUD step aside
+      // the rank-up cinematic frames the hunter under an arch of cards: Pinch steps aside
       this.pickerShown = this.picker.active;
       this.skills.pinchRoot.visible = !this.pickerShown;
-      this.hud.setVisible(!this.pickerShown);
     }
     if (this.picker.active) {
       this.cloth.update(rdt * 0.2, e.realTime);
