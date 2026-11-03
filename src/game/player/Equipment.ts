@@ -91,6 +91,8 @@ const VS = GEAR_VS;
 interface Frame {
   node: THREE.Object3D;
   pos: THREE.Vector3;
+  /** frame turn about the part's Y axis (the back sling faces out of the back) */
+  rotY?: number;
 }
 
 /** vertex positions of a rig part (node-local metres) */
@@ -196,16 +198,18 @@ export function measureRig(rig: RigInstance): { fit: GearFit; frames: Partial<Re
       };
     frames[k] = { node, pos: new THREE.Vector3(cx, all.y0, cz) };
   }
-  // ---- hip (left = mirror of the hip_r socket) and the belt front
-  const pelvis = N['pelvis'];
-  if (pelvis) {
-    const pv = partVerts(rig, 'pelvis');
-    const all = vbox(pv, () => true);
-    const hr = S['hip_r']?.parent === pelvis ? S['hip_r'].position : new THREE.Vector3(all.x0, (all.y0 + all.y1) / 2, 0);
-    frames.hip_l = { node: pelvis, pos: new THREE.Vector3(Math.abs(hr.x), hr.y, hr.z) };
-    const bx = Math.abs(hr.x) * 0.45;
-    const front = vbox(pv, (x, y) => Math.abs(y - hr.y) < 0.05 && Math.abs(x - bx) < 0.06);
-    frames.belt = { node: pelvis, pos: new THREE.Vector3(bx, hr.y - 0.01, (front.n ? front.z1 : all.z1) + 0.01) };
+  // ---- back sling (upper back, clear of the coat cloth) and the neck cord (upper chest, left of the sternum)
+  if (torso) {
+    const tv = partVerts(rig, 'torso');
+    const all = vbox(tv, () => true);
+    const cy = frames.torso?.pos.y ?? (all.y0 + all.y1) / 2;
+    const sy = Math.min(all.y1 - 0.06, cy + 0.08);
+    const back = vbox(tv, (_x, y) => Math.abs(y - sy) < 0.05);
+    frames.sling = { node: torso, pos: new THREE.Vector3(0.05, sy, (back.n ? back.z0 : all.z0) - 0.01), rotY: Math.PI / 2 };
+    const ny = Math.min(all.y1 - 0.04, cy + 0.1);
+    const nx = Math.min(0.1, Math.max(0.04, fit.torso.hw * VS * 0.4));
+    const front = vbox(tv, (x, y) => Math.abs(y - ny) < 0.04 && Math.abs(x - nx) < 0.05);
+    frames.neck = { node: torso, pos: new THREE.Vector3(nx, ny, (front.n ? front.z1 : all.z1) + 0.005) };
   }
   return { fit, frames };
 }
@@ -319,7 +323,10 @@ export class GearRig {
       if (!holder) {
         holder = new THREE.Group();
         holder.name = 'gear:' + id + ':' + (key || p.name);
-        holder.position.copy(f.pos).addScaledVector(_v.set(p.at[0], p.at[1], p.at[2]), VS);
+        _v.set(p.at[0], p.at[1], p.at[2]).multiplyScalar(VS);
+        if (f.rotY) _v.applyAxisAngle(_v2.set(0, 1, 0), f.rotY);
+        holder.position.copy(f.pos).add(_v);
+        holder.rotation.y = f.rotY ?? 0;
         f.node.add(holder);
         w.roots.push(holder);
         if (key) groups.set(p.anchor + ':' + key, holder);

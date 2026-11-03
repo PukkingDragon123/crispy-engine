@@ -12,8 +12,9 @@
 //   torso     origin on the chest surface at the chest-socket height (torso part)
 //   shoulder_l/_r, hand_l/_r   the rig sockets of the same name
 //   foot_l/_r origin on the sole under the middle of the foot, toes +Z (shin part)
-//   hip_l     the left hip (mirror of the hip_r socket), +X = outward
-//   belt      front-left of the belt (pelvis front surface)
+//   sling     the upper back (grapple coils are slung there, clear of the duster's
+//             cloth); the frame is turned so +X points out of the back
+//   neck      upper chest, left of the sternum (charms hang on a neck cord)
 // Moving bits are separate pieces with a joint (swing / spin / focus / hook) so
 // Equipment can animate them; glass pieces render with a see-through material.
 import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
@@ -23,7 +24,7 @@ import { hash3 } from '../../../engine/math/rand';
 export const GEAR_VS = 1 / 48;
 type V3 = [number, number, number];
 
-export type GearAnchor = 'face' | 'torso' | 'shoulder_l' | 'shoulder_r' | 'hand_l' | 'hand_r' | 'foot_l' | 'foot_r' | 'hip_l' | 'belt';
+export type GearAnchor = 'face' | 'torso' | 'shoulder_l' | 'shoulder_r' | 'hand_l' | 'hand_r' | 'foot_l' | 'foot_r' | 'sling' | 'neck';
 export type GearJoint = 'swing' | 'spin' | 'focus' | 'hook';
 
 export interface GearPiece {
@@ -689,7 +690,7 @@ function duneStriders(fit: GearFit): GearPiece[] {
   return out;
 }
 
-// ================================================================== TOOLS (grappling hooks on the left hip)
+// ================================================================== TOOLS (grappling hooks slung on the back)
 /** a coil of twisted rope hung flat against the hip (axis along X), bound with a strap */
 function ropeCoil(m: VoxelModel, rp: Ramp, bind: Ramp) {
   for (let loop = 0; loop < 3; loop++) {
@@ -771,19 +772,26 @@ function hookTool(kind: 'barbed' | 'claw' | 'reel'): GearPiece[] {
   const head = kind === 'barbed' ? barbedHookHead() : kind === 'claw' ? clawHookHead() : harpoonHead();
   // a short tail of rope from the coil to the hook's eye
   rope(coil, [[3, -8, 1], [4, -9, 2.5], [4, -10, 3]], 0);
-  const pieces: GearPiece[] = [piece('coil', 'hip_l', [2, 0, 0], coil), piece('hook', 'hip_l', [6, -11, 3], head, { joint: 'hook' })];
+  const pieces: GearPiece[] = [piece('coil', 'sling', [0, 0, 0], coil), piece('hook', 'sling', [4, -11, 3], head, { joint: 'hook' })];
   if (kind === 'reel') {
     const jar = new VoxelModel('gear_reel_jar');
     for (let y = 0; y <= 4; y++) for (let x = -1; x <= 1; x++) for (let z = -1; z <= 1; z++) if (Math.abs(x) + Math.abs(z) < 2 || y === 0 || y === 4) jar.set(x, y, z, CLEAR.base);
     const arc = new VoxelModel('gear_reel_arc');
     for (let y = 0; y <= 4; y++) arc.set(y % 2 ? 0 : (y & 2 ? 1 : -1) * 0, y, 0, y === 2 ? 0xffffff : SPARK, VF.EMISSIVE | VF.GLOW);
     arc.set(0, -1, 0, COPPER.base, M).set(0, 5, 0, COPPER.base, M);
-    pieces.push(piece('jar', 'hip_l', [4, -1, -3], jar, { glass: true }), piece('arc', 'hip_l', [4, -1, -3], arc));
+    pieces.push(piece('jar', 'sling', [2, -1, -3], jar, { glass: true }), piece('arc', 'sling', [2, -1, -3], arc));
   }
   return pieces;
 }
 
-// ================================================================== CHARMS (swing from the belt)
+// ================================================================== CHARMS (swing on a neck cord)
+const CHARM_AT: V3 = [0, 0, 4];
+/** the cord: from the charm's ring up over the collarbones and round the back of the neck */
+function neckCord(rp: Ramp): GearPiece {
+  const m = new VoxelModel('gear_neck_cord');
+  for (const s of [1, -1]) rope(m, [[0, 0, 4], [s * 2, 4, 3], [s * 4 - 2, 8, 1], [s * 4 - 3.5, 11, -3]], 0, rp);
+  return piece('cord', 'neck', [0, 0, 0], m);
+}
 /** a lucky glass eye in a gold claw on a short chain, under a clear glass dome */
 function glassEye(): GearPiece[] {
   const m = new VoxelModel('gear_glass_eye');
@@ -815,7 +823,7 @@ function glassEye(): GearPiece[] {
     const d = Math.hypot(x, y, z - 0.5);
     if (d > 3.6 && d < 4.5 && z >= 2) dome.set(x, cy + y, z, (x < 0 && y > 0) ? CLEAR.hi : CLEAR.base);
   }
-  return [piece('eye', 'belt', [0, 0, 0], m, { joint: 'swing', group: 'charm' }), piece('dome', 'belt', [0, 0, 0], dome, { glass: true, joint: 'swing', group: 'charm' })];
+  return [neckCord(GO), piece('eye', 'neck', CHARM_AT, m, { joint: 'swing', group: 'charm' }), piece('dome', 'neck', CHARM_AT, dome, { glass: true, joint: 'swing', group: 'charm' })];
 }
 
 /** Khonsu's hourglass: moon-silver frame and crescent, glass bulbs, golden sand running */
@@ -846,7 +854,7 @@ function hourglass(): GearPiece[] {
     }
   }
   for (let y = bot + 4; y <= mid + 1; y++) sand.set(0, y, 0, 0xffd880, VF.EMISSIVE);
-  return [piece('frame', 'belt', [0, 0, 0], fr, { joint: 'swing', group: 'charm' }), piece('sand', 'belt', [0, 0, 0], sand, { joint: 'swing', group: 'charm' }), piece('glass', 'belt', [0, 0, 0], gl, { glass: true, joint: 'swing', group: 'charm' })];
+  return [neckCord(TOON.silver), piece('frame', 'neck', CHARM_AT, fr, { joint: 'swing', group: 'charm' }), piece('sand', 'neck', CHARM_AT, sand, { joint: 'swing', group: 'charm' }), piece('glass', 'neck', CHARM_AT, gl, { glass: true, joint: 'swing', group: 'charm' })];
 }
 
 /** the dead man's hand: a little skeletal hand gripping aces and eights, on a black cord */
@@ -876,7 +884,7 @@ function deadMansHand(): GearPiece[] {
   m.set(3, -9, 2, BO.base).set(3, -8, 3, BO.hi).set(2, -7, 3, BO.base);
   // wrist bones and a black ribbon bow
   m.set(-1, -11, 0, BO.shade).set(1, -11, 0, BO.shade).set(0, -4, 1, LACQ.dark).set(-2, -4, 1, LACQ.base).set(2, -4, 1, LACQ.base).set(-1, -5, 1, LACQ.hi).set(1, -5, 1, LACQ.hi);
-  return [piece('hand', 'belt', [0, 0, 0], m, { joint: 'swing', group: 'charm' })];
+  return [neckCord(LACQ), piece('hand', 'neck', CHARM_AT, m, { joint: 'swing', group: 'charm' })];
 }
 
 // ================================================================== registry
@@ -918,7 +926,7 @@ export function gearPieces(id: GearModelId, fit: GearFit = DEFAULT_FIT): GearPie
 
 /** where each anchor sits in the showcase layout (pairs side by side, voxels) */
 const SHOW: Record<GearAnchor, V3> = {
-  face: [0, 0, 0], torso: [0, 0, 0], belt: [0, 0, 0], hip_l: [-4, 0, 0],
+  face: [0, 0, 0], torso: [0, 0, 0], neck: [0, 0, -4], sling: [0, 0, 0],
   shoulder_l: [9, 0, 0], shoulder_r: [-9, 0, 0],
   hand_l: [6, 0, 0], hand_r: [-6, 0, 0],
   foot_l: [5, 0, 0], foot_r: [-5, 0, 0],
