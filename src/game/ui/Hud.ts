@@ -247,6 +247,10 @@ export class Hud {
   setVisible(v: boolean) {
     this.visible = v;
   }
+  /** toasts of the last few seconds with their age (s) */
+  recentToasts() {
+    return this.recent.map((r) => ({ text: r.text + (r.sub ? ' ' + r.sub : ''), age: this.t - r.at }));
+  }
   /** a quest ended: the mission paper stamps it DONE (ok) or burns it (failed) */
   questEnd(id: string, ok = true) {
     this.questEnds.set(id, ok);

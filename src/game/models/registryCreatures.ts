@@ -45,3 +45,20 @@ import { camelRig as dromedaryRig } from './creatures/camel';
 export const CAMEL_MODELS: Record<string, ModelEntry> = {
   camel: () => dromedaryRig(),
 };
+
+// ---- desert wildlife (run/Wildlife.ts): sand hippos + calves (animate with HippoAnim), the
+// little hopping jerboa (JerboaPupAnim) and the healing cacti (CactusSway; seeded variants).
+// The cacti's origin is the stem on the ground (mesh the rig as-is, not 'bottom').
+import { sandHippoRig, babyHippoRig } from './creatures/hippo';
+import { jerboaPupRig } from './creatures/jerboaSmall';
+import { healCactusRig } from './creatures/healCactus';
+export const WILDLIFE_MODELS: Record<string, ModelEntry> = {
+  sand_hippo: () => sandHippoRig(),
+  sand_hippo_calf: () => babyHippoRig(),
+  jerboa_pup: () => jerboaPupRig(),
+  heal_cactus: () => healCactusRig(0, 'pear'),
+  heal_cactus_v1: () => healCactusRig(1, 'pear'),
+  heal_cactus_v2: () => healCactusRig(2, 'pear'),
+  heal_cactus_barrel: () => healCactusRig(0, 'barrel'),
+  heal_cactus_barrel_v1: () => healCactusRig(1, 'barrel'),
+};

@@ -444,3 +444,28 @@ void wetEye;
 void CRig;
 void h01;
 void n01;
+
+/**
+ * Cut one continuous sculpt into rig parts: `assign` names the part of every voxel
+ * (metres + voxel coords). `plug` may name a second part for voxels near a joint:
+ * when the voxel is buried (not exposed, filled 2 cells around) it is copied there
+ * too, so the joint never opens a gap when the child bends.
+ */
+export function cutInto(whole: VoxelModel, vs: number, parts: Record<string, VoxelModel>, assign: (X: number, Y: number, Z: number) => string, plug?: (X: number, Y: number, Z: number, part: string) => string | null) {
+  whole.forEach((x, y, z, c, f) => {
+    const X = (x + 0.5) * vs, Y = (y + 0.5) * vs, Z = (z + 0.5) * vs;
+    const p = assign(X, Y, Z);
+    parts[p]?.set(x, y, z, c, f);
+    if (!plug) return;
+    const q = plug(X, Y, Z, p);
+    if (!q || !parts[q]) return;
+    if (exposed(whole, x, y, z) || !whole.has(x + 2, y, z) || !whole.has(x - 2, y, z) || !whole.has(x, y + 2, z) || !whole.has(x, y - 2, z)) return;
+    parts[q].set(x, y, z, c, f);
+  });
+}
+
+/** highest filled voxel of a column (or -1) between y0 and y1 (voxel coords) */
+export function topOf(m: VoxelModel, x: number, z: number, y0: number, y1: number) {
+  for (let y = y1; y >= y0; y--) if (m.has(x, y, z)) return y;
+  return -1;
+}

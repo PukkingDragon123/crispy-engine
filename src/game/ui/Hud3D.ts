@@ -5,6 +5,10 @@
 // as little turntable models in their slots, and Pinch as an idol inside the
 // ultimate ring. Also hosts the ultimate cut-in: a 2D speed-line band with a
 // lit 3D bust of Sundown (2D eyes) and an Alagard title.
+// Also hosts: the SOUL BAR (Serket's soul jar above the heart, Pinch guarding
+// its lid — SoulBar.ts), the MISSION PAPER stack (MissionPaper.ts) and the
+// outlaw readouts — tin star, tally board, branded wave plaque, break
+// stopwatch (OutlawHud.ts).
 import * as THREE from 'three';
 import type { Hud } from './Hud';
 import { VoxelModel } from '../../engine/voxel/VoxelModel';
@@ -17,6 +21,9 @@ import { FaceQuads, RigEyes, EyeStyle } from '../fx/FaceFx';
 import { TarotBar } from './TarotBar';
 import { hudCylinder, hudRound, hudHeartRig } from '../models/props/hud';
 import { PausePoster } from './PausePoster';
+import { SoulBar } from './SoulBar';
+import { MissionPaper, questFromObjective } from './MissionPaper';
+import { OutlawHud } from './OutlawHud';
 
 export interface CutInOpts {
   /** rig to show as the bust (default: the player) */
@@ -188,9 +195,10 @@ export class Hud3D {
   private itemGeo = new Map<string, { geo: THREE.BufferGeometry; size: number } | null>();
   private itemPop: number[] = [];
   private lastCounts: number[] = [];
-  // pinch idol
-  private pinch: RigInstance | null = null;
-  private pinchMat: VoxelMaterial;
+  // soul jar, mission paper, outlaw furniture
+  private soul: SoulBar;
+  private paper: MissionPaper;
+  private outlaw: OutlawHud;
   private t = 0;
   // cut-in
   private cut: {
@@ -233,7 +241,6 @@ export class Hud3D {
     this.ghostMat = makeVoxelMaterial({ fog: false, transparent: true, opacity: 0.22 });
     this.ghostMat.depthWrite = false;
     this.ghostMat.depthTest = false;
-    this.pinchMat = makeVoxelMaterial({ fog: false });
 
     this.scene.add(new THREE.HemisphereLight(0xfff4e0, 0x6a4a30, 1.1));
     this.keyLight = new THREE.DirectionalLight(0xfff0d8, 2.4);
@@ -265,13 +272,9 @@ export class Hud3D {
     }
     this.scene.add(this.faces.mesh);
 
-    // pinch idol
-    const pe = modelEntry('pinch');
-    const ps = pe?.() as RigSpec | undefined;
-    if (ps?.parts) {
-      this.pinch = new RigInstance(buildRigGeo(ps, ps.name + ':hud'), { material: this.pinchMat, castShadow: false });
-      this.scene.add(this.pinch.root);
-    }
+    this.soul = new SoulBar(this.scene, hud);
+    this.paper = new MissionPaper(this.scene);
+    this.outlaw = new OutlawHud(this.scene);
 
     this.tarot = new TarotBar(this.scene, hud);
 
@@ -740,27 +743,16 @@ export class Hud3D {
     });
     for (let i = A.items.length; i < this.itemMeshes.length; i++) if (this.itemMeshes[i]) this.itemMeshes[i]!.visible = false;
 
-    // ------------------------------------------------ pinch idol
-    if (this.pinch) {
-      const u = A.ult;
-      const p = this.pinch;
-      p.root.visible = visible;
-      const h = (p.geo.spec.meta?.length as number) ?? 0.5;
-      const sc = (26 * s) / Math.max(0.3, h);
-      const bounce = u.ready ? Math.abs(Math.sin(this.t * 6)) * 3 * s : 0;
-      p.root.scale.setScalar(sc);
-      p.root.position.set(u.x * s, -(u.y + 6) * s + bounce, 0);
-      p.root.rotation.set(0.55, Math.sin(this.t * (u.ready ? 2.2 : 0.6)) * 0.7, 0);
-      const n = p.nodes;
-      for (let k = 1; k <= 5; k++) if (n['tail' + k]) n['tail' + k].rotation.x = -0.25 + Math.sin(this.t * (u.ready ? 7 : 2) + k * 0.6) * (u.ready ? 0.22 : 0.08);
-      const snap = u.ready ? Math.max(0, Math.sin(this.t * 9)) * 0.6 : 0;
-      if (n['pincer_l']) n['pincer_l'].rotation.x = -snap;
-      if (n['pincer_r']) n['pincer_r'].rotation.x = -snap;
-      const tint = this.pinchMat.userData.tint.value;
-      const f = u.ready ? 1 : 0.45 + u.frac * 0.35;
-      tint.setRGB(f, f, f * (u.ready ? 1 : 0.95));
-      p.setExpression(u.ready ? 'happy' : 'sleepy');
-      p.root.updateMatrixWorld(true);
+    // ------------------------------------------------ soul jar, outlaw readouts, mission paper
+    this.soul.update(dt, A.soul, visible, s);
+    if (A.outlaw) this.outlaw.update(dt, A.outlaw, visible, s);
+    {
+      const st = hud.last;
+      const quests = st?.quests ?? (st?.objective ? [questFromObjective(st.objective)] : []);
+      for (const [id, ok] of hud.questEnds) this.paper.end(id, ok);
+      hud.questEnds.clear();
+      this.paper.update(dt, quests, A.paper, visible, s, hud.recentToasts());
+      hud.paperBottom = this.paper.bottom;
     }
 
     if (this.cut) this.updateCut(dt, W, H);
@@ -791,6 +783,9 @@ export class Hud3D {
   dispose() {
     this.endCut();
     this.tarot.dispose();
+    this.soul.dispose();
+    this.paper.dispose();
+    this.outlaw.dispose();
     this.posterUi?.remove();
     this.hud.canvas.style.display = '';
     this.hud.use3D = false;
