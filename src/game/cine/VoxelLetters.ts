@@ -39,7 +39,7 @@ interface Pal {
 
 const PALS: Record<LetterStyle, Pal> = {
   gold: { f0: 0xb87424, f1: 0xffe39a, s0: 0x6a3c12, s1: 0xb0782a, rimHi: 0xfff4d0, rimLo: 0x7a4814, back: 0x4a2a0e, c0: 0x4fe89a, c1: 0xdcffee, ink: 0x1e0f06, metal: true, glowCore: true },
-  ember: { f0: 0x2e2420, f1: 0x6e5a4c, s0: 0x1a1210, s1: 0x3a2e28, rimHi: 0xffb26a, rimLo: 0x2a1a14, back: 0x140c0a, c0: 0xff4a12, c1: 0xffe08a, ink: 0x0c0604, metal: true, glowCore: true },
+  ember: { f0: 0x5a4234, f1: 0xc4a68a, s0: 0x241812, s1: 0x4a3a30, rimHi: 0xffc890, rimLo: 0x2e1e16, back: 0x140c0a, c0: 0xff4a12, c1: 0xffe08a, ink: 0x0c0604, metal: true, glowCore: true },
   bone: { f0: 0xc9a878, f1: 0xfff1d6, s0: 0x8a6a46, s1: 0xc0a074, rimHi: 0xfffaf0, rimLo: 0x8a6a46, back: 0x4a2c1a, c0: 0x8dff4a, c1: 0xeaffd0, ink: 0x22140a, metal: false, glowCore: true },
   moon: { f0: 0x6e7a8e, f1: 0xeaf2ff, s0: 0x343c4c, s1: 0x5a6476, rimHi: 0xffffff, rimLo: 0x3a4252, back: 0x1e2430, c0: 0x46d8ff, c1: 0xe4fbff, ink: 0x0a0e16, metal: true, glowCore: true },
   jade: { f0: 0x1e6a4a, f1: 0x9af0c4, s0: 0x0e3626, s1: 0x2a7a58, rimHi: 0xeafff4, rimLo: 0x14402e, back: 0x0a2418, c0: 0xc4ff6a, c1: 0xffffff, ink: 0x06140e, metal: true, glowCore: true },
@@ -208,6 +208,8 @@ export interface WordOpts {
   castShadow?: boolean;
   /** world fog on the letters (false: always crisp) */
   fog?: boolean;
+  /** resting inlay / edge glow (0 = only the flare as letters land) */
+  glow?: number;
 }
 
 const _v = new THREE.Vector3();
@@ -300,6 +302,10 @@ export class VoxelWord {
       for (const s of [-0.45, 0, 0.45]) g = Math.min(g, groundAt(_v.x + _w.x * l.w * s, _v.z + _w.z * l.w * s));
       l.lift = g - baseY - sink;
     }
+    // upper lines ride on the average of the line below
+    const bottom = this.letters.filter((l) => l.home.y <= 0.001);
+    const avg = bottom.length ? bottom.reduce((a, l) => a + l.lift, 0) / bottom.length : 0;
+    for (const l of this.letters) if (l.home.y > 0.001) l.lift = avg;
   }
 
   /** start the entrance; stagger in seconds between letters */
@@ -400,7 +406,7 @@ export class VoxelWord {
     }
     // the inlay flares as letters land, then breathes
     const fx = this.mat.userData.fx.value;
-    fx.z = Math.max(0, fx.z - dt * 2.2);
+    fx.z = Math.max(this.o.glow ?? 0, fx.z - dt * 2.2);
   }
 
   private land(l: Letter, i: number) {

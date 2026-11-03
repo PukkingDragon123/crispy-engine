@@ -18,6 +18,8 @@ import { BuildKit, HubHost, HubStation, HeroBubble, PriceLock, safe, geoOf, mesh
 import type { Mode, Pick, View } from './HouseExtras';
 
 const IN = HX.CABIN_IN;
+/** hats hang a little smaller than they sit on his big cartoon skull */
+const HAT_HANG = 0.7;
 type Kind = 'hat' | 'outfit' | 'mask' | 'shades';
 interface Item {
   kind: Kind;
@@ -92,9 +94,10 @@ export class Wardrobe3D implements Mode {
   build(k: BuildKit) {
     // the hat rails on the right wall, between the door and the front corner
     const zc = 2.74;
-    for (const [n, y] of [[4, 1.72], [3, 1.36]] as const) {
-      const sm = safe(() => WS.hatPegRail(n, 41 + n));
-      const g = k.against(sm, 'right', zc + (n === 3 ? 0.05 : 0), y, 0.01, 1, false);
+    // three staggered rails, hats hung every which way (they are big hats: they hang at seven tenths)
+    for (const [n, y, dz] of [[3, 1.94, 0], [2, 1.57, 0.08], [2, 1.2, -0.06]] as const) {
+      const sm = safe(() => WS.hatPegRail(n, 41 + n + Math.round(y * 10)));
+      const g = k.against(sm, 'right', zc + dz, y, 0.01, 1, false);
       if (g && sm) {
         g.updateMatrixWorld(true);
         for (const p of sm.meta.pegs) this.pegs.push(new THREE.Vector3(...p).applyMatrix4(g.matrixWorld));
@@ -109,7 +112,7 @@ export class Wardrobe3D implements Mode {
     }
     // the steamer trunk moves out of the corner to make room (to the front-left, by the terrarium)
     this.views = [
-      { pos: new THREE.Vector3(3.3, 1.62, 1.72), look: new THREE.Vector3(4.72, 1.5, 2.74), fov: 44 },
+      { pos: new THREE.Vector3(2.75, 1.68, 1.3), look: new THREE.Vector3(4.75, 1.58, 2.78), fov: 46 },
       { pos: new THREE.Vector3(3.42, 1.46, 1.22), look: new THREE.Vector3(3.5, 1.18, IN.front - 0.32), fov: 50 },
     ];
     this.job = this.make();
@@ -148,6 +151,7 @@ export class Wardrobe3D implements Mode {
     m.updateMatrix();
     const obj = new THREE.Group();
     obj.add(m);
+    obj.scale.setScalar(HAT_HANG);
     const home = new THREE.Group();
     // crown up, tipped out from the wall, front to the room
     const X = new THREE.Vector3(0, 0, 1), Y = new THREE.Vector3(-0.5, 0.866, 0), Z = new THREE.Vector3().crossVectors(X, Y);
@@ -163,7 +167,7 @@ export class Wardrobe3D implements Mode {
       lock.grp.rotation.y = -Math.PI / 2;
       this.h.scene.add(lock.grp);
     }
-    this.items.push({ kind: 'hat', id, home, obj, lock, spot: new THREE.Vector2(4.2, 2.62 + (peg.z - 2.74) * 0.5), face: Math.PI / 2, view: 0, grab: peg.clone().add(new THREE.Vector3(-0.08, 0.02, 0)) });
+    this.items.push({ kind: 'hat', id, home, obj, lock, spot: new THREE.Vector2(4.22, 2.6 + (peg.z - 2.74) * 0.5), face: Math.PI / 2, view: 0, grab: peg.clone().add(new THREE.Vector3(-0.08, -0.02, 0)) });
   }
 
   private addOutfit(id: string, spec: RigSpec, i: number, bone: Set<number>) {
@@ -375,6 +379,7 @@ export class Wardrobe3D implements Mode {
         eng.audio.play(it.kind === 'outfit' ? 'paper_flutter' : 'card_pick', { volume: 0.5 });
       }
     }
+    if (a.carried && it.kind === 'hat') a.carried.scale.setScalar(HAT_HANG + (1 - HAT_HANG) * sstep(0.45, 1.1, a.t));
     const swapAt = it.kind === 'outfit' ? 1.55 : 1.15;
     if (a.t > swapAt && !a.swapped) {
       a.swapped = true;
@@ -390,6 +395,7 @@ export class Wardrobe3D implements Mode {
         it.home.attach(a.carried);
         a.carried.position.set(0, 0, 0);
         a.carried.rotation.set(0, 0, 0);
+        if (it.kind === 'hat') a.carried.scale.setScalar(HAT_HANG);
         a.carried.visible = false;
       }
       (this.h as unknown as { buildHero(): void }).buildHero();

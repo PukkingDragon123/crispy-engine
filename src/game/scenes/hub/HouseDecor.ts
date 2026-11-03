@@ -18,7 +18,7 @@ import { Codex, F_SEEN, F_CLAIM } from '../../meta/Codex';
 import { Blueprints, RELICS } from '../../meta/Blueprints';
 import * as PM from '../../models/props';
 import { damp } from '../../../engine/math/rand';
-import { BuildKit, HubHost, HubStation, HeroBubble, SM, safe, geoOf, meshOf, engrave, clamp01, ease, stepJob } from './HubKit';
+import { BuildKit, HubHost, HubStation, HeroBubble, SM, safe, geoOf, meshOf, engrave, clamp01, ease, stepJob, nailGeo } from './HubKit';
 
 const IN = HX.CABIN_IN;
 /** the trophy wall: the front wall between the two front windows */
@@ -269,24 +269,23 @@ export class HouseDecor {
     });
     for (let i = 0; i < 11; i++) this.slots.push(new THREE.Vector3(-0.5 + i * 0.28, 2.08 + Math.sin(i * 1.7) * 0.015, WALL_Z));
     // empty slots get a nail waiting
-    const nailG = new THREE.BoxGeometry(0.012, 0.012, 0.03);
-    const nailM = new THREE.MeshStandardMaterial({ color: 0x2a2622, metalness: 0.6, roughness: 0.5 });
     const beaten = this.bosses.filter((b) => b.beaten);
     this.slots.forEach((p, i) => {
       if (i < beaten.length) return;
-      const n = new THREE.Mesh(nailG, nailM);
-      n.position.set(p.x, p.y + 0.13, WALL_Z - 0.012);
-      n.rotation.set(0.25, 0, 0);
+      const n = new THREE.Mesh(nailGeo(), sharedVoxelMaterial);
+      n.position.set(p.x, p.y + 0.13, WALL_Z);
+      n.rotation.set(0.25, Math.PI, 0);
       s.add(n);
     });
     this.job = this.bake(beaten);
     // ---- the station
-    const stand = new THREE.Vector2(2.12, 2.28);
+    // he stands off to the left of the wall (screen right), the camera back by the coffee table takes it all in
+    const stand = new THREE.Vector2(-0.32, 2.02);
     this.station = k.station({
       id: 'trophies', label: 'Trophy Wall', title: 'THE TROPHY WALL', short: 'TROPHIES', sub: beaten.length ? `${beaten.length} of ${this.bosses.length} bounties paid in full` : 'every nail is a promise', verb: 'Spin a yarn',
-      stand, face: -0.72, at: new THREE.Vector3(0.9, 1.7, WALL_Z), r: 0.9, objs: [], pose: 'trophies',
-      via: [new THREE.Vector2(2.0, 0.25), new THREE.Vector2(2.05, 1.4)], slot: [-0.86, 0.84, 'left'],
-      shot: { pos: new THREE.Vector3(1.28, 1.5, 0.12), look: new THREE.Vector3(), fov: 47, subject: new THREE.Vector3(stand.x, 1.5, stand.y), ndc: [0.38, 0.02] },
+      stand, face: 0.42, at: new THREE.Vector3(0.9, 1.7, WALL_Z), r: 0.9, objs: [], pose: 'trophies',
+      via: [new THREE.Vector2(-0.32, 0.25)], slot: [-0.86, 0.84, 'left'],
+      shot: { pos: new THREE.Vector3(0.62, 1.64, -1.12), look: new THREE.Vector3(), fov: 50, subject: new THREE.Vector3(stand.x, 1.42, stand.y), ndc: [0.36, -0.04] },
     });
   }
 

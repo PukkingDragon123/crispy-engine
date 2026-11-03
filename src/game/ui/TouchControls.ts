@@ -119,7 +119,7 @@ const CSS = `
 .tc-ui{position:absolute;inset:0;pointer-events:none;z-index:7;user-select:none;-webkit-user-select:none}
 .tc-say{position:absolute;left:50%;transform:translate(-50%,0);font-family:'Alagard',serif;text-align:center;white-space:nowrap;letter-spacing:1px;
   color:#fff3d6;text-shadow:0 2px 0 #2a1408,2px 0 0 #2a1408,-2px 0 0 #2a1408,0 -2px 0 #2a1408,0 4px 10px rgba(20,8,2,.55);transition:opacity .18s}
-.tc-say small{display:block;font-size:.62em;color:#c4ffe0;margin-top:2px}
+.tc-say small{display:block;font-size:.62em;color:#c4ffe0;margin:2px auto 0;white-space:normal;max-width:min(300px,42vw);line-height:1.15}
 `;
 
 export class TouchControls {

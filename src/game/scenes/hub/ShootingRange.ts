@@ -15,6 +15,7 @@ import * as CH from '../../models/characters';
 import * as WS from '../../models/props/workshop';
 import * as HX from '../../models/props/hideout';
 import * as PM from '../../models/props';
+type SMish = { model: VoxelModel; voxelSize: number };
 import { Fx } from '../../fx/Fx';
 import { Debris } from '../../fx/Debris';
 import { loadSave } from '../../meta/Save';
@@ -23,7 +24,7 @@ import { BuildKit, HubHost, HubStation, HeroBubble, HUD_CSS, hubStats, saveHubSt
 import type { Mode, Pick, View } from './HouseExtras';
 
 const IN = HX.CABIN_IN;
-const FENCE = new THREE.Vector3(11.2, 0, 1.4);
+const FENCE = new THREE.Vector3(9.7, 0, 1.45);
 const STAND = new THREE.Vector2(6.35, 1.62);
 const GROUND = -0.02;
 const ROUND = 30;
@@ -84,6 +85,7 @@ export class ShootingRange implements Mode {
   private ray = new THREE.Raycaster();
   private v = new THREE.Vector3();
   private best = false;
+  private rotor: THREE.Mesh | null = null;
 
   constructor(private h: HubHost, private bubble: HeroBubble) {
     this.fx = new Fx(h.particles, new THREE.Scene()); // its pooled lights stay out of the hub (one muzzle light of our own)
@@ -115,12 +117,28 @@ export class ShootingRange implements Mode {
       fence.updateMatrixWorld(true);
       for (const p of fs.meta.slots) slots.push(new THREE.Vector3(...p).applyMatrix4(fence.matrixWorld));
     }
-    for (const [x, z, sd] of [[8.7, -0.15, 5], [9.1, 3.25, 6]] as const) {
+    for (const [x, z, sd] of [[7.9, -0.25, 5], [8.25, 3.3, 6]] as const) {
       const kg = k.put(safe(() => HX.kegCraft(sd)), x, z, sd, GROUND, 0.9, false);
       if (kg) slots.push(new THREE.Vector3(x, new THREE.Box3().setFromObject(kg).max.y, z));
     }
     const P: any = PM;
-    k.put(safe(() => P.cactus?.(17, 'saguaro')), 13.6, 4.4, 0.6, GROUND, 0.8, false);
+    k.put(safe(() => P.cactus?.(17, 'saguaro')), 12.6, 4.6, 0.6, GROUND, 0.8, false);
+    k.put(safe(() => P.cactus?.(23, 'organ')), 13.4, -2.6, 2.1, GROUND, 0.7, false);
+    // the rest of the yard: an outhouse with a moon cut in the door, a trough, a skull on a post, a wheel against
+    // the fence, and the windmill turning out past it all
+    k.put(safe(() => P.outhouse?.(3)), 7.6, 6.0, -Math.PI / 2 - 0.25, GROUND, 1, false);
+    k.put(safe(() => P.trough?.(2)), 6.9, -1.9, 0.2, GROUND, 1, false);
+    k.put(safe(() => P.cattleSkullPost?.(4)), 11.6, -0.6, -1.3, GROUND, 1, false);
+    const wh = k.put(safe(() => P.wagonWheel?.(5)), FENCE.x + 0.12, FENCE.z + 1.95, -Math.PI / 2, GROUND, 1, false);
+    if (wh) wh.rotation.z = 0.25;
+    const wm = safe(() => P.windmill?.(1)) as (SMish & { rotor: VoxelModel; rotorPivot: [number, number, number]; rotorAt: [number, number, number] }) | null;
+    const tower = k.put(wm, 17.5, -3.2, -Math.PI / 2 + 0.3, GROUND, 1, false);
+    if (wm && tower) {
+      const rg = buildVoxelGeometry(wm.rotor, { voxelSize: wm.voxelSize, pivot: wm.rotorPivot });
+      this.rotor = meshOf(rg);
+      this.rotor.position.set(...wm.rotorAt);
+      tower.add(this.rotor);
+    }
     for (let i = 0; i < 9; i++) k.put(safe(() => HX.grassTuft(i % 3)), 6 + (i * 1.37) % 7, -2.2 + ((i * 2.9) % 7.5), i, GROUND, 1, false);
     // the targets
     slots.forEach((p, i) => {
@@ -225,9 +243,9 @@ export class ShootingRange implements Mode {
     const hx = this.h.pos.x, hz = this.h.pos.y;
     const sx = (Math.random() - 0.5) * this.shake, sy = (Math.random() - 0.5) * this.shake;
     return {
-      pos: new THREE.Vector3(hx - 0.92 + sx * 0.02, 1.7 + sy * 0.02, hz + 0.46),
-      look: new THREE.Vector3(FENCE.x, 1.02 + sy * 0.05, FENCE.z + 0.15 + sx * 0.05),
-      fov: 46,
+      pos: new THREE.Vector3(hx - 1.3 + sx * 0.02, 1.86 + sy * 0.02, hz + 1.18),
+      look: new THREE.Vector3(FENCE.x, 0.95 + sy * 0.05, FENCE.z + 0.05 + sx * 0.05),
+      fov: 44,
     };
   }
   picks(): Pick[] {
@@ -433,6 +451,7 @@ export class ShootingRange implements Mode {
       }
     }
     this.debris.update(rdt);
+    if (this.rotor) this.rotor.rotation.z += rdt * (0.8 + this.h.gust * 1.5);
     this.flashK = Math.max(0, this.flashK - rdt * 14);
     if (this.flash) this.flash.intensity = this.flashK * 7;
     void t;

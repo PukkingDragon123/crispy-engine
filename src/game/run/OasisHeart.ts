@@ -171,8 +171,8 @@ void main(){
   col += vH * 0.4;
   col = mix(col, col * 0.3, vk * smoothstep(uVortex.z * 0.4, 0.0, length(px - uVortex.xy)));
   // a lacy line of foam where the water laps the bank, and on the crests of ripples
-  float lace = step(0.42, vn(px * 1.6 + vec2(uTime * 0.25, -uTime * 0.18)));
-  float foam = smoothstep(0.05, 0.0, wd) * (0.35 + 0.65 * lace);
+  float lace = step(0.5, vn(px * 2.3 + vec2(uTime * 0.25, -uTime * 0.18)) * 0.6 + vn(px * 0.7 - uTime * 0.1) * 0.4);
+  float foam = smoothstep(0.035, 0.0, wd) * 0.55 * lace;
   foam = max(foam, smoothstep(0.08, 0.22, vH) * 0.75 * lace);
   col = mix(col, mix(vec3(0.94, 0.97, 0.9), vec3(0.78, 0.82, 0.62), uMurk), foam);
   float fr = pow(1.0 - clamp(normalize(cameraPosition - vW).y, 0.0, 1.0), 4.0);
@@ -934,8 +934,8 @@ export class OasisHeart implements KingArena {
     if (this.state === 'owned' && this.zoneOpen()) {
       this.ensureLurker();
       this.updateLurker(dt);
-      // (never on top of another cinematic: the zone's own entry cutscene plays first)
-      if (this.lurker && pl.alive && dist < this.r * 0.8 && !this.bossAlive() && !d.cam.cine && ctx.engine.timeScale > 0.5) this.startKing();
+      // (never inside another cinematic's slow-mo: the zone's own entry cutscene plays first)
+      if (this.lurker && pl.alive && dist < this.r * 0.8 && !this.bossAlive() && ctx.engine.timeScale > 0.3) this.startKing();
     }
     if (this.king && !this.kingAdopted && (this.king.alive || this.king.root.parent)) this.king.update(dt);
     // the army: spawn once the zone opens, hold the ambushes, respawn the fallen while the King rules

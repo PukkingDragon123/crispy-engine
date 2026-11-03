@@ -112,7 +112,8 @@ export class CineKit {
     P.emit({ pos: base, count: 120 + r * 20, spread: r * 4.5, up: r * 4, life: [0.8, 1.9], size: [0.08, 0.05], sprite: GRAIN, color: SAND, gravity: 14, ground: true, bounce: 0.3, jitter: r * 0.3 });
     P.emit({ pos: base, count: 24 + r * 4, spread: r * 5, up: r * 3.4, life: [0.9, 1.8], size: [0.12, 0.1], sprite: 'pebble', color: STONE, gravity: 18, ground: true, bounce: 0.35, rot: 6, rotSpeed: 8 });
     if (o.wood) P.emit({ pos: mid, count: 30 + r * 5, spread: r * 5, up: r * 4, life: [1.2, 2.4], size: [0.16, 0.14], sprite: 'woodchip', color: [0x8a5a30, 0x5a3a1e, 0x2a1a10], gravity: 13, ground: true, bounce: 0.3, rot: 6, rotSpeed: 10 });
-    P.emit({ pos: base, count: 14 + r * 2, spread: r * 2.2, up: r * 0.9, life: [1.6, 3.2], size: [r * 0.35, r * 1.4], sprite: PUFF, color: [0xe6cf9f, 0xd8b884, 0xc8a070], alpha: 0.7, drag: 1.6, rot: 6, rotSpeed: 0.5, jitter: r * 0.4, delay: 0.05 });
+    // (the voxel billows carry the smoke: the pixel dust is a thin veil low to the ground)
+    P.emit({ pos: base, count: 5 + Math.round(r), spread: r * 2.2, up: r * 0.4, life: [1.2, 2.4], size: [r * 0.2, r * 0.7], sprite: PUFF, color: [0xe6cf9f, 0xd8b884, 0xc8a070], alpha: 0.5, drag: 1.8, rot: 6, rotSpeed: 0.5, jitter: r * 0.4, delay: 0.05 });
     P.emit({ pos: { x: at.x, y: base.y + r * 1.6, z: at.z }, count: 40 + r * 6, spread: r * 2, up: r * 1.5, life: [3, 5.5], size: [0.06, 0.04], sprite: ['dot2', 'grain1'], color: ASH, gravity: 0.5, drag: 0.9, jitter: r, delay: 0.3 });
     // voxel debris: clods of sand, stone and charred wood
     const nd = o.debris ?? Math.round(26 + r * 6);
@@ -154,10 +155,12 @@ export class CineKit {
   }
 
   /** a puff of sand where something breaches or lands */
-  sandPop(at: V, power = 1) {
+  sandPop(at: V, power = 1, light = false) {
     const P = this.particles;
     P.emit({ pos: at, count: Math.round(22 * power), spread: 2.6 * power, up: 3.2 * power, life: [0.5, 1.2], size: [0.07, 0.05], sprite: GRAIN, color: SAND, gravity: 12, ground: true, bounce: 0.25, jitter: 0.25 * power });
-    P.emit({ pos: at, count: Math.round(4 * power), spread: 0.9 * power, up: 0.7, life: [0.9, 1.7], size: [0.35 * power, 1.1 * power], sprite: PUFF, color: [0xe6cf9f, 0xd6b888], alpha: 0.6, drag: 1.8, rot: 6, rotSpeed: 0.6, jitter: 0.3 * power });
+    // a low skirt of dust (light: hugging the ground so it never hides what landed)
+    if (light) P.emit({ pos: at, count: 3, vel: { x: 0, y: 0.2, z: 0 }, spread: 1.6, life: [0.6, 1.1], size: [0.2, 0.55], sprite: PUFF, color: [0xe6cf9f, 0xd6b888], alpha: 0.4, drag: 2.4, rot: 6, rotSpeed: 0.5, jitter: 0.4 });
+    else P.emit({ pos: at, count: Math.round(4 * power), spread: 0.9 * power, up: 0.7, life: [0.9, 1.7], size: [0.35 * power, 1.1 * power], sprite: PUFF, color: [0xe6cf9f, 0xd6b888], alpha: 0.6, drag: 1.8, rot: 6, rotSpeed: 0.6, jitter: 0.3 * power });
   }
 
   update(dt: number, worldDt = dt) {
@@ -190,7 +193,7 @@ export class CineKit {
         const x = s.x + Math.cos(a) * R, z = s.z + Math.sin(a) * R;
         const y = this.world.groundAt(x, z);
         this.particles.emit({ pos: { x, y: y + 0.1, z }, count: 2, vel: { x: Math.cos(a) * 6 * fade, y: 3 + 3 * s.power * fade, z: Math.sin(a) * 6 * fade }, spread: 1.2, life: [0.4, 0.9], size: [0.07, 0.05], sprite: GRAIN, color: SAND, gravity: 10, ground: true, jitter: 0.3 });
-        if (k % 4 === 0) this.particles.emit({ pos: { x, y: y + 0.3, z }, count: 1, vel: { x: Math.cos(a) * 2, y: 0.8, z: Math.sin(a) * 2 }, spread: 0.4, life: [0.7, 1.3], size: [0.5, 1.4], sprite: PUFF, color: 0xe6cf9f, alpha: 0.45, drag: 1.6, rot: 6, rotSpeed: 0.4 });
+        if (k % 5 === 0) this.particles.emit({ pos: { x, y: y + 0.2, z }, count: 1, vel: { x: Math.cos(a) * 2, y: 0.5, z: Math.sin(a) * 2 }, spread: 0.4, life: [0.6, 1.1], size: [0.35, 0.9], sprite: PUFF, color: 0xe6cf9f, alpha: 0.4, drag: 1.8, rot: 6, rotSpeed: 0.4 });
       }
     }
     for (let i = this.fires.length - 1; i >= 0; i--) {

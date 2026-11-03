@@ -252,7 +252,8 @@ export class ChoiceStage {
     if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, 1);
     fwd.normalize();
     this.toH.copy(fwd).negate();
-    this.right.set(-this.toH.z, 0, this.toH.x);
+    // screen-right as seen from the hunter (so option 1 sits on the left, reading order)
+    this.right.set(this.toH.z, 0, -this.toH.x);
     const faceH = Math.atan2(this.toH.x, this.toH.z);
     // ---- set dressing
     for (const p of sp.props ?? []) {
@@ -450,11 +451,11 @@ export class ChoiceStage {
   }
 
   private pushOpt(a: { root: THREE.Object3D; pick: THREE.Object3D[]; kind: OptObj['kind']; focus: THREE.Vector3; labelAt: THREE.Vector3; i: number; o: ChoiceOption; normal: THREE.Vector3; notice?: THREE.Mesh; word?: VoxelWord }) {
-    const label = new FloatText3D(`${a.i + 1}  ${a.o.title.toUpperCase()}`, { size: 0.12, px: 56, cps: 55, wrap: 22, color: a.o.accent ? '#fff3d6' : '#fff3d6', glow: '#ffb070', hdr: 1.25 });
+    const label = new FloatText3D(`${a.i + 1}  ${a.o.title.toUpperCase()}`, { size: 0.14, px: 56, cps: 55, wrap: 22, color: '#fff3d6', glow: '#ffb070', hdr: 1.25 });
     label.anchor.copy(a.labelAt);
     const det = [a.o.body, a.o.footer ? `- ${a.o.footer} -` : ''].filter(Boolean).join('\n');
-    const detail = new FloatText3D(det, { size: 0.072, px: 48, cps: 90, wrap: 34, color: '#f6e6c4', glow: '#c08040', hdr: 1.1 });
-    detail.anchor.copy(a.labelAt).add(new THREE.Vector3(0, 0.2, 0));
+    const detail = new FloatText3D(det, { size: 0.09, px: 48, cps: 90, wrap: 30, color: '#f6e6c4', glow: '#c08040', hdr: 1.1 });
+    detail.anchor.copy(a.labelAt).add(new THREE.Vector3(0, 0.26, 0));
     for (const t of [label, detail]) {
       (t.mesh.material as THREE.MeshBasicMaterial).fog = false;
       t.show(false);
@@ -537,9 +538,17 @@ export class ChoiceStage {
   /** after the camera is final: billboarded words */
   private late(rdt: number) {
     const cam = this.ctx.camera;
+    // spoken words hang at a fixed distance from the lens, toward the speaker, so they read
+    // the same in a close-up and a wide shot (as in the opening)
+    for (const [t, w] of this.lensAt) t.anchor.copy(cam.position).addScaledVector(_v.copy(w).sub(cam.position).normalize(), 3.1);
     for (const t of this.texts) t.update(rdt, cam);
-    this.line?.update(rdt, cam, (c, i, s) => this.speakingVoice && Voice.syllable(this.speakingVoice, c, { index: i, text: s, pos: this.speakingPos }));
+    try {
+      this.line?.update(rdt, cam, (c, i, s) => this.speakingVoice && Voice.syllable(this.speakingVoice, c, { index: i, text: s, pos: this.speakingPos }));
+    } catch (e) {
+      console.warn('[stage] line failed', e);
+    }
   }
+  private lensAt = new Map<FloatText3D, THREE.Vector3>();
   private speakingVoice: VoiceId | null = null;
   private speaker: number | 'sundown' = 0;
   private speakingPos = new THREE.Vector3();
@@ -559,8 +568,10 @@ export class ChoiceStage {
   private say(l: StageLine) {
     const who = l.who ?? 0;
     const head = this.headOf(who);
-    const t = new FloatText3D(l.text, { size: 0.13, px: 60, cps: 34, wrap: 30, color: who === 'sundown' ? '#fff3d6' : '#ffe9c4', glow: who === 'sundown' ? '#ffb070' : '#d0803a', hdr: 1.3 });
-    t.anchor.copy(head).add(new THREE.Vector3(0, who === 'sundown' ? 0.62 : 0.68, 0)).addScaledVector(this.right, who === 'sundown' ? -0.3 : 0.35);
+    const t = new FloatText3D(l.text, { size: 0.105, px: 60, cps: 34, wrap: 30, color: who === 'sundown' ? '#fff3d6' : '#ffe9c4', glow: who === 'sundown' ? '#ffb070' : '#d0803a', hdr: 1.3 });
+    const w = head.clone().add(new THREE.Vector3(0, who === 'sundown' ? 0.5 : 0.55, 0)).addScaledVector(this.right, who === 'sundown' ? -0.35 : 0.4);
+    t.anchor.copy(w);
+    this.lensAt.set(t, w);
     (t.mesh.material as THREE.MeshBasicMaterial).fog = false;
     this.ctx.scene.add(t.mesh);
     this.line = t;
@@ -586,8 +597,10 @@ export class ChoiceStage {
     const head = this.headOf(who);
     const other = who === 'sundown' ? this.headOf(0) : this.headOf('sundown');
     const dir = head.clone().sub(other).setY(0).normalize();
-    const pos = other.clone().addScaledVector(dir, -0.9).addScaledVector(new THREE.Vector3(-dir.z, 0, dir.x), 0.75).add(new THREE.Vector3(0, 0.05, 0));
-    const look = head.clone().add(new THREE.Vector3(0, 0.12, 0));
+    // a medium shot of whoever speaks, from the listener's side, a little off-axis
+    const near = who === 'sundown' ? 2.1 : this.actors[who as number]?.pinch ? 1.6 : 2.7;
+    const pos = head.clone().addScaledVector(dir, -near).addScaledVector(new THREE.Vector3(-dir.z, 0, dir.x), near * 0.32).add(new THREE.Vector3(0, -0.12, 0));
+    const look = head.clone().add(new THREE.Vector3(0, -0.15, 0));
     // the first line gets a slow push from the establishing shot
     this.ccam.set(pos, look, 40 - Math.min(1, this.pt / 3) * 3, 0);
     if (this.clickQueued) {

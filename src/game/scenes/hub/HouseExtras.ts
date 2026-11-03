@@ -207,8 +207,9 @@ export class HouseExtras {
     const eng = this.h.engine;
     const inp = eng.input;
     newFrame(rdt);
-    for (const p of [this.decor, this.range, this.cards, this.juke, this.wardrobe, this.bench, this.garage] as { update?(t: number, rdt: number): void; tick?(t: number, rdt: number): void }[]) p.tick?.(t, rdt);
+    // the decor first: the trophy wall's photographs and mounts take the frame's heavy step before the rest
     this.decor.update(t, rdt);
+    for (const p of [this.decor, this.range, this.cards, this.juke, this.wardrobe, this.bench, this.garage] as { update?(t: number, rdt: number): void; tick?(t: number, rdt: number): void }[]) p.tick?.(t, rdt);
     this.bubble.update(rdt);
     const m = this.mode;
     if (m) {
@@ -266,6 +267,8 @@ export class HouseExtras {
       this.tip.style.left = `${inp.mouseX + 18}px`;
       this.tip.style.top = `${inp.mouseY + 14}px`;
     } else this.tip.style.display = 'none';
+    const hubHint = (this.h as unknown as { hint: HTMLDivElement }).hint;
+    if (hubHint) hubHint.style.visibility = this.mode ? 'hidden' : '';
     const hint = this.mode?.hint() ?? '';
     if (this.hintEl.textContent !== hint) this.hintEl.textContent = hint;
     this.hintEl.style.opacity = hint ? '0.92' : '0';

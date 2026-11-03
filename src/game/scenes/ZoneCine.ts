@@ -276,13 +276,13 @@ export class ZoneCine {
     const size = THREE.MathUtils.clamp((viewW * 0.72) / (longest * 0.68), 0.9, 2.4);
     this.titleSize = size;
     const glow = GLOW[sa.key] ?? '#ffb070';
-    const word = new VoxelWord(name, { height: size, style: sa.key === 'B' ? 'moon' : sa.key === 'C' ? 'ember' : 'gold' });
+    const word = new VoxelWord(name, { height: size, style: sa.key === 'B' ? 'moon' : sa.key === 'C' ? 'ember' : 'gold', fog: false });
     word.group.position.set(ax, w.groundAt(ax, az), az);
     word.group.rotation.y = Math.atan2(ex - ax, ez - az);
     word.plant((x, z) => w.groundAt(x, z));
     const kit = Cinema.get()?.kit;
     word.onLand = (_l, at, i) => {
-      kit?.sandPop(at, 0.9 + size * 0.2);
+      kit?.sandPop(at, 0.6, true);
       if (i % 2 === 0) this.d.engine.audio.play('sand_burst', { pos: at, volume: 0.4, pitch: 0.9 + Math.random() * 0.2 });
     };
     this.d.scene.add(word.group);

@@ -1794,7 +1794,8 @@ export function pictureLight(): StaticModel & { meta: { bulb: V3 } } {
     const outer = Math.hypot(py / 2.6, pz / 3.2) - 1;
     return Math.max(outer, Math.abs(px) - 13, -(Math.hypot(py / 2.0, pz / 2.6) - 1), py - 2.2 + Math.abs(px) * 0.02 > 0 ? -1 : py < -1.6 ? 1 : -1);
   }, [[-14, 1, 8], [14, 8, 16]], 1, (x, y, z) => (Math.abs(x) > 12 ? mul(BRASS, 0.8) : y > 6 ? BRASS_HI : mod(x, 5) === 0 ? mul(BRASS, 0.9) : BRASS), VF.METAL);
-  for (let x = -10; x <= 10; x++) m.set(x, 4, 12, 0xfff0c8, VF.GLOW);
+  // three small warm bulbs tucked up under the hood (not a strip: it reads as old brass, not a shop light)
+  for (const bx of [-7, 0, 7]) egg(m, [bx, 4.6, 12], [1.2, 0.9, 1.2], 0xffd8a0, VF.EMISSIVE);
   return { model: m, voxelSize: DV, meta: { bulb: pivotOf(m, DV, [0, 4, 12]) } };
 }
 

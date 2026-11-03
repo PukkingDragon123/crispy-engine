@@ -199,7 +199,8 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
     pinch = new RigInstance(buildRigGeo(ps, 'pinch:coldopen'), { material: player.material });
     if (!actor.attach('shoulder_l', pinch.root)) actor.nodes['torso']?.add(pinch.root);
   }
-  const A = at(-2.2, 0.4);
+  // he starts clear of the sand drifted against the saloon's front
+  const A = at(-0.6, 0.4);
   actor.root.position.copy(A);
   actor.root.rotation.y = yawD;
   scene.add(actor.root);
@@ -210,10 +211,10 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
     return n.getWorldPosition(new THREE.Vector3());
   };
   // ---- the title, cast in voxels (rises later, behind him, in front of the blaze)
-  const word = new VoxelWord('dustUP', { height: 2.3, style: 'gold' });
+  const word = new VoxelWord('dustUP', { height: 2.3, style: 'gold', fog: false, glow: 0.7 });
   let wordIn = false;
   word.onLand = (_l, p, i) => {
-    kit.sandPop(p, 1.6);
+    kit.sandPop(p, 1.1, true);
     kit.sfx(i % 2 ? 'rock_crumble' : 'sand_burst', p, 0.8, 0.7 + Math.random() * 0.2);
     cam.addTrauma(0.12);
   };
@@ -235,7 +236,9 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
   const blast = (pc: SetPiece[], center: THREE.Vector3, r: number) => {
     for (const p of pc) {
       p.mesh.updateMatrixWorld(true);
-      kit.debris.shatter(p.model, p.vs, p.mesh.matrixWorld.clone(), p.pivot, { chunk: p.vs < 1 / 14 ? 7 : 4, speed: 12 + r, max: p.vs < 1 / 14 ? 420 : 120, up: 8 });
+      // chunks of about 0.3 m whatever the model's voxel size
+      const big = p.model.map.size > 40000;
+      kit.debris.shatter(p.model, p.vs, p.mesh.matrixWorld.clone(), p.pivot, { chunk: Math.max(2, Math.round(0.3 / p.vs)), speed: 12 + r, max: big ? 460 : 110, up: 8 });
       p.mesh.visible = false;
     }
     kit.blast(center, r, { wood: true, debris: 90 });
@@ -297,7 +300,7 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
       }
       if (!boom1 && T >= 2.0) {
         boom1 = true;
-        const saloon = pieces.find((p) => p.boom === 1 && p.vs < 1 / 14);
+        const saloon = pieces.find((p) => p.boom === 1 && p.model.map.size > 40000);
         const center = saloon ? saloon.mesh.position.clone().add(new THREE.Vector3(0, 2.4, 0)) : at(-(frontZ + 4), 0, 2.4);
         blast(pieces.filter((p) => p.boom === 1), center, 6.2);
         kit.blast(porch, 3, { ring: false, flash: false, sound: false, wood: true });
@@ -327,7 +330,7 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
         scene.add(word.group);
         own.push(word.group);
         word.enter('rise', 0.1, 0.05);
-        kit.shock(L.x, L.z, { power: 0.8, speed: 9, life: 1.6 });
+        kit.shock(L.x, L.z, { power: 0.5, speed: 9, life: 1.4 });
         eng.audio.play('quake_rumble', { volume: 0.8, pitch: 0.9 });
       }
       if (wordIn) word.update(dt);
@@ -335,7 +338,7 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
       const h = head();
       if (T < 2.0) {
         const k = T / 2.0;
-        shot(ap.clone().addScaledVector(dir, 4.4 - k * 0.3).addScaledVector(side, 0.9).add(new THREE.Vector3(0, 0.75, 0)), ap.clone().add(new THREE.Vector3(0, 1.3, 0)).addScaledVector(dir, -2.5), 44 - k * 2);
+        shot(ap.clone().addScaledVector(dir, 4.6 - k * 0.3).addScaledVector(side, 0.9).add(new THREE.Vector3(0, 1.05, 0)), ap.clone().add(new THREE.Vector3(0, 1.2, 0)).addScaledVector(dir, -2.5), 46 - k * 2);
       } else if (T < 4.4) {
         const k = (T - 2.0) / 2.4;
         const a = -0.35 + k * 0.6;
@@ -346,11 +349,13 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
         shot(h.clone().addScaledVector(dir, 1.25 - k * 0.15).addScaledVector(side, 0.42).add(new THREE.Vector3(0, -0.14, 0)), h.clone().add(new THREE.Vector3(0, 0.02, 0)), 30 - k * 2, -0.03);
       } else if (T < 7.6) {
         const k = (T - 5.6) / 2.0;
-        shot(ap.clone().addScaledVector(side, -11 + k * 1.5).addScaledVector(dir, 5.5).add(new THREE.Vector3(0, 2.2 + k * 0.4, 0)), ap.clone().add(new THREE.Vector3(0, 1.8, 0)).addScaledVector(dir, -4.5), 52);
+        // from the side away from the wagon: a small figure walking out of the inferno
+        shot(ap.clone().addScaledVector(side, 12 - k * 1.5).addScaledVector(dir, 6.5).add(new THREE.Vector3(0, 2.0 + k * 0.4, 0)), ap.clone().add(new THREE.Vector3(0, 2.2, 0)).addScaledVector(dir, -5).addScaledVector(side, -2), 54);
       } else {
+        // low, looking up: the name against the smoke column, him walking out under it
         const k = ease((T - 7.6) / 3.0);
         const L = word.group.position;
-        shot(ap.clone().addScaledVector(dir, 6.5 + k * 3).addScaledVector(side, 0.6).add(new THREE.Vector3(0, 0.9 + k * 2.4, 0)), L.clone().add(new THREE.Vector3(0, 1.3 + k * 0.4, 0)).lerp(ap.clone().add(new THREE.Vector3(0, 1.4, 0)), 0.25 * (1 - k)), 50 - k * 4);
+        shot(ap.clone().addScaledVector(dir, 7.2 + k * 2).addScaledVector(side, 0.5).add(new THREE.Vector3(0, 0.55 + k * 0.45, 0)), L.clone().add(new THREE.Vector3(0, 1.45 + k * 0.35, 0)), 52 - k * 4);
       }
       kit.update(cdt, cdt);
       if (!fadeOut && T >= 9.9) {

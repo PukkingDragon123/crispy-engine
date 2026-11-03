@@ -142,6 +142,7 @@ export class TwentyOne implements Mode {
   private tap = 0;
   private sitK = 0;
   private result = '';
+  private boardOff = false;
 
   constructor(private h: HubHost, private bubble: HeroBubble) {}
 
@@ -179,7 +180,7 @@ export class TwentyOne implements Mode {
       id: 'cards', label: 'Card Table', title: 'TWENTY-ONE', short: 'CARDS', sub: "Mama deals, and Mama doesn't lose gracefully", verb: 'Play a hand with Mama',
       stand: SEAT.clone(), face, at: new THREE.Vector3(TABLE.x, this.top, TABLE.z), r: 0.7, objs: [this.table, stool], pose: 'cards',
       via: [new THREE.Vector2(1.7, 0.25)], slot: [-0.86, 0.84, 'left'], surf: this.top,
-      shot: { pos: new THREE.Vector3(1.66, 1.38, 0.42), look: new THREE.Vector3(), fov: 44, subject: new THREE.Vector3(TABLE.x + 0.12, 0.82, TABLE.z - 0.18), ndc: [0.08, -0.12] },
+      shot: { pos: new THREE.Vector3(3.08, 1.46, 0.24), look: new THREE.Vector3(), fov: 52, subject: new THREE.Vector3(TABLE.x + 0.05, 0.8, TABLE.z - 0.1), ndc: [0.0, -0.12] },
     });
   }
   /** a point on the table top in its own frame (+z toward Sundown) */
@@ -205,8 +206,9 @@ export class TwentyOne implements Mode {
     return this;
   }
   view(): View | null {
-    const c = this.local(0, 0.02);
-    return { pos: new THREE.Vector3(1.86, 1.36, -0.02), look: c.add(new THREE.Vector3(0.05, 0.12, -0.12)), fov: 44 };
+    // a two-shot from the side: Sundown on the left, Mama on the right, the cards between them
+    const c = this.local(0.0, 0.0);
+    return { pos: new THREE.Vector3(2.92, 1.36, -0.08), look: c.add(new THREE.Vector3(0, 0.16, -0.04)), fov: 50 };
   }
   hint() {
     if (this.phase === 'bet' || this.phase === 'done') return `${this.result ? this.result + '   ·   ' : ''}Click a chip stack to bet: red 10 · white 25 · blue 50   ·   Esc: leave the table`;
@@ -433,6 +435,12 @@ export class TwentyOne implements Mode {
       n['head']?.rotateY(-0.25);
     }
     this.sitK = damp(this.sitK, here ? 1 : 0, 4, rdt);
+    // nobody sits on a stool with a sandboard on his back: it leans on the table leg while he plays
+    const seated = this.sitK > 0.4;
+    if (seated !== this.boardOff && this.h.hero) {
+      this.boardOff = seated;
+      for (const k of ['board_back', 'back']) this.h.hero.sockets[k]?.children.forEach((c) => (c.visible = !seated));
+    }
     void t;
   }
   update(_t: number, _rdt: number) {

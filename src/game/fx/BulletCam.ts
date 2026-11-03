@@ -124,8 +124,8 @@ interface Plan {
   /** after the snap, before the hand-off */
   hold: number;
 }
-const FULL: Plan = { fire: 0.42, muzzle: 0.3, flight: 1.55, slow: 0.42, through: 0.16, burst: 0.22, stop: 0.16, hold: 0.4 };
-const SHORT: Plan = { fire: 0.2, muzzle: 0, flight: 0.6, slow: 0.2, through: 0.06, burst: 0.08, stop: 0.1, hold: 0.22 };
+const FULL: Plan = { fire: 0.42, muzzle: 0.3, flight: 1.55, slow: 0.42, through: 0.16, burst: 0.22, stop: 0.16, hold: 0.55 };
+const SHORT: Plan = { fire: 0.2, muzzle: 0, flight: 0.6, slow: 0.2, through: 0.06, burst: 0.08, stop: 0.1, hold: 0.3 };
 
 // ------------------------------------------------------------------ rigid voxel fragments
 
@@ -502,6 +502,7 @@ export class BulletCam {
   private right = new THREE.Vector3(1, 0, 0);
   private upP = new THREE.Vector3(0, 1, 0);
   private B = new THREE.Vector3();
+  private offW = new THREE.Vector3();
   private heel = new THREE.Vector3();
   private mid = new THREE.Vector3();
   private dist = 0;
@@ -527,6 +528,7 @@ export class BulletCam {
   private shotB = pose();
   private muzzleShot = pose();
   private witness = pose();
+  private homeShot = pose();
   // light from the pool in Fx (held while we need it)
   private light: { l: THREE.PointLight; t: number; dur: number; i0: number } | null = null;
   private lightI = 0;
@@ -605,7 +607,10 @@ export class BulletCam {
     this.active = true;
     // a fresh line for the shot (the side the camera orbits toward)
     this.aimFrame(sh);
-    this.side = this.right.dot(_v.copy(this.run.pos).sub(sh.pos)) >= 0 ? 1 : -1;
+    // orbit toward the sunlit side, so the hit is front-lit (else toward where the run camera already is)
+    const sun = globalUniforms.uSunDirW.value as THREE.Vector3;
+    const sd = this.right.x * sun.x + this.right.z * sun.z;
+    this.side = Math.abs(sd) > 0.12 ? (sd > 0 ? 1 : -1) : this.right.dot(_v.copy(this.run.pos).sub(sh.pos)) >= 0 ? 1 : -1;
     // the world drops into bullet time; the hunter is untouchable and off the controls
     const u = eng.post.u;
     this.saved.desat = u.uDesat.value;
@@ -827,6 +832,11 @@ export class BulletCam {
       ctx.engine.slowMo(0.008, 10);
       ctx.sfx('bullet_whiz', this.tg!.head, 0.55, 0.42);
     }
+    // ---- hold the world where the beat wants it (another system may try to hand time or the controls back)
+    const eng = ctx.engine;
+    eng.input.enabled = false;
+    if (!this.snapped) eng.slowMo(t < T.fire ? 0.05 : t < T.slow0 ? 0.025 : 0.008, t < T.fire ? 9 : 8);
+    if (eng.barTop.style.height !== '11vh') eng.letterbox(true, 0.2);
     // ---- the line, the round
     this.aimFrame(sh);
     const fxRate = held ? 0 : this.fxRate(t, T);
@@ -843,8 +853,8 @@ export class BulletCam {
     // ---- camera + grade
     this.camera(t, T, rdt);
     this.grade(t, T, rdt);
-    this.clearLens(this.p as any, 0.14, 1.2);
-    this.clearLens(ctx.particles as any, 0.3, 1.6);
+    this.clearLens(this.p as any, 0.12, 0.9);
+    this.clearLens(ctx.particles as any, 0.3, 1.0);
     if (t >= T.end) this.finish();
   }
 
@@ -907,9 +917,9 @@ export class BulletCam {
     this.dist = 0;
     // the profile shot of the muzzle (full cut)
     const mz = this.muzzleShot;
-    mz.pos.copy(this.M0).addScaledVector(this.right, 0.5 * this.side).addScaledVector(this.D, 0.22).addScaledVector(this.upP, 0.05);
-    mz.look.copy(this.M0).addScaledVector(this.D, 0.3);
-    mz.fov = 34;
+    mz.pos.copy(this.M0).addScaledVector(this.right, 0.42 * this.side).addScaledVector(this.D, 0.55).addScaledVector(this.upP, 0.1);
+    mz.look.copy(this.M0).addScaledVector(this.D, 0.06);
+    mz.fov = 36;
     mz.roll = 0;
     this.recoilV += 22;
     this.cock = 0;
@@ -929,7 +939,7 @@ export class BulletCam {
     const C = cyl ? cyl.getWorldPosition(_v2).addScaledVector(D, 0.03) : _v2.copy(M).addScaledVector(D, -0.13);
     for (const s of [-1, 1]) p.emit({ pos: C, count: 5, vel: { x: R.x * s * 2.6 + U.x * 0.5, y: R.y * s * 2.6 + U.y * 0.5, z: R.z * s * 2.6 + U.z * 0.5 }, spread: 0.7, life: [0.05, 0.1], size: [0.035, 0.08], sprite: FLAME, additive: true, color: [0xffc060, 0xfff0c0], drag: 9 });
     // burning powder grains, then smoke: a plume and a ring rolling off the muzzle
-    p.emit({ pos: M, count: 30, vel: { x: D.x * 7, y: D.y * 7, z: D.z * 7 }, spread: 3.2, life: [0.12, 0.35], size: [0.022, 0.006], sprite: ['spark', 'streak'], additive: true, color: [0xffc060, 0xffe8a0, 0xff7a2a], drag: 2.4, gravity: 4, stretch: 0.03 });
+    p.emit({ pos: M, count: 24, vel: { x: D.x * 4, y: D.y * 4, z: D.z * 4 }, spread: 2.4, life: [0.12, 0.35], size: [0.012, 0.004], sprite: ['spark', 'glow8'], additive: true, color: [0xffb050, 0xff8a2a, 0xffd080], drag: 2.4, gravity: 4, stretch: 0.01 });
     p.emit({ pos: _v.copy(M).addScaledVector(D, 0.1), count: 5, vel: { x: D.x * 1.3, y: D.y * 1.3, z: D.z * 1.3 }, spread: 0.45, life: [0.5, 0.9], size: [0.06, 0.3], sprite: PUFF, color: SMOKE, alpha: 0.5, drag: 2.4, rot: 6, rotSpeed: 0.5 });
     for (let k = 0; k < 16; k++) {
       const a = (k / 16) * Math.PI * 2;
@@ -1046,7 +1056,7 @@ export class BulletCam {
     p.emit({ pos: En, count: 12, vel: { x: -D.x * 0.7, y: -D.y * 0.7, z: -D.z * 0.7 }, spread: 1.0, life: [0.4, 0.9], size: [0.018, 0.01], sprite: GRAIN, color: BONE, drag: 1.4, gravity: 3 });
     p.emit({ pos: En, count: 1, life: [0.14, 0.14], size: [0.06, 0.24], sprite: 'star4', additive: true, color: 0xfff0d0, sizeJitter: 0 });
     p.emit({ pos: En, count: 2, vel: { x: -D.x * 0.3, y: -D.y * 0.3, z: -D.z * 0.3 }, spread: 0.2, life: [0.5, 0.9], size: [0.04, 0.16], sprite: PUFF, color: tg.kind === 'skull' ? 0xeadcc0 : F.mist, alpha: 0.4, drag: 2.2 });
-    this.ripples.spawn(En, D, tg.r * 1.4, 0.35, 1.6, 0);
+    this.ripples.spawn(En, D, tg.r * 1.4, 0.35, 1.0, 0);
     this.trauma = Math.min(1, this.trauma + 0.2);
     this.holdLight(En, 0xfff0d0, 5);
     ctx.engine.audio.setMuffle(0, 0.05);
@@ -1073,7 +1083,7 @@ export class BulletCam {
     p.emit({ pos: _v.copy(X).addScaledVector(D, 0.08), count: 7, vel: { x: D.x * 1.5, y: D.y * 1.5, z: D.z * 1.5 }, spread: 1.0, life: [1.1, 2.0], size: [0.08, 0.4 + tg.r * 0.6], sprite: PUFF, color: tg.kind === 'skull' ? [0xeadcc0, 0xf3e8cf] : F.mist, alpha: 0.5, drag: 1.8, rot: 6, rotSpeed: 0.4, jitter: 0.06 });
     p.emit({ pos: X, count: 20, vel: { x: D.x * 4, y: D.y * 4 + 0.5, z: D.z * 4 }, spread: 3.2, life: [0.6, 1.2], size: [0.03, 0.026], sprite: ['bone', 'pebble'], color: BONE, gravity: 13, ground: true, bounce: 0.3, rot: 6, rotSpeed: 12 });
     p.emit({ pos: X, count: 1, life: [0.12, 0.12], size: [0.3, 0.7], sprite: ['flash0', 'flash2'], additive: true, color: tg.kind === 'skull' ? 0xfff2d0 : 0xffd8c8, alpha: 0.7, sizeJitter: 0 });
-    this.ripples.spawn(X, D, tg.r * 2.6, 0.5, 1.8, 1);
+    this.ripples.spawn(X, D, tg.r * 2.4, 0.5, 1.1, 1);
     this.trauma = Math.min(1, this.trauma + 0.7);
     this.fovKick -= 5;
     const u = ctx.engine.post.u;
@@ -1372,9 +1382,9 @@ export class BulletCam {
     // the draw: over the gun shoulder, down the line to the target
     const S = this.shoulder(sh, _v);
     const draw = this.shotA;
-    draw.pos.copy(S).addScaledVector(D, -0.78).addScaledVector(R, 0.3).addScaledVector(U, 0.16);
-    draw.look.copy(S).addScaledVector(D, 6).addScaledVector(R, 0.12);
-    draw.fov = 44;
+    draw.pos.copy(S).addScaledVector(D, -1.45).addScaledVector(R, 0.82).addScaledVector(U, 0.12);
+    draw.look.copy(S).addScaledVector(D, 6).addScaledVector(R, 0.38);
+    draw.fov = 40;
     draw.roll = 0;
     if (!this.fired) {
       mixPose(this.run, draw, sm(t / (T.fire * 0.9)), out);
@@ -1384,19 +1394,23 @@ export class BulletCam {
       const th = (0.12 + 0.95 * Math.pow(u, 1.5)) * this.side;
       const chase = this.shotB;
       const back = lerp(0.46, 0.34, u);
-      const off = _v2.copy(U).multiplyScalar(Math.cos(th)).addScaledVector(R, Math.sin(th)).multiplyScalar(0.12);
+      // (wide of the gun while the round is still at the muzzle, then tucked in behind it)
+      const off = _v2.copy(U).multiplyScalar(Math.cos(th)).addScaledVector(R, Math.sin(th)).multiplyScalar(lerp(0.3, 0.12, sm(u / 0.25)));
       const tail = Math.min(this.dist, back);
       chase.pos.copy(this.M0).addScaledVector(D, Math.max(0, this.dist - tail - BULLET_LEN * 0.5)).add(off);
       chase.look.copy(this.B).addScaledVector(D, 2.4).addScaledVector(off, -0.6);
       chase.fov = lerp(52, 46, u);
       chase.roll = -th * 0.16;
-      // the witness: off the side of the head, the round coming in across the frame
-      const wsc = Math.max(1, tg.r / 0.13);
+      // the witness: the camera lets the round go on alone, easing to a stop just short of the head
+      // and swinging on round it, so the entry, the round inside and the exit burst all read
+      const wsc = tg.kind === 'skull' ? 1.7 : Math.max(1, tg.r / 0.13);
+      const thW = (1.07 + 0.75) * this.side;
+      const offW = this.offW.copy(U).multiplyScalar(Math.cos(thW)).addScaledVector(R, Math.sin(thW));
       const wit = this.witness;
-      wit.pos.copy(tg.head).addScaledVector(D, -0.4 * wsc).addScaledVector(R, 1.3 * wsc * this.side).addScaledVector(U, 0.12 * wsc);
-      wit.look.copy(tg.head).addScaledVector(D, -0.3 * wsc);
-      wit.fov = 38;
-      wit.roll = 0;
+      wit.pos.copy(tg.head).addScaledVector(D, -0.72 * wsc).addScaledVector(offW, 0.52 * wsc);
+      wit.look.copy(tg.head).addScaledVector(D, -0.04 * wsc);
+      wit.fov = 44;
+      wit.roll = -thW * 0.06;
       if (!this.short && t < T.cut) {
         // full cut: hard cut to the muzzle in profile as the flash blooms
         copyPose(out, this.muzzleShot);
@@ -1411,12 +1425,15 @@ export class BulletCam {
         const k = sm((t - T.slow0) / (P.slow * 0.95));
         mixPose(chase, wit, k, out);
       } else {
-        // after the snap: ease back to take in the body going down
-        const k = sm((t - T.snap) / P.hold);
+        // after the snap: a beat on the body going down at full speed, then the lens whips back
+        // down the line to the hunter, landing where the rank-up's shockwave rolls out from his board
+        const k = (t - T.snap) / P.hold;
+        const kb = sm(k / 0.3);
         copyPose(out, wit);
-        out.pos.addScaledVector(D, -0.35 * k * wsc).addScaledVector(UP, 0.12 * k);
-        out.look.lerp(tg.body, 0.3 * k);
-        out.fov = lerp(wit.fov, 46, k);
+        out.pos.addScaledVector(D, -0.45 * kb * wsc).addScaledVector(offW, 0.25 * kb * wsc).addScaledVector(UP, 0.15 * kb);
+        out.look.lerp(tg.body, 0.3 * kb);
+        out.roll = lerp(wit.roll, 0, kb);
+        mixPose(out, this.heroShot(sh), sm((k - 0.3) / 0.7), out);
       }
     }
     out.pos.y = Math.max(out.pos.y, ctx.world.groundAt(out.pos.x, out.pos.z) + 0.16);
@@ -1451,6 +1468,21 @@ export class BulletCam {
     }
   }
 
+  /** where the whip home lands: a three-quarter view from behind the hunter, the kill beyond him */
+  private heroShot(sh: Shooter) {
+    const hp = this.homeShot;
+    const tg = this.tg!;
+    const toT = _v3.copy(tg.body).sub(sh.pos).setY(0);
+    if (toT.lengthSq() < 1e-4) toT.copy(this.D).setY(0);
+    toT.normalize();
+    const sx = _v2.crossVectors(toT, UP).normalize();
+    hp.pos.copy(sh.pos).addScaledVector(toT, -2.4).addScaledVector(sx, 0.95 * this.side).addScaledVector(UP, 1.4);
+    hp.look.copy(sh.pos).addScaledVector(UP, 1.05).addScaledVector(toT, 1.4);
+    hp.fov = 50;
+    hp.roll = 0;
+    return hp;
+  }
+
   /** bullet-time grade: drained colour, a vignette, speed blur round the round, a fringe on the hit */
   private grade(t: number, T: ReturnType<BulletCam['times']>, rdt: number) {
     const u = this.ctx.engine.post.u;
@@ -1463,7 +1495,13 @@ export class BulletCam {
     let rad = 0;
     const at = _v.copy(this.fired && !this.entered ? this.B : this.tg!.head);
     if (this.fired && t < T.slow0) rad = 0.32 * sm((t - T.fire - 0.15) / 0.3);
-    else if (this.exited && t < T.snap + 0.2) rad = 0.5 * Math.max(0, 1 - (t - T.exit) * 2.5);
+    else if (this.exited && t < T.snap) rad = 0.5 * Math.max(0, 1 - (t - T.exit) * 2.5);
+    else if (this.snapped) {
+      // the whip home
+      const kw = sat(((t - T.snap) / this.P.hold - 0.3) / 0.7);
+      rad = 0.42 * Math.sin(kw * Math.PI);
+      at.copy(this.host!.shooter.pos).addScaledVector(UP, 1.1);
+    }
     at.project(this.ctx.camera);
     if (at.z < 1) u.uRadialCenter.value.set(at.x * 0.5 + 0.5, at.y * 0.5 + 0.5);
     u.uRadial.value = rad;

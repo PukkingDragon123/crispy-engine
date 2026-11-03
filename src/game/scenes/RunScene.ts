@@ -340,6 +340,7 @@ export class RunScene implements GameScene {
     this.ledger = new Ledger(e.overlay, this.player.stats);
     if (isTouchDevice()) {
       this.touch = new TouchControls(e.overlay, e.input, this.qte);
+      this.touch.attach({ hud: this.hud, hudScene: this.hud3d.scene, player: this.player, pinch: this.skills.pinchRoot, enemies: this.enemies });
       e.input.lockFailed = true; // phones: no pointer lock, the touch layer drives the camera
       e.input.setWantLock(true);
     }
@@ -981,7 +982,7 @@ export class RunScene implements GameScene {
     const e = this.engine;
     this.run.time += dt;
     // pause toggle (simple until poster scene)
-    this.touch?.update(!!this.trial || this.picker.active || this.choice.active || this.shop.active || this.ledger.open || this.pausedByUser);
+    this.touch?.update(!!this.trial || this.picker.active || this.choice.active || this.shop.active || this.ledger.open || this.pausedByUser || !!this.colony?.modal || !!this.jerboa?.modal || this.gearLoot.active || !!this.treasure?.modal);
     if (this.trial) {
       this.qte.update(rdt);
       this.trial.update(rdt);

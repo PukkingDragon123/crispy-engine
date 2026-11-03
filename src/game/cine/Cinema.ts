@@ -218,11 +218,11 @@ export class Cinema {
   }
 
   // ------------------------------------------------------------------ boss arrival
-  bossArrival(b: BossLike, color = '#ff6a3a') {
+  bossArrival(b: BossLike, color?: string) {
     this.lastBoss = performance.now();
     this.pendingGeo = null;
     if (!this.free()) {
-      this.stamp(b.name.toUpperCase(), color);
+      this.stamp(b.name.toUpperCase(), color ?? '#ff6a3a');
       return;
     }
     const ctx = this.ctx, w = ctx.world, kit = this.kit, P = this.player;
@@ -237,7 +237,8 @@ export class Cinema {
     u.normalize();
     const s = new THREE.Vector3(u.z, 0, -u.x);
     const r = THREE.MathUtils.clamp(H * 0.55, 2.2, 6);
-    const style: LetterStyle = color ? styleForColor(color) : 'ember';
+    // forged iron with a molten core out in the desert; moon-silver in the caves
+    const style: LetterStyle = color ? styleForColor(color) : (w as unknown as { ceiling?: unknown }).ceiling ? 'moon' : 'ember';
     // ---- the shots
     const aPos = pp.clone().addScaledVector(u, -2.8).addScaledVector(s, 1.7);
     aPos.y = gAt(aPos.x, aPos.z) + 0.8;
@@ -245,14 +246,14 @@ export class Cinema {
     const head = () => {
       const n = (P.rig.nodes['head'] ?? P.rig.root) as THREE.Object3D;
       n.updateWorldMatrix(true, false);
-      return n.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.08, 0));
+      return n.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.24, 0));
     };
     // ---- the name, cast in voxels, standing in the sand in front of the boss
     const name = b.name.toUpperCase();
     const lines = splitTitle(name, 12);
     const longest = Math.max(...lines.split('\n').map((l) => l.length));
     const lh = Math.min(THREE.MathUtils.clamp(H * 0.32, 1.1, 2.4), 12 / Math.max(4, longest * 0.68));
-    const word = new VoxelWord(lines, { height: lh, style });
+    const word = new VoxelWord(lines, { height: lh, style, fog: false, glow: 0.45 });
     const L = new THREE.Vector3(b.pos.x, 0, b.pos.z).addScaledVector(u, -(bR + 2.4 + H * 0.12));
     L.y = gAt(L.x, L.z);
     const Dl = Math.max(word.width * 0.62 + 2.5, lh * 3.4 + 3);
@@ -262,7 +263,7 @@ export class Cinema {
     word.group.rotation.y = Math.atan2(cPos.x - L.x, cPos.z - L.z);
     word.plant(gAt);
     word.onLand = (_l, at, i) => {
-      kit.sandPop(at, 0.9 + lh * 0.15);
+      kit.sandPop(at, 0.6, true);
       kit.sfx(i % 2 ? 'sand_burst' : 'rock_crumble', at, 0.55, 0.8 + Math.random() * 0.3);
       this.ccam.shake(0.08);
     };
@@ -290,8 +291,8 @@ export class Cinema {
           // B: the hero reaction, lit by the fire behind the lens
           const k = (t - T1) / (T2 - T1);
           const h = head();
-          const pos = h.clone().addScaledVector(u, 1.55 - k * 0.25).addScaledVector(s, 0.48).add(new THREE.Vector3(0, -0.06, 0));
-          this.ccam.set(pos, h, 32 - k * 4, -0.04);
+          const pos = h.clone().addScaledVector(u, 2.7 - k * 0.45).addScaledVector(s, 0.8).add(new THREE.Vector3(0, -0.22, 0));
+          this.ccam.set(pos, h.clone().add(new THREE.Vector3(0, -0.12, 0)), 34 - k * 4, -0.04);
           seq.worldRate = 0.03;
           seq.fxRate = 0.3;
           if (Math.random() < rdt * 14) kit.ash(h.clone().addScaledVector(u, 0.6), 3, { x: s.x * 1.4, y: 0, z: s.z * 1.4 });
@@ -307,11 +308,10 @@ export class Cinema {
             entered = true;
             ctx.scene.add(word.group);
             word.enter('rise', 0.065, 0.1);
-            kit.shock(L.x, L.z, { power: 0.6, speed: 10, life: 1.4 });
             kit.sfx('quake_rumble', L, 0.7, 1.2);
           }
           if (!sub && t > T2 + 0.6 && b.title) {
-            sub = new FloatText3D(b.title, { size: lh * 0.3, px: 72, cps: 30, wrap: 34, color: '#fff0d8', glow: style === 'moon' ? '#46d8ff' : '#ff8a3a', hdr: 1.4 });
+            sub = new FloatText3D(b.title, { size: lh * 0.38, px: 72, cps: 30, wrap: 34, color: '#fff0d8', glow: style === 'moon' ? '#46d8ff' : '#ff8a3a', hdr: 1.4 });
             (sub.mesh.material as THREE.MeshBasicMaterial).fog = false;
             sub.anchor.copy(L).add(new THREE.Vector3(0, word.height + lh * 0.55, 0));
             ctx.scene.add(sub.mesh);
@@ -364,7 +364,7 @@ export class Cinema {
     const text = splitTitle(title.toUpperCase(), 14);
     const longest = Math.max(...text.split('\n').map((l) => l.length));
     const lh = Math.min(1.6, 11 / Math.max(4, longest * 0.68));
-    const word = new VoxelWord(text, { height: lh, style: color ? styleForColor(color) : 'gold' });
+    const word = new VoxelWord(text, { height: lh, style: color ? styleForColor(color) : 'gold', fog: false, glow: 0.35 });
     const L = pp.clone().addScaledVector(f, 15);
     L.y = gAt(L.x, L.z);
     const D = Math.max(word.width * 0.7 + 2, 7.5);
@@ -374,7 +374,7 @@ export class Cinema {
     word.group.rotation.y = Math.atan2(c1.x - L.x, c1.z - L.z);
     word.plant(gAt);
     word.onLand = (_l, at, i) => {
-      kit.sandPop(at, 0.8 + lh * 0.2);
+      kit.sandPop(at, 0.6, true);
       if (i % 2 === 0) kit.sfx('sand_burst', at, 0.45, 0.9 + Math.random() * 0.2);
     };
     const c0 = pp.clone().addScaledVector(f, -5).addScaledVector(s, 9).add(new THREE.Vector3(0, 14, 0));
@@ -591,10 +591,11 @@ export class Cinema {
     this.kit.update(frozen ? 0 : rdt * fxRate, dt);
     for (let i = this.beats.length - 1; i >= 0; i--) {
       const b = this.beats[i];
-      b.t += rdt;
+      const bdt = (window as any).__cineHold ? 0 : rdt;
+      b.t += bdt;
       if (b.follow && !b.word.leaving) this.placeBeat(b);
       if (b.t > b.hold && !b.word.leaving) b.word.leave(b.out);
-      b.word.update(rdt);
+      b.word.update(bdt);
       if (b.word.done) {
         b.word.dispose();
         this.beats.splice(i, 1);

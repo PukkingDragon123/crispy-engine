@@ -23,7 +23,7 @@ import { Blueprints, GUNS, ATTACHMENTS, WEAPON_UPGRADES, blueprint } from '../..
 import { buildWeaponDisplay, buildWeaponRig } from '../../player/Weapons';
 import { blueprintPhoto } from '../../ui/BlueprintReveal';
 import { loadSave, writeSave, owns, PRICES, GUN_PARTS, GUN_PERKS, GunLoadout } from '../../meta/Save';
-import { BuildKit, HubHost, HubStation, HeroBubble, PriceLock, safe, geoOf, meshOf, reach, ease, clamp01, sstep, stepJob } from './HubKit';
+import { BuildKit, HubHost, HubStation, HeroBubble, PriceLock, safe, geoOf, meshOf, reach, ease, clamp01, sstep, stepJob, nailGeo } from './HubKit';
 import type { Mode, Pick, View } from './HouseExtras';
 
 const IN = HX.CABIN_IN;
@@ -165,7 +165,7 @@ export class Bench3D implements Mode {
     }
     this.h.scene.add(this.cartridges);
     this.views = [
-      { pos: new THREE.Vector3(this.bx + 0.12, this.top + 0.72, this.zFront + 0.62), look: new THREE.Vector3(this.bx - 0.02, this.top + 0.02, this.zBack + 0.42), fov: 50 },
+      { pos: new THREE.Vector3(this.bx - 0.98, this.top + 0.98, this.zFront + 1.02), look: new THREE.Vector3(this.bx + 0.1, this.top + 0.04, this.zBack + 0.34), fov: 50 },
       { pos: new THREE.Vector3(-3.3, 1.72, -1.2), look: new THREE.Vector3(-3.45, 2.12, IN.back), fov: 50 },
     ];
     const wm = geoOf(safe(() => WS.benchWrench()), 'center');
@@ -396,8 +396,6 @@ export class Bench3D implements Mode {
   // ======================================================================= blueprints you haven't found: pinned over the board rack
   private *makePapers(): Generator<void, void, void> {
     const locked = Blueprints.list().filter((b) => !b.owned && b.kind !== 'gear');
-    const nailG = new THREE.BoxGeometry(0.012, 0.012, 0.02);
-    const nailM = new THREE.MeshStandardMaterial({ color: 0x3a3430, metalness: 0.5, roughness: 0.5 });
     let slot = 0;
     for (const b of locked) {
       let at: THREE.Vector3;
@@ -420,8 +418,8 @@ export class Bench3D implements Mode {
         mesh.rotation.z = Math.sin(slot * 2.3 + b.id.length) * 0.05;
         mesh.receiveShadow = true;
         mesh.userData.bp = b.id;
-        const nail = new THREE.Mesh(nailG, nailM);
-        nail.position.set(0, w / 3.2 - 0.012, 0.008);
+        const nail = new THREE.Mesh(nailGeo(), sharedVoxelMaterial);
+        nail.position.set(0, w / 3.2 - 0.012, -0.004);
         mesh.add(nail);
         this.h.scene.add(mesh);
         this.papers.push({ id: b.id, mesh, at, ready: true });
@@ -437,6 +435,9 @@ export class Bench3D implements Mode {
     this.vi = 0;
     this.paperDelay = 0;
     this.select(this.sel);
+    this.home = { at: this.st.stand.clone(), face: this.st.face };
+    this.rest = { at: new THREE.Vector2(this.bx + 1.08, this.zFront + 0.3), face: -2.3 };
+    this.goTo(this.rest);
     this.h.engine.audio.play('rev_open', { volume: 0.5 });
     return this;
   }
@@ -474,6 +475,7 @@ export class Bench3D implements Mode {
   }
   back() {
     if (this.fly) return false;
+    this.goTo(this.home);
     this.done = true;
     return true;
   }
@@ -528,7 +530,11 @@ export class Bench3D implements Mode {
     if (!root) return;
     p.grp.updateMatrixWorld(true);
     this.fly = { p, t: 0, on: true, from: p.grp.matrixWorld.clone(), to: root, done: false };
+    this.wt = 0;
     this.vi = 0;
+    // he steps up to the gun to set it
+    const at = (p.gun === 'revolver' ? root : this.longs[p.gun]?.root ?? root).getWorldPosition(new THREE.Vector3());
+    this.goTo({ at: new THREE.Vector2(at.x - 0.08, this.zFront + 0.3), face: Math.PI });
   }
   private unfit(p: Part) {
     const root = this.gunRoot(p.gun);
@@ -574,14 +580,14 @@ export class Bench3D implements Mode {
     }
   }
   private lastGun: THREE.Object3D | null = null;
-  update(t: number, rdt: number) {
+  update(_t: number, rdt: number) {
     const f = this.fly;
     if (!f) return;
     f.t += rdt;
     const p = f.p, eng = this.h.engine;
     const target = f.to.matrixWorld;
     const back = (f as unknown as { back?: THREE.Matrix4 }).back;
-    const A = f.on ? f.from : f.from, B = f.on ? target : back ?? f.from;
+    const A = f.from, B = f.on ? target : back ?? f.from;
     const u = clamp01(f.t / 0.75);
     const e = ease(u);
     const pa = new THREE.Vector3(), qa = new THREE.Quaternion(), sa = new THREE.Vector3();
@@ -593,21 +599,27 @@ export class Bench3D implements Mode {
     p.grp.position.y += Math.sin(Math.PI * u) * 0.16;
     p.grp.quaternion.slerpQuaternions(qa, qb, e);
     p.grp.scale.lerpVectors(sa, sb, e);
-    // the wrench and the sparks while it seats
     const joint = this.v.copy(p.c).applyMatrix4(target);
-    if (f.on && u >= 1 && f.t < 1.75) {
-      if (this.wrench) {
-        this.wrench.visible = true;
-        this.wrench.position.copy(joint).add(new THREE.Vector3(0.06, 0.05, 0.06));
-        this.wrench.rotation.set(-Math.PI / 2, 0, Math.sin(f.t * 14) * 0.5 + 0.4);
+    // it sits on the gun; once he is at the gun, the wrench goes to work in a spray of sparks
+    let done = !f.on && u >= 1;
+    if (f.on && u >= 1) {
+      if (this.h.route.length === 0 && this.h.atK > 0.5) this.wt += rdt;
+      const wt = this.wt;
+      if (wt > 0 && wt < 1.1) {
+        if (this.wrench) {
+          this.wrench.visible = true;
+          this.wrench.position.copy(joint).add(new THREE.Vector3(0.06, 0.05, 0.07));
+          this.wrench.rotation.set(-Math.PI / 2, 0, Math.sin(wt * 14) * 0.5 + 0.4);
+        }
+        if (Math.random() < rdt * 24) this.h.particles.emit({ pos: joint, count: 2, spread: 0.9, up: 0.6, life: [0.2, 0.45], size: [0.03, 0.006], sprite: 'spark', color: 0xffc860, additive: true, gravity: -6, stretch: 0.03 });
+        if (Math.floor(wt * 7) !== Math.floor((wt - rdt) * 7)) eng.audio.play(Math.random() < 0.5 ? 'rev_close' : 'counter_clang', { volume: 0.35, pitch: 1.2 + Math.random() * 0.3 });
       }
-      if (Math.random() < rdt * 24) this.h.particles.emit({ pos: joint, count: 2, spread: 0.9, up: 0.6, life: [0.2, 0.45], size: [0.03, 0.006], sprite: 'spark', color: 0xffc860, additive: true, gravity: -6, stretch: 0.03 });
-      if (Math.floor(f.t * 7) !== Math.floor((f.t - rdt) * 7)) eng.audio.play(Math.random() < 0.5 ? 'rev_close' : 'counter_clang', { volume: 0.35, pitch: 1.2 + Math.random() * 0.3 });
+      done = wt >= 1.15 || f.t > 8;
     }
-    const end = f.on ? 1.8 : 0.8;
-    if (f.t >= end) {
+    if (done) {
       if (this.wrench) this.wrench.visible = false;
       this.fly = null;
+      this.wt = 0;
       if (f.on) {
         this.apply(p, true);
         eng.audio.play('rev_spin', { volume: 0.5 });
@@ -615,14 +627,25 @@ export class Bench3D implements Mode {
         if (Math.random() < 0.6) this.bubble.say(['That\'ll do.', 'Snug as a tick.', 'Now we\'re talking.', 'Purrs like a cat.'][Math.floor(Math.random() * 4)]);
       } else eng.audio.play('shell_casing', { volume: 0.5 });
       this.layout();
+      this.goTo(this.rest);
     }
-    void t;
+  }
+  private wt = 0;
+  /** where he waits while you look things over: the right end of the bench, out of the way of the work */
+  private rest = { at: new THREE.Vector2(), face: 0 };
+  private home = { at: new THREE.Vector2(), face: 0 };
+  private goTo(s: { at: THREE.Vector2; face: number }) {
+    const st = this.st;
+    if (!st) return;
+    st.stand.copy(s.at);
+    st.face = s.face;
+    this.h.route = [s.at.clone()];
   }
   /** his hand on the wrench while a part seats */
   poseHero(_t: number, _rdt: number) {
     const f = this.fly;
-    if (!f || !f.on || f.t < 0.6) return;
-    const w = sstep(0.6, 0.9, f.t) * (1 - sstep(1.6, 1.8, f.t));
+    if (!f || !f.on || this.wt <= 0) return;
+    const w = sstep(0, 0.25, this.wt) * (1 - sstep(0.95, 1.15, this.wt));
     if (this.wrench?.visible) reach(this.h, 'r', this.wrench.position.clone().add(new THREE.Vector3(0.05, 0, 0.05)), new THREE.Vector3(-1, -0.4, -0.2), w);
   }
 

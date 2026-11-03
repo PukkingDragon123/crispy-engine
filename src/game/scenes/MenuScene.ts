@@ -722,6 +722,11 @@ export class MenuScene implements GameScene {
     sens.value = String(Math.round(((eng.input as any).sensitivity ?? 1) * 100));
     sens.oninput = () => ((eng.input as any).sensitivity = +sens.value / 100);
     row('Mouse', sens);
+    const ap = document.createElement('input');
+    ap.type = 'checkbox';
+    ap.checked = eng.input.autoPushDesktop;
+    ap.onchange = () => eng.input.setAutoPushDesktop(ap.checked);
+    row('Auto push', ap);
     p.querySelectorAll('input,select').forEach((el) => ((el as HTMLElement).style.cssText = 'font-family:Alagard;font-size:16px;accent-color:#8a2a18'));
     eng.overlay.appendChild(p);
     this.panel = p;

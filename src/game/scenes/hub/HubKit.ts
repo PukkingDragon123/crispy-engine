@@ -455,3 +455,19 @@ export function stepJob<T extends Generator<void, void, void>>(job: T | null, ta
     return null;
   }
 }
+
+let _nail: THREE.BufferGeometry | null = null;
+/** a forged square nail driven into a wall, head proud (1/256: a domed, hammer-flattened head and a stub of shank) */
+export function nailGeo() {
+  if (_nail) return _nail;
+  const m = new VoxelModel('nail');
+  for (let x = -2; x <= 2; x++)
+    for (let y = -2; y <= 2; y++) {
+      if (Math.abs(x) + Math.abs(y) > 3) continue;
+      m.set(x, y, 1, Math.abs(x) + Math.abs(y) <= 1 ? 0x5a5650 : 0x3a3632, VF.METAL);
+      if (Math.abs(x) + Math.abs(y) <= 1) m.set(x, y, 2, x + y > 0 ? 0x4a4642 : 0x6a645c, VF.METAL);
+    }
+  m.set(0, 0, 0, 0x2a2622, VF.METAL).set(0, 0, -1, 0x2a2622, VF.METAL);
+  _nail = buildVoxelGeometry(m, { voxelSize: 1 / 256, pivot: [0.5, 0.5, 0] });
+  return _nail;
+}

@@ -259,6 +259,7 @@ export class CaveScene implements GameScene {
     this.garments = new Garments(this.player.rig, this.cloth, this.world.groundAt);
     if (isTouchDevice()) {
       this.touch = new TouchControls(e.overlay, e.input, this.qte);
+      this.touch.attach({ hud: this.hud, hudScene: this.hud3d.scene, player: this.player, pinch: this.skills.pinchRoot, enemies: this.enemies });
       e.input.lockFailed = true;
       e.input.setWantLock(true);
     }
