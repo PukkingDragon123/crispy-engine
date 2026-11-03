@@ -1,6 +1,9 @@
 // Sundown's Serket kit: Pinch (shoulder companion that leaps to sting and helps
 // reload), Scorpion Toss (E), Locust Swarm (C), Dung Bomb (G, bouncing physics
 // grenade with a stink cloud).
+// A new hunt starts with only the pistol: the three tarot skills are SEALED until
+// learned from a rank-up card (run/Upgrades.ts `learn*` cards -> Skills.learn).
+// `echo` (a quest reward) makes every cast repeat once ~0.3 s later.
 import * as THREE from 'three';
 import type { Ctx, EnemyLike } from '../Ctx';
 import type { Player } from './Player';
@@ -16,6 +19,20 @@ import { clamp, damp, rnd } from '../../engine/math/rand';
 import { Input } from '../../engine/Input';
 
 const _v = new THREE.Vector3();
+
+export type SkillKey = 'E' | 'C' | 'G';
+/** the three tarot skills: card title and skill name */
+export const SKILL_INFO: Record<SkillKey, { card: string; name: string }> = {
+  E: { card: 'THE MAGICIAN', name: 'Scorpion Toss' },
+  C: { card: 'THE TOWER', name: 'Locust Swarm' },
+  G: { card: 'THE SUN', name: 'Dung Bomb' },
+};
+/** has the running hunt learned this tarot skill? (keys that aren't sealable, like Z, always are) */
+export function isSkillLearned(key: string) {
+  const s = Skills.current;
+  if (!s || !(key in SKILL_INFO)) return true;
+  return s.learned.has(key as SkillKey);
+}
 
 /** small blocky scorpion used for thrown brood (fallback if no model registered) */
 function broodModel() {
@@ -59,6 +76,13 @@ interface Cloud {
 }
 
 export class Skills {
+  /** the hunt's live skill kit (HUD / cinematics read it) */
+  static current: Skills | null = null;
+  /** tarot skills learned this hunt (a new hunt starts with none) */
+  learned = new Set<SkillKey>();
+  /** quest reward: every cast repeats once ~0.3 s later */
+  echo = false;
+  private sealedNag = 0;
   scorpCd = 0;
   swarmCd = 0;
   bombCharges = 2;
@@ -85,6 +109,7 @@ export class Skills {
   constants = { scorpCd: 8, swarmCd: 16, bombRecharge: 7 };
 
   constructor(private ctx: Ctx, private player: Player, private input: Input) {
+    Skills.current = this;
     const vs = 1 / 48;
     const g = buildVoxelGeometry(broodModel(), { voxelSize: vs, pivot: 'bottom' });
     this.broodMesh = new THREE.InstancedMesh(g, sharedVoxelMaterial, 48);
@@ -138,10 +163,11 @@ export class Skills {
         this.bombRecharge = this.constants.bombRecharge * cdr;
       }
     }
+    this.sealedNag -= dt;
     if (this.player.alive) {
-      if (inp.hit('skill1') && this.scorpCd <= 0) this.tossScorpions();
-      if (inp.hit('skill2') && this.swarmCd <= 0) this.summonSwarm();
-      if (inp.hit('grenade') && this.bombCharges > 0) this.throwBomb();
+      if (inp.hit('skill1')) this.tryCast('E');
+      if (inp.hit('skill2')) this.tryCast('C');
+      if (inp.hit('grenade')) this.tryCast('G');
     }
     this.updateBrood(dt);
     this.updateBombs(dt);
@@ -150,14 +176,58 @@ export class Skills {
     this.updatePinch(dt);
   }
 
+  // ----------------------------------------------------------- learning, sealing, echo
+  /** learn a tarot skill (from a rank-up card); `quiet` skips the fanfare (e.g. restoring a carried run) */
+  learn(k: SkillKey, quiet = false) {
+    if (this.learned.has(k)) return;
+    this.learned.add(k);
+    if (k === 'G') this.bombCharges = 2;
+    if (quiet) return;
+    const info = SKILL_INFO[k];
+    const c = this.player.center(new THREE.Vector3());
+    this.ctx.toast(`${info.card} AWAKENS`, '#c8ff5a', `${info.name}  ·  ${k}`, true);
+    this.ctx.sfx('card_flip', null, 0.9);
+    this.ctx.sfx('divine_chime', null, 0.7);
+    this.ctx.fx.glyphs(c, 0x9dff3a, 10, 1.4);
+    this.ctx.fx.sparkle(c, 0xffd36b, 12, 0.9);
+    this.player.express('smug', 1.2);
+  }
+
+  private tryCast(k: SkillKey) {
+    if (!this.learned.has(k)) {
+      if (this.sealedNag <= 0) {
+        this.sealedNag = 1.2;
+        this.ctx.sfx('ui_error', null, 0.5);
+        this.ctx.toast(`${SKILL_INFO[k].card} IS SEALED`, '#d8c8a8', 'Earn it at a bounty rank-up');
+      }
+      return;
+    }
+    if (k === 'E' && this.scorpCd <= 0) this.tossScorpions();
+    else if (k === 'C' && this.swarmCd <= 0) this.summonSwarm();
+    else if (k === 'G' && this.bombCharges > 0) this.throwBomb();
+    else return;
+    if (this.echo) this.ctx.engine.tweens.after(0.3, () => this.echoCast(k));
+  }
+
+  /** the echo: the same skill again, free, with a jade shimmer */
+  private echoCast(k: SkillKey) {
+    if (!this.player.alive) return;
+    const c = this.player.center(new THREE.Vector3());
+    this.ctx.fx.sparkle(c, 0x9dff3a, 10, 0.7);
+    this.ctx.sfx('divine_chime', c, 0.35, 1.4);
+    if (k === 'E') this.tossScorpions(true);
+    else if (k === 'C') this.summonSwarm(true);
+    else this.throwBomb(true);
+  }
+
   // ----------------------------------------------------------- scorpion toss
-  tossScorpions() {
+  tossScorpions(echo = false) {
     const n = 2 + Math.round(this.stats.get('scorpions'));
-    this.scorpCd = this.constants.scorpCd * (1 - this.stats.get('cdr'));
+    if (!echo) this.scorpCd = this.constants.scorpCd * (1 - this.stats.get('cdr'));
     const o = this.player.center(new THREE.Vector3());
     const aim = this.player.aimPoint;
     for (let i = 0; i < n; i++) {
-      const spread = (i - (n - 1) / 2) * 0.22;
+      const spread = (i - (n - 1) / 2) * 0.22 + (echo ? 0.11 : 0);
       const dx = aim.x - o.x, dz = aim.z - o.z;
       const d = Math.min(26, Math.hypot(dx, dz)) || 1;
       const ang = Math.atan2(dx, dz) + spread;
@@ -237,10 +307,17 @@ export class Skills {
   }
 
   // ----------------------------------------------------------- swarm
-  summonSwarm() {
-    this.swarmCd = this.constants.swarmCd * (1 - this.stats.get('cdr'));
-    this.swarmT = 8 * Math.sqrt(this.stats.get('swarmSize'));
+  summonSwarm(echo = false) {
     const count = Math.round(36 * this.stats.get('swarmSize'));
+    if (echo && this.swarmT > 0) {
+      // the echo thickens the cloud already circling and keeps it a little longer
+      this.swarmT += 2;
+      for (let i = 0; i < Math.round(count * 0.6); i++) this.swarmBugs.push({ a: rnd.next() * Math.PI * 2, r: 1.5 + rnd.next() * 3, h: 0.5 + rnd.next() * 2, sp: (1.5 + rnd.next() * 2) * rnd.sign(), dive: 0, target: null, p: this.player.center(new THREE.Vector3()) });
+      this.ctx.sfx('divine_power', this.player.pos, 0.35, 1.2);
+      return;
+    }
+    if (!echo) this.swarmCd = this.constants.swarmCd * (1 - this.stats.get('cdr'));
+    this.swarmT = 8 * Math.sqrt(this.stats.get('swarmSize'));
     this.swarmBugs = [];
     for (let i = 0; i < count; i++) this.swarmBugs.push({ a: rnd.next() * Math.PI * 2, r: 1.5 + rnd.next() * 3, h: 0.5 + rnd.next() * 2, sp: (1.5 + rnd.next() * 2) * rnd.sign(), dive: 0, target: null, p: this.player.center(new THREE.Vector3()) });
     this.ctx.sfx('divine_power', this.player.pos, 0.6);
@@ -288,12 +365,15 @@ export class Skills {
   }
 
   // ----------------------------------------------------------- dung bomb
-  throwBomb() {
-    this.bombCharges--;
-    if (this.bombRecharge <= 0) this.bombRecharge = this.constants.bombRecharge * (1 - this.stats.get('cdr'));
+  throwBomb(echo = false) {
+    if (!echo) {
+      this.bombCharges--;
+      if (this.bombRecharge <= 0) this.bombRecharge = this.constants.bombRecharge * (1 - this.stats.get('cdr'));
+    }
     const o = this.player.center(new THREE.Vector3()).add(new THREE.Vector3(0, 0.5, 0));
     const aim = this.player.aimPoint;
-    const dx = aim.x - o.x, dz = aim.z - o.z;
+    const jit = echo ? 1.6 : 0;
+    const dx = aim.x - o.x + (rnd.next() - 0.5) * jit, dz = aim.z - o.z + (rnd.next() - 0.5) * jit;
     const d = Math.min(30, Math.hypot(dx, dz)) || 1;
     const T = 0.5 + d / 30;
     const v = new THREE.Vector3((dx / Math.hypot(dx, dz)) * (d / T), 5 + d * 0.18, (dz / Math.hypot(dx, dz)) * (d / T));

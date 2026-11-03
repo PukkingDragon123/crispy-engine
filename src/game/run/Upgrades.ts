@@ -1,6 +1,8 @@
 // Upgrade pool: gun mods, insect powers, stat passives, gear (visible on
 // Sundown), god relics with unique effects, and hidden EVOLUTIONS when two
 // maxed upgrades meet. Effects are event-driven (see UpgradeEffects).
+// A hunt starts with only the pistol: the three tarot skills are learned from
+// `learn` cards, and every rank-up roll guarantees one until all three are known.
 import * as THREE from 'three';
 import type { Modifier, StatSheet } from '../combat/Stats';
 import type { Ctx } from '../Ctx';
@@ -33,11 +35,19 @@ export interface UpgradeDef {
   evolveFrom?: [string, string];
   lore?: string;
   god?: string;
+  /** learning card: taking it unseals this tarot skill (Skills.learn) */
+  learn?: 'E' | 'C' | 'G';
+  /** only offered once this upgrade has been taken (e.g. Brood Mother needs Scorpion Toss) */
+  needs?: string;
 }
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
 export const UPGRADES: UpgradeDef[] = [
+  // ------------------------------------------------------------- the tarot skills (sealed at the start of a hunt)
+  { id: 'learnScorpionToss', name: 'The Magician', cat: 'insect', rarity: 'rare', maxLv: 1, icon: 'scorp', god: 'Serket', learn: 'E', desc: () => 'LEARN SCORPION TOSS  [E]: hurl a brood of venomous scorpions that hunt down and sting whatever they land near.', lore: 'Serket keeps a few spare scorpions up her sleeve. Now so do you.' },
+  { id: 'learnLocustSwarm', name: 'The Tower', cat: 'insect', rarity: 'rare', maxLv: 1, icon: 'locust', god: 'Khepri', learn: 'C', desc: () => 'LEARN LOCUST SWARM  [C]: a storm of locusts circles you and dives at anything that comes close.', lore: 'A plague, but a loyal one.' },
+  { id: 'learnDungBomb', name: 'The Sun', cat: 'insect', rarity: 'rare', maxLv: 1, icon: 'dung', god: 'Khepri', learn: 'G', desc: () => 'LEARN DUNG BOMB  [G]: lob a bouncing ball of sacred dung that bursts into a poison stink cloud. Two charges.', lore: 'Khepri rolls the sun across the sky. You roll something else.' },
   // ------------------------------------------------------------- gun
   { id: 'venomRounds', name: 'Venom Rounds', cat: 'gun', rarity: 'common', maxLv: 5, icon: 'bubble', god: 'Serket', desc: (l) => `Bullets apply +${l} extra poison stack${l > 1 ? 's' : ''}. Poison +${l * 8}% potency.`, mods: (l) => [{ stat: 'statusPower', type: 'pct', value: l * 0.08 }], lore: 'Pinch milks the venom himself. Do not ask how.' },
   { id: 'quickdraw', name: 'Quickdraw', cat: 'gun', rarity: 'common', maxLv: 5, icon: 'bullet', desc: (l) => `Fire rate +${l * 12}%.`, mods: (l) => [{ stat: 'fireRate', type: 'pct', value: l * 0.12 }] },
@@ -49,9 +59,9 @@ export const UPGRADES: UpgradeDef[] = [
   { id: 'speedLoader', name: 'Speed Loader', cat: 'gun', rarity: 'common', maxLv: 4, icon: 'cylinder', desc: (l) => `Reload speed +${l * 20}%.`, mods: (l) => [{ stat: 'reloadSpeed', type: 'pct', value: l * 0.2 }] },
   { id: 'steadyHand', name: 'Steady Hand', cat: 'gun', rarity: 'common', maxLv: 3, icon: 'dot4', desc: (l) => `Spread −${l * 18}%, crit chance +${l * 3}%.`, mods: (l) => [{ stat: 'spread', type: 'pct', value: -l * 0.18 }, { stat: 'critChance', type: 'flat', value: l * 0.03 }] },
   // ------------------------------------------------------------- insects
-  { id: 'broodMother', name: 'Brood Mother', cat: 'insect', rarity: 'uncommon', maxLv: 4, icon: 'scorp', god: 'Serket', desc: (l) => `Scorpion Toss throws ${l} more scorpion${l > 1 ? 's' : ''}; they sting harder.`, mods: (l) => [{ stat: 'scorpions', type: 'flat', value: l }, { stat: 'magicDmg', type: 'pct', value: l * 0.05 }] },
-  { id: 'locustCloud', name: 'Locust Cloud', cat: 'insect', rarity: 'uncommon', maxLv: 4, icon: 'locust', god: 'Khepri', desc: (l) => `Swarm size +${l * 25}% and lasts longer.`, mods: (l) => [{ stat: 'swarmSize', type: 'pct', value: l * 0.25 }] },
-  { id: 'dungEngineer', name: 'Dung Engineer', cat: 'insect', rarity: 'common', maxLv: 4, icon: 'dung', god: 'Khepri', desc: (l) => `Dung Bomb radius +${l * 18}%, damage +${l * 15}%.`, mods: (l) => [{ stat: 'explosionRadius', type: 'pct', value: l * 0.18 }] },
+  { id: 'broodMother', needs: 'learnScorpionToss', name: 'Brood Mother', cat: 'insect', rarity: 'uncommon', maxLv: 4, icon: 'scorp', god: 'Serket', desc: (l) => `Scorpion Toss throws ${l} more scorpion${l > 1 ? 's' : ''}; they sting harder.`, mods: (l) => [{ stat: 'scorpions', type: 'flat', value: l }, { stat: 'magicDmg', type: 'pct', value: l * 0.05 }] },
+  { id: 'locustCloud', needs: 'learnLocustSwarm', name: 'Locust Cloud', cat: 'insect', rarity: 'uncommon', maxLv: 4, icon: 'locust', god: 'Khepri', desc: (l) => `Swarm size +${l * 25}% and lasts longer.`, mods: (l) => [{ stat: 'swarmSize', type: 'pct', value: l * 0.25 }] },
+  { id: 'dungEngineer', needs: 'learnDungBomb', name: 'Dung Engineer', cat: 'insect', rarity: 'common', maxLv: 4, icon: 'dung', god: 'Khepri', desc: (l) => `Dung Bomb radius +${l * 18}%, damage +${l * 15}%.`, mods: (l) => [{ stat: 'explosionRadius', type: 'pct', value: l * 0.18 }] },
   { id: 'pinchTraining', name: "Pinch's Training", cat: 'insect', rarity: 'uncommon', maxLv: 4, icon: 'scorp_x2', desc: (l) => `Pinch attacks ${l * 20}% faster and stings for more poison.`, mods: (l) => [{ stat: 'magic', type: 'flat', value: l }] },
   { id: 'scarabShield', name: 'Scarab Shield', cat: 'insect', rarity: 'rare', maxLv: 3, icon: 'scarab', god: 'Khepri', desc: (l) => `${l + 1} armored scarabs orbit you and block bullets.`, attach: 'scarab_pauldron' },
   { id: 'fireAnts', name: 'Fire Ants', cat: 'insect', rarity: 'rare', maxLv: 2, icon: 'flame1', desc: (l) => `Insect attacks have ${l * 30}% chance to ignite (burn).` },
@@ -80,7 +90,7 @@ export const UPGRADES: UpgradeDef[] = [
   { id: 'anubisScale', name: "Anubis' Scale", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'ankh', god: 'Anubis', desc: () => 'Kills heal 1% health; at full health they grant shield instead.' },
   { id: 'thothLedger', name: "Thoth's Ledger", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'glyph0', god: 'Thoth', desc: () => '+30% bounty. Weak points crit more (+15% crit chance on headshots).', mods: () => [{ stat: 'bountyGain', type: 'pct', value: 0.3 }] },
   { id: 'sekhmetClaw', name: "Sekhmet's Claw", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'flame2', god: 'Sekhmet', desc: () => 'Burning enemies spread fire on death. Melee ignites.' },
-  { id: 'dungCrown', name: "Khepri's Dung Crown", cat: 'relic', rarity: 'legendary', maxLv: 1, icon: 'dung', god: 'Khepri', desc: () => 'Dung Bombs split into 3 smaller bombs on explosion. Glorious.' },
+  { id: 'dungCrown', needs: 'learnDungBomb', name: "Khepri's Dung Crown", cat: 'relic', rarity: 'legendary', maxLv: 1, icon: 'dung', god: 'Khepri', desc: () => 'Dung Bombs split into 3 smaller bombs on explosion. Glorious.' },
   { id: 'moonCharm', name: "Khonsu's Moon Charm", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'star4', god: 'Khonsu', desc: () => 'Big air (1 s+) slows time while airborne. +10% crit while airborne.' },
   { id: 'bastetBell', name: "Bastet's Bell", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'charm', god: 'Bastet', desc: () => 'Counters are easier and heal 8%. Pinch purrs. (He is a scorpion.)' },
   // ------------------------------------------------------------- evolutions
@@ -92,6 +102,8 @@ export const UPGRADES: UpgradeDef[] = [
 ];
 
 export const UPGRADE_BY_ID: Record<string, UpgradeDef> = Object.fromEntries(UPGRADES.map((u) => [u.id, u]));
+/** the three cards that unseal the tarot skills */
+export const LEARN_CARDS = UPGRADES.filter((u): u is UpgradeDef & { learn: 'E' | 'C' | 'G' } => !!u.learn);
 
 export interface Offer {
   def: UpgradeDef;
@@ -117,8 +129,11 @@ export class UpgradeManager {
     const out: Offer[] = [];
     const evo = UPGRADES.filter((u) => u.cat === 'evolution' && !this.lv(u.id) && u.evolveFrom && u.evolveFrom.every((id) => this.lv(id) >= Math.min(UPGRADE_BY_ID[id].maxLv, 3)));
     if (evo.length) out.push({ def: evo[0], fromLv: 0, toLv: 1 });
+    // a sealed tarot skill is always on offer until all three are learned
+    const sealed = UPGRADES.filter((u) => u.learn && !this.lv(u.id) && !this.banished.has(u.id));
+    if (sealed.length && out.length < n) out.push({ def: sealed[Math.floor(rnd.next() * sealed.length)], fromLv: 0, toLv: 1 });
     const rarityLuck = this.stats.get('rarity');
-    const pool = UPGRADES.filter((u) => u.cat !== 'evolution' && !this.banished.has(u.id) && this.lv(u.id) < u.maxLv);
+    const pool = UPGRADES.filter((u) => u.cat !== 'evolution' && !u.learn && (!u.needs || this.lv(u.needs) > 0) && !this.banished.has(u.id) && this.lv(u.id) < u.maxLv);
     const chosen = new Set(out.map((o) => o.def.id));
     let guard = 0;
     while (out.length < n && guard++ < 200) {
@@ -168,6 +183,11 @@ export class UpgradeEffects {
 
   constructor(private ctx: Ctx, private up: UpgradeManager, private player: any, private skills: any) {
     const ev = ctx.events;
+    // a learning card unseals its tarot skill (with fanfare when picked)
+    ev.on('upgradePicked', (id: string) => {
+      const k = UPGRADE_BY_ID[id]?.learn;
+      if (k) this.skills?.learn?.(k, false);
+    });
     ev.on('enemyHit', (e: any, hit: any, amt: number, res: any) => this.onHit(e, hit, amt, res));
     ev.on('enemyKilled', (e: any, hit: any) => this.onKill(e, hit));
     ev.on('shot', (hit: any) => this.onShot(hit));
@@ -287,6 +307,8 @@ export class UpgradeEffects {
   }
 
   update(dt: number) {
+    // skills learned on an earlier leg of the hunt (carried runs re-apply their history quietly)
+    for (const u of LEARN_CARDS) if (this.up.lv(u.id) > 0) this.skills?.learn?.(u.learn, true);
     // scarab shield orbiters block projectiles
     const l = this.up.lv('scarabShield');
     if (!l) return;

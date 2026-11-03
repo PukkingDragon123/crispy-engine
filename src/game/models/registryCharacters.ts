@@ -33,3 +33,9 @@ CHARACTER_MODELS['camel'] = camelRig;
 CHARACTER_MODELS['anubis'] = anubisRig;
 CHARACTER_MODELS['serket_avatar'] = serketAvatarRig;
 for (const a of ATTACHMENT_IDS) CHARACTER_MODELS['att_' + a] = () => attachmentModel(a);
+// Serket's spirit avatar as the scorpion girl (opening cinematic + tutorial guide)
+import { scorpionGirlRig } from './characters/scorpionGirl';
+CHARACTER_MODELS['serket_girl'] = scorpionGirlRig;
+// the realm of spirits: the Anubis trial's tomb gate, hall, scales, soul avatar and the dead
+import { REALM_MODELS } from './anubis/realm';
+Object.assign(CHARACTER_MODELS, REALM_MODELS);

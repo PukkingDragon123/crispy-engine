@@ -13,8 +13,8 @@ import { sharedFoliageMaterial, sharedVoxelMaterial } from '../../engine/render/
 import type { World } from './World';
 import type { Anchor, ZoneDef } from './RegionGen';
 import type { Collider } from './Colliders';
-import { RNG, rnd, hash2i } from '../../engine/math/rand';
-import { unkey, downsampleModel } from '../../engine/voxel/VoxelModel';
+import { RNG, rnd, hash2i, hash3, Noise } from '../../engine/math/rand';
+import { VoxelModel as VM, unkey, downsampleModel, mix as mixRGB, mulRGB } from '../../engine/voxel/VoxelModel';
 
 type SM = { model: VoxelModel; voxelSize: number; meta?: any; anchor?: [number, number, number]; rotor?: VoxelModel; rotorPivot?: any; rotorAt?: any };
 
@@ -30,6 +30,108 @@ interface KindDef {
 }
 
 const P: any = PM;
+
+// ---------------------------------------------------------------------------
+// Zone rim markers: wind-worn standing stones (1/10 m voxels). Each is a tapered,
+// leaning, slightly twisted sandstone slab with a sand-blasted waist, horizontal
+// flutes cut into its windward (-x) face, strata, desert-varnish streaks running
+// down the lee side and a bleached crown; it stands half-buried in a drift that
+// trails downwind (+x), with spalled fragments on the windward side. Variants
+// 6-7 are the taller gate stones that flank each corridor mouth (carved band and
+// weathered tally notches facing the zone).
+const STONE = { base: 0xc49468, shade: 0xa47650, deep: 0x845a3c, hi: 0xdcb282, bleach: 0xecd4a8, varnish: 0x5a3a28, sand: 0xe0b478, sandHi: 0xf0cf98, sandLo: 0xcf9f66 };
+function rimStone(v: number): SM {
+  const rng = new RNG(7719 + v * 131);
+  const nz = new Noise(311 + v * 17);
+  const m = new VM('rimStone' + v);
+  const gate = v >= 6;
+  const G = 6; // buried rows below the sand line
+  const H = Math.round((gate ? rng.range(6.4, 7.4) : rng.range(3.0, 5.4)) * 10);
+  const W0 = (gate ? rng.range(1.1, 1.3) : rng.range(0.72, 1.1)) * 10;
+  const D0 = W0 * (gate ? rng.range(0.62, 0.75) : rng.range(0.5, 0.78));
+  const leanX = rng.range(-0.09, 0.09) * (gate ? 0.25 : 1), leanZ = rng.range(-0.07, 0.07) * (gate ? 0.25 : 1);
+  const twist = rng.range(-0.4, 0.4) * (gate ? 0.3 : 1);
+  const broken = !gate && rng.chance(0.34);
+  const crownT = 0.8;
+  const strata = [STONE.base, STONE.shade, STONE.hi, STONE.base, STONE.deep, STONE.base, STONE.hi];
+  for (let y = 0; y < H + G; y++) {
+    const ym = y - G;
+    const t = Math.max(0, ym) / H;
+    let k = (1 - 0.36 * t) * (1 + 0.07 * Math.sin(t * Math.PI));
+    k *= 1 - 0.15 * Math.exp(-(((ym - 7) / 4) ** 2)); // sand-blasted waist
+    if (!broken && t > crownT) k *= Math.sqrt(Math.max(0, 1 - ((t - crownT) / (1 - crownT)) ** 2));
+    const hw = W0 * k, hd = D0 * k;
+    if (hw < 0.8 || hd < 0.6) continue;
+    const cx = leanX * Math.max(0, ym), cz = leanZ * Math.max(0, ym);
+    const ang = twist * t;
+    const cs = Math.cos(ang), sn = Math.sin(ang);
+    const R = Math.ceil(Math.max(hw, hd) + Math.abs(cx) + Math.abs(cz)) + 2;
+    for (let x = -R; x <= R; x++)
+      for (let z = -R; z <= R; z++) {
+        const dx = x - cx, dz = z - cz;
+        const lx = dx * cs + dz * sn, lz = -dx * sn + dz * cs;
+        const e = Math.pow(Math.abs(lx) / hw, 2.4) + Math.pow(Math.abs(lz) / hd, 2.4);
+        const pit = nz.n3(x * 0.21, y * 0.13, z * 0.21) * 0.14 + nz.n3(x * 0.6, y * 0.6, z * 0.6) * 0.05;
+        const flute = lx < 0 ? (Math.sin(y * 0.85 + nz.n2(z * 0.15, y * 0.04) * 2.5) * 0.5 + 0.5) * 0.17 * Math.min(1, -lx / hw) * (ym > 2 ? 1 : 0) : 0;
+        if (e > 1 - pit - flute) continue;
+        if (broken && ym > H - 5 + nz.n2(x * 0.35, z * 0.35) * 5) continue; // jagged fracture
+        const sw = nz.n2(x * 0.15 + 3, z * 0.15) * 2.5;
+        let c = strata[((Math.floor((y + sw) / 5) % strata.length) + strata.length) % strata.length];
+        const vs = nz.n2(x * 0.32 + 11, z * 0.32 - 4);
+        if (vs > 0.3 && ym > H * (0.25 + 0.3 * (nz.n2(x * 0.1, z * 0.1) * 0.5 + 0.5)) && lx > -hw * 0.3) c = mixRGB(c, STONE.varnish, Math.min(0.75, 0.45 + (vs - 0.3)));
+        if (lx < -hw * 0.55) c = mixRGB(c, STONE.bleach, 0.32);
+        if (t > 0.86 || (broken && ym > H - 7)) c = mixRGB(c, STONE.bleach, 0.38);
+        if (ym < 4) c = mixRGB(c, STONE.sand, 0.45);
+        m.set(x, y, z, mulRGB(c, 1 + (hash3(x, y, z) - 0.5) * 0.08));
+      }
+  }
+  if (gate) {
+    // a carved band ringing the stone and weathered tally notches on the face toward the zone (+z)
+    const band = G + Math.round(H * 0.68);
+    const groove: [number, number, number][] = [];
+    m.forEach((x, y, z) => {
+      if (y < band || y > band + 2) return;
+      if (!m.has(x, y, z + 1) || !m.has(x, y, z - 1) || !m.has(x + 1, y, z) || !m.has(x - 1, y, z)) groove.push([x, y, z]);
+    });
+    for (const [x, y, z] of groove) m.del(x, y, z);
+    for (let i = 0; i < 5; i++) {
+      const nx = -4 + i * 2;
+      for (let y = band - 10 - (i % 2) * 2; y < band - 4; y++) {
+        let zt = -999;
+        for (let z = 20; z > -20; z--) if (m.has(nx, y, z)) { zt = z; break; }
+        if (zt > -999) m.del(nx, y, zt);
+      }
+    }
+  }
+  // the drift: piled against the windward face, trailing downwind; spalled fragments upwind
+  const tail = gate ? 6 : Math.round(rng.range(12, 17));
+  const up = gate ? 6 : 8;
+  for (let x = -Math.ceil(W0) - up; x <= Math.ceil(W0) + tail; x++)
+    for (let z = -Math.ceil(D0) - 6; z <= Math.ceil(D0) + 6; z++) {
+      const zf = Math.exp(-((z / (D0 + 3)) ** 2) * 1.4);
+      let h: number;
+      if (x >= 0) h = 5 * Math.max(0, 1 - x / (W0 + tail)) * zf;
+      else h = 3.4 * Math.exp(-(((x + W0 * 0.8) / 4) ** 2)) * zf;
+      h += nz.n2(x * 0.3, z * 0.3) * 0.8;
+      const top = Math.round(G + h);
+      for (let y = G - 2; y < top; y++) {
+        if (m.has(x, y, z)) continue;
+        m.set(x, y, z, y === top - 1 ? (hash3(x, 7, z) > 0.6 ? STONE.sandHi : STONE.sand) : STONE.sandLo);
+      }
+    }
+  for (let f = 0; f < (gate ? 2 : 3); f++) {
+    const fx = -Math.round(W0) - rng.int(4, 9), fz = rng.int(-8, 8), r = rng.range(1.4, 2.6);
+    for (let x = -3; x <= 3; x++)
+      for (let y = 0; y <= 3; y++)
+        for (let z = -3; z <= 3; z++) {
+          const d = Math.hypot(x, y * 1.4, z) + nz.n3((fx + x) * 0.5, y * 0.5, (fz + z) * 0.5) * 0.9;
+          if (d > r) continue;
+          m.set(fx + x, G - 1 + y, fz + z, mulRGB(y >= 2 ? STONE.hi : STONE.shade, 1 + (hash3(x, y, z) - 0.5) * 0.08));
+        }
+  }
+  return { model: m, voxelSize: 0.1 };
+}
+
 const cactusKind = (v: number) => (['saguaro', 'saguaro', 'saguaro', 'barrel', 'prickly', 'organ', 'saguaro', 'barrel', 'prickly', 'organ'] as const)[v % 10];
 
 const KINDS: Record<string, KindDef> = {
@@ -87,7 +189,10 @@ const KINDS: Record<string, KindDef> = {
   stoneGate: { variants: 1, build: () => P.templeGate(0), solid: 'voxel', unique: true },
   ore: { variants: 5, build: (v, a) => P.oreNode(a.data?.type ?? (['copper', 'silver', 'gold', 'turquoise', 'amethyst'] as const)[v % 5], v), solid: 'circle', radius: 0.5, unique: true },
   tumbleweed: { variants: 3, build: (v) => P.tumbleweed(v), solid: 'none' },
+  rimStone: { variants: 6, build: (v) => rimStone(v), solid: 'circle', radius: 0.7 },
+  rimGate: { variants: 2, build: (v) => rimStone(6 + v), solid: 'circle', radius: 0.7 },
 };
+const RIM_KINDS = new Set(['rimStone', 'rimGate']);
 
 const LANDMARKS: Record<string, () => SM> = {
   tradingPost: () => P.tradingPost(1),
@@ -208,7 +313,7 @@ export class Props {
     // gather per variant counts first for instanced capacity
     const plan: { a: Anchor; kind: string; v: Variant }[] = [];
     const zoneBatches = new Map<string, Batch>();
-    for (const a of z.anchors) {
+    for (const a of [...z.anchors, ...this.rimAnchors(z)]) {
       if (a.kind === 'landmark') {
         this.addLandmark(z, a);
         continue;
@@ -227,6 +332,11 @@ export class Props {
       const rot = a.rot ?? this.rng.range(0, Math.PI * 2);
       let y = g - 0.05;
       if (kind === 'capstone') y = a.data?.y ?? g;
+      if (RIM_KINDS.has(kind)) {
+        // stand on the lowest sand under the footprint, the base row buried
+        const w = this.world.groundAt;
+        y = Math.min(g, w(a.x + 1.2, a.z), w(a.x - 1.2, a.z), w(a.x, a.z + 1.2), w(a.x, a.z - 1.2)) - 0.55;
+      }
       _q.setFromAxisAngle(UP, rot);
       _s.setScalar(sc);
       const riseDepth = a.rise ? v.height * sc + 0.5 : 0;
@@ -289,6 +399,54 @@ export class Props {
     }
     for (const b of zoneBatches.values()) this.layoutBatch(b, this.lastLodPos);
     console.log(`[props] zone ${z.index}: ${plan.length} props in ${(performance.now() - t0).toFixed(0)}ms`);
+  }
+
+  /**
+   * Standing stones just outside a zone's rim, one every ~10 m with the odd smaller
+   * companion, a gap at each corridor mouth flanked by two tall gate stones.
+   */
+  private rimAnchors(z: ZoneDef): Anchor[] {
+    const sa = this.world.sa;
+    const out: Anchor[] = [];
+    const rng = new RNG(z.index * 7919 + sa.seed * 13 + 5);
+    const R = z.r + 3.5;
+    const windRot = Math.atan2(-sa.wind.z, sa.wind.x);
+    const mouths: { x: number; z: number; ux: number; uz: number; w: number }[] = [];
+    const addMouth = (tx: number, tz: number, cw: number) => {
+      const d = Math.hypot(tx - z.cx, tz - z.cz) || 1;
+      const ux = (tx - z.cx) / d, uz = (tz - z.cz) / d;
+      mouths.push({ x: z.cx + ux * R, z: z.cz + uz * R, ux, uz, w: cw });
+    };
+    const prev = sa.zones[z.index - 1], next = sa.zones[z.index + 1];
+    if (prev && z.corridor) addMouth(prev.cx, prev.cz, z.corridor.w);
+    if (next?.corridor) addMouth(next.cx, next.cz, next.corridor.w);
+    const ok = (x: number, zz: number, pad: number) =>
+      this.world.field.inBounds(x, zz, 6) &&
+      this.world.groundAt(x, zz) > sa.waterLevel + 0.3 &&
+      !z.anchors.some((a) => a.kind !== 'tumbleweed' && Math.hypot(a.x - x, a.z - zz) < pad);
+    const n = Math.round((Math.PI * 2 * R) / 8.5);
+    for (let i = 0; i < n; i++) {
+      const a = ((i + rng.range(-0.25, 0.25)) / n) * Math.PI * 2;
+      const rr = R + rng.range(-0.8, 2.2);
+      const x = z.cx + Math.cos(a) * rr, zz = z.cz + Math.sin(a) * rr;
+      if (mouths.some((m) => Math.hypot(m.x - x, m.z - zz) < m.w * 0.5 + 8)) continue;
+      if (!ok(x, zz, 4)) continue;
+      out.push({ kind: 'rimStone', x, z: zz, rot: windRot + rng.range(-0.35, 0.35), scale: rng.range(0.95, 1.4) });
+      if (rng.chance(0.24)) {
+        const b = a + rng.range(-0.04, 0.04), r2 = rr + rng.range(2.6, 4.6);
+        const x2 = z.cx + Math.cos(b) * r2, z2 = z.cz + Math.sin(b) * r2;
+        if (ok(x2, z2, 3)) out.push({ kind: 'rimStone', x: x2, z: z2, rot: windRot + rng.range(-0.5, 0.5), scale: rng.range(0.5, 0.68) });
+      }
+    }
+    for (const m of mouths) {
+      const px = -m.uz, pz = m.ux;
+      for (const s of [-1, 1]) {
+        const off = m.w * 0.5 + 4.5;
+        const x = m.x + px * s * off + m.ux * 1.5, zz = m.z + pz * s * off + m.uz * 1.5;
+        if (ok(x, zz, 3)) out.push({ kind: 'rimGate', x, z: zz, rot: Math.atan2(-m.ux, -m.uz), scale: 1.2 });
+      }
+    }
+    return out;
   }
 
   private vkeys = new Map<Variant, number>();

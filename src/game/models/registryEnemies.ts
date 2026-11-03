@@ -16,7 +16,7 @@ import { sandWolfRig } from './enemies/wolf';
 import { duneWormRig } from './enemies/worm';
 import { sandwormRig } from './enemies/sandworm';
 import { khonsuAvatarRig, khonsuHandRig } from './enemies/khonsu';
-import { rainFrogMamaRig, rainFrogBabyRig } from './enemies/frog';
+import { rainFrogMamaRig, rainFrogBabyRig, desertMothRig, frogWigHat, FROG_WIG_VS } from './enemies/frog';
 import { thornyLizardRig, thornbackRig } from './enemies/lizard';
 import { bellSnakeRig } from './enemies/snake';
 import { khonsuSandRig, khonsuSandSpikeModel } from './enemies/khonsuSand';
@@ -80,6 +80,8 @@ export const ENEMY_MODELS: Record<string, ModelEntry> = {
   rain_frog_baby_v2: () => rainFrogBabyRig({ variant: 2 }),
   rain_frog_baby_v3: () => rainFrogBabyRig({ variant: 3 }),
   rain_frog_baby_v4: () => rainFrogBabyRig({ variant: 4 }),
+  rain_frog_moth: () => desertMothRig(),
+  rain_frog_wig: () => ({ model: frogWigHat(), voxelSize: FROG_WIG_VS }),
   thorny_lizard: () => thornyLizardRig(),
   thorny_lizard_v1: () => thornyLizardRig({ variant: 1 }),
   thorny_lizard_v2: () => thornyLizardRig({ variant: 2 }),

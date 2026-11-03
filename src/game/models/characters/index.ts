@@ -3,7 +3,8 @@
 // (no resampling / texture passes). Humanoids use the shared toon kit (../toon/humanoid.ts).
 // Scales: Sundown & merchant 1/30, dumb scarab / dung ball 1/30, Pinch & revolver & dung bomb /
 // duck 1/48, boards 1/32, camel 1/24, Anubis & Serket avatar 1/20, attachments 1/30 (hero grid).
-import { skeletonCowboyRig as sundownBase, referenceSkeletonRig as refBase, CowboyLook } from './skeleton';
+import { referenceSkeletonRig as refBase, CowboyLook } from './skeleton';
+import { skeletonCowboyRig as sundownBase } from './sundown';
 import { revolverRig as revolverBase, GunParts, DEFAULT_GUN } from './revolver';
 import { pinchRig as pinchBase } from './pinch';
 import { sandboardModel as boardBase, BoardId } from './boards';
@@ -15,6 +16,8 @@ import { attachmentModel as attachmentBase, AttachmentId, Attachment } from './a
 import type { RigSpec } from '../../../engine/voxel/Rig';
 
 export { HAT_IDS, OUTFIT_IDS, SUNDOWN_EXPRESSIONS, SUNDOWN_VS, skeletonFigure, figureRig } from './skeleton';
+export { SUNDOWN_HD_VS, BOARD_BACK_SOCKET, attachBoardOnBack } from './sundown';
+export type { BoardBackOpts } from './sundown';
 export type { CowboyLook, HatId, OutfitId, SkeletonFigure, FigurePart } from './skeleton';
 export { DEFAULT_GUN } from './revolver';
 export type { GunParts } from './revolver';
@@ -27,7 +30,7 @@ export { ATTACHMENT_IDS } from './attachments';
 export type { AttachmentId, Attachment } from './attachments';
 
 /** voxels per metre of each family */
-export const SCALE = { sundown: 30, pinch: 48, revolver: 48, board: 32, merchant: 30, camel: 24, anubis: 20, serket: 20, attachment: 30, small: 48 };
+export const SCALE = { sundown: 54, pinch: 72, revolver: 48, board: 32, merchant: 30, camel: 24, anubis: 20, serket: 20, attachment: 30, small: 48 };
 
 const memo = <A extends unknown[], R>(fn: (...a: A) => R) => {
   const cache = new Map<string, R>();
@@ -39,7 +42,8 @@ const memo = <A extends unknown[], R>(fn: (...a: A) => R) => {
   };
 };
 
-export const skeletonCowboyRig = memo((look: CowboyLook = { hat: 'stetson', outfit: 'bare' }): RigSpec => sundownBase(look));
+/** Sundown, the player (HD build, 1/54 m). Default look: the punk biker jacket. */
+export const skeletonCowboyRig = memo((look: CowboyLook = { hat: 'stetson', outfit: 'punk' }): RigSpec => sundownBase(look));
 export const referenceSkeletonRig = memo((): RigSpec => refBase());
 export const revolverRig = memo((g: GunParts = DEFAULT_GUN): RigSpec => revolverBase(g));
 export const pinchRig = memo((): RigSpec => pinchBase());

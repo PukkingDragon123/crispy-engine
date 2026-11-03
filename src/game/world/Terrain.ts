@@ -3,11 +3,14 @@
 // (wind ripples, sand sparkle, tile grout, rock strata lines).
 import * as THREE from 'three';
 import { Heightfield, MAT } from './Heightfield';
-import { noise, hash2, clamp } from '../../engine/math/rand';
+import { noise, hash2, clamp, Noise, smoothstep } from '../../engine/math/rand';
 import { globalUniforms, celify } from '../../engine/render/VoxelMaterial';
+import type { HeightTex } from './Env';
 import { SandWaves, SAND_GLSL, SAND_MAX } from './SandWaves';
 
 const CHUNK = 32;
+/** GPU heightfield texel (m) */
+const HF_CELL = 2;
 // near field: 12.5 cm sand columns (much higher voxel count), coarser rings outward
 const LOD_CELL = [0.125, 0.25, 0.5, 1, 2, 4];
 const LOD_STEP = [0.0625, 0.125, 0.25, 0.5, 1, 2];
@@ -88,18 +91,31 @@ export function makeTerrainDepthMaterial(sand: SandWaves) {
   return m;
 }
 
+const blackHF = new THREE.DataTexture(new Uint16Array([0]), 1, 1, THREE.RedFormat, THREE.HalfFloatType);
+blackHF.needsUpdate = true;
+
 export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWaves = NO_SAND) {
   const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96, metalness: 0 });
   const uWind = { value: new THREE.Vector2(wind.x, wind.z) };
   const uMarks = { value: blackTex as THREE.Texture };
   const uMarkArea = { value: 256 };
   const uMarkClock = { value: 0 };
+  /** coarse heightfield (far dune shadows, crest / trough colour) */
+  const uHF = { value: blackHF as THREE.Texture };
+  const uHFInfo = { value: new THREE.Vector4(0, 0, 1, 0) };
+  /** sun shadow-map coverage: centre xz, radius; beyond it the heightfield casts the shadows */
+  const uShC = { value: new THREE.Vector4(0, 0, 40, 0) };
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uWind = uWind;
     sh.uniforms.uTime = globalUniforms.uTime;
     sh.uniforms.uMarks = uMarks;
     sh.uniforms.uMarkArea = uMarkArea;
     sh.uniforms.uMarkClock = uMarkClock;
+    sh.uniforms.uHF = uHF;
+    sh.uniforms.uHFInfo = uHFInfo;
+    sh.uniforms.uShC = uShC;
+    sh.uniforms.uSunDirW = globalUniforms.uSunDirW;
+    sh.uniforms.uLook = globalUniforms.uLook;
     sandVertex(sh, sand, true);
     sh.vertexShader = sh.vertexShader
       .replace(
@@ -125,19 +141,46 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
         uniform float uTime;
         uniform sampler2D uMarks;
         uniform float uMarkArea, uMarkClock;
+        uniform sampler2D uHF;
+        uniform vec4 uHFInfo, uShC, uLook;
+        uniform vec3 uSunDirW;
         varying float vTM;
         varying vec3 vWP;
         varying vec3 vWN;
         vec3 sandBump = vec3(0.0);
+        // far field: the heightfield casts the dune shadows the shadow map cannot reach
+        float tFarSh = 1.0;
+        float tMapW = 1.0;
+        #define CEL_SHADOW_HOOK(s) mix(tFarSh, (s), tMapW)
         float th(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
         float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
           return mix(mix(th(i), th(i + vec2(1.0, 0.0)), f.x), mix(th(i + vec2(0.0, 1.0)), th(i + vec2(1.0, 1.0)), f.x), f.y); }
-        float trk(vec2 p){ float r = texture2D(uMarks, fract(p / uMarkArea)).r; return r > 0.0 ? 1.0 - smoothstep(22.0, 48.0, uMarkClock - r) : 0.0; }`
+        float trk(vec2 p){ float r = texture2D(uMarks, fract(p / uMarkArea)).r; return r > 0.0 ? 1.0 - smoothstep(22.0, 48.0, uMarkClock - r) : 0.0; }
+        float hfAt(vec2 xz){ return texture2D(uHF, xz * uHFInfo.x + uHFInfo.y).r; }
+        // soft shadow marched over the heightfield toward the sun (penumbra widens with distance)
+        float farShadow(vec3 p, vec3 L) {
+          float res = 1.0;
+          float t = 1.6;
+          p.y = max(p.y, hfAt(p.xz)) + 0.35;
+          for (int i = 0; i < 16; i++) {
+            vec3 q = p + L * t;
+            float dh = q.y - hfAt(q.xz);
+            res = min(res, 5.0 * dh / t + 0.5);
+            if (res < 0.0) break;
+            t *= 1.33;
+          }
+          return smoothstep(0.0, 1.0, res);
+        }`
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
         float sparkle = 0.0;
+        {
+          float dC = distance(vWP.xz, uShC.xy);
+          tMapW = uShC.w > 0.5 ? 1.0 - smoothstep(uShC.z * 0.6, uShC.z * 0.92, dC) : 1.0;
+          if (tMapW < 0.999 && uHFInfo.w > 0.5 && uSunDirW.y > 0.03) tFarSh = farShadow(vWP + vWN * 0.3, uSunDirW);
+        }
         {
           vec3 an = abs(vWN);
           bool top = an.y > 0.6;
@@ -152,22 +195,33 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
               // wind ripples: asymmetric (gentle windward, steep lee) bands that catch the low sun,
               // creeping slowly downwind
               vec2 wd = normalize(uWind + vec2(1e-4));
+              // slipfaces (steep lee faces) are smooth avalanche sand: no ripples, grain-flow streaks instead
+              float lee = smoothstep(0.1, 0.32, dot(vWN.xz, wd)) * smoothstep(0.12, 0.34, 1.0 - vWN.y);
               vec2 pw = vec2(dot(vWP.xz, wd), dot(vWP.xz, vec2(-wd.y, wd.x)));
               float ph = pw.x * 2.6 + sin(pw.y * 0.31 + th(floor(vWP.xz * 0.05)) * 6.0) * 1.3 - uTime * 0.11;
               float rf = fract(ph);
               float dh = rf < 0.72 ? 1.0 / 0.72 : -1.0 / 0.28;
-              float fade = smoothstep(48.0, 8.0, camD);
+              float fade = smoothstep(48.0, 8.0, camD) * (1.0 - lee);
               vec2 g = wd * dh * 2.6 * 0.012 * fade;
               sandBump = vec3(-g.x, 0.0, -g.y);
               jit += (rf > 0.72 ? -0.05 : (rf < 0.12 ? 0.03 : 0.0)) * fade;
               // mega-ripples: long sand waves that keep the far dunes detailed
               float ph2 = pw.x * 0.36 + sin(pw.y * 0.045 + th(floor(vWP.xz * 0.012)) * 6.0) * 2.2 - uTime * 0.02;
               float rf2 = fract(ph2);
-              float far = smoothstep(220.0, 26.0, camD) * smoothstep(4.0, 18.0, camD);
+              float far = smoothstep(220.0, 26.0, camD) * smoothstep(4.0, 18.0, camD) * (1.0 - lee * 0.85);
               float dh2 = rf2 < 0.78 ? 1.0 / 0.78 : -1.0 / 0.22;
               vec2 g2 = wd * dh2 * 0.36 * 0.22 * far;
               sandBump += vec3(-g2.x, 0.0, -g2.y);
               jit += (rf2 > 0.78 ? -0.045 : (rf2 < 0.1 ? 0.025 : 0.0)) * far;
+              if (lee > 0.01) {
+                vec2 dn = normalize(vWN.xz + vec2(1e-4));
+                vec2 q16 = floor(vWP.xz * 16.0) / 16.0;
+                float across = dot(q16, vec2(-dn.y, dn.x));
+                float along = dot(q16, dn);
+                float gf = vn(vec2(across * 2.2, along * 0.16 + th(vec2(floor(across * 2.2), 5.0)) * 3.0));
+                float gfFade = smoothstep(90.0, 6.0, camD);
+                jit += ((gf > 0.66 ? -0.07 : (gf < 0.22 ? 0.045 : 0.0)) * gfFade - 0.035) * lee;
+              }
               // grain: three-tone speckle at 32 px / m, a finer 64 px / m layer up close
               float gr = th(floor(vWP.xz * 32.0));
               jit += gr > 0.93 ? 0.06 : (gr < 0.07 ? -0.07 : 0.0);
@@ -204,6 +258,18 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
             if (!top && fract(vWP.y * 2.0) < 0.07) jit -= 0.18;
           } else if (m == 7.0) {
             jit += (h1 > 0.75 ? 0.08 : 0.0) - (h1 < 0.15 ? 0.1 : 0.0);
+          }
+          // dune colour: bleached dry crests, damp darker troughs, warm / cool sand fields
+          if ((m <= 2.0 || m == 6.0) && uHFInfo.w > 0.5) {
+            vec2 xz = vWP.xz;
+            float hc = hfAt(xz);
+            float hA = (hfAt(xz + vec2(10.0, 0.0)) + hfAt(xz - vec2(10.0, 0.0)) + hfAt(xz + vec2(0.0, 10.0)) + hfAt(xz - vec2(0.0, 10.0))) * 0.25;
+            float cv = clamp((hc - hA) * 0.42, -1.0, 1.0);
+            vec3 tint = mix(vec3(1.0), vec3(1.06, 1.035, 0.96), smoothstep(0.05, 0.8, cv));
+            tint *= mix(vec3(1.0), vec3(0.87, 0.83, 0.82), smoothstep(-0.05, -0.9, cv));
+            float wc = vn(xz * 0.0045 + 3.7) * 0.65 + vn(xz * 0.013 - 1.3) * 0.35;
+            tint *= mix(vec3(0.97, 0.985, 1.03), vec3(1.035, 0.99, 0.94), smoothstep(0.3, 0.7, wc));
+            diffuseColor.rgb *= tint;
           }
           diffuseColor.rgb *= 1.0 + jit;
           // ground marks: board tracks, scorch, blood, venom (timestamps -> fade by age)
@@ -252,8 +318,8 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
       );
     celify(sh);
   };
-  m.customProgramCacheKey = () => 'terrain-v6sand';
-  (m as any).userData = { uWind, uMarks, uMarkArea, uMarkClock };
+  m.customProgramCacheKey = () => 'terrain-v7atmo';
+  (m as any).userData = { uWind, uMarks, uMarkArea, uMarkClock, uHF, uHFInfo, uShC };
   return m;
 }
 
@@ -276,6 +342,13 @@ export class Terrain {
   /** the chunk being meshed a few rows per frame (no hitches at high resolution) */
   private job: { c: Chunk; lod: number; it: Generator<void, THREE.BufferGeometry, void> } | null = null;
 
+  /** coarse half-float heightfield on the GPU: far dune shadows, crest / trough colour, airborne sand */
+  hf: HeightTex;
+  private hfN: number;
+  private hfData: Uint16Array;
+  private hfDirty: number[] | null = null;
+  private hfLast = 0;
+
   constructor(public field: Heightfield, wind: { x: number; z: number }, sand?: SandWaves) {
     this.material = makeTerrainMaterial(wind, sand);
     this.depthMaterial = makeTerrainDepthMaterial(sand ?? NO_SAND);
@@ -284,6 +357,43 @@ export class Terrain {
       for (let i = 0; i < this.nC; i++) this.chunks.set(i + j * 1000, { cx: i, cz: j, lod: -1, mesh: null, dirty: true, builtLod: -1 });
     field.onDirty.push((x0, z0, x1, z1) => this.markDirty(x0, z0, x1, z1));
     this.group.name = 'terrain';
+    const n = (this.hfN = Math.ceil(field.size / HF_CELL) + 1);
+    this.hfData = new Uint16Array(n * n);
+    this.fillHF(0, 0, n - 1, n - 1);
+    const tex = new THREE.DataTexture(this.hfData, n, n, THREE.RedFormat, THREE.HalfFloatType);
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+    this.hf = { tex, info: new THREE.Vector4(1 / (HF_CELL * n), 0.5 / n, HF_CELL, 1) };
+    const u = (this.material as any).userData;
+    u.uHF.value = tex;
+    u.uHFInfo.value = this.hf.info;
+    field.onDirty.push((x0, z0, x1, z1) => {
+      const d = this.hfDirty;
+      this.hfDirty = d ? [Math.min(d[0], x0), Math.min(d[1], z0), Math.max(d[2], x1), Math.max(d[3], z1)] : [x0, z0, x1, z1];
+    });
+  }
+
+  private fillHF(i0: number, j0: number, i1: number, j1: number) {
+    const n = this.hfN, f = this.field;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) this.hfData[i + j * n] = THREE.DataUtils.toHalfFloat(f.heightAt(i * HF_CELL, j * HF_CELL));
+  }
+  /** re-upload the changed part of the GPU heightfield (stamps rising, craters) a few times a second */
+  private flushHF() {
+    const d = this.hfDirty;
+    if (!d) return;
+    const now = performance.now();
+    if (now - this.hfLast < 300) return;
+    this.hfLast = now;
+    this.hfDirty = null;
+    const n = this.hfN;
+    const c = (v: number) => Math.max(0, Math.min(n - 1, v));
+    this.fillHF(c(Math.floor(d[0] / HF_CELL) - 1), c(Math.floor(d[1] / HF_CELL) - 1), c(Math.ceil(d[2] / HF_CELL) + 1), c(Math.ceil(d[3] / HF_CELL) + 1));
+    this.hf.tex.needsUpdate = true;
+  }
+  /** where the sun's shadow map is valid (the heightfield shadows the rest) */
+  setShadowCenter(x: number, z: number, radius: number) {
+    (this.material as any).userData.uShC.value.set(x, z, radius, 1);
   }
 
   setMarks(tex: THREE.Texture, area: number) {
@@ -310,6 +420,7 @@ export class Terrain {
   /** decide LODs around focus and rebuild within a time budget */
   update(focus: THREE.Vector3, budgetMs = 4, force = false) {
     const t0 = performance.now();
+    this.flushHF();
     const want: Chunk[] = [];
     for (const c of this.chunks.values()) {
       const x0 = c.cx * CHUNK,
@@ -396,7 +507,143 @@ export class Terrain {
     for (const c of this.chunks.values()) c.mesh?.geometry.dispose();
     this.material.dispose();
     this.depthMaterial.dispose();
+    this.hf.tex.dispose();
     this.group.removeFromParent();
+  }
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * The land beyond the play area: a low-detail proxy of the heightfield (fills the
+ * far field past the chunk LOD range) that runs on outside the map into a sea of
+ * big transverse dunes, terraced mesas with strata cliffs and a far hazy range of
+ * buttes. Lives almost entirely inside the aerial perspective, so distance reads
+ * in layers.
+ */
+export class Backdrop {
+  mesh: THREE.Mesh;
+  constructor(field: Heightfield, wind: { x: number; z: number }, seed: number) {
+    const S = field.size;
+    const nz = new Noise(seed * 13 + 5);
+    const CELL = 12;
+    const x0 = -0.9 * S, x1 = 1.9 * S;
+    const N = Math.ceil((x1 - x0) / CELL) + 1;
+    const pos = new Float32Array(N * N * 3);
+    const col = new Float32Array(N * N * 3);
+    const H = new Float32Array(N * N);
+    const wl = Math.hypot(wind.x, wind.z) || 1;
+    const wx = wind.x / wl, wz = wind.z / wl;
+    const edgeH = (x: number, z: number) => field.heightAt(Math.max(0, Math.min(S, x)), Math.max(0, Math.min(S, z)));
+    // dune sea: big wind-shaped transverse ridges with a sharp brink and a long windward back
+    const dunes = (x: number, z: number) => {
+      const u = x * wx + z * wz, v = -x * wz + z * wx;
+      const ph = (u + nz.n2(x * 0.003, z * 0.003) * 70) / (150 + 60 * nz.n2(v * 0.002, 1.7)) + nz.n2(v * 0.006, 2.3) * 0.7;
+      const t = ph - Math.floor(ph);
+      const prof = t < 0.78 ? smoothstep(0, 1, t / 0.78) : 1 - smoothstep(0, 1, (t - 0.78) / 0.22);
+      return prof * (12 + 9 * nz.n2(x * 0.0025 - 4, z * 0.0025 + 2)) + nz.fbm2(x / 420, z / 420, 3) * 14;
+    };
+    // mesas: blobby plateaus (thresholded fbm), eroded edges from a finer octave
+    const mesaMask = (x: number, z: number) => nz.fbm2(x * 0.0034 + 3.3, z * 0.0034 - 1.1, 3) + nz.n2(x * 0.02, z * 0.02) * 0.05;
+    const mesa = (x: number, z: number, out: number) => {
+      const r = mesaMask(x, z);
+      if (r < 0.26) return -1e9;
+      const top = 46 + 70 * (nz.n2(x * 0.004 + 9, z * 0.004) * 0.5 + 0.5);
+      // stepped terraces: cliff band, ledge, cap rock
+      const k = smoothstep(0.26, 0.4, r);
+      const steps = Math.floor(k * 3.999) / 3 * 0.35 + smoothstep(0.0, 1.0, k) * 0.65;
+      return 24 + top * steps * smoothstep(40, 160, out);
+    };
+    const far = (x: number, z: number, out: number) => {
+      // a far range of buttes standing out of the haze
+      const k = smoothstep(260, 520, out);
+      if (k <= 0) return -1e9;
+      const r = nz.ridged2(x * 0.0035 - 7, z * 0.0035 + 3, 3);
+      return 30 + Math.pow(Math.max(0, r - 0.45) / 0.55, 1.6) * 150 * k;
+    };
+    for (let j = 0; j < N; j++)
+      for (let i = 0; i < N; i++) {
+        const x = x0 + i * CELL, z = x0 + j * CELL;
+        const out = Math.max(-x, -z, x - S, z - S); // metres outside the map square
+        let h: number;
+        let kind = 0; // 0 sand, 1 mesa rock, 2 far butte
+        if (out <= -CELL) {
+          // proxy: stays just below the real terrain so near chunks always cover it
+          h = Math.min(field.heightAt(x, z), field.heightAt(x + CELL, z), field.heightAt(x - CELL, z), field.heightAt(x, z + CELL), field.heightAt(x, z - CELL)) - 2.5;
+        } else {
+          const e = edgeH(x, z) - 2.5;
+          const d = 22 + dunes(x, z);
+          const m = mesa(x, z, out);
+          const f = far(x, z, out);
+          let w = Math.max(d, m, f);
+          if (m >= w - 0.01 && m > d) kind = 1;
+          if (f >= w - 0.01 && f > d && f > m) kind = 2;
+          h = e + (w - e) * smoothstep(-CELL, 90, out);
+          // the outermost rows sink so the grid edge never shows
+          const rim = Math.min(i, j, N - 1 - i, N - 1 - j);
+          if (rim < 2) h -= (2 - rim) * 60;
+        }
+        const k = i + j * N;
+        H[k] = h;
+        pos[k * 3] = x;
+        pos[k * 3 + 1] = h;
+        pos[k * 3 + 2] = z;
+        col[k * 3] = kind;
+      }
+    // colours: sand with crest / trough value, strata on cliffs, mauve far rock
+    const c = new THREE.Color();
+    const SAND = [0xe8c088, 0xdcae74, 0xf0cf98];
+    const STR = [0xd6a674, 0xbf8a5c, 0xa8744c, 0xcf9a6a, 0x8f5e40, 0xc48c60];
+    for (let j = 0; j < N; j++)
+      for (let i = 0; i < N; i++) {
+        const k = i + j * N;
+        const h = H[k];
+        const hl = H[Math.max(0, i - 1) + j * N], hr = H[Math.min(N - 1, i + 1) + j * N];
+        const hd = H[i + Math.max(0, j - 1) * N], hu = H[i + Math.min(N - 1, j + 1) * N];
+        const slope = Math.hypot(hr - hl, hu - hd) / (2 * CELL);
+        const cav = h - (hl + hr + hd + hu) * 0.25;
+        const kind = col[k * 3];
+        const x = pos[k * 3], z = pos[k * 3 + 2];
+        if (kind === 0 || slope < 0.35) {
+          c.setHex(SAND[Math.floor((nz.n2(x * 0.01, z * 0.01) * 0.5 + 0.5) * 2.99)]);
+          c.multiplyScalar(1 + Math.max(-0.2, Math.min(0.08, cav * 0.05)));
+          if (kind > 0) c.lerp(new THREE.Color(0xc8946a), 0.35);
+        } else {
+          c.setHex(STR[Math.floor(h * 0.16 + nz.n2(x * 0.02, z * 0.02) * 1.2 + 64) % STR.length]);
+          if (kind === 2) c.lerp(new THREE.Color(0xa48078), 0.45);
+        }
+        col[k * 3] = c.r;
+        col[k * 3 + 1] = c.g;
+        col[k * 3 + 2] = c.b;
+      }
+    const idx = new Uint32Array((N - 1) * (N - 1) * 6);
+    let o = 0;
+    for (let j = 0; j < N - 1; j++)
+      for (let i = 0; i < N - 1; i++) {
+        const a = i + j * N, b = a + 1, d = a + N, e = d + 1;
+        idx[o++] = a; idx[o++] = d; idx[o++] = b;
+        idx[o++] = b; idx[o++] = d; idx[o++] = e;
+      }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    geo.computeVertexNormals();
+    geo.computeBoundingSphere();
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
+    mat.onBeforeCompile = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace('#include <dithering_fragment>', '#include <dithering_fragment>\n gl_FragColor.a = 0.0;');
+      celify(sh);
+    };
+    mat.customProgramCacheKey = () => 'backdrop-v1';
+    this.mesh = new THREE.Mesh(geo, mat);
+    this.mesh.name = 'backdrop';
+    this.mesh.matrixAutoUpdate = false;
+    this.mesh.renderOrder = -5;
+  }
+  dispose() {
+    this.mesh.removeFromParent();
+    this.mesh.geometry.dispose();
+    (this.mesh.material as THREE.Material).dispose();
   }
 }
 

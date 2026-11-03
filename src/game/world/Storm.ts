@@ -2,54 +2,91 @@
 // capsules, all animatable), a swirling curtain rendered along the boundary,
 // and roaming dust devils that damage anything inside them.
 import * as THREE from 'three';
-import { globalUniforms } from '../../engine/render/VoxelMaterial';
+import { globalUniforms, atmoFogUniforms } from '../../engine/render/VoxelMaterial';
 import { rnd } from '../../engine/math/rand';
 
 export interface StormDisc { id: string; x: number; z: number; r: number; target: number; speed: number; }
 export interface StormCapsule { id: string; ax: number; az: number; bx: number; bz: number; w: number; target: number; speed: number; }
 export interface DustDevil { x: number; z: number; vx: number; vz: number; r: number; life: number; dps: number; mesh: THREE.Group; }
 
+// Two layers ring the open play space just past its rim:
+//  kind 0 - a low curtain of blowing sand hugging the boundary (streaks racing sideways,
+//           a ragged billowing crest, skittering pixel grains);
+//  kind 1 - the sandstorm proper, set back beyond it: tall, slowly rolling, softer.
+// Both are lit by the sun (glowing gold when back-lit) and sit inside the aerial perspective.
 const curtainVert = /* glsl */ `
-attribute vec3 iPos; attribute float iSeed;
-varying vec2 vUv; varying float vSeed; varying float vFog;
-uniform float uWidth, uHeight;
+attribute vec4 iPos; attribute float iSeed;
+varying vec2 vUv; varying vec2 vM; varying float vSeed; varying float vKind; varying vec3 vWP;
+#include <fog_pars_vertex>
 void main(){
-  vec3 base = iPos;
-  vec4 mvBase = modelViewMatrix * vec4(base, 1.0);
+  float kind = iPos.w;
+  vec2 size = kind < 0.5 ? vec2(18.0, 10.0) : vec2(36.0, 44.0);
   // cylindrical billboard (rotate around Y toward camera)
   vec3 camRight = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
   camRight.y = 0.0; camRight = normalize(camRight);
-  vec3 wp = base + camRight * position.x * uWidth + vec3(0.0, (position.y + 0.5) * uHeight, 0.0);
-  vec4 mv = viewMatrix * vec4(wp, 1.0);
+  vec3 wp = iPos.xyz + camRight * position.x * size.x + vec3(0.0, (position.y + 0.5) * size.y, 0.0);
+  vec4 mvPosition = viewMatrix * vec4(wp, 1.0);
   vUv = position.xy + 0.5;
+  vM = vUv * size;
   vSeed = iSeed;
-  vFog = -mv.z;
-  gl_Position = projectionMatrix * mv;
+  vKind = kind;
+  vWP = wp;
+  gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>
 }`;
 const curtainFrag = /* glsl */ `
-uniform float uTime; uniform vec3 uColor; uniform vec3 uDark; uniform float uOpacity;
-varying vec2 vUv; varying float vSeed; varying float vFog;
-float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+uniform float uTime, uOpacity;
+uniform vec3 uColor, uDark, uSunDirW, uSunCol;
+varying vec2 vUv; varying vec2 vM; varying float vSeed; varying float vKind; varying vec3 vWP;
+#include <fog_pars_fragment>
+float hash(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
   return mix(mix(hash(i), hash(i+vec2(1,0)), f.x), mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y); }
 float fbm(vec2 p){ float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++){ s += a * vn(p); p *= 2.03; a *= 0.5; } return s; }
 void main(){
-  vec2 uv = vUv;
-  // pixelate for voxel-pixel coherence
-  vec2 pu = floor(uv * vec2(14.0, 34.0)) / vec2(14.0, 34.0);
   float t = uTime;
-  float n = fbm(vec2(pu.x * 2.0 + vSeed * 7.0 - t * 0.35, pu.y * 6.0 - t * 0.9 + vSeed));
-  float n2 = fbm(vec2(pu.x * 4.0 + t * 0.6 + vSeed * 3.0, pu.y * 6.0 - t * 1.1));
-  float edge = smoothstep(0.0, 0.25, uv.x) * smoothstep(1.0, 0.75, uv.x);
-  float vert = smoothstep(1.0, 0.35, uv.y) * (0.75 + 0.25 * smoothstep(0.0, 0.08, uv.y));
-  float a = clamp((n * 1.25 + n2 * 0.45 - 0.25) * edge * vert, 0.0, 1.0) * uOpacity;
-  vec3 col = mix(uDark, uColor, n2 * 0.6 + uv.y * 0.4);
-  float near = smoothstep(2.0, 18.0, vFog);
-  a *= near;
-  if (a < 0.02) discard;
+  vec2 uv = vUv;
+  float edge = smoothstep(0.0, 0.24, uv.x) * smoothstep(1.0, 0.76, uv.x);
+  vec3 vd = normalize(vWP - cameraPosition);
+  float back = pow(max(dot(vd, uSunDirW), 0.0), 3.0);
+  vec3 light = uSunCol * 0.3 + vec3(0.32, 0.34, 0.4);
+  vec3 col;
+  float a;
+  if (vKind < 0.5) {
+    vec2 pm = floor(vM * 6.0) / 6.0;
+    float sx = pm.x + vSeed * 53.0;
+    float streak = fbm(vec2(sx * 0.16 - t * 2.6, pm.y * 1.9 + vSeed * 7.0));
+    float billow = fbm(vec2(sx * 0.05 - t * 0.55, pm.y * 0.22 - t * 0.35 + vSeed * 3.0));
+    float topH = 0.26 + 0.64 * billow;
+    float body = 1.0 - smoothstep(topH - 0.32, topH + 0.06, uv.y);
+    a = clamp(body * (0.55 + 0.85 * streak), 0.0, 1.0) * edge;
+    float gr = step(0.972, hash(floor(vec2(pm.x - t * 22.0, pm.y * 6.0) + vSeed * 91.0))) * body;
+    col = mix(uDark, uColor, 0.45 + 0.4 * uv.y + streak * 0.3) * light;
+    col += uColor * light * gr * 0.7;
+    a = max(a, gr * edge * 0.85);
+  } else {
+    vec2 pm = floor(vM * 1.6) / 1.6;
+    float n1 = fbm(vec2(pm.x * 0.035 + vSeed * 9.0 - t * 0.18, pm.y * 0.05 - t * 0.12));
+    float n2 = fbm(vec2(pm.x * 0.09 - t * 0.5 + vSeed * 3.0, pm.y * 0.12 - t * 0.3));
+    float topH = 0.5 + 0.45 * n1;
+    float body = 1.0 - smoothstep(topH - 0.38, topH + 0.04, uv.y);
+    a = clamp(body * (0.3 + 0.75 * n2), 0.0, 1.0) * edge * 0.7;
+    // billows: lit crowns, shaded bellies
+    col = mix(uDark, uColor, 0.35 + 0.55 * n2 + 0.2 * uv.y) * light;
+  }
+  col += uSunCol * vec3(1.0, 0.8, 0.55) * back * 0.14;
+  a *= uOpacity * smoothstep(1.5, 9.0, vFogDepth);
+  if (a < 0.01) discard;
   gl_FragColor = vec4(col, a);
-  #include <colorspace_fragment>
+  #include <fog_fragment>
 }`;
+
+const MAX_CURTAIN = 1600;
+/** [kind, offset past the rim (m), spacing (m)] */
+const LAYERS: [number, number, number][] = [
+  [0, 2.5, 6],
+  [1, 16, 11],
+];
 
 export class Storm {
   discs: StormDisc[] = [];
@@ -63,28 +100,29 @@ export class Storm {
   private dirty = true;
   private rebuildTimer = 0;
   uniforms = {
+    ...atmoFogUniforms(),
     uTime: globalUniforms.uTime,
-    uColor: { value: new THREE.Color(0xe8c48c) },
-    uDark: { value: new THREE.Color(0xa87444) },
-    uOpacity: { value: 0.82 },
-    uWidth: { value: 16 },
-    uHeight: { value: 46 },
+    uSunDirW: globalUniforms.uSunDirW,
+    uSunCol: globalUniforms.uSunCol,
+    uColor: { value: new THREE.Color(0xf6dcb0) },
+    uDark: { value: new THREE.Color(0xb0784a) },
+    uOpacity: { value: 0.9 },
   };
   /** 0..1: storm intensity weakened by boss kills */
   strength = 1;
 
   constructor(public heightAt: (x: number, z: number) => number) {
-    const MAXN = 900;
+    const MAXN = MAX_CURTAIN;
     this.geo = new THREE.InstancedBufferGeometry();
     const q = new THREE.PlaneGeometry(1, 1);
     this.geo.index = q.index;
     this.geo.setAttribute('position', q.getAttribute('position'));
-    this.iPos = new Float32Array(MAXN * 3);
+    this.iPos = new Float32Array(MAXN * 4);
     this.iSeed = new Float32Array(MAXN);
-    this.geo.setAttribute('iPos', new THREE.InstancedBufferAttribute(this.iPos, 3));
+    this.geo.setAttribute('iPos', new THREE.InstancedBufferAttribute(this.iPos, 4));
     this.geo.setAttribute('iSeed', new THREE.InstancedBufferAttribute(this.iSeed, 1));
     this.geo.instanceCount = 0;
-    const mat = new THREE.ShaderMaterial({ vertexShader: curtainVert, fragmentShader: curtainFrag, uniforms: this.uniforms, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+    const mat = new THREE.ShaderMaterial({ vertexShader: curtainVert, fragmentShader: curtainFrag, uniforms: this.uniforms, transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: true });
     this.curtain = new THREE.Mesh(this.geo, mat);
     this.curtain.frustumCulled = false;
     this.curtain.renderOrder = 5;
@@ -151,21 +189,27 @@ export class Storm {
 
   private rebuild() {
     let n = 0;
-    const push = (x: number, z: number) => {
-      if (n >= 900) return;
-      if (this.sdf(x, z) > 1.5) return; // interior seam
-      this.iPos[n * 3] = x;
-      this.iPos[n * 3 + 1] = this.heightAt(x, z) - 4;
-      this.iPos[n * 3 + 2] = z;
+    // kind 0 hugs the rim; kind 1 stands well outside it (never over another open area)
+    const push = (x: number, z: number, kind: number) => {
+      if (n >= MAX_CURTAIN) return;
+      const s = this.sdf(x, z);
+      if (kind === 0 ? s > 1.5 : s > -9) return;
+      this.iPos[n * 4] = x;
+      this.iPos[n * 4 + 1] = this.heightAt(x, z) - (kind === 0 ? 0.7 : 4);
+      this.iPos[n * 4 + 2] = z;
+      this.iPos[n * 4 + 3] = kind;
       this.iSeed[n] = ((x * 0.137 + z * 0.311) % 1 + 1) % 1;
       n++;
     };
     for (const d of this.discs) {
       if (d.r < 1) continue;
-      const steps = Math.max(12, Math.ceil((Math.PI * 2 * d.r) / 7));
-      for (let i = 0; i < steps; i++) {
-        const a = (i / steps) * Math.PI * 2;
-        push(d.x + Math.cos(a) * (d.r + 2), d.z + Math.sin(a) * (d.r + 2));
+      for (const [kind, off, gap] of LAYERS) {
+        const R = d.r + off;
+        const steps = Math.max(10, Math.ceil((Math.PI * 2 * R) / gap));
+        for (let i = 0; i < steps; i++) {
+          const a = ((i + kind * 0.5) / steps) * Math.PI * 2;
+          push(d.x + Math.cos(a) * R, d.z + Math.sin(a) * R, kind);
+        }
       }
     }
     for (const c of this.capsules) {
@@ -173,10 +217,12 @@ export class Storm {
       const dx = c.bx - c.ax, dz = c.bz - c.az;
       const L = Math.hypot(dx, dz) || 1;
       const nx = -dz / L, nz = dx / L;
-      const steps = Math.ceil(L / 7);
-      for (let i = 0; i <= steps; i++) {
-        const t = i / steps;
-        for (const s of [-1, 1]) push(c.ax + dx * t + nx * s * (c.w * 0.5 + 2), c.az + dz * t + nz * s * (c.w * 0.5 + 2));
+      for (const [kind, off, gap] of LAYERS) {
+        const steps = Math.ceil(L / gap);
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          for (const s of [-1, 1]) push(c.ax + dx * t + nx * s * (c.w * 0.5 + off), c.az + dz * t + nz * s * (c.w * 0.5 + off), kind);
+        }
       }
     }
     this.geo.instanceCount = n;
@@ -211,7 +257,7 @@ export class Storm {
       this.dirty = false;
       this.rebuildTimer = 0.25;
     }
-    this.uniforms.uOpacity.value = 0.55 + 0.4 * this.strength;
+    this.uniforms.uOpacity.value = 0.6 + 0.35 * this.strength;
     // dust devils roam inside the safe area
     for (let i = this.devils.length - 1; i >= 0; i--) {
       const dv = this.devils[i];

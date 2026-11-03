@@ -300,6 +300,11 @@ export class Enemy implements EnemyLike {
 
 /** parts that can come off */
 const SEVERABLE = /^(arm|fore|hand|thigh|shin|leg|head|tail|claw|pincer|wing|ear|jaw|horn|stinger|mandible|antenna|paw|foot)/;
+/** the upper body a blast tears off the hips */
+const TORSO = /^(torso|chest|spine|belly|thorax|abdomen)/;
+/** ragdoll pieces alive at once before old ones are hurried into the sand */
+const RAG_SOFT = 700;
+const RAG_HARD = 1000;
 
 interface RagPiece {
   batch: RigBatch;
@@ -620,6 +625,11 @@ export class Enemies implements EnemyApi {
     const kind = hit.source === 'poison' ? 'poison' : hit.headshot && e.def.hitKind !== 'chitin' ? 'bone' : e.def.hitKind;
     if (hit.source !== 'poison' && hit.source !== 'bleed' && hit.source !== 'burn') {
       ctx.fx.hit(pp, { x: -e.hitX, y: 0.4, z: -e.hitZ }, kind, res.crit ? 1.5 : 1);
+      // a round goes through: the exit spray leaves out the back along the shot
+      if (dir && (hit.source === 'gun' || hit.source === 'projectile') && !e.sandForm) {
+        const ex = { x: pp.x + dir.x * e.radius * 0.8, y: pp.y + (dir.y ?? 0) * e.radius * 0.8, z: pp.z + dir.z * e.radius * 0.8 };
+        this.gore.exitWound(ex, dir, fluidFor(e.def.id, e.def.hitKind, e.alpha), res.crit ? 1.45 : hit.headshot ? 1.25 : 1);
+      }
       ctx.sfx(e.def.hitKind === 'chitin' || e.def.hitKind === 'armor' ? 'hit_armor' : e.def.hitKind === 'bone' ? 'hit_bone' : 'hit_flesh', pp, 0.7);
       if (hit.headshot) ctx.sfx('headshot', pp, 0.8);
       if (res.crit) ctx.sfx('hit_crit', pp, 0.6);
@@ -627,7 +637,7 @@ export class Enemies implements EnemyApi {
       else if (e.def.hitKind === 'flesh') ctx.events.emit('groundMark', pp.x + e.hitX * 0.8, pp.z + e.hitZ * 0.8, 0.4, 2);
     }
     const col = res.superCrit ? 0xff4a2a : res.crit ? 0xffd040 : hit.source === 'poison' ? 0x9dff3a : hit.source === 'burn' ? 0xffa040 : hit.source === 'bleed' ? 0xe04040 : 0xffffff;
-    ctx.fx.number({ x: pp.x, y: pp.y + 0.3, z: pp.z }, amt, col, res.crit ? 1.3 : hit.source === 'poison' ? 0.75 : 1);
+    ctx.fx.number({ x: pp.x, y: pp.y + 0.3, z: pp.z }, amt, col, res.crit ? 1.3 : hit.headshot ? 1.2 : hit.source === 'poison' ? 0.75 : 1);
     if (res.superCrit) ctx.toast('SHATTER!', '#ff6a3a');
     for (const c of res.combos) this.combo(e, c);
     // DOOM
@@ -645,7 +655,10 @@ export class Enemies implements EnemyApi {
     let part = hit.tags?.[0];
     if (hit.headshot && e.hp <= 0) part = 'head';
     const pi = part ? e.part(part) : -1;
-    if (!dot && part && pi >= 0 && e.batch.geo.parts[pi].parent >= 0 && SEVERABLE.test(part)) {
+    // a crit headshot kill (and now and then a plain one) bursts the skull instead of popping the head off
+    let burst = false;
+    if (!dot && hit.headshot && e.hp <= 0 && !e.sandForm && (res.crit || rnd.chance(0.3))) burst = this.burstHead(e, e.hitX, e.hitZ);
+    if (!burst && !dot && part && pi >= 0 && e.batch.geo.parts[pi].parent >= 0 && SEVERABLE.test(part)) {
       const chance = e.hp <= 0 ? 1 : amt >= e.maxHp * 0.25 ? 0.85 : res.crit ? 0.4 : 0;
       if (chance > 0 && rnd.chance(chance)) {
         this.detach(e, part, e.hitX, e.hitZ);
@@ -653,7 +666,7 @@ export class Enemies implements EnemyApi {
         if (e.hp > 0 && e.skel === 'humanoid' && /^(thigh|shin|leg)/.test(part)) e.hp = 0;
       }
     }
-    if (e.hp <= 0) this.kill(e, hit, e.hitX, e.hitZ, res.crit);
+    if (e.hp <= 0) this.kill(e, hit, e.hitX, e.hitZ, res.crit, burst);
     return amt;
   }
 
@@ -696,7 +709,7 @@ export class Enemies implements EnemyApi {
     parts.forEach((_, j) => {
       if (!e.hidden[j] || before.has(j)) return;
       const r = this.spawnPiece(e, j, dx * 6 + (rnd.next() - 0.5) * 3, 4 + rnd.next() * 3 + (partName === 'head' ? 4 : 0), dz * 6 + (rnd.next() - 0.5) * 3, W);
-      r.life += 3.5; // severed limbs linger, tumbling and bleeding into the sand
+      r.life += 5; // severed limbs linger, tumbling and bleeding into the sand
       if (j === i) limbPiece = r;
     });
     this.goreCut(e, i, W, limbPiece, partName === 'head', null);
@@ -707,7 +720,7 @@ export class Enemies implements EnemyApi {
   }
 
   /** wound caps, arterial jets, the splash: the satisfying part of losing a limb */
-  private goreCut(e: Enemy, j: number, W: THREE.Matrix4[], limbPiece: RagPiece | null, head: boolean, pieces: Map<number, RagPiece> | null) {
+  private goreCut(e: Enemy, j: number, W: THREE.Matrix4[], limbPiece: RagPiece | null, head: boolean, pieces: Map<number, RagPiece> | null, fountain = 1) {
     const parts = e.batch.geo.parts;
     const p = parts[j];
     const g = p.geo;
@@ -734,6 +747,7 @@ export class Enemies implements EnemyApi {
       head,
       piece: limbPiece,
       pieceW: limbPiece ? W[j] : null,
+      fountain,
     });
     if (pieces && holder >= 0) {
       const hp = pieces.get(holder);
@@ -753,11 +767,57 @@ export class Enemies implements EnemyApi {
     return true;
   }
 
+  /**
+   * A crit headshot pops the skull: bone chips, voxel gibs and a cloud of
+   * mist blown out along the shot, whatever it wore flies off whole, and the
+   * neck stump pumps a fountain while the body stands a beat and drops.
+   */
+  burstHead(e: Enemy, dx: number, dz: number) {
+    const i = e.part('head');
+    const parts = e.batch.geo.parts;
+    if (i < 0 || e.hidden[i] || parts[i].parent < 0) return false;
+    const W = this.poseWorld(e);
+    const g = parts[i].geo;
+    if (!g.boundingBox) g.computeBoundingBox();
+    const at = g.boundingBox!.getCenter(new THREE.Vector3()).applyMatrix4(W[i]);
+    const size = g.boundingBox!.getSize(new THREE.Vector3()).length() * new THREE.Vector3().setFromMatrixScale(W[i]).x;
+    const before = new Set<number>();
+    parts.forEach((_, j) => e.hidden[j] && before.add(j));
+    const hideRec = (k: number) => {
+      e.hidden[k] = 1;
+      parts.forEach((p, j) => {
+        if (p.parent === k) hideRec(j);
+      });
+    };
+    hideRec(i);
+    parts.forEach((_, j) => {
+      if (j === i || !e.hidden[j] || before.has(j)) return;
+      const r = this.spawnPiece(e, j, dx * 3 + (rnd.next() - 0.5) * 3, 5 + rnd.next() * 3, dz * 3 + (rnd.next() - 0.5) * 3, W);
+      r.life += 4;
+    });
+    const fluid = fluidFor(e.def.id, e.def.hitKind, e.alpha);
+    this.gore.skullBurst(at, { x: dx, z: dz }, fluid, clamp(size / 0.45, 0.7, 1.8));
+    this.goreCut(e, i, W, null, true, null, 1.7);
+    this.ctx.sfx('headshot', at, 1, 0.92);
+    this.ctx.sfx('gore_splat', at, 0.9, 0.8);
+    this.ctx.engine.hitStop(0.1);
+    this.ctx.shake(0.32);
+    this.ctx.events.emit('decap', e);
+    this.ctx.events.emit('skullBurst', e);
+    return true;
+  }
+
+  /** how long a ragdoll piece lingers before sinking (shorter when the field is crowded) */
+  private pieceLife() {
+    const n = this.rag.length;
+    return (6.5 + rnd.next() * 2.5) * (n > RAG_SOFT ? 0.45 : n > RAG_SOFT * 0.6 ? 0.75 : 1);
+  }
+
   private spawnPiece(e: Enemy, part: number, vx: number, vy: number, vz: number, pose?: THREE.Matrix4[]) {
     const W = pose ? pose[part] : this.poseWorld(e)[part];
     const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), sc = new THREE.Vector3();
     W.decompose(pos, quat, sc);
-    const r: RagPiece = { batch: e.batch, part, pos, quat, vel: new THREE.Vector3(vx, vy, vz), ang: new THREE.Vector3((rnd.next() - 0.5) * 16, (rnd.next() - 0.5) * 16, (rnd.next() - 0.5) * 16), life: 3.2 + rnd.next(), scale: sc.x, rest: false, tint: e.tint.clone() };
+    const r: RagPiece = { batch: e.batch, part, pos, quat, vel: new THREE.Vector3(vx, vy, vz), ang: new THREE.Vector3((rnd.next() - 0.5) * 16, (rnd.next() - 0.5) * 16, (rnd.next() - 0.5) * 16), life: this.pieceLife(), scale: sc.x, rest: false, tint: e.tint.clone() };
     this.rag.push(r);
     this.gore.rehome(e, part, r);
     return r;
@@ -779,26 +839,53 @@ export class Enemies implements EnemyApi {
       ctx.fx.dust({ x: e.pos.x, y: e.pos.y + 0.3, z: e.pos.z }, 1.1 * e.scale, P.sand1, 5);
       ctx.sfx('sand_burst', c, 0.7);
     } else if (violent) {
-      const force = 5 + (hit?.knock ?? 2) * 1.5 + (crit ? 3 : 0);
+      const blast = hit?.source === 'explosion' || hit?.source === 'board';
+      const force = 5 + (hit?.knock ?? 2) * 1.5 + (crit ? 3 : 0) + (blast ? 2 : 0);
       const W = this.poseWorld(e);
       const pieces = new Map<number, RagPiece>();
       const parts = e.batch.geo.parts;
+      // a blast or a ram tears the body at the waist: the upper half is thrown up and
+      // back, the hips and legs skid off low
+      const torso = blast ? parts.findIndex((p, j) => TORSO.test(p.name) && p.parent >= 0 && !e.hidden[j]) : -1;
+      const upper = new Set<number>();
+      if (torso >= 0) {
+        const mark = (k: number) => {
+          upper.add(k);
+          parts.forEach((p, j) => p.parent === k && mark(j));
+        };
+        mark(torso);
+      }
       parts.forEach((p, j) => {
         if (e.hidden[j]) return;
-        const up = 2 + rnd.next() * 4 + (p.name === 'head' || p.name === 'hat' ? 3.5 : 0);
-        pieces.set(j, this.spawnPiece(e, j, dx * force * (0.5 + rnd.next() * 0.8) + e.vel.x * 0.5 + (rnd.next() - 0.5) * 3, up, dz * force * (0.5 + rnd.next() * 0.8) + e.vel.z * 0.5 + (rnd.next() - 0.5) * 3, W));
+        let up = 2 + rnd.next() * 4 + (p.name === 'head' || p.name === 'hat' ? 3.5 : 0);
+        let f = force;
+        if (torso >= 0) {
+          if (upper.has(j)) {
+            up += 2.5;
+            f *= 1.15;
+          } else {
+            up *= 0.45;
+            f *= 0.65;
+          }
+        }
+        const r = this.spawnPiece(e, j, dx * f * (0.5 + rnd.next() * 0.8) + e.vel.x * 0.5 + (rnd.next() - 0.5) * 3, up, dz * f * (0.5 + rnd.next() * 0.8) + e.vel.z * 0.5 + (rnd.next() - 0.5) * 3, W);
+        r.life += blast ? 2.5 : 1.5; // what is left of a violent death lies there a while
+        pieces.set(j, r);
       });
-      // torn apart at a couple of joints (more for blasts), plus voxel gibs
-      const blast = hit?.source === 'explosion' || hit?.source === 'board';
+      // torn apart at several joints (many for blasts), plus voxel gibs
+      if (torso >= 0) {
+        this.goreCut(e, torso, W, pieces.get(torso) ?? null, false, pieces);
+        this.gore.split(new THREE.Vector3().setFromMatrixPosition(W[torso]), { x: dx, z: dz }, fluid, e.scale);
+      }
       const cuts = parts.map((p, j) => j).filter((j) => parts[j].parent >= 0 && !e.hidden[j] && SEVERABLE.test(parts[j].name));
       for (let k = cuts.length - 1; k > 0; k--) {
         const r = Math.floor(rnd.next() * (k + 1));
         [cuts[k], cuts[r]] = [cuts[r], cuts[k]];
       }
-      for (const j of cuts.slice(0, blast ? 3 : 2)) this.goreCut(e, j, W, pieces.get(j) ?? null, parts[j].name === 'head', pieces);
-      this.gore.gibs(c, fluid, blast ? 14 : 7, blast ? 1.4 : 1);
+      for (const j of cuts.slice(0, blast ? 5 : crit ? 3 : 2)) this.goreCut(e, j, W, pieces.get(j) ?? null, parts[j].name === 'head', pieces);
+      this.gore.gibs(c, fluid, blast ? 18 : 8, blast ? 1.6 : 1.1);
     } else {
-      this.gore.pool(e.pos.x, e.pos.z, 0.55 + e.radius * 1.1, fluid);
+      this.gore.pool(e.pos.x, e.pos.z, 0.6 + e.radius * 1.2, fluid);
       // fall away from the shot (local push direction), sideways at random
       const lz = dx * Math.sin(e.yaw) + dz * Math.cos(e.yaw);
       const dur = e.skel === 'humanoid' ? 1.35 : e.skel === 'quad' ? 1.4 : e.skel === 'worm' ? 1.6 : e.skel === 'snake' ? 1.7 : e.skel === 'lizard' ? 1.15 : e.skel === 'bird' ? 1.3 : e.skel === 'beetle' ? 1.1 : e.skel === 'scorpion' ? 1.2 : 0.6;
@@ -1141,9 +1228,11 @@ export class Enemies implements EnemyApi {
             if (r.vel.lengthSq() < 0.05) r.rest = true;
           }
         }
-      } else if (r.life < 1.2) r.pos.y -= dt * 0.3;
+      } else if (r.life < 1.8) r.pos.y -= dt * 0.22; // sink into the sand before dissolving
     }
-    if (this.rag.length > 900) this.rag.splice(0, this.rag.length - 900);
+    // crowded field: hurry the oldest pieces into the sand instead of popping them
+    if (this.rag.length > RAG_SOFT) for (let i = 0; i < this.rag.length - RAG_SOFT; i++) this.rag[i].life = Math.min(this.rag[i].life, 1.6);
+    if (this.rag.length > RAG_HARD) this.rag.splice(0, this.rag.length - RAG_HARD);
   }
 
   // ------------------------------------------------------------- snake wrap

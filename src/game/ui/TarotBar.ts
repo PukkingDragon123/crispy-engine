@@ -7,6 +7,9 @@
 // photographed progressively (time-sliced, the cards are dealt face-down and
 // flip as their art is ready). On use a card pops, spins to show its sculpted
 // back and throws skill-themed 2D pixel-art particles.
+// A hunt starts with the three skill cards SEALED: they lie face down, dimmed,
+// with no key cap, until the skill is learned from a rank-up card; then the
+// card leaps, turns over in a full flourish and bursts with its own particles.
 import * as THREE from 'three';
 import type { Hud } from './Hud';
 import type { RigSpec } from '../../engine/voxel/Rig';
@@ -15,6 +18,7 @@ import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMater
 import { CardStudio } from './CardStudio';
 import { Kit, TAROT_BAR, TarotDef, TarotFx } from './TarotCards';
 import { CARD, tarotFrame } from '../models/props/tarot';
+import { isSkillLearned } from '../player/Skills';
 
 /** photo size of the 66×88-voxel art window */
 export const TAROT_ART: [number, number] = [168, 224];
@@ -264,6 +268,10 @@ interface CardObj {
   sk: number;
   glint: number;
   trickle: number;
+  /** sealed: the skill isn't learned yet (face down) */
+  locked: boolean;
+  /** 1 -> 0 while the just-learned card turns face up */
+  unlock: number;
 }
 
 const FW = CARD.W, FH = CARD.H;
@@ -398,7 +406,7 @@ export class TarotBar {
     plaque(def.title, CARD.title.cx, CARD.title.cy + 0.5, 54, 8, 0.7);
     for (const o of [frame, art, ...texts]) o.frustumCulled = false;
     this.scene.add(group);
-    return { def, group, tilt, frame, frameMat, art, artMat, texts, pop: 0, flip: 1, hasArt: false, lastCd: 0, lastCharges: -1, ready: 0, wasReady: true, flash: 0, seed: i * 1.7, sx: 0, sy: 0, sk: 1, glint: Math.random(), trickle: 0 };
+    return { def, group, tilt, frame, frameMat, art, artMat, texts, pop: 0, flip: 1, hasArt: false, lastCd: 0, lastCharges: -1, ready: 0, wasReady: true, flash: 0, seed: i * 1.7, sx: 0, sy: 0, sk: 1, glint: Math.random(), trickle: 0, locked: !isSkillLearned(def.key), unlock: 0 };
   }
 
   update(dt: number, W: number, H: number) {
@@ -423,8 +431,21 @@ export class TarotBar {
       const used = ult ? this.lastUlt >= 1 && st.ult < 0.5 : cdNow > c.lastCd + 0.4 || (charges >= 0 && c.lastCharges >= 0 && charges < c.lastCharges);
       c.lastCd = cdNow;
       c.lastCharges = charges;
-      const readyNow = frac <= 0.001;
-      if (used && visible) {
+      // sealed until learned; learning it turns the card over with a flourish
+      const locked = !isSkillLearned(c.def.key);
+      if (c.locked && !locked) {
+        c.unlock = 1;
+        c.pop = 1;
+        c.flash = 1;
+        if (visible) {
+          this.useFx(c);
+          this.readyFx(c);
+        }
+      }
+      c.locked = locked;
+      c.unlock = Math.max(0, c.unlock - dt * 0.8);
+      const readyNow = frac <= 0.001 && !locked;
+      if (used && visible && !locked) {
         c.pop = 1;
         c.flash = 1;
       }
@@ -436,7 +457,8 @@ export class TarotBar {
       c.pop = Math.max(0, c.pop - dt * 1.15);
       c.flash = Math.max(0, c.flash - dt * 3.2);
       c.ready = readyNow ? Math.min(1, c.ready + dt * 3) : 0;
-      if (c.hasArt) c.flip = Math.max(0, c.flip - dt * 2.2);
+      if (c.locked) c.flip = Math.min(1, c.flip + dt * 3);
+      else if (c.hasArt) c.flip = Math.max(0, c.flip - dt * (c.unlock > 0 ? 1.15 : 2.2));
       // fan along the bottom-right, the ultimate largest at the end
       const big = ult ? 1.22 : 1;
       const slot = n - 1 - i;
@@ -449,7 +471,7 @@ export class TarotBar {
       const lift = k > 0 ? Math.sin(Math.min(1, u * 1.25) * Math.PI) : 0;
       const swell = k > 0 ? Math.sin(Math.min(1, u * 1.6) * Math.PI) * 0.55 + Math.max(0, Math.sin(u * Math.PI * 3)) * 0.04 * k : 0;
       const spin = k > 0 ? smooth(Math.min(1, Math.max(0, (u - 0.12) / 0.62))) * Math.PI * 2 : 0;
-      const y = H - 14 * s - (ch * big) / 2 - bob - lift * 46 * s;
+      const y = H - 14 * s - (ch * big) / 2 - bob - lift * 46 * s - Math.sin(c.unlock * Math.PI) * 30 * s + (c.locked ? 6 * s : 0);
       const sc = ((ch * big) / FH) * (1 + swell);
       c.group.visible = visible;
       c.group.position.set(x, -y, 700 + i * 40 + (k > 0 ? 500 : 0));
@@ -467,7 +489,7 @@ export class TarotBar {
       // the gilt breathes when ready; the gems glow for the ultimate
       const breathe = c.ready * (ult ? 0.5 + 0.5 * Math.sin(this.t * 5) : 0.5 + 0.5 * Math.sin(this.t * 2.2 + i));
       const tint = c.frameMat.userData.tint.value;
-      const lvl = readyNow ? 1 + breathe * 0.06 + c.flash * 0.3 : 0.74 + c.flash * 0.3;
+      const lvl = c.locked ? 0.5 : readyNow ? 1 + breathe * 0.06 + c.flash * 0.3 : 0.74 + c.flash * 0.3;
       tint.setRGB(lvl, lvl, lvl * (readyNow ? 1 : 1.04));
       c.frameMat.userData.fx.value.z = breathe * (ult ? 2.5 : 1.2) + c.flash * 2;
       for (const m of c.texts) (m.material as THREE.MeshBasicMaterial).color.setScalar(readyNow ? 1 : 0.8);
@@ -475,8 +497,8 @@ export class TarotBar {
       c.sy = y;
       c.sk = sc;
       if (used && visible) this.useFx(c);
-      if (visible) this.ambientFx(c, dt, frac, readyNow, ult);
-      hud.cardAnchors.push({ key: c.def.key, x: x / s, y: y / s, h: (ch * big) / s, cd: ult ? 0 : cdNow });
+      if (visible && !c.locked) this.ambientFx(c, dt, frac, readyNow, ult);
+      if (!c.locked) hud.cardAnchors.push({ key: c.def.key, x: x / s, y: y / s, h: (ch * big) / s, cd: ult ? 0 : cdNow });
     });
     this.lastUlt = st.ult;
   }

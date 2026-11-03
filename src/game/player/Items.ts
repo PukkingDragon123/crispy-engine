@@ -1,4 +1,5 @@
 // Two consumable slots. Physical items found in chests, drops and shops.
+// A new hunt starts with EMPTY pockets: everything is found, bought or earned.
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Player } from './Player';
@@ -36,7 +37,15 @@ export interface Slot {
 }
 
 export class Inventory {
+  /** new hunts start with empty pockets (no starter kit) */
+  static START_EMPTY = true;
   slots: (Slot | null)[] = [null, null];
+  /**
+   * True until the run's first update: a hunt's opening loadout is empty, so any
+   * starter kit handed over while the scene is still being built is turned away.
+   * (A run carried over from another sub-area restores `slots` directly.)
+   */
+  private opening = Inventory.START_EMPTY;
   private buffs: { source: string; until: number }[] = [];
   drunk = 0;
   hiccup = 0;
@@ -44,6 +53,7 @@ export class Inventory {
   constructor(private ctx: Ctx, private player: Player) {}
 
   add(id: ItemId, n = 1): boolean {
+    if (this.opening) return false;
     const def = ITEMS[id];
     for (const s of this.slots) if (s && s.id === id && s.count < def.stack) {
       s.count = Math.min(def.stack, s.count + n);
@@ -151,6 +161,7 @@ export class Inventory {
   }
 
   update(dt: number, input: { hit(a: any): boolean }) {
+    this.opening = false;
     if (input.hit('item1')) this.use(0);
     if (input.hit('item2')) this.use(1);
     const now = this.ctx.run.time;

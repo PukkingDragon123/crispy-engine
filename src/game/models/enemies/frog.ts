@@ -1,6 +1,7 @@
-// Desert rain frogs (Breviceps macrops): round, fat, granular-skinned, grumpy-
-// mouthed and adorable. The mama wears an old lady's curly grey wig, a little
-// rose-felt hat with a flower and a veil, pearls and a tiny purse.
+// Desert rain frogs (Breviceps macrops): round, squishy, grumpy-mouthed and
+// adorable. The mama has a big mouth and a long sticky rigged tongue, and wears a
+// big fabulous lilac curly wig (also a hat for the hunter: `frogWigHat()`), pearls
+// and a tiny purse. Also a little desert moth for her to catch (`desertMothRig`).
 //
 // Also hosts the small realistic-creature kit shared by frog / lizard / snake /
 // quest NPC models (CRig + geometric shape helpers + natural texture helpers).
@@ -429,23 +430,39 @@ export function memo<A, R>(fn: (a: A) => R): (a?: A) => R {
   };
 }
 
+
 // ============================================================== RAIN FROGS
+// Desert rain frogs (Breviceps macrops), as cute as the real thing: a round,
+// squishy body that settles onto the sand, big glossy dark eyes under soft
+// grumpy lids (rigged `lid_l`/`lid_r`: they blink and pull into moods), a wide
+// downturned mouth with a modelled jaw over a real mouth cavity (ridged palate,
+// floor, gullet), tiny stubby legs and soft warm colours.
+// Mama: a BIG mouth and a long sticky tongue: a 12-segment telescoping chain
+// (`tongue1`..`tongue12` + `tongue_tip`, all pivoting at the root on the front
+// of the mouth floor) that lies folded back along the floor at rest and flips out
+// over the lip like a real frog's. She wears pearls, a little purse and a big
+// fabulous lilac curly wig (`wig` + bouncy `ringlet_*` parts), the very wig the
+// hunter can wear afterwards (`frogWigHat()`).
 interface FrogPal {
   skin: number;
   lo: number;
   hi: number;
   belly: number;
-  wart: number;
   blush: number;
+  lip: number;
 }
 const BABY_PALS: FrogPal[] = [
-  { skin: 0xd8bf94, lo: 0xae9068, hi: 0xeedcb8, belly: 0xf4ebdc, wart: 0xe9d3a8, blush: 0xeab09a },
-  { skin: 0xc6c0b4, lo: 0x9c958a, hi: 0xe4e0d6, belly: 0xf2efe8, wart: 0xdcd6ca, blush: 0xe6b2ac },
-  { skin: 0xcc9c66, lo: 0xa07446, hi: 0xe8c28a, belly: 0xf2e2ca, wart: 0xe0b47a, blush: 0xeca486 },
-  { skin: 0xbfb88a, lo: 0x958f62, hi: 0xdad6aa, belly: 0xf0ecd6, wart: 0xd0ca98, blush: 0xe2ae96 },
-  { skin: 0xd8ae98, lo: 0xae8270, hi: 0xf2d2c0, belly: 0xf7e8e0, wart: 0xeac2ae, blush: 0xf2a0a0 },
+  { skin: 0xe2bc8c, lo: 0xc79c6c, hi: 0xf3dab4, belly: 0xfaf0e2, blush: 0xf5a496, lip: 0xf3dfc4 }, // sand peach
+  { skin: 0xd4c8b6, lo: 0xb0a18e, hi: 0xede6da, belly: 0xfbf7f0, blush: 0xf2aaae, lip: 0xefe8dc }, // cream grey
+  { skin: 0xdeaa6e, lo: 0xbe884e, hi: 0xf2cd98, belly: 0xf8ead4, blush: 0xf59e86, lip: 0xf3d9b4 }, // honey
+  { skin: 0xd0c08e, lo: 0xab9d6c, hi: 0xe6dcb2, belly: 0xf6f2de, blush: 0xefa894, lip: 0xebe3c6 }, // olive sand
+  { skin: 0xe6b4a0, lo: 0xc78e7a, hi: 0xf7d6c8, belly: 0xfcefe8, blush: 0xf8969e, lip: 0xf7ddd2 }, // rosy
 ];
-const MAMA_PAL: FrogPal = { skin: 0xcbb08a, lo: 0x9e8464, hi: 0xe6d2b2, belly: 0xf1e6d4, wart: 0xdcc49c, blush: 0xeaa498 };
+const MAMA_PAL: FrogPal = { skin: 0xd8aa7a, lo: 0xb98a5c, hi: 0xeecba2, belly: 0xf7e9d6, blush: 0xf2988c, lip: 0xf2dcc0 };
+/** mouth interior */
+const MOUTH = { floor: 0xd8727e, palate: 0xc46474, ridge: 0xac5064, gullet: 0x5a1e28, gum: 0xe69a9c, line: 0x5a2c2a };
+/** the wig: soft lilac "blue rinse" curls and a hot-pink satin bow with a pearl */
+const WIG = { base: 0xb9a2de, shade: 0x9882c4, deep: 0x6c5496, hi: 0xd7c8f1, sheen: 0xf1e8fc, bow: 0xe4558e, bowShade: 0xbb3a6c, bowDeep: 0x8c2450, bowHi: 0xf794bc, pearl: 0xfaf4ec };
 
 interface FrogCfg {
   name: string;
@@ -457,236 +474,517 @@ interface FrogCfg {
   seed: number;
 }
 
+// ---------------------------------------------------------------- little vector helpers
+const nrm3 = (v: V3): V3 => {
+  const l = Math.hypot(v[0], v[1], v[2]) || 1;
+  return [v[0] / l, v[1] / l, v[2] / l];
+};
+const dot3 = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross3 = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const add3 = (a: V3, b: V3, s = 1): V3 => [a[0] + b[0] * s, a[1] + b[1] * s, a[2] + b[2] * s];
+/** local -> world for euler [pitch X, yaw Y, roll Z] (the inverse of the shape kit's orientation) */
+function rotFwd(p: V3, r: V3): V3 {
+  let [x, y, z] = p;
+  let c = Math.cos(r[2]), s = Math.sin(r[2]);
+  [x, y] = [x * c - y * s, x * s + y * c];
+  c = Math.cos(r[0]);
+  s = Math.sin(r[0]);
+  [y, z] = [y * c - z * s, y * s + z * c];
+  c = Math.cos(r[1]);
+  s = Math.sin(r[1]);
+  [x, z] = [x * c + z * s, -x * s + z * c];
+  return [x, y, z];
+}
+/** world -> local for the same euler */
+function rotInv(p: V3, r: V3): V3 {
+  let [x, y, z] = p;
+  let c = Math.cos(-r[1]), s = Math.sin(-r[1]);
+  [x, z] = [x * c + z * s, -x * s + z * c];
+  c = Math.cos(-r[0]);
+  s = Math.sin(-r[0]);
+  [y, z] = [y * c - z * s, y * s + z * c];
+  c = Math.cos(-r[2]);
+  s = Math.sin(-r[2]);
+  [x, y] = [x * c - y * s, x * s + y * c];
+  return [x, y, z];
+}
+
 /** first filled voxel scanning from the front (+Z) along a row — the face surface */
 function frontZ(m: VoxelModel, xi: number, yi: number, zMax: number, zMin: number) {
   for (let k = zMax; k >= zMin; k--) if (m.has(xi, yi, k)) return k;
   return null;
 }
 
-function frog(c: FrogCfg): RigSpec {
-  const { R, pal, seed } = c;
-  const rig = new CRig(c.name, c.vs);
-  const C: V3 = [0, R * 0.84, 0];
-  const body = rig.part('body', undefined, [0, C[1], 0]);
-  // ---------------------------------------------------------- the plump flesh mass (never a sphere)
-  const prims: Prim[] = [
-    { c: [0, R * 0.84, -R * 0.04], r: [R * 1.0, R * 0.84, R * 0.94] }, // main mass
-    { c: [0, R * 0.42, R * 0.06], r: [R * 1.1, R * 0.46, R * 0.92] }, // belly sagging onto the sand
-    { c: [R * 0.56, R * 0.74, R * 0.5], r: [R * 0.42, R * 0.35, R * 0.38] }, // puffy jowls
-    { c: [-R * 0.56, R * 0.74, R * 0.5], r: [R * 0.42, R * 0.35, R * 0.38] },
-    { c: [0, R * 1.04, -R * 0.42], r: [R * 0.8, R * 0.6, R * 0.6] }, // back hump
-    { c: [0, R * 0.6, -R * 0.68], r: [R * 0.82, R * 0.5, R * 0.42] }, // rump
-    { c: [R * 0.4, R * 1.3, R * 0.38], r: [R * 0.32, R * 0.24, R * 0.3] }, // brow mounds the eyes sit under
-    { c: [-R * 0.4, R * 1.3, R * 0.38], r: [R * 0.32, R * 0.24, R * 0.3] },
-    { c: [R * 0.78, R * 0.6, R * 0.7], r: [R * 0.11, R * 0.08, R * 0.1], sub: true, k: R * 0.08 }, // mouth-corner dimples
-    { c: [-R * 0.78, R * 0.6, R * 0.7], r: [R * 0.11, R * 0.08, R * 0.1], sub: true, k: R * 0.08 },
+/** recolour one surface voxel near p (tiny catchlights that an ellipsoid would miss) */
+function dabAt(m: VoxelModel, p: V3, back: V3, col: number) {
+  for (let s = 0; s < 4; s++) {
+    const x = Math.floor(p[0] - back[0] * s), y = Math.floor(p[1] - back[1] * s), z = Math.floor(p[2] - back[2] * s);
+    if (m.has(x, y, z)) {
+      m.set(x, y, z, col);
+      return;
+    }
+  }
+}
+
+// ---------------------------------------------------------------- eyes and lids
+/**
+ * big glossy anime-cute frog eye: a dark wet globe, a bronze iris ring, a wide
+ * oval pupil, a warm light bounce in the lower iris and two catchlights that sit
+ * in the same screen corner on both eyes (as real light does)
+ */
+function cuteEye(m: VoxelModel, c: V3, r: number, fwd: V3, ring: number, iris: number) {
+  const f = nrm3(fwd);
+  const e1 = nrm3(cross3([0, 1, 0], f));
+  const e2 = cross3(f, e1);
+  ell(m, c, [r, r, r], (x, y, z) => {
+    const p: V3 = [x + 0.5 - c[0], y + 0.5 - c[1], z + 0.5 - c[2]];
+    if (dot3(p, f) / r < 0.12) return 0x22160f;
+    const u = dot3(p, e1) / r, w = dot3(p, e2) / r;
+    const d = Math.hypot(u, w);
+    if (d > 0.86) return 0x2c1d13;
+    if ((u / 0.5) ** 2 + ((w + 0.03) / 0.4) ** 2 < 1) return 0x070403; // pupil (slightly wide, frog-like)
+    if (w < -0.42 && Math.abs(u) < 0.52) return mixc(ring, 0xf6d49a, 0.3); // warm bounce light
+    if (d > 0.68) return ring;
+    return w > 0.32 ? mulc(iris, 0.72) : iris; // the lid shades the top of the iris
+  }, { fl: VF.METAL });
+  const X: V3 = [1, 0, 0];
+  const big = add3(add3(add3(c, f, r * 0.8), e2, r * 0.42), X, r * 0.24);
+  const br = Math.max(0.95, r * 0.24);
+  ell(m, big, [br, br, br], 0xffffff, { keep: (_a, _b, _c, x, y, z) => m.has(x, y, z) && exposed(m, x, y, z) });
+  dabAt(m, big, f, 0xffffff);
+  const small = add3(add3(add3(c, f, r * 0.92), e2, -r * 0.34), X, -r * 0.24);
+  if (r * 0.13 >= 0.9) ell(m, small, [r * 0.13, r * 0.13, r * 0.13], 0xeef4ff, { keep: (_a, _b, _c, x, y, z) => m.has(x, y, z) && exposed(m, x, y, z) });
+  else dabAt(m, small, f, 0xeef4ff);
+}
+
+/** a soft skin eyelid: a spherical cap hugging the globe (pivot = eye centre; +X rotation closes it) */
+function lidCap(m: VoxelModel, c: V3, r: number, axis: V3, half: number, skin: number, rim: number) {
+  const a = nrm3(axis);
+  const r0 = r * 1.03 + 0.15, r1 = r0 + Math.max(1.3, r * 0.22);
+  const ch = Math.cos(half), chr = Math.cos(half - Math.max(0.1, 1.15 / r1));
+  const B = Math.ceil(r1) + 1;
+  for (let i = Math.floor(c[0] - B); i <= Math.ceil(c[0] + B); i++)
+    for (let j = Math.floor(c[1] - B); j <= Math.ceil(c[1] + B); j++)
+      for (let k = Math.floor(c[2] - B); k <= Math.ceil(c[2] + B); k++) {
+        const p: V3 = [i + 0.5 - c[0], j + 0.5 - c[1], k + 0.5 - c[2]];
+        const l = Math.hypot(p[0], p[1], p[2]);
+        if (l < r0 || l > r1) continue;
+        const ca = dot3(p, a) / l;
+        if (ca < ch) continue;
+        m.set(i, j, k, ca < chr ? rim : skin);
+      }
+}
+
+// ---------------------------------------------------------------- the sticky tongue
+/** one telescoping tongue segment: lies from `root` back along -Z for L voxels, flat top with a midline groove */
+function tongueSeg(m: VoxelModel, root: V3, L: number, rx: number, ry: number, seed: number) {
+  const top = 0xe27884, groove = 0xc65a6a, side = 0xd86a78, under = 0xf0a2a8, wet = 0xffd2da;
+  for (let k = Math.floor(root[2] - L - 2); k <= Math.ceil(root[2] + 2); k++) {
+    const u = (root[2] - (k + 0.5)) / L;
+    if (u < -0.06 || u > 1.06) continue;
+    const e = u < 0.1 ? Math.sqrt(Math.max(0, 1 - ((0.1 - u) / 0.16) ** 2)) : u > 0.9 ? Math.sqrt(Math.max(0, 1 - ((u - 0.9) / 0.16) ** 2)) : 1;
+    if (e < 0.2) continue;
+    const ax = rx * e, ay = ry * e;
+    for (let i = Math.floor(root[0] - ax - 1); i <= Math.ceil(root[0] + ax); i++)
+      for (let j = Math.floor(root[1] - ay - 1); j <= Math.ceil(root[1] + ay); j++) {
+        const dx = (i + 0.5 - root[0]) / ax, dy = (j + 0.5 - root[1]) / ay;
+        const q = dx * dx + (dy > 0 ? Math.pow(Math.abs(dy), 2.6) : dy * dy); // flatter on top
+        if (q > 1) continue;
+        let col = dy > 0.3 ? (Math.abs(i + 0.5 - root[0]) < 0.75 ? groove : top) : dy < -0.35 ? under : side;
+        if (dy > 0.3 && hash3(i + seed, j, k) > 0.94) col = wet;
+        m.set(i, j, k, col);
+      }
+  }
+}
+/** the sticky tip: a bulbous, gently cleft, glossy pad */
+function tonguePad(m: VoxelModel, at: V3, R: number) {
+  blob(m, [
+    { c: [at[0] + R * 0.06, at[1], at[2] - R * 0.07], r: [R * 0.12, R * 0.08, R * 0.12] },
+    { c: [at[0] - R * 0.06, at[1], at[2] - R * 0.07], r: [R * 0.12, R * 0.08, R * 0.12] },
+    { c: [at[0], at[1] + R * 0.02, at[2] - R * 0.2], r: [R * 0.035, R * 0.06, R * 0.05], sub: true, k: R * 0.04 },
+  ], (_x, y) => {
+    const dy = y + 0.5 - at[1];
+    return dy > R * 0.04 ? 0xd85a6c : dy < -R * 0.03 ? 0xec8c98 : 0xe06a7a;
+  }, { k: R * 0.06, fl: VF.METAL });
+  paint(m, (x, y, z) => !m.has(x, y + 1, z) && hash3(x * 5, y * 3, z * 7) > 0.86, 0xffe0e6, VF.SOLID);
+}
+
+// ---------------------------------------------------------------- the fabulous curly wig
+/** how a wig sits on a head (geometric voxel coords of the wearer) */
+interface WigFit {
+  /** head ellipsoid the wig sits on */
+  hc: V3;
+  hr: V3;
+  /** curl ball radius */
+  cr: number;
+  /** keep the face clear: no hair where z > faceZ, y < browY and |x| < faceX */
+  faceZ: number;
+  browY: number;
+  faceX: number;
+  /** lowest the hair falls (back and sides) */
+  hangY: number;
+  /** ringlet length and ball radius */
+  ringLen: number;
+  ringR: number;
+  /** where the bow sits (direction from the wig centre), its size and jaunty roll */
+  bowDir: V3;
+  bowS: number;
+  bowRoll: number;
+  seed: number;
+}
+/** the hair mass: a teased bouffant dome piled high, a back fall, side puffs framing the face, a fringe roll */
+function wigMass(f: WigFit): Prim[] {
+  const [x0, y0, z0] = f.hc, [S, H, D] = f.hr;
+  return [
+    { c: [x0, y0 + H * 0.58, z0 - D * 0.1], r: [S * 1.36, H * 0.8, D * 1.28] },
+    { c: [x0, y0 + H * 1.02, z0 - D * 0.18], r: [S * 0.95, H * 0.5, D * 0.9] },
+    { c: [x0, y0 - H * 0.1, z0 - D * 0.55], r: [S * 1.26, H * 0.92, D * 0.74] },
+    { c: [x0 + S * 1.1, y0 - H * 0.02, z0 - D * 0.04], r: [S * 0.52, H * 0.82, D * 0.74] },
+    { c: [x0 - S * 1.1, y0 - H * 0.02, z0 - D * 0.04], r: [S * 0.52, H * 0.82, D * 0.74] },
+    { c: [x0, y0 + H * 0.66, z0 + D * 0.66], r: [S * 1.0, H * 0.3, D * 0.42] },
   ];
-  const lumpy = lumps(R * 0.018, 1 / (R * 0.45), seed, R > 12 ? R * 0.05 : 0, 2.0);
-  const fold = (x: number, y: number, z: number) => {
-    // a fat roll around the sides and back, and a double-chin crease
-    const side = Math.min(1, Math.max(0, (Math.abs(x) - R * 0.45) / (R * 0.3))) * (z < R * 0.55 ? 1 : 0.2);
-    const roll = Math.exp(-(((y - R * 0.52) / (R * 0.05)) ** 2)) * R * 0.085 * side;
-    const chin = Math.exp(-(((y - R * 0.36) / (R * 0.045)) ** 2)) * R * 0.07 * (z > R * 0.45 && Math.abs(x) < R * 0.7 ? 1 : 0);
-    return roll + chin;
+}
+const wigCentre = (f: WigFit): V3 => [f.hc[0], f.hc[1] + f.hr[1] * 0.3, f.hc[2] - f.hr[2] * 0.15];
+/** ringlet anchors: [left front, left back, right front, right back] */
+function wigRinglets(f: WigFit): V3[] {
+  const [x0, y0, z0] = f.hc, [S, H, D] = f.hr;
+  return [
+    [x0 + S * 1.2, y0 - H * 0.48, z0 + D * 0.22],
+    [x0 + S * 0.96, y0 - H * 0.6, z0 - D * 0.52],
+    [x0 - S * 1.2, y0 - H * 0.48, z0 + D * 0.22],
+    [x0 - S * 0.96, y0 - H * 0.6, z0 - D * 0.52],
+  ];
+}
+/** march from inside the mass along d to its surface */
+function marchOut(prims: Prim[], k: number, from: V3, d: V3, maxT: number): V3 | null {
+  for (let t = 0; t < maxT; t += 0.4) {
+    const p = add3(from, d, t);
+    if (blobSdf(prims, k, p[0], p[1], p[2]) > 0) return p;
+  }
+  return null;
+}
+function sdfNormal(prims: Prim[], k: number, p: V3): V3 {
+  const e = 0.6;
+  const g = (dx: number, dy: number, dz: number) => blobSdf(prims, k, p[0] + dx, p[1] + dy, p[2] + dz);
+  return nrm3([g(e, 0, 0) - g(-e, 0, 0), g(0, e, 0) - g(0, -e, 0), g(0, 0, e) - g(0, 0, -e)]);
+}
+/** one tight curl: a ball with a spiral groove winding round its outward axis, lit from above */
+function curlBall(m: VoxelModel, q: V3, r: number, n: V3, seed: number, ok: (x: number, y: number, z: number) => boolean) {
+  const up: V3 = Math.abs(n[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const e1 = nrm3(cross3(up, n)), e2 = cross3(n, e1);
+  const ph = hash3(seed, 3, 9) * Math.PI * 2;
+  const turn = 6.5 + hash3(seed, 7, 1) * 2;
+  ell(m, q, [r, r * 0.94, r], (x, y, z) => {
+    if (!ok(x, y, z)) return null;
+    const a: V3 = [x + 0.5 - q[0], y + 0.5 - q[1], z + 0.5 - q[2]];
+    const along = dot3(a, n) / r;
+    const u = dot3(a, e1) / r, w = dot3(a, e2) / r;
+    const rho = Math.hypot(u, w), phi = Math.atan2(w, u);
+    const lit = along * 0.5 + (a[1] / r) * 0.5;
+    if (Math.sin(phi + rho * turn + ph) > 0.6 && along > -0.25) return along > 0.4 ? WIG.shade : WIG.deep;
+    if (lit > 0.72 && along > 0.45) return WIG.sheen;
+    return lit > 0.3 ? WIG.hi : lit > -0.28 ? WIG.base : WIG.shade;
+  });
+}
+/** a corkscrew ringlet: curls stacked along a tightening helix, ending in a little flick */
+function ringlet(m: VoxelModel, at: V3, f: WigFit, idx: number) {
+  const side = at[0] >= f.hc[0] ? 1 : -1;
+  const K = Math.max(4, Math.round(f.ringLen / (f.ringR * 0.85)) + 1);
+  for (let j = 0; j < K; j++) {
+    const t = j / (K - 1);
+    const a = j * 2.2 + idx * 1.3;
+    const hr = f.ringR * 0.55 * (1 - 0.3 * t);
+    const q: V3 = [at[0] + Math.cos(a) * hr + side * t * f.ringR * 0.35, at[1] - t * f.ringLen, at[2] + Math.sin(a) * hr];
+    curlBall(m, q, f.ringR * (1 - 0.42 * t), nrm3([Math.cos(a) * side, 0.25, Math.sin(a)]), 977 + idx * 13 + j, () => true);
+  }
+}
+/** a satin bow (two loops with folds, a pinched knot with a pearl, two tails) pinned to the curls */
+function wigBow(m: VoxelModel, f: WigFit, mass: Prim[], k: number) {
+  const d = nrm3(f.bowDir);
+  const s = marchOut(mass, k, wigCentre(f), d, f.hr[0] * 5);
+  if (!s) return;
+  const bs = f.bowS;
+  const c = add3(s, d, -bs * 0.12);
+  const rot: V3 = [-Math.asin(d[1]), Math.atan2(d[0], d[2]), f.bowRoll];
+  const prims: Prim[] = [
+    { c: [bs * 0.88, bs * 0.1, 0], r: [bs * 0.9, bs * 0.58, bs * 0.34], rot: [0, 0, 0.2] },
+    { c: [-bs * 0.88, bs * 0.1, 0], r: [bs * 0.9, bs * 0.58, bs * 0.34], rot: [0, 0, -0.2] },
+    { c: [bs * 1.05, bs * 0.12, bs * 0.32], r: [bs * 0.42, bs * 0.22, bs * 0.22], sub: true, k: bs * 0.2 },
+    { c: [-bs * 1.05, bs * 0.12, bs * 0.32], r: [bs * 0.42, bs * 0.22, bs * 0.22], sub: true, k: bs * 0.2 },
+    { c: [0, 0, bs * 0.08], r: [bs * 0.34, bs * 0.4, bs * 0.34] },
+    { c: [bs * 0.42, -bs * 0.78, -bs * 0.04], r: [bs * 0.2, bs * 0.62, bs * 0.12], rot: [0, 0, 0.5] },
+    { c: [-bs * 0.42, -bs * 0.78, -bs * 0.04], r: [bs * 0.2, bs * 0.62, bs * 0.12], rot: [0, 0, -0.5] },
+  ];
+  const B = Math.ceil(bs * 2.3) + 1;
+  for (let i = Math.floor(c[0] - B); i <= Math.ceil(c[0] + B); i++)
+    for (let j = Math.floor(c[1] - B); j <= Math.ceil(c[1] + B); j++)
+      for (let kk = Math.floor(c[2] - B); kk <= Math.ceil(c[2] + B); kk++) {
+        const l = rotInv([i + 0.5 - c[0], j + 0.5 - c[1], kk + 0.5 - c[2]], rot);
+        if (blobSdf(prims, bs * 0.16, l[0], l[1], l[2]) > 0) continue;
+        const ax = Math.abs(l[0]);
+        let col = WIG.bow;
+        if (ax < bs * 0.36 && l[1] > -bs * 0.45) col = ax < bs * 0.1 ? WIG.bowDeep : WIG.bowShade; // pinched knot
+        else if (l[1] < -bs * 0.42) col = l[1] < -bs * 1.2 ? WIG.bowShade : WIG.bow; // tails
+        else if (l[2] > bs * 0.12 && Math.hypot(ax - bs * 1.05, l[1] - bs * 0.12) < bs * 0.36) col = WIG.bowDeep; // inside the loop
+        else if (Math.sin(Math.atan2(l[1], ax - bs * 0.15) * 4) > 0.55) col = WIG.bowShade; // satin folds
+        else if (l[1] > bs * 0.3) col = WIG.bowHi;
+        else if (l[1] < -bs * 0.28) col = WIG.bowShade;
+        m.set(i, j, kk, col);
+      }
+  const pearl = add3(c, rotFwd([0, bs * 0.02, bs * 0.44], rot));
+  const pr = Math.max(0.8, bs * 0.17);
+  ell(m, pearl, [pr, pr, pr], WIG.pearl, { fl: VF.METAL });
+  dabAt(m, add3(pearl, d, pr * 0.8), d, 0xffffff);
+}
+/** sculpt the whole wig into `m` (ringlets into `rings[i]` when given, so they can bounce) */
+function curlyWig(m: VoxelModel, f: WigFit, rings?: VoxelModel[]) {
+  const mass = wigMass(f);
+  const [S, H, D] = f.hr;
+  const k = S * 0.32;
+  const ok = (x: number, y: number, z: number) => {
+    const gx = x + 0.5, gy = y + 0.5, gz = z + 0.5;
+    if (gy < f.hangY) return false;
+    if (gz > f.faceZ && gy < f.browY && Math.abs(gx - f.hc[0]) < f.faceX) return false;
+    const ex = (gx - f.hc[0]) / S, ey = (gy - f.hc[1]) / H, ez = (gz - f.hc[2]) / D;
+    return ex * ex + ey * ey + ez * ez > 0.86; // hollow cap: it sits ON the head (and is hollow when lifted off)
   };
-  const wartAt = (x: number, y: number, z: number) => R > 12 && noise.n3((x + 0.5) * (2.0 / (R * 0.45)) - seed, (y + 0.5) * (2.0 / (R * 0.45)), (z + 0.5) * (2.0 / (R * 0.45)) + seed) > 0.7;
-  // clean cel-friendly colour regions: base, darker dorsal patches, pale belly, light warts
+  // shadowed core between the curls
+  blob(m, mass, (x, y, z) => (ok(x, y, z) ? WIG.deep : null), { k, disp: () => f.cr * 0.55 });
+  // tight curls over the whole surface (fibonacci-spread, each on the true surface normal)
+  const mc = wigCentre(f);
+  const avg = (S * 1.3 + H * 1.05 + D * 1.15) / 3;
+  const n = Math.round(((4 * avg * avg) / (f.cr * f.cr)) * 1.35);
+  for (let i = 0; i < n; i++) {
+    const yv = 1 - (2 * (i + 0.5)) / n, rr = Math.sqrt(1 - yv * yv), th = i * 2.399963;
+    const d: V3 = [Math.cos(th) * rr, yv, Math.sin(th) * rr];
+    const s = marchOut(mass, k, mc, d, avg * 4);
+    if (!s) continue;
+    const q = add3(s, d, -f.cr * 0.3);
+    if (q[1] < f.hangY + f.cr * 0.2) continue;
+    if (q[2] > f.faceZ && q[1] < f.browY && Math.abs(q[0] - f.hc[0]) < f.faceX) continue;
+    curlBall(m, q, f.cr * (0.86 + hash3(i, f.seed, 5) * 0.3), sdfNormal(mass, k, s), i * 7 + f.seed * 31, ok);
+  }
+  wigRinglets(f).forEach((a, i) => ringlet(rings?.[i] ?? m, a, f, i));
+  wigBow(m, f, mass, k);
+}
+
+/** the hunter's fit: Sundown's skull (1/36 grid, rows 48-62, 12 wide, brows ~57, face front z 6) */
+const SUNDOWN_WIG: WigFit = { hc: [0, 56, -0.5], hr: [6.6, 7.6, 7.0], cr: 2.35, faceZ: 1, browY: 58.6, faceX: 6.9, hangY: 46.5, ringLen: 6.5, ringR: 1.85, bowDir: [0.55, 0.7, 0.45], bowS: 2.3, bowRoll: -0.45, seed: 3 };
+
+/** voxel size of the wig hat (Sundown's grid) */
+export const FROG_WIG_VS = 1 / 36;
+/** the hat part's joint in Sundown's rig (same as every hat: `J.hat`) */
+export const FROG_WIG_PIVOT: V3 = [0, 59, -1];
+/** `hat_top` row for the wig (the top of the bouffant), for `HAT_TOP` */
+export const FROG_WIG_TOP = 69;
+const wigHatBase = memo((_: void): VoxelModel => {
+  const m = new VoxelModel('hat');
+  curlyWig(m, SUNDOWN_WIG);
+  hollow(m, 2);
+  return m;
+});
+/**
+ * Mama Rain Frog's big fabulous curly wig as a hat for the hunter: lilac bouffant,
+ * corkscrew ringlets, satin bow with a pearl. Authored in Sundown's rig space like
+ * every hat in characters/skeleton.ts: part `hat`, parent `head`, pivot/attach
+ * `FROG_WIG_PIVOT` ([0,59,-1]), voxel size `FROG_WIG_VS` (1/36); `hat_top` row
+ * `FROG_WIG_TOP`. Returns a fresh copy.
+ */
+export function frogWigHat(): VoxelModel {
+  return wigHatBase().clone();
+}
+
+// ---------------------------------------------------------------- the frog
+function frog(c: FrogCfg): RigSpec {
+  const { R, pal, seed, mama } = c;
+  const rig = new CRig(c.name, c.vs);
+  const C: V3 = [0, R * 0.8, 0];
+  const eyeR = R * c.eyeK;
+  const eL: V3 = [R * 0.45, R * (mama ? 1.2 : 1.16), R * (mama ? 0.7 : 0.72)]; // bulging out of the face, frog-like
+  const eR: V3 = [-eL[0], eL[1], eL[2]];
+  const W = R * (mama ? 0.86 : 0.62); // mouth half-width: mama's is BIG
+  const mouthY0 = C[1] - R * (mama ? 0.08 : 0.05);
+  const droop = R * (mama ? 0.15 : 0.13);
+  const mouthY = (x: number) => mouthY0 - droop * Math.min(1, (x / W) ** 2); // grumpy downturned line
+  const zH = R * 0.06; // jaw hinge plane
+  const body = rig.part('body', undefined, [0, C[1], 0]);
+  // ---------------------------------------------------------- the plump, squishy flesh mass
+  const mound = (s: number): Prim => ({ c: [s * eL[0] * 0.97, eL[1] - eyeR * 0.22, eL[2] - eyeR * 0.4], r: [eyeR * 1.3, eyeR * 1.12, eyeR * 1.2] });
+  const dimple = (s: number): Prim => ({ c: [s * W * 0.93, mouthY(W) + R * 0.01, R * (mama ? 0.6 : 0.68)], r: [R * 0.1, R * 0.08, R * 0.1], sub: true, k: R * 0.08 });
+  const prims: Prim[] = [
+    { c: [0, R * 0.82, -R * 0.04], r: [R, R * 0.8, R * 0.94] }, // round main mass
+    { c: [0, R * 0.42, R * 0.04], r: [R * 1.07, R * 0.42, R * 0.9] }, // belly settling onto the sand
+    { c: [R * 0.5, R * 0.64, R * 0.5], r: [R * 0.44, R * 0.36, R * 0.38] }, // puffy cheeks
+    { c: [-R * 0.5, R * 0.64, R * 0.5], r: [R * 0.44, R * 0.36, R * 0.38] },
+    { c: [0, R * 0.58, -R * 0.6], r: [R * 0.82, R * 0.46, R * 0.42] }, // rump
+    { c: [0, R * 0.9, R * 0.6], r: [R * 0.42, R * 0.3, R * 0.34] }, // short blunt snout
+    mound(1),
+    mound(-1),
+    dimple(1),
+    dimple(-1),
+  ];
+  const lumpy = lumps(R * 0.012, 1 / (R * 0.5), seed);
+  const fold = (x: number, y: number, z: number) => {
+    const chin = Math.exp(-(((y - R * 0.38) / (R * 0.045)) ** 2)) * R * (mama ? 0.07 : 0.03) * (z > R * 0.45 && Math.abs(x) < R * 0.7 ? 1 : 0);
+    if (!mama) return chin;
+    // granny's fat roll round the sides and back
+    const side = Math.min(1, Math.max(0, (Math.abs(x) - R * 0.45) / (R * 0.3))) * (z < R * 0.55 ? 1 : 0.2);
+    return chin + Math.exp(-(((y - R * 0.52) / (R * 0.05)) ** 2)) * R * 0.08 * side;
+  };
+  // clean soft colour regions: warm base, a few darker dorsal mottles, pale belly, sparse light granules
   const skin = (x: number, y: number, z: number) => {
     const gy = y + 0.5;
     const warp = noise.n3(x * (0.9 / R) + seed, y * (0.9 / R), z * (0.9 / R)) * R * 0.08;
     if (gy + warp < R * 0.46) return pal.belly;
-    if (gy + warp < R * 0.58) return mixc(pal.belly, pal.skin, 0.55);
-    if (wartAt(x, y, z)) return pal.wart;
-    const patch = n01(x, y, z, 1 / (R * 0.55), seed + 4);
-    if (patch > 0.66 && gy > R * 0.72) return pal.lo;
+    if (gy + warp < R * 0.56) return mixc(pal.belly, pal.skin, 0.5);
+    if (gy > R * 0.62 && hash3(x * 7 + seed, y * 3, z * 5) > (mama ? 0.93 : 0.955)) return pal.hi;
+    if (n01(x, y, z, 1 / (R * 0.5), seed + 4) > 0.67 && gy > R * 0.78) return pal.lo;
     return pal.skin;
   };
   blob(body, prims, skin, { k: R * 0.28, disp: (x, y, z) => lumpy(x, y, z) + fold(x, y, z), keep: (_x, y) => y >= 0 });
-  smoothVox(body, 2);
-  // ---------------------------------------------------------- split head / jaw / throat / belly so they can move
-  const mouthY = (x: number) => C[1] + R * 0.04 - R * 0.12 * (x / (R * 0.75)) ** 2; // grumpy downturned line, just under the eyes
-  rig.part('head', 'body', [0, C[1] - R * 0.08, R * 0.04]);
-  rig.part('jaw', 'body', [0, mouthY(R * 0.7), R * 0.26]);
-  const thr: V3 = [0, C[1] - R * 0.64, R * 0.58];
-  rig.part('throat', 'jaw', [0, thr[1] + R * 0.12, thr[2] - R * 0.04]);
-  rig.part('belly', 'body', [0, R * 0.36, R * 0.1]);
-  // carve the mouth groove into the solid face before splitting
-  for (let xi = Math.floor(-R * 0.82); xi <= Math.ceil(R * 0.82); xi++) {
-    const yi = Math.floor(mouthY(xi + 0.5));
+  smoothVox(body, mama ? 1 : 2);
+  // ---------------------------------------------------------- the mouth line, then split head / jaw / throat / belly
+  const seen = new Set<number>();
+  for (let x = -W; x <= W; x += 0.25) {
+    const xi = Math.floor(x), yi = Math.floor(mouthY(x));
+    const key = xi * 4096 + yi;
+    if (seen.has(key)) continue;
+    seen.add(key);
     const z = frontZ(body, xi, yi, Math.ceil(R * 1.4), 0);
     if (z === null) continue;
-    for (let d = 0; d <= 1; d++) {
-      body.del(xi, yi, z - d);
-      body.del(xi, yi + (Math.abs(xi + 0.5) > R * 0.6 ? 1 : 0), z - d);
-    }
-    if (body.has(xi, yi, z - 2)) body.set(xi, yi, z - 2, 0x3a2420);
+    body.del(xi, yi, z);
+    if (body.has(xi, yi, z - 1)) body.set(xi, yi, z - 1, MOUTH.line);
   }
+  rig.part('head', 'body', [0, C[1] - R * 0.1, R * 0.04]);
+  rig.part('jaw', 'body', [0, mouthY(W), zH]);
+  const thr: V3 = [0, mouthY0 - R * 0.36, R * 0.62];
+  rig.part('throat', 'jaw', [0, thr[1] + R * 0.12, thr[2] - R * 0.04]);
+  rig.part('belly', 'body', [0, R * 0.36, R * 0.1]);
   rig.move('body', 'jaw', (x, y, z) => {
-    const gx = x + 0.5, gy = y + 0.5, gz = z + 0.5;
-    return gz > R * 0.3 && gy < mouthY(gx) && gy > C[1] - R * 0.56 && Math.abs(gx) < R * 0.86;
+    const gx = x + 0.5, gy = y + 0.5;
+    return z + 0.5 > zH && gy < mouthY(gx) && gy > mouthY(gx) - R * 0.3 && Math.abs(gx) < W + R * 0.05;
   });
-  rig.move('body', 'throat', (x, y, z) => Math.hypot((x + 0.5 - thr[0]) / (R * 0.44), (y + 0.5 - thr[1]) / (R * 0.24), (z + 0.5 - thr[2]) / (R * 0.32)) < 1);
-  rig.move('body', 'head', (x, y, z) => {
-    const gx = x + 0.5, gy = y + 0.5, gz = z + 0.5;
-    return gz > -R * 0.02 && gy >= mouthY(gx) && gy > C[1] - R * 0.5;
-  });
-  rig.move('body', 'belly', (x, y, z) => {
-    const gy = y + 0.5, gz = z + 0.5;
-    return gy < R * 0.44 && gz > -R * 0.35 && Math.abs(x + 0.5) < R * 0.95;
-  });
+  rig.move('body', 'throat', (x, y, z) => Math.hypot((x + 0.5 - thr[0]) / (R * 0.4), (y + 0.5 - thr[1]) / (R * 0.2), (z + 0.5 - thr[2]) / (R * 0.3)) < 1);
+  rig.move('body', 'head', (x, y, z) => z + 0.5 > -R * 0.04 && y + 0.5 >= mouthY(x + 0.5));
+  rig.move('body', 'belly', (x, y, z) => y + 0.5 < R * 0.44 && z + 0.5 > -R * 0.35 && Math.abs(x + 0.5) < R * 0.95);
   const head = rig.m('head'), jaw = rig.m('jaw');
-  // inner mouth (pink) visible when the jaw opens
-  const inner = (m: VoxelModel, x: number, y: number, z: number) => m.has(x, y, z + 1) && m.has(x + 1, y, z) && m.has(x - 1, y, z) && m.has(x, y, z - 1);
-  paint(jaw, (x, y, z) => !jaw.has(x, y + 1, z) && inner(jaw, x, y, z) && y + 0.5 > mouthY(x + 0.5) - 3, 0xd88a86);
-  paint(head, (x, y, z) => !head.has(x, y - 1, z) && inner(head, x, y, z) && y + 0.5 < mouthY(x + 0.5) + 3 && z + 0.5 > R * 0.3, 0xc87476);
-  // throat: soft pale pouch that puffs
-  paint(rig.m('throat'), () => true, (x, y, z) => (n01(x, y, z, 1 / (R * 0.2), seed) > 0.7 ? 0xf6e2d6 : mixc(pal.belly, 0xf2d8cc, 0.4)));
-  // nostrils
+  // ---------------------------------------------------------- the mouth cavity: ridged palate, soft floor, dark gullet
+  const cav: V3 = [0, mouthY0 - R * 0.01, R * 0.4];
+  const cavR: V3 = [W * 0.8, R * (mama ? 0.15 : 0.11), R * 0.46];
+  const lipT = Math.max(2, R * 0.085);
+  const inCav = (x: number, y: number, z: number, s = 1) => ((x + 0.5 - cav[0]) / (cavR[0] * s)) ** 2 + ((y + 0.5 - cav[1]) / (cavR[1] * s)) ** 2 + ((z + 0.5 - cav[2]) / (cavR[2] * s)) ** 2 <= 1;
+  const carveMouth = (m: VoxelModel) => {
+    const front = new Map<number, number>();
+    m.forEach((x, y, z) => {
+      const kk = x * 4096 + y;
+      const f = front.get(kk);
+      if (f === undefined || z > f) front.set(kk, z);
+    });
+    const del: V3[] = [];
+    m.forEach((x, y, z) => {
+      if (!inCav(x, y, z)) return;
+      const f = front.get(x * 4096 + y);
+      if (f !== undefined && z <= f - lipT) del.push([x, y, z]);
+    });
+    for (const [x, y, z] of del) m.del(x, y, z);
+  };
+  carveMouth(jaw);
+  carveMouth(head);
+  const facesCav = (m: VoxelModel, x: number, y: number, z: number) => {
+    for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] as V3[]) if (!m.has(x + dx, y + dy, z + dz) && inCav(x + dx, y + dy, z + dz, 1.12)) return true;
+    return false;
+  };
+  const deep = (z: number) => z + 0.5 < cav[2] - cavR[2] * 0.5;
+  paint(jaw, (x, y, z) => facesCav(jaw, x, y, z), (_x, _y, z) => (deep(z) ? MOUTH.gullet : MOUTH.floor));
+  paint(head, (x, y, z) => facesCav(head, x, y, z), (_x, _y, z) => (deep(z) ? MOUTH.gullet : Math.floor(z + 0.5) % 3 === 0 ? MOUTH.ridge : MOUTH.palate));
+  // lips (pale rim along the line) and gums (the flat faces behind them), seen when the jaw drops
+  const lipOrGum = (m: VoxelModel, x: number, y: number, z: number) => (frontZ(m, x, y, Math.ceil(R * 1.4), Math.floor(z)) ?? z) - z < lipT ? pal.lip : MOUTH.gum;
+  paint(jaw, (x, y, z) => !jaw.has(x, y + 1, z) && y + 0.5 > mouthY(x + 0.5) - 2 && !facesCav(jaw, x, y, z), (x, y, z) => lipOrGum(jaw, x, y, z));
+  paint(head, (x, y, z) => !head.has(x, y - 1, z) && y + 0.5 < mouthY(x + 0.5) + 2 && z + 0.5 > zH && !facesCav(head, x, y, z), (x, y, z) => lipOrGum(head, x, y, z));
+  // the back wall of the mouth (body, behind the hinge) is the dark throat
+  paint(body, (x, y, z) => Math.abs(z + 0.5 - zH) < R * 0.12 && Math.abs(y + 0.5 - mouthY0) < R * 0.17 && Math.abs(x + 0.5) < W * 0.75 && !body.has(x, y, z + 1), MOUTH.gullet);
+  // throat: a soft pale pouch that puffs
+  paint(rig.m('throat'), () => true, (x, y, z) => (n01(x, y, z, 1 / (R * 0.2), seed) > 0.7 ? 0xf8e6da : mixc(pal.belly, 0xf4dcd0, 0.4)));
+  // nostrils on the snout
   for (const sgn of [1, -1]) {
-    const xi = Math.floor(sgn * R * 0.12 + (sgn < 0 ? -0.5 : 0)), yi = Math.floor(C[1] + R * 0.05);
+    const xi = Math.floor(sgn * R * 0.11 + (sgn < 0 ? -0.5 : 0)), yi = Math.floor(R * 0.98);
     const z = frontZ(head, xi, yi, Math.ceil(R * 1.4), 0);
     if (z !== null) {
       head.del(xi, yi, z);
-      head.set(xi, yi, z - 1, 0x2a1a14);
+      head.set(xi, yi, z - 1, 0x3a221a);
     }
   }
-  // cheek blush below the eyes (clean soft region)
+  // soft blush on the cheeks
   paint(head, (x, y, z) => {
     const gx = Math.abs(x + 0.5), gy = y + 0.5, gz = z + 0.5;
-    return Math.hypot(gx - R * 0.55, gy - (C[1] - R * 0.03), gz - R * 0.72) < R * 0.17 && exposed(head, x, y, z);
-  }, pal.blush);
-  // ---------------------------------------------------------- big glossy eyes (anime catchlights) + heavy lids
-  const eyeR = R * c.eyeK;
-  const eL: V3 = [R * 0.43, R * 1.36, R * 0.6]; // high and bulging, frog-like
-  const eR: V3 = [-eL[0], eL[1], eL[2]];
+    return Math.hypot(gx - R * 0.56, gy - (mouthY0 + R * 0.1), gz - R * 0.72) < R * 0.17 && exposed(head, x, y, z);
+  }, (x, y, z) => (Math.hypot(Math.abs(x + 0.5) - R * 0.56, y + 0.5 - (mouthY0 + R * 0.1), z + 0.5 - R * 0.72) < R * 0.11 ? pal.blush : mixc(pal.blush, pal.skin, 0.5)));
+  // ---------------------------------------------------------- big glossy modelled eyes under soft rigged lids
   for (const e of [eL, eR]) ell(head, e, [eyeR * 0.98, eyeR * 0.98, eyeR * 0.98], 0, { carve: true });
-  const eyeL = rig.part('eye_l', 'head', eL);
-  wetEye(eyeL, eL, eyeR, [0.5, 0.3, 0.82], { sclera: 0x1a110c, iris: 0x4e3422, pupil: 0x050403, irisR: 0.88, pupilR: 0.52 });
-  paint(eyeL, (x, y, z) => hash3(x * 11, y * 13, z * 17) > 0.9 && exposed(eyeL, x, y, z) && eyeL.get(x, y, z)! !== 0xffffff, 0x8a6434, VF.METAL);
-  // big + small catchlight (reads as cute under cel shading)
-  {
-    const f: V3 = [0.5, 0.3, 0.82];
-    const l = Math.hypot(...f);
-    const hp: V3 = [eL[0] + (f[0] / l) * eyeR * 0.6 + eyeR * 0.2, eL[1] + eyeR * 0.5, eL[2] + (f[2] / l) * eyeR * 0.7];
-    ell(eyeL, hp, [Math.max(0.9, eyeR * 0.24), Math.max(0.9, eyeR * 0.24), Math.max(0.9, eyeR * 0.2)], 0xffffff, { keep: (_a, _b, _c, x, y, z) => eyeL.has(x, y, z) && exposed(eyeL, x, y, z) });
-    const hp2: V3 = [eL[0] + (f[0] / l) * eyeR * 0.75 - eyeR * 0.15, eL[1] - eyeR * 0.15, eL[2] + (f[2] / l) * eyeR * 0.82];
-    const hi = Math.floor(hp2[0]), hj = Math.floor(hp2[1]), hk = Math.floor(hp2[2]);
-    if (eyeL.has(hi, hj, hk)) eyeL.set(hi, hj, hk, 0xf2f6ff);
-  }
-  rig.mirror('eye_l', 'eye_r');
-  // heavy upper lids (sleepy-grumpy look) folded over the top of each globe
-  for (const e of [eL, eR])
-    blob(head, [{ c: [e[0] * 1.02, e[1] + eyeR * 0.58, e[2] - eyeR * 0.22], r: [eyeR * 1.06, eyeR * 0.46, eyeR * 0.96] }], (x, y, z) => (wartAt(x, y, z) ? pal.wart : pal.skin), { k: 1, keep: (x, y, z) => !eyeL.has(x, y, z) && !rig.m('eye_r').has(x, y, z) && y + 0.5 > e[1] + eyeR * 0.15 && z + 0.5 < e[2] + eyeR * 0.8, under: true });
-  // ---------------------------------------------------------- stubby chubby arms with little hands
-  const sh: V3 = [R * 0.58, C[1] - R * 0.46, R * 0.5];
-  const el: V3 = [R * 0.72, R * 0.32, R * 0.6];
-  const wr: V3 = [R * 0.68, R * 0.14, R * 0.78];
+  const look = (s: number): V3 => [0.45 * s, 0.24, 0.86];
+  const ring = mama ? 0x9a6630 : 0xa8763a, iris = mama ? 0x4a2c18 : 0x52321c;
+  cuteEye(rig.part('eye_l', 'head', eL), eL, eyeR, look(1), ring, iris);
+  cuteEye(rig.part('eye_r', 'head', eR), eR, eyeR, look(-1), ring, iris);
+  // lids: a little heavier on the inner side (the grumpy-cute frown); babies wider-eyed
+  lidCap(rig.part('lid_l', 'head', eL), eL, eyeR, mama ? [-0.2, 1, -0.45] : [-0.16, 1, -0.6], mama ? 1.15 : 0.98, pal.skin, mixc(pal.skin, 0x5a3426, 0.5));
+  rig.mirror('lid_l', 'lid_r');
+  // ---------------------------------------------------------- tiny stubby arms with round-padded fingers
+  const pad = mixc(pal.hi, 0xf8dcd2, 0.5);
+  const sh: V3 = [R * 0.52, R * 0.4, R * 0.5];
+  const el: V3 = [R * 0.62, R * 0.22, R * 0.58];
+  const wr: V3 = [R * 0.58, R * 0.1, R * 0.72];
   const legFL = rig.part('leg_fl', 'body', sh);
-  tube(legFL, [sh, el, wr], [R * 0.16, R * 0.15, R * 0.12], (x, y, z) => (y + 0.5 < R * 0.3 ? mixc(pal.skin, pal.belly, 0.4) : pal.skin));
+  tube(legFL, [sh, el, wr], [R * 0.14, R * 0.13, R * 0.1], (_x, y) => (y + 0.5 < R * 0.28 ? mixc(pal.skin, pal.belly, 0.4) : pal.skin));
   const footFL = rig.part('foot_fl', 'leg_fl', wr);
-  blob(footFL, [{ c: [wr[0], wr[1] - R * 0.05, wr[2] + R * 0.05], r: [R * 0.16, R * 0.07, R * 0.14] }], pal.skin, { k: 1, keep: (_x, y) => y >= 0 });
+  blob(footFL, [{ c: [wr[0], wr[1] - R * 0.05, wr[2] + R * 0.04], r: [R * 0.13, R * 0.06, R * 0.12] }], pal.skin, { k: 1, keep: (_x, y) => y >= 0 });
   for (let f = 0; f < 4; f++) {
-    const a = -0.65 + f * 0.43;
-    const tip: V3 = [wr[0] + Math.sin(a) * R * 0.22, R * 0.045, wr[2] + Math.cos(a) * R * 0.21];
-    cap(footFL, [wr[0], R * 0.08, wr[2] + R * 0.05], tip, R * 0.05, R * 0.042, pal.skin, { keep: (_a, _b, _c, _x, y) => y >= 0 });
-    ell(footFL, tip, [R * 0.065, R * 0.045, R * 0.065], mixc(pal.hi, 0xf6dcd0, 0.5), { keep: (_a, _b, _c, _x, y) => y >= 0 }); // toe pads
+    const a = -0.6 + f * 0.4;
+    const tip: V3 = [wr[0] + Math.sin(a) * R * 0.17, R * 0.04, wr[2] + Math.cos(a) * R * 0.16];
+    cap(footFL, [wr[0], R * 0.07, wr[2] + R * 0.04], tip, R * 0.045, R * 0.04, pal.skin, { keep: (_a, _b, _c, _x, y) => y >= 0 });
+    ell(footFL, tip, [R * 0.058, R * 0.042, R * 0.058], pad, { keep: (_a, _b, _c, _x, y) => y >= 0 });
   }
-  // ---------------------------------------------------------- fat folded hind legs + splayed feet
-  const hip: V3 = [R * 0.62, R * 0.48, -R * 0.42];
-  const ank: V3 = [R * 0.72, R * 0.13, -R * 0.36];
+  // ---------------------------------------------------------- fat folded hind legs + splayed little feet
+  const hip: V3 = [R * 0.62, R * 0.46, -R * 0.42];
+  const ank: V3 = [R * 0.72, R * 0.12, -R * 0.34];
   const legBL = rig.part('leg_bl', 'body', hip);
   blob(legBL, [
-    { c: [R * 0.76, R * 0.32, -R * 0.34], r: [R * 0.3, R * 0.26, R * 0.42] }, // thigh
-    { c: [R * 0.84, R * 0.2, -R * 0.12], r: [R * 0.2, R * 0.16, R * 0.3] }, // folded calf
-  ], (x, y, z) => (y + 0.5 < R * 0.18 ? mixc(pal.skin, pal.belly, 0.4) : wartAt(x, y, z) ? pal.wart : pal.skin), { k: R * 0.12, disp: lumpy, keep: (_x, y) => y >= 0 });
+    { c: [R * 0.76, R * 0.3, -R * 0.34], r: [R * 0.28, R * 0.24, R * 0.38] }, // thigh
+    { c: [R * 0.84, R * 0.18, -R * 0.12], r: [R * 0.18, R * 0.14, R * 0.26] }, // folded calf
+  ], (_x, y) => (y + 0.5 < R * 0.18 ? mixc(pal.skin, pal.belly, 0.4) : pal.skin), { k: R * 0.12, disp: lumpy, keep: (_x, y) => y >= 0 });
   const footBL = rig.part('foot_bl', 'leg_bl', ank);
-  blob(footBL, [{ c: [R * 0.74, R * 0.05, -R * 0.04], r: [R * 0.17, R * 0.06, R * 0.26] }], pal.skin, { k: 1, keep: (_x, y) => y >= 0 });
+  blob(footBL, [{ c: [R * 0.74, R * 0.05, -R * 0.04], r: [R * 0.15, R * 0.055, R * 0.22] }], pal.skin, { k: 1, keep: (_x, y) => y >= 0 });
   for (let f = 0; f < 5; f++) {
     const a = -0.5 + f * 0.27;
-    const tip: V3 = [R * 0.74 + Math.sin(a) * R * 0.28, R * 0.035, R * 0.02 + Math.cos(a) * R * 0.27];
-    cap(footBL, [R * 0.74, R * 0.05, R * 0.02], tip, R * 0.046, R * 0.04, pal.skin, { keep: (_a, _b, _c, _x, y) => y >= 0 });
-    ell(footBL, tip, [R * 0.06, R * 0.04, R * 0.06], mixc(pal.hi, 0xf6dcd0, 0.5), { keep: (_a, _b, _c, _x, y) => y >= 0 });
+    const tip: V3 = [R * 0.74 + Math.sin(a) * R * 0.24, R * 0.035, R * 0.02 + Math.cos(a) * R * 0.23];
+    cap(footBL, [R * 0.74, R * 0.05, R * 0.02], tip, R * 0.042, R * 0.036, pal.skin, { keep: (_a, _b, _c, _x, y) => y >= 0 });
+    ell(footBL, tip, [R * 0.055, R * 0.038, R * 0.055], pad, { keep: (_a, _b, _c, _x, y) => y >= 0 });
   }
   rig.mirror('leg_fl', 'leg_fr');
   rig.mirror('foot_fl', 'foot_fr', 'leg_fr');
   rig.mirror('leg_bl', 'leg_br');
   rig.mirror('foot_bl', 'foot_br', 'leg_br');
 
-  // ---------------------------------------------------------- mama's finery
-  let top = C[1] + R * 0.9;
-  if (c.mama) {
+  // ---------------------------------------------------------- mama: tongue, pearls, purse, the wig
+  let top = C[1] + R * 0.86;
+  const vs = c.vs;
+  const m3 = (p: V3) => [p[0] * vs, p[1] * vs, p[2] * vs];
+  const meta: Record<string, unknown> = {};
+  if (mama) {
+    // the long sticky tongue, folded back along the mouth floor
+    const N = 12, L = Math.round(R * 0.44);
+    const tRoot: V3 = [0, mouthY0 - R * 0.075, R * 0.62];
+    for (let i = 1; i <= N; i++) {
+      const k = (i - 1) / (N - 1);
+      tongueSeg(rig.part('tongue' + i, i === 1 ? 'jaw' : 'tongue' + (i - 1), tRoot), tRoot, L, R * (0.15 - 0.035 * k), R * (0.068 - 0.014 * k), i * 17);
+    }
+    const tip: V3 = [tRoot[0], tRoot[1], tRoot[2] - L];
+    tonguePad(rig.part('tongue_tip', 'tongue' + N, tip), tip, R);
+    meta.tongue = { segments: N, segLen: L * vs, root: m3(tRoot), reach: ((N - 1) * 0.95 * L + L + R * 0.12) * vs };
     // pearl necklace resting in the fat fold under the chin
     for (let a = -1.2; a <= 1.201; a += 0.13) {
       const p: V3 = [Math.sin(a) * R * 0.98, R * 0.36 + Math.abs(Math.sin(a)) * R * 0.2, Math.cos(a) * R * 0.95];
       ell(rig.m('belly'), p, [R * 0.062, R * 0.062, R * 0.062], (x, y, z) => (hash3(x, y, z) > 0.75 ? 0xffffff : 0xefe4e2), { fl: VF.METAL, under: true });
     }
-    // the wig: a mass of tight grey curls over crown, sides and back (each curl has a spiral groove)
-    const hd = rig.m('head');
-    const curls: V3[] = [];
-    const cr = R * 0.15;
-    let ring = 0;
-    for (let elv = 0.2; elv < 1.5; elv += 0.15, ring++) {
-      const n = Math.max(1, Math.round(Math.cos(elv) * 16));
-      for (let i = 0; i < n; i++) {
-        const az = (i / n) * Math.PI * 2 + (ring % 2) * 0.21;
-        if (Math.cos(az) > 0.2 && elv < 0.9) continue; // leave the face
-        const d: V3 = [Math.sin(az) * Math.cos(elv), Math.sin(elv), Math.cos(az) * Math.cos(elv)];
-        const p: V3 = [d[0] * R * 1.04, C[1] + R * 0.2 + d[1] * R * 0.86, -R * 0.06 + d[2] * R * 0.98];
-        if (p[1] < C[1] + R * 0.1) continue;
-        curls.push(p);
-      }
-    }
-    for (const s2 of [1, -1]) for (let i = 0; i < 3; i++) curls.push([s2 * R * (0.92 - i * 0.06), C[1] + R * (0.3 + i * 0.17), R * (0.4 - i * 0.12)]);
-    curls.forEach((p, idx) => {
-      const r = cr * (0.88 + hash3(idx, 3, 7) * 0.3);
-      ell(hd, p, [r, r * 0.92, r], (x, y, z) => {
-        const vx = x + 0.5 - p[0], vy = y + 0.5 - p[1], vz = z + 0.5 - p[2];
-        const ang = Math.atan2(vy, vx + vz * 0.5);
-        const rr = Math.hypot(vx, vy, vz) / r;
-        const groove = Math.sin(ang * 1 + rr * 7) > 0.55;
-        return groove ? 0x9c96a4 : rr > 0.78 ? 0xc6c0ce : 0xdedbe4;
-      }, { under: true });
-    });
-    top = C[1] + R * 0.2 + R * 0.86 + cr * 1.6;
-    // the little hat: felt cloche with a dented crown, curled brim, band, rose, daisy, veil
-    const hb: V3 = [R * 0.1, top - cr * 0.8, -R * 0.04];
-    const hat = rig.part('hat', 'head', hb);
-    const tilt: V3 = [-0.14, 0.15, -0.2];
-    const hr = R * 0.47;
-    blob(hat, [
-      { c: [hb[0], hb[1] + R * 0.17, hb[2]], r: [hr * 0.82, R * 0.2, hr * 0.82], rot: tilt }, // crown
-      { c: [hb[0], hb[1] + R * 0.02, hb[2]], r: [hr * 1.15, R * 0.06, hr * 1.15], rot: tilt }, // brim
-      { c: [hb[0], hb[1] + R * 0.38, hb[2] + R * 0.05], r: [hr * 0.36, R * 0.08, hr * 0.2], rot: tilt, sub: true, k: R * 0.06 }, // crown dent
-    ], (x, y, z) => {
-      const rel = y + 0.5 - hb[1];
-      if (rel > R * 0.05 && rel < R * 0.14) return 0x7a3a50; // band
-      return n01(x, y, z, 1 / (R * 0.25), 21) > 0.62 ? 0xc48ea0 : 0xb47888;
-    }, { k: R * 0.07 });
-    // rose on the right side of the band (petals spiral in clear colour bands)
-    const rose: V3 = [hb[0] - hr * 0.86, hb[1] + R * 0.12, hb[2] + hr * 0.3];
-    blob(hat, [{ c: rose, r: [R * 0.13, R * 0.12, R * 0.13] }], (x, y, z) => {
-      const a = Math.atan2(z + 0.5 - rose[2], x + 0.5 - rose[0]);
-      const rr = Math.hypot(x + 0.5 - rose[0], z + 0.5 - rose[2]);
-      const sp = Math.sin(a * 2 + rr * (6 / (R * 0.13)));
-      return sp > 0.25 ? 0xc02a3c : sp > -0.35 ? 0x9a1a2c : 0xe2485c;
-    }, { k: 1, disp: lumps(R * 0.012, 1 / (R * 0.05), 5) });
-    blob(hat, [{ c: [rose[0] + R * 0.04, rose[1] - R * 0.07, rose[2] + R * 0.15], r: [R * 0.06, R * 0.025, R * 0.1], rot: [0.3, 0.5, 0] }], 0x5a7c34, { k: 1, under: true });
-    // daisy on the other side
-    const dz: V3 = [hb[0] + hr * 0.72, hb[1] + R * 0.2, hb[2] + hr * 0.48];
-    for (let pi = 0; pi < 8; pi++) {
-      const a = (pi / 8) * Math.PI * 2;
-      blob(hat, [{ c: [dz[0] + Math.cos(a) * R * 0.075, dz[1] + Math.sin(a) * R * 0.075, dz[2] + R * 0.03], r: [R * 0.05, R * 0.028, R * 0.03], rot: [0, 0, a] }], 0xf8f4ec, { k: 1, under: true });
-    }
-    ell(hat, [dz[0], dz[1], dz[2] + R * 0.05], [R * 0.04, R * 0.04, R * 0.03], 0xe8b428);
-    // veil: a neat sparse net hanging off the front brim over the brow
-    const vz = hb[2] + hr * 0.98;
-    for (let xi = Math.floor(hb[0] - hr * 0.9); xi <= Math.ceil(hb[0] + hr * 0.7); xi++)
-      for (let yi = Math.floor(hb[1] - R * 0.34); yi <= Math.floor(hb[1]); yi++) {
-        if ((xi + yi) % 2 !== 0) continue;
-        const sag = Math.round(((xi + 0.5 - hb[0]) / hr) ** 2 * 1.5);
-        const zz = Math.floor(vz + (hb[1] - yi) * 0.22) - sag;
-        if (!head.has(xi, yi, zz) && !rig.m('eye_l').has(xi, yi, zz) && !rig.m('eye_r').has(xi, yi, zz)) hat.set(xi, yi, zz, 0x7a6a88);
-      }
     // purse dangling from her left wrist (soft sagging leather bag, strap, brass clasp)
     const purse = rig.part('purse', 'foot_fl', [wr[0] + R * 0.04, wr[1] + R * 0.12, wr[2] + R * 0.02]);
     const pc: V3 = [wr[0] + R * 0.14, wr[1] + R * 0.02, wr[2] + R * 0.12];
@@ -695,16 +993,27 @@ function frog(c: FrogCfg): RigSpec {
       { c: [pc[0], pc[1] - R * 0.07, pc[2]], r: [R * 0.075, R * 0.07, R * 0.17] },
     ], (_x, y) => (y + 0.5 > pc[1] + R * 0.06 ? 0x9a6e2c : 0xb88a40), { k: R * 0.05 });
     tube(purse, [[pc[0], pc[1] + R * 0.11, pc[2] - R * 0.09], [pc[0], pc[1] + R * 0.21, pc[2]], [pc[0], pc[1] + R * 0.11, pc[2] + R * 0.09]], [R * 0.022, R * 0.022, R * 0.022], 0x5e3e1c);
-    box(purse, [pc[0] - R * 0.02, pc[1] + R * 0.08, pc[2] - R * 0.025], [pc[0] + R * 0.09, pc[1] + R * 0.115, pc[2] + R * 0.025], 0xe8c860, { fl: VF.METAL });
-    top = hb[1] + R * 0.42;
+    blob(purse, [{ c: [pc[0] + R * 0.035, pc[1] + R * 0.1, pc[2]], r: [R * 0.05, R * 0.02, R * 0.03] }], 0xe8c860, { k: 1, fl: VF.METAL });
+    // the big fabulous curly wig, with corkscrew ringlets that bounce
+    const wf: WigFit = { hc: [0, R * 1.08, -R * 0.15], hr: [R * 0.7, R * 0.56, R * 0.78], cr: R * 0.12, faceZ: R * 0.1, browY: eL[1] + eyeR + R * 0.05, faceX: R * 0.86, hangY: R * 0.9, ringLen: R * 0.36, ringR: R * 0.105, bowDir: [0.55, 0.72, 0.42], bowS: R * 0.14, bowRoll: -0.45, seed: 5 };
+    const wig = rig.part('wig', 'head', [0, R * 1.55, -R * 0.16]);
+    const rnames = ['ringlet_l1', 'ringlet_l2', 'ringlet_r1', 'ringlet_r2'];
+    const rings = wigRinglets(wf).map((a, i) => rig.part(rnames[i], 'wig', a));
+    curlyWig(wig, wf, rings);
+    hollow(wig, 2);
+    const b = wig.bounds();
+    top = b.maxY + 1;
+    rig.socket('wig_top', 'wig', [0, top - R * 0.06, wf.hc[2] - wf.hr[2] * 0.18]);
+    meta.wig = { top: top * vs, width: (b.maxX - b.minX + 1) * vs };
+  } else {
+    top = Math.max(top, eL[1] + eyeR * 1.3);
   }
   hollow(body, 3);
   hollow(rig.m('belly'), 3);
+  hollow(head, 3);
   rig.socket('head_top', 'head', [0, top, 0]);
-  rig.socket('mouth', 'jaw', [0, mouthY(0), R * 1.0]);
+  rig.socket('mouth', 'jaw', [0, mouthY0, R * 0.95]);
   rig.socket('back', 'body', [0, C[1] + R * 0.3, -R * 0.95]);
-  const vs = c.vs;
-  const m3 = (p: V3) => [p[0] * vs, p[1] * vs, p[2] * vs];
   return rig.build({
     kind: 'frog',
     height: top * vs,
@@ -713,17 +1022,80 @@ function frog(c: FrogCfg): RigSpec {
     bodyCenter: m3(C),
     eyes: { l: m3(eL), r: m3(eR), radius: eyeR * vs },
     throatCenter: m3(thr),
-    /** puff: scale the `throat` part up to ~1.6x; jiggle: scale `belly` */
+    /** puff: scale the `throat` part up to ~1.6x; jiggle: scale `belly`; blink: rotate `lid_l`/`lid_r` +X ~1.9 rad */
     puffMax: 1.6,
-    expressions: jawExpressions({ neutral: 0, happy: 0.12, surprised: 0.35, scared: 0.28, laugh: 0.3, sing: 0.4, hurt: 0.15, sleepy: 0.02 }),
+    ...meta,
+    expressions: jawExpressions(mama ? { neutral: 0, happy: 0.1, surprised: 0.42, scared: 0.26, laugh: 0.46, sing: 0.5, hurt: 0.18, sleepy: 0.02 } : { neutral: 0, happy: 0.1, surprised: 0.36, scared: 0.26, laugh: 0.34, sing: 0.42, hurt: 0.15, sleepy: 0.02 }),
     defaultExpression: 'neutral',
   });
 }
 
-/** the mama rain frog (old lady wig, felt hat with rose, daisy and veil, pearls, purse) ~0.95 m with hat */
-export const rainFrogMamaRig = memo((_: void): RigSpec => frog({ name: 'rain_frog_mama', vs: 1 / 56, R: 24, pal: MAMA_PAL, eyeK: 0.23, mama: true, seed: 7 }));
-/** a tiny rain froglet, ~0.22 m; variant 0-4 = colour morph */
+/** the mama rain frog (big mouth, sticky tongue, big fabulous curly lilac wig, pearls, purse) ~0.9 m with the wig */
+export const rainFrogMamaRig = memo((_: void): RigSpec => frog({ name: 'rain_frog_mama', vs: 1 / 70, R: 30, pal: MAMA_PAL, eyeK: 0.28, mama: true, seed: 7 }));
+/** a tiny rain froglet, ~0.19 m; variant 0-4 = colour morph */
 export const rainFrogBabyRig = memo((o: { variant?: number } = {}): RigSpec => {
   const v = (((o?.variant ?? 0) % BABY_PALS.length) + BABY_PALS.length) % BABY_PALS.length;
-  return frog({ name: 'rain_frog_baby_' + v, vs: 1 / 80, R: 9, pal: BABY_PALS[v], eyeK: 0.3, mama: false, seed: 11 + v * 3 });
+  return frog({ name: 'rain_frog_baby_' + v, vs: 1 / 116, R: 13, pal: BABY_PALS[v], eyeK: 0.38, mama: false, seed: 11 + v * 3 });
+});
+
+// ---------------------------------------------------------------- the moths she snaps out of the air
+/** a fluffy little desert moth, ~7 cm wingspan (parts `body`, `wing_l`, `wing_r`; flap = rotate the wings about Z) */
+export const desertMothRig = memo((_: void): RigSpec => {
+  const rig = new CRig('desert_moth', 1 / 300);
+  const body = rig.part('body', undefined, [0, 0, 0]);
+  const fur = 0xeadfc6, furD = 0xcbb894, band = 0x8c6c48, leg = 0x7e6044;
+  blob(body, [
+    { c: [0, 0, 1.4], r: [2.1, 2.0, 2.4] }, // fuzzy thorax
+    { c: [0, -0.4, -3.0], r: [1.6, 1.5, 3.4] }, // abdomen
+    { c: [0, 0.3, 4.2], r: [1.5, 1.4, 1.3] }, // head
+  ], (_x, y, z) => {
+    const gz = z + 0.5;
+    if (gz < -0.8) return Math.floor(gz * 0.8) & 1 ? band : furD;
+    return y + 0.5 > 0.4 ? fur : furD;
+  }, { k: 1.1 });
+  bumps(body, [0, 0, 0.6], 0.45, (_x, _y, _z, c) => mulc(c, 1.07), 3, (_x, _y, z) => z + 0.5 > -1); // the fluff
+  for (const s of [1, -1]) {
+    ell(body, [s * 1.2, 0.6, 4.7], [1.0, 1.0, 1.0], 0x161010, { fl: VF.METAL }); // little glossy bead eyes
+    dabAt(body, [s * 1.2 + 0.3, 1.2, 5.6], [0, 0, 1], 0xffffff);
+    // feathery antennae
+    const pts: V3[] = [[s * 0.6, 1.2, 4.9], [s * 1.9, 3.3, 6.5], [s * 3.4, 4.5, 7.6]];
+    tube(body, pts, [0.55, 0.45, 0.4], 0x9c7c54);
+    for (let t = 1; t < 6; t++) {
+      const p = add3(pts[1], add3(pts[2], pts[1], -1), (t - 1) / 5);
+      body.set(Math.floor(p[0] + s * 0.9), Math.floor(p[1] - 0.6), Math.floor(p[2]), 0xbca078);
+    }
+    // three pairs of thin bent legs tucked under the thorax
+    for (let i = 0; i < 3; i++) tube(body, [[s * 0.9, -1.2, 2.4 - i * 1.2], [s * 2.1, -2.0, 2.7 - i * 1.5], [s * 2.5, -3.2, 3.0 - i * 1.8]], [0.45, 0.4, 0.35], leg);
+  }
+  // wings: cambered scalloped membranes in a shallow V, a thick costa, transverse band, eyespot, veins; rosy hindwings beneath
+  const wl = rig.part('wing_l', 'body', [1.2, 0.9, 1.8]);
+  const base: V3 = [1.2, 0.9, 1.8];
+  for (let i = 1; i <= 14; i++)
+    for (let k = -10; k <= 6; k++) {
+      const u = i + 0.5 - base[0], v = k + 0.5 - base[2];
+      const rho = Math.hypot(u, v), beta = Math.atan2(-v, u);
+      const fore = beta > -0.22 && beta < 0.78 && rho < 11.2 * (1 - 0.3 * ((beta - 0.25) / 0.53) ** 2) + 0.35 * Math.sin(beta * 30);
+      const hind = !fore && beta > 0.55 && beta < 1.42 && rho < 7.4 * (1 - 0.25 * ((beta - 1.0) / 0.45) ** 2) + 0.3 * Math.sin(beta * 26);
+      if (!fore && !hind) continue;
+      const y = Math.floor(base[1] + u * 0.14 + 0.02 * u * u - (hind ? 1 : 0));
+      let col: number;
+      if (fore) {
+        const rmax = 11.2 * (1 - 0.3 * ((beta - 0.25) / 0.53) ** 2);
+        const t = rho / rmax;
+        const spot = Math.hypot(u - Math.cos(0.32) * rmax * 0.74, v + Math.sin(0.32) * rmax * 0.74);
+        col = 0xcdb48c;
+        if (Math.abs(t - 0.58) < 0.06) col = 0x8e6e4a;
+        if ([0.02, 0.22, 0.42, 0.62].some((bv) => Math.abs(beta - bv) * rho < 0.42) && t < 0.9) col = 0xa88c64;
+        if (spot < 1.9) col = spot < 0.9 ? 0xf2e4c4 : 0x5c3c26;
+        if (t > 0.92) col = 0xeadfc8;
+        wl.set(i, y, k, col);
+        if (beta < -0.08) wl.set(i, y + 1, k, 0x9c7c58); // thick leading edge
+      } else {
+        const t = rho / 7.4;
+        col = t < 0.35 ? 0xb88a7a : t > 0.9 ? 0xf0dcd4 : 0xe2b4a4;
+        wl.set(i, y, k, col);
+      }
+    }
+  rig.mirror('wing_l', 'wing_r');
+  return rig.build({ kind: 'moth', span: 0.075 });
 });

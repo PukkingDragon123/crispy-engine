@@ -1,14 +1,19 @@
-// Atmosphere: gradient sky dome with sun glow + pixel stars, warm haze fog,
-// sun with player-following shadow frustum, hemisphere bounce, drifting voxel clouds.
+// Atmosphere: a painted physically-inspired sky that shares its horizon haze with
+// the fog (distant dunes melt into the exact sky colour of their bearing), warm low
+// sun with a player-following shadow frustum, cool sky fill + warm sand bounce,
+// aerial perspective / drifting ground dust (see ATMO in VoxelMaterial), drifting
+// voxel clouds and airborne pixel sand.
 import * as THREE from 'three';
-import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { RNG } from '../../engine/math/rand';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { VoxelModel, vary } from '../../engine/voxel/VoxelModel';
+import { ATMO, ATMO_HAZE_GLSL, globalUniforms } from '../../engine/render/VoxelMaterial';
 
 export interface EnvPreset {
   zenith: number;
+  /** sunward horizon haze (warm forward-scattered glow) */
   horizon: number;
+  /** below-horizon / sand tint */
   ground: number;
   sunColor: number;
   sunIntensity: number;
@@ -17,6 +22,7 @@ export interface EnvPreset {
   hemiSky: number;
   hemiGround: number;
   hemiIntensity: number;
+  /** haze away from the sun (aerial perspective colour, particles fog to it too) */
   fog: number;
   fogNear: number;
   fogFar: number;
@@ -27,9 +33,10 @@ export interface EnvPreset {
 }
 
 export const PRESETS: Record<string, EnvPreset> = {
-  dunes: { zenith: 0x3f86d6, horizon: 0xf3d6a4, ground: 0xd9ad74, sunColor: 0xffe3b8, sunIntensity: 3.4, sunElev: 34, sunAzim: 230, hemiSky: 0xbcd8ff, hemiGround: 0xd29a5c, hemiIntensity: 1.05, fog: 0xe9d3ae, fogNear: 110, fogFar: 460, exposure: 1.0, stars: 0, clouds: 0.5, cloudColor: 0xfff6ea },
-  oasis: { zenith: 0x4b8fd1, horizon: 0xf6c88f, ground: 0xb8955f, sunColor: 0xffd29a, sunIntensity: 3.1, sunElev: 22, sunAzim: 250, hemiSky: 0xc9dcf0, hemiGround: 0xa8925c, hemiIntensity: 1.1, fog: 0xf0cf9e, fogNear: 60, fogFar: 300, exposure: 1.02, stars: 0, clouds: 0.65, cloudColor: 0xffe7cf },
-  pyramid: { zenith: 0x5a2c3a, horizon: 0xe0794a, ground: 0x9c5a36, sunColor: 0xffa070, sunIntensity: 2.7, sunElev: 14, sunAzim: 260, hemiSky: 0xe0a080, hemiGround: 0x8c4a2c, hemiIntensity: 1.0, fog: 0xc8704a, fogNear: 40, fogFar: 240, exposure: 1.05, stars: 0.15, clouds: 0.8, cloudColor: 0xe89a7a },
+  // warm, fairly low afternoon sun; cool lavender distance, gold toward the sun
+  dunes: { zenith: 0x2860b8, horizon: 0xffdfb4, ground: 0xd2a26a, sunColor: 0xffd8a8, sunIntensity: 3.4, sunElev: 26, sunAzim: 230, hemiSky: 0x93b0e6, hemiGround: 0xd9a46a, hemiIntensity: 1.0, fog: 0xc0c7d8, fogNear: 45, fogFar: 560, exposure: 1.0, stars: 0, clouds: 0.45, cloudColor: 0xfff2e2 },
+  oasis: { zenith: 0x317ccb, horizon: 0xffdaa8, ground: 0xb8955f, sunColor: 0xffd29e, sunIntensity: 3.3, sunElev: 21, sunAzim: 250, hemiSky: 0xa2c2ea, hemiGround: 0xb39a62, hemiIntensity: 1.05, fog: 0xc0d0d6, fogNear: 22, fogFar: 430, exposure: 1.02, stars: 0, clouds: 0.6, cloudColor: 0xffe8d0 },
+  pyramid: { zenith: 0x47305a, horizon: 0xff9c60, ground: 0x9c5a36, sunColor: 0xffa676, sunIntensity: 2.9, sunElev: 13, sunAzim: 260, hemiSky: 0xc49eaa, hemiGround: 0x9a5434, hemiIntensity: 1.0, fog: 0xb58074, fogNear: 18, fogFar: 330, exposure: 1.05, stars: 0.15, clouds: 0.8, cloudColor: 0xe89a7a },
   menu: { zenith: 0x2f5fa8, horizon: 0xffb877, ground: 0xc98c55, sunColor: 0xffb070, sunIntensity: 3.2, sunElev: 9, sunAzim: 255, hemiSky: 0xb0c4e8, hemiGround: 0xc88850, hemiIntensity: 0.95, fog: 0xf0b884, fogNear: 40, fogFar: 260, exposure: 1.0, stars: 0.25, clouds: 0.55, cloudColor: 0xffd2b0 },
   night: { zenith: 0x0b1530, horizon: 0x2c4466, ground: 0x2a2a38, sunColor: 0x9fb8ff, sunIntensity: 1.1, sunElev: 40, sunAzim: 140, hemiSky: 0x5068a0, hemiGround: 0x302a34, hemiIntensity: 0.7, fog: 0x1c2840, fogNear: 30, fogFar: 200, exposure: 1.1, stars: 1, clouds: 0.3, cloudColor: 0x5a6a90 },
   underworld: { zenith: 0x02080f, horizon: 0x0d3a4a, ground: 0x061018, sunColor: 0x8ff0ff, sunIntensity: 1.6, sunElev: 60, sunAzim: 200, hemiSky: 0x3a8ab0, hemiGround: 0x101820, hemiIntensity: 0.8, fog: 0x07222e, fogNear: 20, fogFar: 140, exposure: 1.15, stars: 1, clouds: 0, cloudColor: 0x203040 },
@@ -39,20 +46,31 @@ const skyVert = /* glsl */ `
 varying vec3 vDir;
 void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position,1.0); gl_Position = p.xyww; }`;
 const skyFrag = /* glsl */ `
-uniform vec3 uZenith, uHorizon, uGround, uSunDir, uSunColor;
-uniform float uStars, uTime;
+uniform vec3 uZenith, uGround, fogColor, uSunDisk;
+uniform mat4 uAtmo;
+uniform float uStars, uTime, uDisk;
 varying vec3 vDir;
+${ATMO_HAZE_GLSL}
 float h3(vec3 p){ p = fract(p*0.3183099+0.1); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
 void main(){
   vec3 d = normalize(vDir);
   float y = d.y;
-  vec3 col = y > 0.0 ? mix(uHorizon, uZenith, pow(clamp(y, 0.0, 1.0), 0.55)) : mix(uHorizon, uGround, clamp(-y * 6.0, 0.0, 1.0));
-  // horizon haze band
-  col = mix(col, uHorizon * 1.08, exp(-abs(y) * 14.0) * 0.45);
-  float sd = max(dot(d, uSunDir), 0.0);
-  col += uSunColor * (pow(sd, 6.0) * 0.28 + pow(sd, 64.0) * 0.6);
-  // pixel sun disk
-  if (sd > 0.9985) col = mix(col, vec3(1.0, 0.97, 0.88) * 3.0, 0.9);
+  float mu = dot(d, uAtmo[0].xyz);
+  float m = max(mu, 0.0);
+  // the horizon band is the very haze distant terrain fades into
+  vec3 hz = atmoHaze(d, fogColor);
+  float t = clamp(y, 0.0, 1.0);
+  float g = pow(smoothstep(0.0, 0.75, t), 0.55);
+  // the sunward sky stays paler for longer: a bright dusty halo
+  g *= 1.0 - 0.3 * pow(m, 3.0) * (1.0 - t);
+  vec3 col = mix(hz, uZenith, g);
+  col += hz * 0.07 * exp(-abs(y) * 36.0);
+  if (y < 0.0) col = mix(hz, uGround, smoothstep(0.0, 0.35, -y) * 0.35);
+  // forward scattering around the sun
+  col += uSunDisk * 0.05 * (pow(m, 6.0) * 0.45 + pow(m, 48.0) * 1.1 + pow(m, 420.0) * 3.0) * uAtmo[0].w;
+  // sun disk with a touch of limb darkening (bloom picks the HDR core up)
+  float disk = smoothstep(0.99958, 0.99974, mu);
+  col = mix(col, uSunDisk * (0.72 + 0.28 * smoothstep(0.99958, 0.99994, mu)), disk * uDisk);
   // stars (pixelated)
   if (uStars > 0.0 && y > 0.05) {
     vec3 q = floor(d * 380.0);
@@ -64,19 +82,115 @@ void main(){
   #include <colorspace_fragment>
 }`;
 
-/** Preetham sky with an extra radiance gain (the stock shader is calibrated for exposure ~0.5) */
-export function makeSky(gain: number) {
-  const sky = new Sky();
-  const m = sky.material as THREE.ShaderMaterial;
-  m.uniforms.uGain = { value: gain };
-  m.fragmentShader = m.fragmentShader.replace('uniform float time;', 'uniform float time;\nuniform float uGain;').replace('gl_FragColor = vec4( texColor, 1.0 );', 'gl_FragColor = vec4( texColor * uGain, 1.0 );');
-  return sky;
+/** airborne pixel sand: saltating grains hopping low over the dunes and fine dust hanging higher, all wind-driven */
+const airVert = /* glsl */ `
+attribute vec4 aSeed;
+uniform vec3 uCam, uSunDirW, uLight;
+uniform vec3 uPal[4];
+uniform float uTime, uPx, uBox;
+uniform vec2 uWind;
+uniform sampler2D uHF;
+uniform vec4 uHFInfo;
+varying vec3 vCol;
+varying float vA;
+void main(){
+  bool salt = aSeed.w < 0.68;
+  vec2 wd = normalize(uWind + vec2(1e-4));
+  vec2 side = vec2(-wd.y, wd.x);
+  float spd = salt ? mix(5.5, 10.5, aSeed.y) : mix(0.9, 2.6, aSeed.y);
+  float sway = salt ? sin(uTime * 2.3 + aSeed.z * 40.0) * 0.15 : sin(uTime * (0.35 + aSeed.z * 0.6) + aSeed.x * 31.0) * 1.6;
+  vec2 p = (aSeed.xz - 0.5) * uBox + wd * spd * uTime + side * sway;
+  vec2 rel = mod(p - uCam.xz + uBox * 0.5, uBox) - uBox * 0.5;
+  vec2 xz = uCam.xz + rel;
+  float g = texture2D(uHF, xz * uHFInfo.x + uHFInfo.y).r;
+  float hop;
+  if (salt) {
+    // saltation: short ballistic hops skimming the sand
+    float ph = fract(uTime * mix(0.8, 1.7, aSeed.z) + aSeed.x * 7.0);
+    hop = 4.0 * ph * (1.0 - ph) * mix(0.05, 0.6, aSeed.z * aSeed.z) + 0.04;
+  } else {
+    hop = mix(0.35, 6.0, aSeed.y * aSeed.y) + sin(uTime * 0.7 + aSeed.z * 12.0) * 0.35;
+  }
+  vec3 wp = vec3(xz.x, g + hop, xz.y);
+  vec4 mv = viewMatrix * vec4(wp, 1.0);
+  gl_Position = projectionMatrix * mv;
+  float d = max(-mv.z, 0.1);
+  float sz = (salt ? 0.032 : 0.022) * uPx / d;
+  gl_PointSize = clamp(floor(sz + 0.5), 1.0, 3.0);
+  vA = smoothstep(uBox * 0.5, uBox * 0.3, length(rel)) * smoothstep(0.5, 1.8, d) * (salt ? 0.95 : 0.6) * min(1.0, sz * 1.5 + 0.3) * uHFInfo.w;
+  int ci = int(floor(aSeed.y * 3.99));
+  vec3 c = ci == 0 ? uPal[0] : ci == 1 ? uPal[1] : ci == 2 ? uPal[2] : uPal[3];
+  // grains catch the sun: brighter looking into it, with the odd glint
+  vec3 vd = normalize(wp - cameraPosition);
+  float fwd = max(dot(vd, uSunDirW), 0.0);
+  float glint = step(0.94, fract(aSeed.x * 91.7 + uTime * (0.4 + aSeed.z)));
+  vCol = c * uLight * (1.0 + fwd * fwd * 1.3 + glint * 0.8);
+}`;
+const airFrag = /* glsl */ `
+varying vec3 vCol;
+varying float vA;
+float bayer4(vec2 p){ vec2 q = mod(floor(p), 4.0); int i = int(q.x + q.y * 4.0);
+  float m[16] = float[16](0.0,8.0,2.0,10.0,12.0,4.0,14.0,6.0,3.0,11.0,1.0,9.0,15.0,7.0,13.0,5.0); return (m[i] + 0.5) / 16.0; }
+void main(){
+  if (vA < bayer4(gl_FragCoord.xy)) discard;
+  gl_FragColor = vec4(vCol, 1.0);
+}`;
+
+export interface HeightTex {
+  tex: THREE.Texture;
+  /** x: world->uv scale, y: uv offset, z: texel size (m), w: 1 when valid */
+  info: THREE.Vector4;
+}
+
+export class AirSand {
+  points: THREE.Points;
+  private u: Record<string, THREE.IUniform>;
+  private v2 = new THREE.Vector2();
+
+  constructor(hf: HeightTex, wind: { x: number; z: number }, count = 7200, box = 58) {
+    const rng = new RNG(4242);
+    const seeds = new Float32Array(count * 4);
+    for (let i = 0; i < seeds.length; i++) seeds[i] = rng.next();
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+    g.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 4));
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e7);
+    this.u = {
+      uTime: globalUniforms.uTime,
+      uSunDirW: globalUniforms.uSunDirW,
+      uCam: { value: new THREE.Vector3() },
+      uLight: { value: new THREE.Color(1.6, 1.5, 1.35) },
+      uPal: { value: [0xf2d49c, 0xe2b97a, 0xd2a564, 0xfbe8bc].map((c) => new THREE.Color(c)) },
+      uPx: { value: 600 },
+      uBox: { value: box },
+      uWind: { value: new THREE.Vector2(wind.x, wind.z) },
+      uHF: { value: hf.tex },
+      uHFInfo: { value: hf.info },
+    };
+    const mat = new THREE.ShaderMaterial({ vertexShader: airVert, fragmentShader: airFrag, uniforms: this.u, depthWrite: false });
+    this.points = new THREE.Points(g, mat);
+    this.points.frustumCulled = false;
+    this.points.renderOrder = 4;
+    this.points.name = 'airSand';
+    this.points.onBeforeRender = (renderer, _s, camera) => {
+      this.u.uCam.value.copy(camera.position);
+      renderer.getDrawingBufferSize(this.v2);
+      this.u.uPx.value = this.v2.y * 0.5 * (camera as THREE.PerspectiveCamera).projectionMatrix.elements[5];
+    };
+  }
+  /** light level of the grains (sun radiance share + sky) */
+  setLight(sun: THREE.Color, k: number, ambient: number) {
+    (this.u.uLight.value as THREE.Color).copy(sun).multiplyScalar(k).addScalar(ambient);
+  }
+  dispose() {
+    this.points.removeFromParent();
+    this.points.geometry.dispose();
+    (this.points.material as THREE.Material).dispose();
+  }
 }
 
 export class Env {
   sky: THREE.Mesh;
-  /** physically based (Preetham) daytime sky — the realistic look; gradient dome is kept for night/underworld */
-  phys: Sky;
   sun: THREE.DirectionalLight;
   hemi: THREE.HemisphereLight;
   fog: THREE.Fog;
@@ -86,31 +200,34 @@ export class Env {
   private skyU: Record<string, THREE.IUniform>;
   private cloudSpeed = 2.2;
   shadowExtent = 46;
+  /** smoothed reference height of the regional ground: the haze / dust layers sit on it */
+  hazeBase = 8;
+  private hazeTarget = NaN;
+  air: AirSand | null = null;
+  private prevBefore: THREE.Scene['onBeforeRender'];
+  private prevAfter: THREE.Scene['onAfterRender'];
+  private dustDensity = 0.9;
 
   constructor(public scene: THREE.Scene, presetName: keyof typeof PRESETS = 'dunes', seed = 1) {
     this.preset = { ...PRESETS[presetName] };
+    this.fog = new THREE.Fog(0xffffff, 60, 300);
     this.skyU = {
       uZenith: { value: new THREE.Color() },
-      uHorizon: { value: new THREE.Color() },
       uGround: { value: new THREE.Color() },
-      uSunDir: { value: new THREE.Vector3() },
-      uSunColor: { value: new THREE.Color() },
+      fogColor: { value: this.fog.color },
+      uSunDisk: { value: new THREE.Color() },
+      uAtmo: { value: ATMO.u },
       uStars: { value: 0 },
+      uDisk: { value: 1 },
       uTime: { value: 0 },
     };
     this.sky = new THREE.Mesh(
-      new THREE.SphereGeometry(900, 32, 16),
+      new THREE.SphereGeometry(900, 48, 24),
       new THREE.ShaderMaterial({ vertexShader: skyVert, fragmentShader: skyFrag, uniforms: this.skyU, side: THREE.BackSide, depthWrite: false, fog: false })
     );
     this.sky.renderOrder = -10;
     this.sky.frustumCulled = false;
     scene.add(this.sky);
-    this.phys = makeSky(0.32);
-    this.phys.scale.setScalar(1000);
-    this.phys.frustumCulled = false;
-    this.phys.renderOrder = -11;
-    (this.phys.material as THREE.ShaderMaterial).depthWrite = false;
-    scene.add(this.phys);
     this.sun = new THREE.DirectionalLight(0xffffff, 3);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -124,43 +241,77 @@ export class Env {
     scene.add(this.sun, this.sun.target);
     this.hemi = new THREE.HemisphereLight(0xffffff, 0xffffff, 1);
     scene.add(this.hemi);
-    this.fog = new THREE.Fog(0xffffff, 60, 300);
     scene.fog = this.fog;
     scene.add(this.clouds);
     this.buildClouds(seed);
     this.apply(this.preset);
+    // the new look (atmosphere, rim, bounce) is live only while this scene renders
+    ATMO.scene = scene;
+    this.prevBefore = scene.onBeforeRender;
+    this.prevAfter = scene.onAfterRender;
+    scene.onBeforeRender = (...a) => {
+      ATMO.u[15] = 1;
+      globalUniforms.uLook.value.x = 1;
+      this.prevBefore.apply(scene, a);
+    };
+    scene.onAfterRender = (...a) => {
+      ATMO.u[15] = 0;
+      globalUniforms.uLook.value.x = 0;
+      this.prevAfter.apply(scene, a);
+    };
+  }
+
+  setWind(x: number, z: number) {
+    const l = Math.hypot(x, z) || 1;
+    ATMO.u[8] = x / l;
+    ATMO.u[9] = z / l;
   }
 
   apply(p: EnvPreset) {
     this.preset = p;
+    const day = p.stars < 0.5;
     this.skyU.uZenith.value.setHex(p.zenith);
-    this.skyU.uHorizon.value.setHex(p.horizon);
     this.skyU.uGround.value.setHex(p.ground);
-    this.skyU.uSunColor.value.setHex(p.sunColor);
     this.skyU.uStars.value = p.stars;
     const el = THREE.MathUtils.degToRad(p.sunElev),
       az = THREE.MathUtils.degToRad(p.sunAzim);
     this.sunDir.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)).normalize();
-    this.skyU.uSunDir.value.copy(this.sunDir);
-    // realistic: a strong white-warm sun, physically scattered sky, a weak warm ground bounce
-    const day = p.stars < 0.5;
-    this.phys.visible = day;
-    this.sky.visible = !day;
-    const su = (this.phys.material as THREE.ShaderMaterial).uniforms;
-    su.turbidity.value = p.sunElev < 20 ? 7 : 5.5; // desert dust
-    su.rayleigh.value = p.sunElev < 20 ? 2.6 : 1.6;
-    su.mieCoefficient.value = 0.006;
-    su.mieDirectionalG.value = 0.82;
-    su.sunPosition.value.copy(this.sunDir);
-    this.sun.color.setHex(p.sunColor).lerp(new THREE.Color(0xffffff), 0.35);
-    this.sun.intensity = p.sunIntensity * (day ? 1.4 : 1);
+    // a strong warm sun, cool sky fill from the hemisphere + IBL (cel shade tone stays bluish)
+    this.sun.color.setHex(p.sunColor).lerp(new THREE.Color(0xffffff), 0.22);
+    this.sun.intensity = p.sunIntensity * (day ? 1.35 : 1);
     this.hemi.color.setHex(p.hemiSky);
     this.hemi.groundColor.setHex(p.hemiGround);
-    this.hemi.intensity = p.hemiIntensity * (day ? 0.22 : 0.8);
-    // aerial perspective: dusty, slightly blue-shifted haze that thickens with distance
-    this.fog.color.setHex(p.fog).lerp(new THREE.Color(day ? 0xc9d2d8 : p.fog), day ? 0.25 : 0);
-    this.fog.near = p.fogNear * (day ? 0.8 : 1);
-    this.fog.far = p.fogFar * (day ? 1.35 : 1);
+    this.hemi.intensity = p.hemiIntensity * (day ? 0.34 : 0.8);
+    this.fog.color.setHex(p.fog);
+    this.fog.near = p.fogNear;
+    this.fog.far = p.fogFar;
+    (this.skyU.uSunDisk.value as THREE.Color).setHex(p.sunColor).multiplyScalar(day ? 7 : 2.2);
+    this.skyU.uDisk.value = 1;
+    // shared atmosphere
+    const u = ATMO.u;
+    u[0] = this.sunDir.x;
+    u[1] = this.sunDir.y;
+    u[2] = this.sunDir.z;
+    u[3] = day ? 0.8 : 0.25;
+    const hz = new THREE.Color(p.horizon);
+    u[4] = hz.r;
+    u[5] = hz.g;
+    u[6] = hz.b;
+    u[7] = 0.034;
+    u[10] = 3.2;
+    this.dustDensity = day ? (p.sunElev < 18 ? 0.8 : 0.6) : 0.25;
+    u[11] = this.dustDensity;
+    ATMO.sunDir.copy(this.sunDir);
+    ATMO.sunColor.setHex(p.sunColor);
+    ATMO.shafts = day ? 0.5 : 0.18;
+    // look uniforms for every voxel model
+    const gu = globalUniforms;
+    gu.uSunDirW.value.copy(this.sunDir);
+    gu.uSunCol.value.copy(this.sun.color).multiplyScalar(this.sun.intensity);
+    const sunOnGround = this.sun.intensity * Math.max(0, this.sunDir.y);
+    gu.uBounceCol.value.setHex(p.hemiGround).multiplyScalar(0.26 * sunOnGround);
+    gu.uLook.value.set(gu.uLook.value.x, day ? 0.34 : 0.2, 1, day ? 0.22 : 0.35);
+    this.air?.setLight(gu.uSunCol.value, 0.36, day ? 0.3 : 0.12);
     this.clouds.visible = p.clouds > 0.01;
     this.clouds.children.forEach((c, i) => ((c as THREE.Mesh).visible = i / this.clouds.children.length < p.clouds));
     const cm = (this.clouds.children[0] as THREE.Mesh | undefined)?.material as THREE.MeshLambertMaterial | undefined;
@@ -226,53 +377,29 @@ export class Env {
     }
   }
 
-  /** prefiltered desert-sky environment for PBR reflections (metal, gold, wet) */
+  /** prefiltered sky environment for image-based fill + PBR reflections (metal, gold, wet) */
   applyEnvMap(renderer: THREE.WebGLRenderer) {
     const p = this.preset;
-    if (p.stars < 0.5) {
-      // image-based lighting straight from the physical sky + a warm sand ground for bounce light
-      const envScene = new THREE.Scene();
-      const sky = makeSky(0.32);
-      sky.scale.setScalar(100);
-      const su = (sky.material as THREE.ShaderMaterial).uniforms;
-      const src = (this.phys.material as THREE.ShaderMaterial).uniforms;
-      for (const k of ['turbidity', 'rayleigh', 'mieCoefficient', 'mieDirectionalG']) su[k].value = src[k].value;
-      su.sunPosition.value.copy(this.sunDir);
-      envScene.add(sky);
-      const ground = new THREE.Mesh(new THREE.CircleGeometry(60, 24), new THREE.MeshBasicMaterial({ color: new THREE.Color(p.hemiGround).multiplyScalar(0.55) }));
-      ground.rotation.x = -Math.PI / 2;
-      ground.position.y = -2;
-      envScene.add(ground);
-      const pm = new THREE.PMREMGenerator(renderer);
-      const rt = pm.fromScene(envScene, 0.04);
-      this.scene.environment = rt.texture;
-      this.scene.environmentIntensity = 0.42;
-      pm.dispose();
-      return rt;
-    }
+    const day = p.stars < 0.5;
     const envScene = new THREE.Scene();
-    const geo = new THREE.SphereGeometry(10, 32, 16);
-    const col: number[] = [];
-    const pos = geo.getAttribute('position');
-    const z = new THREE.Color(p.zenith), h = new THREE.Color(p.horizon), g = new THREE.Color(p.ground);
-    const c = new THREE.Color();
-    for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i) / 10;
-      if (y > 0) c.copy(h).lerp(z, Math.pow(y, 0.6));
-      else c.copy(h).lerp(g, Math.min(1, -y * 3));
-      col.push(c.r, c.g, c.b);
-    }
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    envScene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
-    const sunBall = new THREE.Mesh(new THREE.SphereGeometry(0.8, 12, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(p.sunColor).multiplyScalar(6) }));
-    sunBall.position.copy(this.sunDir).multiplyScalar(8);
-    envScene.add(sunBall);
+    const sky = new THREE.Mesh(new THREE.SphereGeometry(50, 48, 24), new THREE.ShaderMaterial({ vertexShader: skyVert, fragmentShader: skyFrag, uniforms: { ...this.skyU, uDisk: { value: 0 } }, side: THREE.BackSide, depthWrite: false }));
+    envScene.add(sky);
+    // sunlit sand below: the warm bounce every shaded surface picks up
+    const sunOnGround = this.sun.intensity * Math.max(0.05, this.sunDir.y);
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(40, 32), new THREE.MeshBasicMaterial({ color: new THREE.Color(p.hemiGround).multiplyScalar(day ? 0.11 * sunOnGround : 0.3) }));
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -3;
+    envScene.add(ground);
     const pm = new THREE.PMREMGenerator(renderer);
-    const rt = pm.fromScene(envScene, 0.02);
+    const rt = pm.fromScene(envScene, 0.04, 0.1, 200);
     this.scene.environment = rt.texture;
-    this.scene.environmentIntensity = 0.6;
-    this.hemi.intensity = this.preset.hemiIntensity * 0.7;
+    this.scene.environmentIntensity = day ? 0.52 : 0.6;
+    if (!day) this.hemi.intensity = this.preset.hemiIntensity * 0.7;
     pm.dispose();
+    sky.geometry.dispose();
+    (sky.material as THREE.Material).dispose();
+    ground.geometry.dispose();
+    (ground.material as THREE.Material).dispose();
     return rt;
   }
 
@@ -280,7 +407,6 @@ export class Env {
   update(focus: THREE.Vector3, dt: number, time: number) {
     this.skyU.uTime.value = time;
     this.sky.position.copy(focus);
-    this.phys.position.copy(focus);
     const ext = this.shadowExtent;
     const sc = this.sun.shadow.camera;
     if (sc.right !== ext) {
@@ -303,5 +429,31 @@ export class Env {
       c.position.x = Math.cos(c.userData.a) * c.userData.r;
       c.position.z = Math.sin(c.userData.a) * c.userData.r;
     }
+    // atmosphere: the haze floor follows the regional ground height slowly
+    if (Number.isNaN(this.hazeTarget)) this.hazeTarget = focus.y - 4;
+    this.hazeBase += (this.hazeTarget - this.hazeBase) * Math.min(1, dt * 0.5);
+    ATMO.u[12] = time;
+    ATMO.u[13] = this.hazeBase;
+    ATMO.scene = this.scene;
+  }
+
+  /** regional ground level for the haze floor (World samples the terrain around the player) */
+  setHazeFloor(y: number) {
+    if (Number.isNaN(this.hazeTarget)) this.hazeBase = y;
+    this.hazeTarget = y;
+  }
+
+  dispose() {
+    if (this.scene.onBeforeRender !== this.prevBefore) this.scene.onBeforeRender = this.prevBefore;
+    if (this.scene.onAfterRender !== this.prevAfter) this.scene.onAfterRender = this.prevAfter;
+    if (ATMO.scene === this.scene) ATMO.scene = null;
+    ATMO.u[15] = 0;
+    globalUniforms.uLook.value.x = 0;
+    this.sky.removeFromParent();
+    this.sun.removeFromParent();
+    this.sun.target.removeFromParent();
+    this.hemi.removeFromParent();
+    this.clouds.removeFromParent();
+    this.air?.dispose();
   }
 }

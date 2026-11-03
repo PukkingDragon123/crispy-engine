@@ -17,13 +17,13 @@ import { TOON, Ramp } from '../style';
 import { defaultExpressions } from '../toon/humanoid';
 
 export type HatId = 'stetson' | 'duck' | 'sombrero' | 'nemes' | 'tophat' | 'bandit';
-export type OutfitId = 'bare' | 'duster' | 'poncho' | 'vest' | 'sheriff' | 'pharaoh';
+export type OutfitId = 'bare' | 'punk' | 'duster' | 'poncho' | 'vest' | 'sheriff' | 'pharaoh';
 export interface CowboyLook {
   hat: HatId;
   outfit: OutfitId;
 }
 export const HAT_IDS: HatId[] = ['stetson', 'duck', 'sombrero', 'nemes', 'tophat', 'bandit'];
-export const OUTFIT_IDS: OutfitId[] = ['bare', 'duster', 'poncho', 'vest', 'sheriff', 'pharaoh'];
+export const OUTFIT_IDS: OutfitId[] = ['bare', 'punk', 'duster', 'poncho', 'vest', 'sheriff', 'pharaoh'];
 export const SUNDOWN_EXPRESSIONS = ['neutral', 'focus', 'smug', 'surprised', 'hurt', 'angry', 'laugh', 'wink', 'dead', 'determined'] as const;
 export const SUNDOWN_VS = 1 / 36;
 
@@ -422,6 +422,7 @@ interface Outfit {
 }
 const OUT: Record<OutfitId, Outfit> = {
   bare: { coat: TOON.leather, trim: TOON.leatherDark, band: TOON.red, boot: TOON.leather, belt: TOON.leatherDark },
+  punk: { coat: TOON.black, trim: TOON.black, band: TOON.red, boot: TOON.black, belt: TOON.black },
   duster: { coat: TOON.duster, trim: TOON.leatherDark, band: TOON.red, boot: TOON.leather, belt: TOON.leatherDark },
   poncho: { coat: TOON.poncho, trim: TOON.linen, band: TOON.turquoise, boot: TOON.leather, belt: TOON.leatherDark },
   vest: { coat: TOON.leather, trim: TOON.leatherDark, band: TOON.red, boot: ramp(0x8e3b26, 0x6c2a1b, 0xad5236, 0x4a1a10), belt: TOON.leatherDark },
@@ -831,7 +832,12 @@ function buildHat(id: HatId, o: OutfitId) {
 const HAT_TOP: Record<HatId, number> = { stetson: 67, duck: 76, sombrero: 72, nemes: 64, tophat: 75, bandit: 66 };
 
 // ================================================================== RIG
-export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: 'bare' }): RigSpec {
+/**
+ * The LEGACY 1/36 build. It is no longer Sundown (the player is the HD build in
+ * sundown.ts); it stays only as the base every humanoid enemy is cut from
+ * (referenceSkeletonRig -> skeletonFigure). Do not change its proportions.
+ */
+export function legacyCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: 'bare' }): RigSpec {
   const o = look.outfit;
   const OF = OUT[o];
   const sk = buildSkull();
@@ -976,7 +982,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
 
 /** the bare reference skeleton (no hat, no gear) — used by previews / style checks */
 export function referenceSkeletonRig(): RigSpec {
-  const rig = skeletonCowboyRig({ hat: 'stetson', outfit: 'bare' });
+  const rig = legacyCowboyRig({ hat: 'stetson', outfit: 'bare' });
   const { hat_top: _hatTop, ...sockets } = rig.sockets ?? {};
   const skullTop = (SKULL_TOP + 1) * SUNDOWN_VS;
   return {

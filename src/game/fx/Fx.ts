@@ -99,7 +99,7 @@ export class Fx {
     const s = fanned ? 0.85 : 1;
     const P = this.p;
     const fp = { x: pos.x + dir.x * 0.3, y: pos.y + dir.y * 0.3, z: pos.z + dir.z * 0.3 };
-    P.emit({ pos, count: 1, life: [0.05, 0.06], size: [0.8 * s, 1.05 * s], sprite: ['flash0', 'flash1', 'flash2'], animate: true, additive: true, color, rot: 6.28, sizeJitter: 0.1 });
+    P.emit({ pos, count: 1, life: [0.05, 0.06], size: [0.6 * s, 0.82 * s], sprite: ['flash0', 'flash1', 'flash2'], animate: true, additive: true, color, rot: 6.28, sizeJitter: 0.1 });
     P.emit({ pos: fp, count: 1, vel: { x: dir.x * 0.5, y: dir.y * 0.5, z: dir.z * 0.5 }, life: [0.045, 0.055], size: [0.17 * s, 0.1], sprite: 'glow16', additive: true, color: 0xffd27a, stretch: 1.1, sizeJitter: 0 });
     // cylinder gap: two little sideways jets just behind the muzzle
     let sx = dir.z, sz = -dir.x;
@@ -126,14 +126,21 @@ export class Fx {
     const ux = dx / d, uy = dy / d, uz = dz / d;
     const P = this.p;
     const s0 = 0.7;
-    P.emit({ pos: { x: from.x + ux * s0, y: from.y + uy * s0, z: from.z + uz * s0 }, count: 1, vel: { x: ux * speed, y: uy * speed, z: uz * speed }, life: [(d - s0) / speed, (d - s0) / speed], size: [0.055, 0.045], sprite: 'streak', additive: true, color: 0xfffbe8, stretch: 0.012, sizeJitter: 0 });
+    // the streak sprite is 1:8, so its drawn width is size / 8: grows with range to stay ~2 px wide
+    const sw = Math.min(1, 0.3 + d * 0.012);
+    P.emit({ pos: { x: from.x + ux * s0, y: from.y + uy * s0, z: from.z + uz * s0 }, count: 1, vel: { x: ux * speed, y: uy * speed, z: uz * speed }, life: [(d - s0) / speed, (d - s0) / speed], size: [0.3, sw], sprite: 'streak', additive: true, color: 0xfffbe8, stretch: 0.012, sizeJitter: 0 });
     const seg = Math.min(4, Math.max(1.4, d / 14));
     const n = Math.min(18, Math.floor((d - 1.2) / seg));
-    const v = 0.01;
+    // stretched sprites take their length from velocity × stretch, and the particle shader reads
+    // stretch > 1.5 as its screen-space flag: drift each segment slowly forward (air dragged
+    // along behind the round) and keep stretch at 1.44
+    const v = seg * 0.75;
     for (let i = 0; i < n; i++) {
       const c = 1.2 + i * seg + seg * 0.5;
       const fade = 1 - (i / Math.max(1, n)) * 0.45;
-      P.emit({ pos: { x: from.x + ux * c, y: from.y + uy * c, z: from.z + uz * c }, count: 1, vel: { x: ux * v, y: uy * v, z: uz * v }, life: [0.15 + fade * 0.06, 0.15 + fade * 0.06], size: [0.02, 0.006], sprite: 'glow8', additive: true, color, alpha: 0.5 * fade, stretch: (seg * 1.08) / v, sizeJitter: 0, delay: c / speed });
+      // width grows with distance so the wake reads as a steady 1.5-2 px line on screen
+      const w = 0.022 + c * 0.0028;
+      P.emit({ pos: { x: from.x + ux * c, y: from.y + uy * c, z: from.z + uz * c }, count: 1, vel: { x: ux * v, y: uy * v, z: uz * v }, life: [0.16 + fade * 0.08, 0.16 + fade * 0.08], size: [w, w * 0.35], sprite: 'glow8', additive: true, color, alpha: 0.75 * fade, stretch: 1.44, sizeJitter: 0, delay: c / speed });
     }
     if (hit) P.emit({ pos: to, count: 1, life: [0.05, 0.06], size: [0.3, 0.05], sprite: 'glow16', additive: true, color: 0xfff2c0, sizeJitter: 0, delay: d / speed });
   }

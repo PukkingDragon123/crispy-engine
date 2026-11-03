@@ -2,22 +2,26 @@
 // + props, and the zone-progression transformations (walls collapse, temples rise).
 import * as THREE from 'three';
 import { generateSubArea, SubArea, ZoneDef } from './RegionGen';
-import { Terrain } from './Terrain';
-import { Env, PRESETS } from './Env';
+import { Terrain, Backdrop } from './Terrain';
+import { Env, PRESETS, AirSand } from './Env';
 import { Storm } from './Storm';
 import { Colliders } from './Colliders';
 import { MAT } from './Heightfield';
 import type { SurfaceInfo } from '../player/Board';
-import { globalUniforms } from '../../engine/render/VoxelMaterial';
+import { globalUniforms, atmoFogUniforms } from '../../engine/render/VoxelMaterial';
 import { SandWaves } from './SandWaves';
 
 const waterVert = /* glsl */ `
-varying vec3 vW; varying float vFog;
-void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mv = viewMatrix * w; vFog = -mv.z; gl_Position = projectionMatrix * mv; }`;
+varying vec3 vW;
+#include <fog_pars_vertex>
+void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vec4 mvPosition = viewMatrix * w; gl_Position = projectionMatrix * mvPosition;
+#include <fog_vertex>
+}`;
 const waterFrag = /* glsl */ `
-uniform float uTime; uniform vec3 uDeep, uShallow, uSky, fogColor; uniform float fogNear, fogFar;
+uniform float uTime; uniform vec3 uDeep, uShallow, uSky;
 uniform sampler2D uHeight; uniform vec2 uSize; uniform float uLevel;
-varying vec3 vW; varying float vFog;
+varying vec3 vW;
+#include <fog_pars_fragment>
 float h12(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
 void main(){
   vec2 px = floor(vW.xz * 4.0) / 4.0;
@@ -31,9 +35,11 @@ void main(){
   float foam = smoothstep(0.12, 0.0, depth) * (0.6 + 0.4 * step(0.5, fract(w2 * 2.0)));
   col = mix(col, vec3(0.95, 0.97, 0.92), foam);
   col += glint;
-  col = mix(col, uSky, 0.18);
-  float f = smoothstep(fogNear, fogFar, vFog);
-  gl_FragColor = vec4(mix(col, fogColor, f), mix(0.86, 0.6, foam));
+  // grazing views mirror the sky
+  float fr = pow(1.0 - clamp(normalize(cameraPosition - vW).y, 0.0, 1.0), 4.0);
+  col = mix(col, uSky, 0.12 + 0.5 * fr);
+  gl_FragColor = vec4(col, mix(0.86, 0.6, foam));
+  #include <fog_fragment>
   #include <colorspace_fragment>
 }`;
 
@@ -50,7 +56,12 @@ export class World {
   props: { update(dt: number, focus: THREE.Vector3): void; riseFor(stampId: string, k: number): void; group: THREE.Group } | null = null;
   /** living sand: travelling dune waves, rings, swells (rendered + felt by every ground query) */
   sand = new SandWaves();
+  /** the land past the play area (and a far-field proxy of the map) */
+  backdrop: Backdrop;
+  /** airborne pixel sand around the camera */
+  air: AirSand;
   private _g = { x: 0, z: 0 };
+  private hazeT = 0;
 
   constructor(public scene: THREE.Scene, key: 'A' | 'B' | 'C', seed: number) {
     this.sa = generateSubArea(key, seed);
@@ -58,6 +69,13 @@ export class World {
     this.terrain = new Terrain(this.sa.field, this.sa.wind, this.sand);
     this.sand.ground = (x, z) => this.sa.field.heightSmooth(x, z);
     this.group.add(this.terrain.group);
+    this.env.setWind(this.sa.wind.x, this.sa.wind.z);
+    this.backdrop = new Backdrop(this.sa.field, this.sa.wind, seed);
+    this.group.add(this.backdrop.mesh);
+    this.air = new AirSand(this.terrain.hf, this.sa.wind);
+    this.env.air = this.air;
+    this.env.apply(this.env.preset);
+    this.group.add(this.air.points);
     this.storm = new Storm((x, z) => this.sa.field.heightAt(x, z));
     this.group.add(this.storm.group);
     scene.add(this.group);
@@ -91,14 +109,13 @@ export class World {
       vertexShader: waterVert,
       fragmentShader: waterFrag,
       transparent: true,
+      fog: true,
       uniforms: {
+        ...atmoFogUniforms(),
         uTime: globalUniforms.uTime,
         uDeep: { value: new THREE.Color(0x1b6f86) },
         uShallow: { value: new THREE.Color(0x5fd0c8) },
-        uSky: { value: new THREE.Color(env.zenith) },
-        fogColor: { value: new THREE.Color(env.fog) },
-        fogNear: { value: env.fogNear },
-        fogFar: { value: env.fogFar },
+        uSky: { value: new THREE.Color(env.zenith).lerp(new THREE.Color(env.fog), 0.45) },
         uHeight: { value: tex },
         uSize: { value: new THREE.Vector2(f.size, f.size) },
         uLevel: { value: this.sa.waterLevel },
@@ -237,17 +254,29 @@ export class World {
   update(dt: number, focus: THREE.Vector3, time: number, fx: any) {
     this.sand.update(dt);
     this.terrain.update(focus, 4);
+    // the haze / dust floor rests on the regional ground level around the hunter
+    this.hazeT -= dt;
+    if (this.hazeT <= 0) {
+      this.hazeT = 0.5;
+      const f = this.sa.field;
+      let s = 0;
+      for (let i = 0; i < 9; i++) {
+        const a = (i / 9) * Math.PI * 2;
+        s += f.heightAt(focus.x + Math.cos(a) * 45, focus.z + Math.sin(a) * 45);
+      }
+      this.env.setHazeFloor(Math.max(this.sa.waterLevel, s / 9 - 3));
+    }
     this.env.update(focus, dt, time);
+    const st = this.env.sun.target.position;
+    this.terrain.setShadowCenter(st.x, st.z, this.env.shadowExtent);
     this.storm.update(dt, fx);
     this.props?.update(dt, focus);
   }
 
   dispose() {
     this.terrain.dispose();
+    this.backdrop.dispose();
     this.group.removeFromParent();
-    this.env.sky.removeFromParent();
-    this.env.sun.removeFromParent();
-    this.env.hemi.removeFromParent();
-    this.env.clouds.removeFromParent();
+    this.env.dispose();
   }
 }
