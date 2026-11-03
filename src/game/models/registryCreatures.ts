@@ -29,9 +29,10 @@ export const TOAD_MODELS: Record<string, ModelEntry> = {
   toadlet_v3: () => toadletRig({ variant: 3 }),
 };
 
-// ---- the travelling trading post (creatures/caravanTortoise.ts): Ozymandias, a giant
-// tortoise carrying the shop on his back (Old Mother Tamsin rides at socket `rider`)
-import { caravanTortoiseRig } from './creatures/caravanTortoise';
-export const CARAVAN_MODELS: Record<string, ModelEntry> = {
-  caravan_tortoise: () => caravanTortoiseRig(),
+// ---- the travelling trading post (creatures/turtleHouse.ts): Gobi, a giant turtle with
+// a shop-house and an acacia on his shell, and Ozymandias, the tortoise who keeps it
+import { turtleHouseRig, tortoiseGuyRig } from './creatures/turtleHouse';
+export const TURTLE_HOUSE_MODELS: Record<string, ModelEntry> = {
+  turtle_house: () => turtleHouseRig(),
+  tortoise_guy: () => tortoiseGuyRig(),
 };

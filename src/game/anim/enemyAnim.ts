@@ -434,8 +434,32 @@ export function animateEnemy(e: Enemy, env: AnimEnv) {
       }
     }
   }
+  // eaten alive (scarab swarm): thrashing, swatting at itself, shaking its head, screaming
+  let thrash = 0;
+  if (e.eatenT > 0 && !a.dying && e.state !== 'down') {
+    thrash = clamp01(e.eatenT / 0.3);
+    const w = thrash;
+    if (e.skel === 'humanoid') {
+      const sl = Math.sin(t * 17 + e.quirk * 5), sr = Math.sin(t * 15.5 + 2 + e.quirk * 3);
+      blendS(e, 'arm_l', -1.5 + sl * 0.95, 0.3 + sl * 0.3, 0.35 - sl * 0.25, w * 0.85);
+      blendS(e, 'arm_r', -1.4 + sr * 0.95, -0.3 - sr * 0.3, -0.35 + sr * 0.25, w * 0.85);
+      blendS(e, 'fore_l', -1.3 - Math.max(0, sl) * 0.6, 0, 0, w * 0.8);
+      blendS(e, 'fore_r', -1.25 - Math.max(0, sr) * 0.6, 0, 0, w * 0.8);
+      A(e, 'torso', Math.sin(t * 11) * 0.16 * w + 0.12 * w, Math.sin(t * 7.3) * 0.4 * w, Math.sin(t * 9.1) * 0.12 * w);
+      A(e, 'head', Math.sin(t * 13) * 0.2 * w, Math.sin(t * 16) * 0.45 * w, 0);
+      RO(e, Math.sin(t * 6.1) * 0.03 * w, -0.02 * w, Math.sin(t * 5.3) * 0.03 * w);
+    } else {
+      RR(e, Math.sin(t * 12) * 0.12 * w, Math.sin(t * 8.5) * 0.25 * w, Math.sin(t * 10.5) * 0.16 * w);
+      A(e, 'head', Math.sin(t * 14) * 0.25 * w, Math.sin(t * 17) * 0.35 * w, 0);
+      A(e, 'neck', Math.sin(t * 9) * 0.3 * w, Math.sin(t * 11) * 0.4 * w, 0);
+      for (let k = 1; k <= 4; k++) {
+        A(e, 'leg_l' + k, 0, Math.sin(t * 21 + k) * 0.35 * w, Math.sin(t * 19 + k * 2) * 0.25 * w);
+        A(e, 'leg_r' + k, 0, Math.sin(t * 20 + k) * 0.35 * w, Math.sin(t * 18 + k * 2) * 0.25 * w);
+      }
+    }
+  }
   // jaw scream / chatter shared by every skeleton with a jaw
-  const scream = e.state === 'windup' ? ap.antic * 0.55 : e.hitT < 0.2 ? (1 - e.hitT / 0.2) * 0.5 : 0;
+  const scream = e.state === 'windup' ? ap.antic * 0.55 : e.hitT < 0.2 ? (1 - e.hitT / 0.2) * 0.5 : thrash * (0.45 + Math.abs(Math.sin(t * 9)) * 0.3);
   const chatter = e.def.id === 'husk' ? Math.max(0, Math.sin(t * 7 + e.quirk * 20)) * 0.12 : 0;
   e.jaw = damp(e.jaw, scream + chatter + hack * 0.7 + (e.state === 'down' ? 0.3 : 0) + (a.low > 0.5 ? 0.12 : 0) + (a.dying ? 0.35 : 0), 14, dt);
   A(e, 'jaw', e.jaw);

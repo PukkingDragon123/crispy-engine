@@ -2,7 +2,7 @@
 
 export type Action =
   | 'forward' | 'back' | 'left' | 'right'
-  | 'jump' | 'drift' | 'boost' | 'grapple'
+  | 'jump' | 'push' | 'drift' | 'boost' | 'grapple'
   | 'fire' | 'aim' | 'reload' | 'melee' | 'grenade'
   | 'skill1' | 'skill2' | 'ultimate' | 'interact'
   | 'item1' | 'item2' | 'stats' | 'pause' | 'trick';
@@ -13,6 +13,9 @@ export const DEFAULT_BINDINGS: Record<Action, string[]> = {
   left: ['KeyA', 'ArrowLeft'],
   right: ['KeyD', 'ArrowRight'],
   jump: ['Space'],
+  // SHIFT is the rider's foot: TAP to kick-push (on the beat for a perfect push),
+  // HOLD through an A / D carve to drift, hold in the air + WASD to spin / flip
+  push: ['ShiftLeft', 'ShiftRight'],
   drift: ['ShiftLeft', 'ShiftRight'],
   boost: ['ControlLeft', 'KeyV'],
   grapple: ['KeyQ'],

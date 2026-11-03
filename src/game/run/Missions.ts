@@ -90,7 +90,7 @@ export class Missions {
       const inter: Interactable = {
         pos: door.clone(),
         radius: 7,
-        label: type === 'tradingPost' ? 'Trade with Ozymandias' : `Enter ${name}`,
+        label: type === 'tradingPost' ? 'Talk to Ozymandias' : `Enter ${name}`,
         enabled: true,
         promptY: type === 'tradingPost' ? 3.2 : 2.4,
         use: () => void this.enter(lm, inter, door),
@@ -101,9 +101,10 @@ export class Missions {
   }
 
   /**
-   * The trading post is Ozymandias, a giant tortoise carrying the shop on his
-   * back, plodding round his campfire with Old Mother Tamsin riding on his
-   * shell. (If his model is missing, Tamsin keeps the shop on foot by the camp.)
+   * The trading post is Gobi, a giant turtle with a little shop-house and an
+   * acacia on his shell, plodding round his campfire; Ozymandias, the tortoise
+   * who keeps the shop, stands on the porch. (If the turtle model is missing,
+   * Old Mother Tamsin keeps the shop on foot by the camp.)
    */
   private spawnMerchant(lm: PropInst, door: THREE.Vector3, inter: Interactable) {
     const ctx = this.d.ctx;
@@ -114,18 +115,19 @@ export class Missions {
       return spec?.parts ? new RigInstance(buildRigGeo(spec, key + ':npc'), { material: makeVoxelMaterial() }) : null;
     };
     const home = new THREE.Vector3(lm.anchor.x, 0, lm.anchor.z);
-    const giant = rigOf('caravan_tortoise');
-    const tamsin = rigOf('merchant');
-    if (giant) {
-      // he starts beside his fire, side-on, already on his rounds
-      const at = home.clone().addScaledVector(out, 6.5);
-      giant.root.position.set(at.x, ctx.world.groundAt(at.x, at.z), at.z);
-      giant.root.rotation.y = face + Math.PI / 2;
-      ctx.scene.add(giant.root);
-      if (tamsin) giant.attach('rider', tamsin.root);
-      this.npcs.push({ rig: giant, eyes: null, kind: 'merchant', t: rnd.next() * 10, lm, inter, hooks: this.shopHooks({ rider: tamsin, home }) });
+    const gobi = rigOf('turtle_house');
+    const ozzy = gobi ? rigOf('tortoise_guy') : null;
+    if (gobi) {
+      // he starts beside the fire, side-on, already on his rounds (the shop seats Ozymandias on the porch)
+      const at = home.clone().addScaledVector(out, 4.5);
+      gobi.root.position.set(at.x, ctx.world.groundAt(at.x, at.z), at.z);
+      gobi.root.rotation.y = face + Math.PI / 2;
+      ctx.scene.add(gobi.root);
+      const p = this.d.player;
+      this.npcs.push({ rig: gobi, eyes: null, kind: 'merchant', t: rnd.next() * 10, lm, inter, hooks: this.shopHooks({ rider: ozzy, home, hunter: { rig: p.rig, gun: p.gun, root: p.root } }) });
       return;
     }
+    const tamsin = rigOf('merchant');
     if (tamsin) {
       const at = door.clone();
       tamsin.root.position.set(at.x, ctx.world.groundAt(at.x, at.z), at.z);

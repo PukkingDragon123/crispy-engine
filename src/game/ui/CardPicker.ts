@@ -210,7 +210,7 @@ export class CardPicker {
     const eng = this.ctx.engine;
     const asp = eng.width / eng.height;
     const tanH = this.tanH;
-    const sx = CARD_W * 1.3;
+    const sx = CARD_W * 1.38;
     let depth = 2.75, sc = 1;
     const need = ((n - 1) / 2) * sx + CARD_W / 2 + 0.12;
     if (need > depth * tanH * asp) depth = Math.min(3.5, need / (tanH * asp));
@@ -222,7 +222,7 @@ export class CardPicker {
     for (let i = 0; i < n; i++) {
       const u = n > 1 ? (i - (n - 1) / 2) / ((n - 1) / 2) : 0;
       const z = depth - 0.22 * u * u;
-      let y = staged ? hh * (0.52 - 0.15 * u * u) : -hh * 0.02;
+      let y = staged ? hh * (0.53 - 0.11 * u * u) : -hh * 0.02;
       y = Math.min(y, hh * 0.97 - (CARD_H * sc) / 2);
       out.push({ c: new THREE.Vector3((i - (n - 1) / 2) * sx * sc, y, z), roll: staged ? -u * 0.08 : 0, yaw: -u * 0.15 });
     }

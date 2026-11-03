@@ -4,7 +4,18 @@
 // Base moves are always known; the rest unlock permanently (saved).
 import { loadSave, writeSave } from '../meta/Save';
 
-export type TechniqueId = 'grapple' | 'kick' | 'neck_slicer';
+export type TechniqueId = 'push' | 'drift' | 'grapple' | 'kick' | 'neck_slicer' | 'sand_kick' | 'wall_ride' | 'manual' | 'dune_surf';
+
+/** board moves that unlock permanently; the run hooks live in player/BoardMoves */
+export const MOVE_UNLOCKS = {
+  /** Bounty Rank reached in a run */
+  sand_kick: { rank: 3 },
+  manual: { rank: 6 },
+  /** any boss defeated (not escaped) */
+  wall_ride: { boss: true },
+  /** a style combo banked at this multiplier or better */
+  dune_surf: { combo: 3 },
+} as const;
 
 export interface Technique {
   id: TechniqueId;
@@ -20,6 +31,22 @@ export interface Technique {
 }
 
 export const TECHNIQUES: Technique[] = [
+  {
+    id: 'push',
+    name: 'Kick-Push',
+    how: 'Tap SHIFT: plant a foot and kick. Push again as the foot lands back on the deck (on the beat) for a PERFECT PUSH; a perfect streak builds speed, mashing only scuffs. Push right after a clean landing for a LANDING PUSH. W leans in to hold speed, S sits back to brake.',
+    unlockHint: '',
+    base: true,
+    art: '',
+  },
+  {
+    id: 'drift',
+    name: 'Sand Drift',
+    how: 'Hold SHIFT through an A / D carve: the tail kicks out in a spray of sand, release to sling out of it. JUMP mid-drift for a SPIN LAUNCH. Drift through an enemy to slash it with the board. Chain moves for a style combo.',
+    unlockHint: '',
+    base: true,
+    art: '',
+  },
   { id: 'grapple', name: "The Hanged Man's Rope", how: 'Q — lasso a post, a beast or a bounty and swing.', unlockHint: '', base: true, art: 'Q' },
   { id: 'kick', name: 'Strength', how: 'F — a spur kick that knocks the dust out of anything close.', unlockHint: '', base: true, art: 'F' },
   {
@@ -29,6 +56,38 @@ export const TECHNIQUES: Technique[] = [
     unlockHint: 'Defeat the Avatar of Khonsu (wave 5).',
     base: false,
     art: 'neck_slicer',
+  },
+  {
+    id: 'sand_kick',
+    name: 'Sand Kick',
+    how: 'In the air, tap JUMP: stamp a burst of sand out of nothing and hop again. Once per air (a wall kick gives it back).',
+    unlockHint: 'Reach Bounty Rank 3 in a run.',
+    base: false,
+    art: '',
+  },
+  {
+    id: 'wall_ride',
+    name: 'Wall Ride',
+    how: 'Jump into a cliff or a ruin wall at an angle (or hold JUMP into it at speed): ride along the face, then JUMP to kick off it.',
+    unlockHint: 'Defeat a boss.',
+    base: false,
+    art: '',
+  },
+  {
+    id: 'manual',
+    name: 'Nose Manual',
+    how: 'Double-tap W: rock onto the nose and glide with almost no drag. Keep it balanced with W / S, JUMP to pop a nollie out of it, double-tap W to set it down.',
+    unlockHint: 'Reach Bounty Rank 6 in a run.',
+    base: false,
+    art: '',
+  },
+  {
+    id: 'dune_surf',
+    name: 'Dune Surf',
+    how: 'Hold JUMP to tuck down a dune face or a living-sand wave: the slope pours its speed into the board.',
+    unlockHint: 'Bank a x3 style combo.',
+    base: false,
+    art: '',
   },
 ];
 

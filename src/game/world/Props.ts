@@ -15,8 +15,56 @@ import type { Anchor, ZoneDef } from './RegionGen';
 import type { Collider } from './Colliders';
 import { RNG, rnd, hash2i, hash3, Noise } from '../../engine/math/rand';
 import { VoxelModel as VM, unkey, downsampleModel, mix as mixRGB, mulRGB } from '../../engine/voxel/VoxelModel';
+import { ruinify, ruinSpots, RuinOpts, RuinSpots, NOCOL, cobweb, spiderNest, plankDebris, outpostTower, oasisReeds, oasisFlowers, lilyPads } from '../models/props/ruins';
+import { globalUniforms, atmoFogUniforms } from '../../engine/render/VoxelMaterial';
+import { PRESETS } from './Env';
 
-type SM = { model: VoxelModel; voxelSize: number; meta?: any; anchor?: [number, number, number]; rotor?: VoxelModel; rotorPivot?: any; rotorAt?: any };
+type SM = {
+  model: VoxelModel;
+  voxelSize: number;
+  meta?: any;
+  anchor?: [number, number, number];
+  rotor?: VoxelModel;
+  rotorPivot?: any;
+  rotorAt?: any;
+  /** geometry origin in voxel coords (ruins keep the intact building's bottom-centre so meta.entrance stays exact) */
+  pivot?: [number, number, number];
+  /** an abandoned ruin: interior spots for loot, nests, egg sacs and webs */
+  ruin?: RuinSpots;
+};
+
+// ---------------------------------------------------------------------------
+// Abandoned desert: every building is a ruin (see models/props/ruins.ts)
+const SAND_COLS = new Set([0xf0d29a, 0xd9b276]);
+/** wreck a building model, keeping its original bottom-centre pivot */
+function ruined(sm: SM | null, o: Partial<RuinOpts> & { seed: number }): SM | null {
+  if (!sm?.model) return sm;
+  const b = sm.model.bounds();
+  const pivot: [number, number, number] = [(b.minX + b.maxX + 1) / 2, b.minY, (b.minZ + b.maxZ + 1) / 2];
+  const model = ruinify(sm.model, { vs: sm.voxelSize, entrance: sm.meta?.entrance, ...o });
+  let rotor = sm.rotor;
+  if (rotor) {
+    // the windmill's sails: blades snapped off, slats missing
+    const rb = rotor.bounds();
+    const hx = (rb.minX + rb.maxX + 1) / 2, hy = (rb.minY + rb.maxY + 1) / 2;
+    const r = new VM(rotor.name + '_ruin');
+    const gone = (o.seed * 3) % 4;
+    rotor.forEach((x, y, z, c, f) => {
+      const a = Math.atan2(y + 0.5 - hy, x + 0.5 - hx), d = Math.hypot(x + 0.5 - hx, y + 0.5 - hy);
+      const sector = Math.floor(((a + Math.PI) / (Math.PI * 2)) * 8) % 8;
+      if (d > 6 && (sector === gone * 2 || (sector === (gone * 2 + 5) % 8 && d > 14) || hash3(x, y, 7) < 0.12)) return;
+      r.set(x, y, z, mixRGB(c, 0xd0c4aa, 0.45), f);
+    });
+    rotor = r;
+  }
+  return { ...sm, model, rotor, pivot, ruin: ruinSpots(model, sm.voxelSize, pivot) };
+}
+const ruinMemo = new Map<string, SM | null>();
+const memoRuin = (key: string, f: () => SM | null) => {
+  if (!ruinMemo.has(key)) ruinMemo.set(key, f());
+  return ruinMemo.get(key)!;
+};
+
 
 interface KindDef {
   variants: number;
@@ -141,7 +189,7 @@ const KINDS: Record<string, KindDef> = {
   bush: { variants: 4, build: (v) => P.dryBush(v), solid: 'none', foliage: true },
   deadBush: { variants: 12, build: (v) => deadBush(v), solid: 'none', foliage: true },
   dryGrass: { variants: 8, build: (v) => dryGrass(v), solid: 'none', foliage: true },
-  reeds: { variants: 3, build: (v) => P.dryBush(v + 10), solid: 'none', foliage: true },
+  reeds: { variants: 4, build: (v) => oasisReeds(v + 4), solid: 'none', foliage: true },
   palm: { variants: 4, build: (v) => P.palm(v), solid: 'circle', radius: 0.12, foliage: true },
   skull: { variants: 1, build: () => P.skull('cow'), solid: 'none' },
   giantSkull: { variants: 1, build: () => P.skull('giant'), solid: 'voxel' },
@@ -162,20 +210,32 @@ const KINDS: Record<string, KindDef> = {
   mineCart: { variants: 2, build: (v) => P.mineCart(v), solid: 'circle', radius: 0.6 },
   mineEntrance: { variants: 1, build: () => P.railSegment(6, 2), solid: 'none' },
   wagon: { variants: 2, build: (v) => P.wagon(v), solid: 'voxel', unique: true },
-  tent: { variants: 3, build: (v) => P.tent(v), solid: 'voxel' },
+  tent: { variants: 3, build: (v) => ruined(P.tent(v), { seed: 101 + v, collapse: 0.15, breach: 0, tear: 0.45, lean: 0.06, sand: 0.3 }), solid: 'voxel' },
   campfire: { variants: 1, build: () => P.campfire(1), solid: 'circle', radius: 0.5 },
   wantedBoard: { variants: 2, build: (v) => P.wantedBoard(v), solid: 'voxel' },
   well: { variants: 1, build: () => P.well(0), solid: 'circle', radius: 0.6 },
   trough: { variants: 1, build: () => P.trough(0), solid: 'box' },
-  shack: { variants: 4, build: (v) => P.shack(v), solid: 'voxel', unique: true },
-  watchtower: { variants: 1, build: () => P.watchtower(0), solid: 'voxel', unique: true },
-  windmill: { variants: 1, build: () => P.windmill(0), solid: 'voxel', unique: true },
-  waterTower: { variants: 1, build: () => P.waterTower(0), solid: 'voxel', unique: true },
-  outhouse: { variants: 1, build: () => P.outhouse(0), solid: 'voxel', unique: true, destructible: { hp: 60, material: 'wood' } },
-  gallows: { variants: 1, build: () => P.gallows(0), solid: 'voxel', unique: true },
-  saloonFacade: { variants: 1, build: () => P.saloonFacade(0), solid: 'voxel', unique: true },
-  sheriffFacade: { variants: 1, build: () => P.sheriffFacade(0), solid: 'voxel', unique: true },
-  storeFacade: { variants: 1, build: () => P.generalStoreFacade(0), solid: 'voxel', unique: true },
+  // every building out here is abandoned: caved-in, breached, bleached, half-buried in sand
+  shack: { variants: 4, build: (v) => ruined(P.shack(v), { seed: 11 + v, collapse: 0.85, breach: 1.1, sand: 0.6 }), solid: 'voxel', unique: true },
+  watchtower: { variants: 1, build: () => ruined(P.watchtower(0), { seed: 21, collapse: 0.5, keepBelow: 4.6, breach: 0, lean: 0.03, sand: 0.4 }), solid: 'voxel', unique: true },
+  windmill: { variants: 1, build: () => ruined(P.windmill(0), { seed: 31, collapse: 0.3, keepBelow: 3, breach: 0, lean: 0.03, sand: 0.4 }), solid: 'voxel', unique: true },
+  waterTower: { variants: 1, build: () => ruined(P.waterTower(0), { seed: 41, collapse: 0.35, keepBelow: 4.4, breach: 0, lean: 0.03, sand: 0.45 }), solid: 'voxel', unique: true },
+  outhouse: { variants: 1, build: () => ruined(P.outhouse(0), { seed: 51, collapse: 0.45, breach: 0.4, lean: 0.12, sand: 0.4 }), solid: 'voxel', unique: true, destructible: { hp: 60, material: 'wood' } },
+  gallows: { variants: 1, build: () => ruined(P.gallows(0), { seed: 61, collapse: 0.25, breach: 0, lean: 0.05, sand: 0.35 }), solid: 'voxel', unique: true },
+  saloonFacade: { variants: 1, build: () => ruined(P.saloonFacade(0), { seed: 71, collapse: 0.75, breach: 0.9 }), solid: 'voxel', unique: true },
+  sheriffFacade: { variants: 1, build: () => ruined(P.sheriffFacade(0), { seed: 81, collapse: 0.75, breach: 0.9 }), solid: 'voxel', unique: true },
+  storeFacade: { variants: 1, build: () => ruined(P.generalStoreFacade(0), { seed: 91, collapse: 0.8, breach: 0.9 }), solid: 'voxel', unique: true },
+  // spider country: webs strung across corners and doorways, funnel-web nests, broken planks
+  cobweb: { variants: 5, build: (v) => cobweb(v), solid: 'none' },
+  spiderNest: { variants: 3, build: (v) => spiderNest(v), solid: 'none' },
+  plankDebris: { variants: 4, build: (v) => plankDebris(v), solid: 'none' },
+  // tall ruined lookout towers (grapple to the top for the loot)
+  outpost: { variants: 2, build: (v, a) => outpostTower(a.data?.variant ?? v), solid: 'voxel', unique: true, grapple: true },
+  // oasis life
+  oasisReeds: { variants: 4, build: (v) => oasisReeds(v), solid: 'none', foliage: true },
+  oasisFlowers: { variants: 4, build: (v) => oasisFlowers(v), solid: 'none', foliage: true },
+  lilyPads: { variants: 2, build: (v) => lilyPads(v), solid: 'none' },
+  rug: { variants: 2, build: (v) => P.rug(v), solid: 'none' },
   obelisk: { variants: 2, build: (v) => P.obelisk(v, false), solid: 'circle', radius: 0.5, unique: true },
   obeliskBroken: { variants: 2, build: (v) => P.obelisk(v + 4, true), solid: 'circle', radius: 0.5, unique: true },
   column: { variants: 2, build: (v, a) => P.column(v, !!a.data?.broken), solid: 'circle', radius: 0.45, unique: true },
@@ -199,11 +259,12 @@ const LANDMARKS: Record<string, () => SM> = {
   // Missions); his landmark is just the campfire he plods round, so the mission
   // scan and the escort routes still find "the trading post"
   tradingPost: () => ({ ...P.campfire(3), meta: { entrance: [0, 3], footprint: [6, 6], height: 1.5, caravanCamp: true } }),
-  outlawFort: () => P.outlawFort(2),
-  mineHeadframe: () => P.mineHeadframe(3),
-  ranchBarn: () => P.ranchBarn(4),
-  sheriffOffice: () => P.sheriffOffice(5),
-  saloon: () => P.saloon(6),
+  // the rest are ghost towns now: abandoned, caved in and full of spiders (built once per type)
+  outlawFort: () => memoRuin('outlawFort', () => ruined(P.outlawFort(2), { seed: 201, collapse: 0.55, breach: 0.5, sand: 0.7 }))!,
+  mineHeadframe: () => memoRuin('mineHeadframe', () => ruined(P.mineHeadframe(3), { seed: 202, collapse: 0.35, keepBelow: 3.2, breach: 0.5, lean: 0.025, sand: 0.6 }))!,
+  ranchBarn: () => memoRuin('ranchBarn', () => ruined(P.ranchBarn(4), { seed: 203, collapse: 0.85, breach: 0.8, sand: 0.7 }))!,
+  sheriffOffice: () => memoRuin('sheriffOffice', () => ruined(P.sheriffOffice(5), { seed: 204, collapse: 0.8, breach: 0.9, sand: 0.6 }))!,
+  saloon: () => memoRuin('saloon', () => ruined(P.saloon(6), { seed: 205, collapse: 0.75, breach: 0.8, sand: 0.6 }))!,
 };
 
 interface Variant {
@@ -243,6 +304,40 @@ export interface PropInst {
   extra?: any;
 }
 
+// oasis pool water (same look as the sub-area sea: pixel ripples, depth tint, shoreline foam, glints, sky sheen)
+const POOL_VERT = /* glsl */ `
+attribute float aDepth;
+varying vec3 vW;
+varying float vD;
+#include <fog_pars_vertex>
+void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vD = aDepth; vec4 mvPosition = viewMatrix * w; gl_Position = projectionMatrix * mvPosition;
+#include <fog_vertex>
+}`;
+const POOL_FRAG = /* glsl */ `
+uniform float uTime; uniform vec3 uDeep, uShallow, uSky;
+varying vec3 vW;
+varying float vD;
+#include <fog_pars_fragment>
+float h12(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
+void main(){
+  if (vD < 0.0) discard;
+  vec2 px = floor(vW.xz * 4.0) / 4.0;
+  float w1 = sin(px.x * 0.9 + uTime * 1.1) * cos(px.y * 0.8 - uTime * 0.9);
+  float w2 = sin(px.x * 2.1 - px.y * 1.5 + uTime * 1.7);
+  float depth = clamp(vD, 0.0, 1.6) / 1.6;
+  vec3 col = mix(uShallow, uDeep, smoothstep(0.0, 1.0, depth));
+  col += (w1 * 0.035 + w2 * 0.025);
+  float glint = step(0.986, h12(px + floor(uTime * 3.0))) * 0.55;
+  float foam = smoothstep(0.1, 0.0, vD) * (0.55 + 0.45 * step(0.5, fract(w2 * 2.0)));
+  col = mix(col, vec3(0.93, 0.96, 0.9), foam);
+  col += glint;
+  float fr = pow(1.0 - clamp(normalize(cameraPosition - vW).y, 0.0, 1.0), 4.0);
+  col = mix(col, uSky, 0.12 + 0.45 * fr);
+  gl_FragColor = vec4(col, mix(0.82, 0.55, foam));
+  #include <fog_fragment>
+  #include <colorspace_fragment>
+}`;
+
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -257,13 +352,18 @@ export class Props {
   batches: Batch[] = [];
   onBreak?: (p: PropInst, spd: number, dir?: THREE.Vector3) => void;
   private rng = new RNG(1234);
+  /** ruined landmark geometry, shared by every zone that has one */
+  private lmVariants = new Map<string, Variant>();
+  /** oasis pools (local water surfaces in the dry sub-areas) */
+  pools: { x: number; z: number; r: number; level: number; mesh: THREE.Mesh }[] = [];
   private lastLodPos = new THREE.Vector3(1e9, 0, 0);
   lodNear = 55;
 
   private lod(v: Variant) {
     if (!v.lodGeo) {
       const ds = downsampleModel(v.sm.model, 2);
-      v.lodGeo = ds.count > 0 ? buildVoxelGeometry(ds, { voxelSize: v.sm.voxelSize * 2, pivot: 'bottom' }) : v.geo;
+      const pv = v.sm.pivot;
+      v.lodGeo = ds.count > 0 ? buildVoxelGeometry(ds, { voxelSize: v.sm.voxelSize * 2, pivot: pv ? [pv[0] / 2, pv[1] / 2, pv[2] / 2] : 'bottom' }) : v.geo;
     }
     return v.lodGeo;
   }
@@ -300,7 +400,7 @@ export class Props {
       console.warn('[props] build failed', kind, e);
     }
     if (!sm || !sm.model) return null;
-    const geo = buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: 'bottom' });
+    const geo = buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot ?? 'bottom' });
     geo.computeBoundingBox();
     const bb = geo.boundingBox!;
     vr = { sm, geo, mesh: null, count: 0, cap: 0, height: bb.max.y - bb.min.y, halfX: (bb.max.x - bb.min.x) / 2, halfZ: (bb.max.z - bb.min.z) / 2 };
@@ -316,17 +416,35 @@ export class Props {
     // gather per variant counts first for instanced capacity
     const plan: { a: Anchor; kind: string; v: Variant }[] = [];
     const zoneBatches = new Map<string, Batch>();
+    const extra: Anchor[] = [];
+    const planOf = (a: Anchor) => {
+      const def = KINDS[a.kind];
+      if (!def) return null;
+      let v = hash2i(Math.round(a.x * 10), Math.round(a.z * 10)) % def.variants;
+      if (typeof a.data?.variant === 'number') v = a.data.variant % def.variants;
+      const vr = this.variant(a.kind, v, a);
+      return vr ? { a, kind: a.kind, v: vr } : null;
+    };
     for (const a of [...z.anchors, ...this.rimAnchors(z)]) {
       if (a.kind === 'landmark') {
-        this.addLandmark(z, a);
+        this.addLandmark(z, a, extra);
         continue;
       }
-      const def = KINDS[a.kind];
-      if (!def) continue;
-      const v = hash2i(Math.round(a.x * 10), Math.round(a.z * 10)) % def.variants;
-      const vr = this.variant(a.kind, v, a);
-      if (!vr) continue;
-      plan.push({ a, kind: a.kind, v: vr });
+      if (a.kind === 'oasisPool') {
+        this.addPool(a);
+        continue;
+      }
+      const p = planOf(a);
+      if (!p) continue;
+      plan.push(p);
+      if (p.v.sm.ruin) {
+        a.rot ??= this.rng.range(0, Math.PI * 2);
+        this.ruinDecor(a, p.v, a.rot, a.scale ?? 1, this.world.groundAt(a.x, a.z) - 0.05, extra, false);
+      }
+    }
+    for (const a of extra) {
+      const p = planOf(a);
+      if (p) plan.push(p);
     }
     for (const { a, kind, v } of plan) {
       const def = KINDS[kind];
@@ -335,6 +453,7 @@ export class Props {
       const rot = a.rot ?? this.rng.range(0, Math.PI * 2);
       let y = g - 0.05;
       if (kind === 'capstone') y = a.data?.y ?? g;
+      else if (typeof a.data?.y === 'number') y = a.data.y;
       if (RIM_KINDS.has(kind)) {
         // stand on the lowest sand under the footprint, the base row buried
         const w = this.world.groundAt;
@@ -367,7 +486,7 @@ export class Props {
           holder.matrix.copy(matrix);
           holder.add(rm);
           this.group.add(holder);
-          this.rotors.push({ mesh: rm, speed: 1.2 + this.rng.next() });
+          this.rotors.push({ mesh: rm, speed: v.sm.ruin ? 0.12 + this.rng.next() * 0.25 : 1.2 + this.rng.next() });
         }
       } else {
         const bkey = z.index + ':' + kind + ':' + this.variantKey(v);
@@ -397,6 +516,14 @@ export class Props {
         const an = v.sm.anchor;
         const c = this.world.colliders.circle(a.x + an[0], a.z + an[2], 0.8, y + an[1] - 1, y + an[1] + 1, { tag: 'grapple', solid: false, bullets: false });
         inst.colliders.push(c);
+      }
+      if (kind === 'outpost' && v.sm.meta?.anchor) {
+        // the lookout: a grapple point at the top, the loot platform for RuinNests
+        const cs = Math.cos(rot), sn = Math.sin(rot);
+        const at = (p: [number, number, number]) => ({ x: a.x + (p[0] * cs + p[2] * sn) * sc, y: y + p[1] * sc, z: a.z + (-p[0] * sn + p[2] * cs) * sc });
+        const an = at(v.sm.meta.anchor);
+        inst.colliders.push(this.world.colliders.circle(an.x, an.z, 0.9, an.y - 1, an.y + 1, { tag: 'grapple', solid: false, bullets: false }));
+        a.data = { ...(a.data ?? {}), top: at(v.sm.meta.top), grapple: an };
       }
       this.list.push(inst);
     }
@@ -501,10 +628,13 @@ export class Props {
   private voxelColliders(v: Variant, x: number, z: number, rot: number, sc: number, y0: number, g: number) {
     const vs = v.sm.voxelSize * sc;
     const b = v.sm.model.bounds();
-    const cx = (b.minX + b.maxX + 1) / 2, cz = (b.minZ + b.maxZ + 1) / 2, by = b.minY;
+    const pv = v.sm.pivot;
+    const cx = pv ? pv[0] : (b.minX + b.maxX + 1) / 2, cz = pv ? pv[2] : (b.minZ + b.maxZ + 1) / 2, by = pv ? pv[1] : b.minY;
     const cell = 1.0;
     const occ = new Map<string, number>(); // key -> top height
-    for (const [k] of v.sm.model.map) {
+    for (const [k, val] of v.sm.model.map) {
+      // drifted sand, rubble, silk and cloth scraps never block the board
+      if ((val >>> 24) & NOCOL || SAND_COLS.has(val & 0xffffff)) continue;
       const [vx, vy, vz] = unkey(k);
       const ly = (vy - by) * vs;
       if (ly < 0.15 || ly > 2.6) continue;
@@ -546,7 +676,7 @@ export class Props {
     return out;
   }
 
-  private addLandmark(z: ZoneDef, a: Anchor) {
+  private addLandmark(z: ZoneDef, a: Anchor, extra: Anchor[] = []) {
     const type = a.data?.type as string;
     const mk = LANDMARKS[type];
     if (!mk) return;
@@ -558,10 +688,14 @@ export class Props {
       console.warn('[props] landmark failed', type, e);
       return;
     }
-    const geo = buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: 'bottom' });
-    geo.computeBoundingBox();
-    const bb = geo.boundingBox!;
-    const v: Variant = { sm, geo, mesh: null, count: 1, cap: 1, height: bb.max.y - bb.min.y, halfX: (bb.max.x - bb.min.x) / 2, halfZ: (bb.max.z - bb.min.z) / 2 };
+    let v = this.lmVariants.get(type);
+    if (!v) {
+      const geo = buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot ?? 'bottom' });
+      geo.computeBoundingBox();
+      const bb = geo.boundingBox!;
+      v = { sm, geo, mesh: null, count: 1, cap: 1, height: bb.max.y - bb.min.y, halfX: (bb.max.x - bb.min.x) / 2, halfZ: (bb.max.z - bb.min.z) / 2 };
+      if (sm.ruin) this.lmVariants.set(type, v);
+    }
     const g = this.world.groundAt(a.x, a.z);
     // entrance faces zone center: model fronts face +Z -> rotate so +Z points along anchor rot
     const rot = Math.PI / 2 - (a.rot ?? 0);
@@ -574,9 +708,142 @@ export class Props {
     this.group.add(mesh);
     const inst: PropInst = { kind: 'landmark', anchor: a, zone: z.index, variant: v, index: -1, mesh, matrix, colliders: [], hp: 0, broken: false, baseY: g, extra: { type, meta: sm.meta, rot } };
     inst.colliders = this.voxelColliders(v, a.x, a.z, rot, 1, g - 0.5, g);
+    if (sm.ruin) this.ruinDecor(a, v, rot, 1, g - 0.1, extra, true);
     this.list.push(inst);
     this.landmarks.push(inst);
     console.log(`[props] landmark ${type} built in ${(performance.now() - t0).toFixed(0)}ms`);
+  }
+
+  /**
+   * Dress a ruin from its interior analysis: webs in the high corners and across the
+   * doorway, a funnel-web nest, egg sacs, pots and a crate on the floor, broken planks,
+   * bones and a skull around it. The loot / spider spots for RuinNests are written to
+   * the building's anchor as `data.ruin` (world space).
+   */
+  private ruinDecor(a: Anchor, v: Variant, rot: number, sc: number, baseY: number, out: Anchor[], big: boolean) {
+    const sp = v.sm.ruin;
+    if (!sp) return;
+    const rng = new RNG(hash2i(Math.round(a.x * 7), Math.round(a.z * 7)) + 99);
+    const cs = Math.cos(rot), sn = Math.sin(rot);
+    const W = (lx: number, lz: number) => ({ x: a.x + (lx * cs + lz * sn) * sc, z: a.z + (-lx * sn + lz * cs) * sc });
+    const ent = v.sm.meta?.entrance as [number, number] | undefined;
+    const door = ent ?? [0, 0];
+    const fp = (v.sm.meta?.footprint as [number, number] | undefined) ?? [v.halfX * 2, v.halfZ * 2];
+    const radius = Math.hypot(fp[0], fp[1]) * 0.5 * sc;
+    const used: { x: number; z: number }[] = [];
+    const free = (x: number, z: number, d: number) => !used.some((u) => Math.hypot(u.x - x, u.z - z) < d);
+    const take = (x: number, z: number) => used.push({ x, z });
+    // floor spots, furthest from the door first (the back of the room), walls preferred
+    const spots = sp.interior.filter((c) => c.walls > 0).sort((p, q) => Math.hypot(q.x - door[0], q.z - door[1]) - Math.hypot(p.x - door[0], p.z - door[1]));
+    const roomy = sp.interior.length >= (big ? 12 : 6);
+    const info: any = { chest: null, nests: [], eggs: [], drops: [], cx: a.x, cz: a.z, r: radius, big, y: baseY };
+    // the loot: a chest at the back of the room
+    const chest = roomy ? spots[0] : undefined;
+    if (chest) {
+      const w = W(chest.x, chest.z);
+      info.chest = { x: w.x, y: baseY + chest.y * sc, z: w.z, rot: rot + Math.atan2(door[0] - chest.x, door[1] - chest.z) };
+      take(chest.x, chest.z);
+    }
+    // the nest: deep in the room, away from the chest
+    if (roomy) {
+      const ns = spots.find((c) => free(c.x, c.z, big ? 4 : 2.2));
+      if (ns) {
+        const w = W(ns.x, ns.z);
+        out.push({ kind: 'spiderNest', x: w.x, z: w.z, rot: rng.range(0, Math.PI * 2), data: { y: baseY + ns.y * sc - 0.08 } });
+        info.nests.push({ x: w.x, y: baseY + ns.y * sc, z: w.z, alpha: big && rng.chance(0.5) });
+        take(ns.x, ns.z);
+      }
+    }
+    // webs in the high corners (spiders drop from these)
+    const nWeb = big ? 5 : 2;
+    let webs = 0;
+    for (const c of rng.shuffle(sp.corners.slice())) {
+      if (webs >= nWeb || !free(c.x, c.z, 1.6)) continue;
+      const w = W(c.x, c.z);
+      const top = baseY + c.top * sc;
+      out.push({ kind: 'cobweb', x: w.x, z: w.z, rot: rot + c.rot, scale: 1, data: { y: top - 1.35, variant: rng.int(0, 2) } });
+      info.drops.push({ x: w.x, y: top - 0.3, z: w.z });
+      take(c.x, c.z);
+      webs++;
+      // an egg clutch under some of the webs
+      if (info.eggs.length < (big ? 2 : 1) && rng.chance(0.7)) info.eggs.push({ x: w.x, y: baseY + c.y * sc, z: w.z, rot: rot + c.rot });
+    }
+    // a tattered web across the doorway
+    if (ent && sp.interior.length) {
+      const near = sp.interior.reduce((p, q) => (Math.hypot(q.x - ent[0], q.z - ent[1]) < Math.hypot(p.x - ent[0], p.z - ent[1]) ? q : p));
+      const w = W(near.x, near.z);
+      out.push({ kind: 'cobweb', x: w.x, z: w.z, rot: rot + Math.atan2(ent[0], ent[1]), scale: 1, data: { y: baseY + near.y * sc + 0.25, variant: 3 + rng.int(0, 1) } });
+      info.drops.push({ x: w.x, y: baseY + near.y * sc + 2.4, z: w.z });
+    }
+    // breakables on the floor: pots and a crate (loot), plus the egg sacs' spots kept clear
+    const nPots = big ? 3 : 1 + rng.int(0, 1);
+    let pots = 0;
+    for (const c of spots) {
+      if (pots >= nPots) break;
+      if (!free(c.x, c.z, 1.3)) continue;
+      const w = W(c.x, c.z);
+      out.push({ kind: pots === 0 && rng.chance(0.5) ? 'crate' : 'pot', x: w.x, z: w.z, rot: rng.range(0, 6.28), scale: rng.range(0.85, 1.05), data: { y: baseY + c.y * sc - 0.04 } });
+      take(c.x, c.z);
+      pots++;
+    }
+    // outside: broken planks, bones and a bleached skull in the drifts
+    const nDeb = big ? 4 : 1 + rng.int(0, 1);
+    for (let i = 0; i < nDeb; i++) {
+      const ang = rng.range(0, Math.PI * 2), d = radius + rng.range(0.5, 3);
+      out.push({ kind: 'plankDebris', x: a.x + Math.cos(ang) * d, z: a.z + Math.sin(ang) * d, rot: rng.range(0, 6.28), scale: 1 });
+    }
+    for (let i = 0; i < (big ? 2 : 1); i++) {
+      const ang = rng.range(0, Math.PI * 2), d = radius * rng.range(0.6, 1.1) + 1;
+      out.push({ kind: rng.chance(0.6) ? 'boneScatter' : 'skull', x: a.x + Math.cos(ang) * d, z: a.z + Math.sin(ang) * d, rot: rng.range(0, 6.28), scale: 1 });
+    }
+    a.data = { ...(a.data ?? {}), ruin: info };
+  }
+
+  /** a local oasis pool (dry sub-areas have no sea level): a water surface clipped to the carved basin */
+  private addPool(a: Anchor) {
+    const lvl = a.data?.level as number | undefined;
+    const r = (a.data?.r as number | undefined) ?? 9;
+    if (lvl === undefined || lvl <= this.world.sa.waterLevel + 0.05) return;
+    const R = r * 1.45, step = 0.5;
+    const n = Math.ceil((R * 2) / step) + 1;
+    const pos: number[] = [], depth: number[] = [], idx: number[] = [];
+    for (let j = 0; j < n; j++)
+      for (let i = 0; i < n; i++) {
+        const x = a.x - R + i * step, z = a.z - R + j * step;
+        pos.push(x, lvl, z);
+        depth.push(lvl - this.world.sa.field.heightSmooth(x, z));
+      }
+    for (let j = 0; j < n - 1; j++)
+      for (let i = 0; i < n - 1; i++) {
+        const k = i + j * n;
+        const q = [k, k + 1, k + n, k + n + 1];
+        if (q.every((t) => depth[t] < -0.05)) continue;
+        idx.push(k, k + n, k + 1, k + 1, k + n, k + n + 1);
+      }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('aDepth', new THREE.Float32BufferAttribute(depth, 1));
+    geo.setIndex(idx);
+    geo.computeBoundingSphere();
+    const env = PRESETS[this.world.sa.env];
+    const mat = new THREE.ShaderMaterial({
+      vertexShader: POOL_VERT,
+      fragmentShader: POOL_FRAG,
+      transparent: true,
+      fog: true,
+      uniforms: {
+        ...atmoFogUniforms(),
+        uTime: globalUniforms.uTime,
+        uDeep: { value: new THREE.Color(0x1f6a6e) },
+        uShallow: { value: new THREE.Color(0x63c4b0) },
+        uSky: { value: new THREE.Color(env.zenith).lerp(new THREE.Color(env.fog), 0.45) },
+      },
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 3;
+    mesh.receiveShadow = false;
+    this.group.add(mesh);
+    this.pools.push({ x: a.x, z: a.z, r, level: lvl, mesh });
   }
 
   /** world position of a landmark-local point (meta.entrance etc.) */

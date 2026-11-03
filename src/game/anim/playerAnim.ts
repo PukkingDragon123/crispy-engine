@@ -1148,6 +1148,7 @@ export class PlayerAnim {
 
   /** gun root (the wrist): reload roll/pitch, recoil snap, the twirl, barrel correction */
   finish(I: PlayerAnimIn) {
+    (I.rig as unknown as { itemUse?: (i: PlayerAnimIn, a: unknown) => void }).itemUse?.(I, this); // consumable use overlay (anim/itemUseAnim.ts)
     const g = I.gun.root;
     this.e0.set(this.wristPitch * (1 - this.armActR) + this.twirl, 0, this.wristRoll * (1 - this.armActR));
     g.quaternion.setFromEuler(this.e0);

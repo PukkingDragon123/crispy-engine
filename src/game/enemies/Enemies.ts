@@ -19,6 +19,8 @@ import { EnemyAnim, animateEnemy, AnimEnv, GETUP } from '../anim/enemyAnim';
 const RANGED = new Set(['burst', 'fan', 'ring', 'spiral', 'snipe', 'lob', 'volley', 'stream']);
 /** hit sources that are damage-over-time ticks (no flinch, no poise, no impact fx) */
 const DOT = new Set(['poison', 'bleed', 'burn']);
+/** loose gear and cloth the scarab swarm gnaws off first */
+const GEAR = /^(hat|coat|wig|weapon|shield|mask|crown|bone_crown|cactus|bomb|board|purse|key|sack|cape|scarf|bandana|bandage|cloth|belt|guitar|bow|whip|lasso|weed|plume|charm)/;
 /** multi-kill tiers: kills inside the chain window → callout */
 const MULTI: [number, string, string][] = [
   [2, 'DOUBLE KILL', '#ffe28a'],
@@ -224,6 +226,10 @@ export class Enemy implements EnemyLike {
   coughCd = 0;
   /** poison stacks last shown as a venom count */
   venomShown = 0;
+  /** scarab swarm: seconds of being eaten left (thrashing, can't fight back), share eaten 0..1, pieces gnawed off */
+  eatenT = 0;
+  eaten = 0;
+  gnawed = 0;
   cds: number[];
   scale: number;
   dmgMul: number;
@@ -385,6 +391,9 @@ export class Enemies implements EnemyApi {
   /** multi-kill chain: count, time of the last kill, best tier announced, settle timer */
   private mk = { n: 0, t: -99, shown: 0, pending: 0 };
   private coughSfxT = 0;
+  private gnawSfxT = 0;
+  /** extra rigged instances drawn with the horde each frame (skills push into a RigBatch: the scarab swarm) */
+  drawHooks: ((render: EnemyRender) => void)[] = [];
   private grid = new Map<number, Enemy[]>();
   private laserMat = new THREE.LineBasicMaterial({ color: 0xff3020, transparent: true, opacity: 0.85 });
 
@@ -847,6 +856,100 @@ export class Enemies implements EnemyApi {
     return true;
   }
 
+  // ------------------------------------------------------------- scarab swarm: eaten alive
+  /**
+   * The scarab swarm is on it (called per feeding tick by the skill): it thrashes
+   * and can't fight back, and every quarter of it eaten something is gnawed off —
+   * hat, coat, bandages, weapon first, then hands, ears, tails, jaws.
+   */
+  feed(target: EnemyLike, bites: number) {
+    if (!(target instanceof Enemy) || !target.alive) return;
+    const e = target;
+    e.eatenT = 0.7;
+    e.eaten = Math.max(e.eaten, 1 - e.hp / Math.max(1, e.maxHp));
+    const s = e.state;
+    const big = e.def.ai === 'tank' || e.def.ai === 'charger' || e.alpha;
+    if (s === 'windup' || s === 'move' || s === 'recover' || s === 'strike' || s === 'stagger') this.stagger(e, big ? 0.3 : 0.55);
+    // stumbling, swatting at itself
+    const j = Math.min(3, 1 + bites * 0.12) / Math.sqrt(e.scale);
+    e.vel.x += (rnd.next() - 0.5) * j;
+    e.vel.z += (rnd.next() - 0.5) * j;
+    const due = Math.min(5, Math.floor(e.eaten * 4 + 0.4));
+    while (e.gnawed < due) {
+      e.gnawed++;
+      this.gnaw(e);
+    }
+  }
+
+  /** chew one thing off: loose gear and cloth drop away in tatters; late on, hands and ears go (with the gore) */
+  private gnaw(e: Enemy) {
+    const ctx = this.ctx;
+    const parts = e.batch.geo.parts;
+    const pick = (re: RegExp) => {
+      const c: number[] = [];
+      parts.forEach((p, j) => {
+        if (!e.hidden[j] && p.parent >= 0 && re.test(p.name)) c.push(j);
+      });
+      return c.length ? c[Math.floor(rnd.next() * c.length)] : -1;
+    };
+    const hx = e.pos.x, hy = e.pos.y + e.height * 0.6, hz = e.pos.z;
+    let j = pick(GEAR);
+    const late = e.gnawed >= 3;
+    if (j < 0 && late) {
+      const limb = pick(/^(hand|fore|ear|horn|antenna|tail|pincer|frill|brow|tongue)/);
+      if (limb >= 0) {
+        const a = rnd.next() * Math.PI * 2;
+        this.detach(e, parts[limb].name, Math.sin(a) * 0.3, Math.cos(a) * 0.3);
+        return;
+      }
+    }
+    const hk = e.def.hitKind;
+    if (j >= 0) {
+      // the piece and everything on it drops away, chewed loose
+      const W = this.poseWorld(e);
+      const before = new Set<number>();
+      parts.forEach((_, k) => e.hidden[k] && before.add(k));
+      const hideRec = (k: number) => {
+        e.hidden[k] = 1;
+        parts.forEach((p, q) => p.parent === k && hideRec(q));
+      };
+      hideRec(j);
+      parts.forEach((_, k) => {
+        if (!e.hidden[k] || before.has(k)) return;
+        const r = this.spawnPiece(e, k, (rnd.next() - 0.5) * 2.4, 1 + rnd.next() * 1.6, (rnd.next() - 0.5) * 2.4, W);
+        r.ang.multiplyScalar(0.4);
+        r.life += 3;
+      });
+      const at = new THREE.Vector3().setFromMatrixPosition(W[j]);
+      ctx.fx.hit(at, { x: 0, y: 1, z: 0 }, hk === 'linen' || hk === 'wood' ? hk : 'linen', 1.1);
+    } else ctx.fx.hit({ x: hx, y: hy, z: hz }, { x: 0, y: 1, z: 0 }, hk, 1.3);
+    if (this.now - this.gnawSfxT > 0.15) {
+      this.gnawSfxT = this.now;
+      ctx.sfx(hk === 'linen' || hk === 'flesh' || hk === 'wood' ? 'bandage' : hk === 'bone' ? 'hit_bone' : 'hit_armor', { x: hx, y: hy, z: hz }, 0.55, 1.15 + rnd.next() * 0.2);
+    }
+  }
+
+  /** eaten to death: no fall, no fountain — the bones / pieces just fall apart where it stood, picked pale */
+  private pickedClean(e: Enemy, c: { x: number; y: number; z: number }) {
+    const ctx = this.ctx;
+    const W = this.poseWorld(e);
+    const parts = e.batch.geo.parts;
+    const bony = e.def.hitKind === 'bone';
+    parts.forEach((p, j) => {
+      if (e.hidden[j]) return;
+      const head = p.name === 'head' || p.name === 'hat';
+      const r = this.spawnPiece(e, j, (rnd.next() - 0.5) * 1.8, 0.4 + rnd.next() * 1.4 + (head ? 1.2 : 0), (rnd.next() - 0.5) * 1.8, W);
+      r.ang.multiplyScalar(0.55);
+      r.life += 3.5;
+      // stripped to the bone: everything left is pale and dry
+      if (!bony) r.tint.setRGB(1.22, 1.1, 0.9);
+    });
+    ctx.particles.emit({ pos: c, count: 14, spread: 3, up: 2.5, life: [0.5, 1], size: [0.06, 0.05], sprite: ['bone', 'pebble'], color: [P.bone1, P.bone0], gravity: 15, ground: true, bounce: 0.3, rot: 6, rotSpeed: 10 });
+    ctx.fx.dust({ x: e.pos.x, y: e.pos.y + 0.3, z: e.pos.z }, 0.9 * e.scale, P.sand0, 4);
+    ctx.sfx('skeleton_rattle', c, 0.85, 0.9 + rnd.next() * 0.2);
+    ctx.sfx('limb_off', c, 0.4, 1.2);
+  }
+
   /** multi-kill chain: callouts settle a beat after the last kill so a blast reads as one big number */
   private countKill() {
     const mk = this.mk;
@@ -1108,7 +1211,10 @@ export class Enemies implements EnemyApi {
     // violent deaths send the bones flying; everything else collapses procedurally first
     const headI = e.part('head');
     const violent = !collapse && (!hit || (hit.knock ?? 0) >= 9 || hit.source === 'explosion' || hit.source === 'board' || (crit && rnd.chance(0.35)) || (headI >= 0 && e.hidden[headI] === 1));
-    if (e.sandForm) {
+    // eaten alive by the scarab swarm: what is left falls apart where it stood
+    const picked = hit?.source === 'swarm' && e.eatenT > 0 && !e.sandForm && e.skel !== 'worm' && e.skel !== 'snake';
+    if (picked) this.pickedClean(e, c);
+    else if (e.sandForm) {
       // a sand-form just falls apart into the dune
       ctx.fx.sandBurst(c, 1.3 * e.scale);
       ctx.fx.dust({ x: e.pos.x, y: e.pos.y + 0.3, z: e.pos.z }, 1.1 * e.scale, P.sand1, 5);
@@ -1417,6 +1523,7 @@ export class Enemies implements EnemyApi {
       e.flipped = Math.max(0, e.flipped - dt);
       e.poise = Math.max(0, e.poise - dt * 0.4);
       e.coughCd -= dt;
+      e.eatenT = Math.max(0, e.eatenT - dt);
       for (let k = 0; k < e.cds.length; k++) e.cds[k] -= dt;
       e.buffT = Math.max(0, e.buffT - dt);
       for (const b of bands) if (b !== e && b.pos.distanceTo(e.pos) < 12) e.buffT = Math.max(e.buffT, 0.5);
@@ -1515,6 +1622,7 @@ export class Enemies implements EnemyApi {
     };
     for (const e of this.list) if (e.alive) drawE(e);
     for (const e of this.dying) drawE(e);
+    for (const h of this.drawHooks) h(this.render);
     for (const r of this.rag) {
       _s.set(r.scale, r.scale, r.scale);
       _m.compose(r.pos, r.quat, _s);

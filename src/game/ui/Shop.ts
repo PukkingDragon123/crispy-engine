@@ -27,7 +27,7 @@ import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Input } from '../../engine/Input';
 import type { CameraRig, CineShot } from '../player/CameraRig';
-import type { RigInstance } from '../../engine/voxel/Rig';
+import { RigInstance } from '../../engine/voxel/Rig';
 import type { Collider } from '../world/Colliders';
 import * as PM from '../models/props';
 import { modelEntry } from '../models/lookup';
@@ -41,21 +41,29 @@ import { FloatText3D } from '../fx/FloatText3D';
 
 /** what the run hands her each frame so she can stage her own arrival scene */
 export interface MerchantHooks {
-  /** the hunter's board (braked to a stop when the arrival scene starts) */
-  board?: { vel: THREE.Vector3 };
+  /** the hunter's board (braked to a stop when the arrival scene starts; parked at the gangplank for a visit) */
+  board?: { vel: THREE.Vector3; pos?: THREE.Vector3; place?(x: number, y: number, z: number, heading: number): void };
   /** her wares, the same stock the T-key path uses; without it there is no arrival scene */
   stock?: () => Ware[];
   /** something else owns the screen (a mission cinematic, a notice, the hunter is dead) */
   busy?: () => boolean;
-  /** the caravan tortoise: Tamsin's rig riding on his back, and the camp he walks round */
+  /** the turtle house: Ozymandias's rig (he keeps the porch), and the camp Gobi walks round */
   rider?: RigInstance | null;
   home?: THREE.Vector3;
+  /**
+   * the hunter, for a visit inside the house: his rig (hidden while a copy of
+   * it walks up the gangplank and in at the door), his revolver (holstered on
+   * the walker) and the root his board pose is written to
+   */
+  hunter?: { rig: RigInstance; gun?: RigInstance | null; root?: THREE.Object3D };
 }
 
 const ARRIVE_R = 13; // ride inside this to be greeted
 const REARM_R = 17; // ...and out past this (for REARM_T seconds) before it can happen again
 const REARM_T = 4;
 const CALM_R = 15; // no scene with an enemy this close to the hunter
+const ARRIVE_R_T = 16; // the turtle house is big: greeted a little further out
+const DIG_R = 18; // outlaws this close to the turtle and he digs in
 
 export interface Ware {
   id: string;
@@ -79,13 +87,21 @@ const LINES = {
 
 /** Ozymandias: slow, ancient, a little pompous, kind underneath */
 const LINES_C: typeof LINES = {
-  hello: ['Welcome to the only shop that walks.', 'Everything I own is on my back. Most of it is for sale.', 'Hrrm. Take your time. I always do.'],
+  hello: ['Welcome to the only shop that walks.', 'Everything I own is in this house. Most of it is for sale.', 'Hrrm. Take your time. I always do.'],
   poor: ['No gold, no goods. Even a tortoise knows that.', 'Come back heavier, little bones.', 'I have patience. Not that much.'],
-  thanks: ['Hrrm. A fine choice.', 'Sold. I will walk a little lighter.', 'Mind how you carry it, little bones.'],
-  bye: ['Safe roads, little bones.', 'I will be around. Slowly.', 'Off you go. I will catch up in a century.'],
-  shot: ['Hrrm! I felt that through the shell.', 'Not at the shop, rider!', 'I have outlived better shots than you.'],
-  arrive: ['Hrrm. A rider. Slow down, the pots rattle.', 'Ahh... a customer. I have walked nine hundred years for this.', 'Whoa there. Mind the rug, I am unrolling it.'],
+  thanks: ['Hrrm. A fine choice.', 'Sold. Gobi will walk a little lighter.', 'Mind how you carry it, little bones.'],
+  bye: ['Safe roads, little bones.', 'We will be around. Slowly.', 'Off you go. Gobi will catch up in a century.'],
+  shot: ['Hrrm! Not indoors!', 'Not at the shop, rider!', 'I have outlived better shots than you.'],
+  arrive: ['Hrrm. A rider. Whoa, Gobi. We have a customer.', 'Ahh... a visitor. We have walked nine hundred years for this.', 'Slow down, slow down. The pots rattle.'],
 };
+/** what you can say to him on his porch (the first goes in, the last rides on) */
+const TALK: { q: string; a: string[]; go?: 'enter' | 'bye' }[] = [
+  { q: 'Show me your wares.', a: ['Come in, come in. Wipe your bones.', 'Hrrm. Come up. Mind the step, Gobi is ticklish.', 'Inside, then. The kettle is on.'], go: 'enter' },
+  { q: 'Who are you?', a: ['Ozymandias, merchant of the walking road. Nine hundred years on this shell.', 'Ozymandias. I sell, Gobi walks. Since the pyramids were pointy.'] },
+  { q: 'Why is a tree growing on your turtle?', a: ['Gobi swallowed an acacia seed in the old kingdom. Now it shades us both.', 'It came up through the porch one spring. We let it stay.'] },
+  { q: 'Is it safe out here?', a: ['When outlaws come, Gobi digs in and I bar the shutters. Sand is a fine door.', 'Safe as sand. If Gobi starts digging, you start riding.'] },
+  { q: 'Just passing through.', a: ['Then pass slowly. Safe roads, little bones.', 'Hrrm. The road will bring you back. It always does.'], go: 'bye' },
+];
 const VOICE_T = { title: TITLE, lines: LINES };
 const VOICE_C = { title: 'OZYMANDIAS', lines: LINES_C };
 
@@ -588,7 +604,7 @@ class Tamsin {
     this.rig?.setExpression('neutral');
   }
 
-  // ---- the merchant surface the shop talks to (shared with the caravan)
+  // ---- the merchant surface the shop talks to (shared with the turtle house)
   readonly kind = 'tamsin' as const;
   /** root -> rug centre (m) */
   readonly rugDist = 1.05;
@@ -616,14 +632,20 @@ class Tamsin {
   }
 }
 
-// ================================================================== Ozymandias, the walking shop
-// A giant old tortoise with the trading post on his back. He plods a slow loop
-// round his camp (diagonal-pair gait, the load swaying, the goods swinging on
-// springs), stops and turns to face a customer, and when there is danger he
-// pulls everything in and drops onto his plastron, the whole pack rattling,
-// then peeks out, eyes first. Old Mother Tamsin rides on his shell and copies
-// him: she ducks when he does and pops back out on her own.
-const PEEK_C = 0.72;
+// ================================================================== Gobi and Ozymandias, the walking shop
+// Gobi is a colossal, gentle turtle with a shop-house and an acacia on his
+// shell. He plods a slow loop round his camp (diagonal-pair gait, the house
+// rocking, lanterns, chime and pots swinging on springs, the tree swaying in
+// the wind, smoke curling from the stovepipe), stops and turns his porch to a
+// customer, and lowers his gangplank for a visit. When outlaws come near, or
+// there is shooting or a blast close by, he pulls everything in, drops onto
+// his plastron and wiggles down into the sand until only the shell top, the
+// house and the tree show, while the shutters bang shut one after another.
+// Once it has been quiet a while his eyes come up out of the sand first, then
+// he heaves himself out with the sand pouring off his shell. Ozymandias, the
+// tortoise who keeps the shop, stands on the porch (his own shy puppet: he
+// ducks into his shell at a pointed gun) and walks in and out of the house.
+const PEEK_G = 0.66;
 const LEGS: [string, number, number][] = [
   // leg, gait phase offset, side (+1 left)
   ['fl', 0, 1],
@@ -631,21 +653,27 @@ const LEGS: [string, number, number][] = [
   ['fr', 0.5, -1],
   ['bl', 0.5, 1],
 ];
+const OZ_SPEED = 1.15;
 
-class Caravan {
-  readonly kind = 'caravan' as const;
+class Turtle {
+  readonly kind = 'turtle' as const;
+  readonly root: THREE.Object3D;
   readonly n: Record<string, THREE.Object3D | undefined> = {};
   private rest: Record<string, THREE.Vector3> = {};
   private restRot: Record<string, THREE.Euler> = {};
   private ret: Record<string, THREE.Vector3> = {};
-  private dropM = 0.8;
+  private dropM = 1.05;
+  private digM = 0.85;
   mode: Mode = 'out';
   private mt = 0;
   private calm = 0;
-  private calmNeed = 2.5;
+  private calmNeed = 3;
   private peekHold = 1;
   private from: Channels = { neck: 0, limb: 0, tail: 0, drop: 0, tuck: 0 };
   readonly ch: Channels = { neck: 0, limb: 0, tail: 0, drop: 0, tuck: 0 };
+  private dig = 0;
+  private digFrom = 0;
+  private wiggle = 0;
   private thumped = false;
   private sq = 0;
   private sqV = 0;
@@ -654,17 +682,17 @@ class Caravan {
   private hy = 0;
   private hp = 0;
   private jaw = 0;
-  private talkT = 0;
   private nodT = 0;
-  private shakeT = 0;
   private stompT = 0;
   private blinkT = 3;
   private blinkOn = 0;
   private t = rnd.next() * 10;
   private grumbleCd = 0;
   private grumbleAt = -1;
-  private swings: Swing[] = [];
-  // walking
+  private swings: (Swing & { name: string })[] = [];
+  private burstT = 0;
+  private smokeT = 0;
+  // walking his rounds
   private home: THREE.Vector3;
   private wp = new THREE.Vector3();
   private wpA = rnd.next() * Math.PI * 2;
@@ -674,8 +702,32 @@ class Caravan {
   private yawTarget: number | null = null;
   private col: Collider | null = null;
   private colAt = new THREE.Vector3(1e9, 0, 0);
-  /** Old Mother Tamsin on his back */
+  /** seconds until a halted visit lets him walk on */
+  private resumeT = -1;
+  // the house: door, shutters, gangplank
+  private doorK = 0;
+  private doorWant = 0;
+  private doorOpen = -1.65;
+  private shut: { o: THREE.Object3D; open: number; k: number; want: number; delay: number }[] = [];
+  private rampK = 0;
+  private rampWant = 0;
+  private rampTilt = 0.79;
+  private rampStow = new THREE.Vector3(-3.95, -0.26, 0);
+  private rampLanded = true;
+  private CC = new THREE.Vector3(0, 1.45, -0.2);
+  readonly meta: any;
+  // Ozymandias on his porch
   readonly rider: Tamsin | null;
+  private rPos = new THREE.Vector3();
+  private rYaw = Math.PI / 2;
+  private rTurn = Math.PI / 2;
+  private rPath: THREE.Vector3[] | null = null;
+  private rS = 0;
+  private rDone: (() => void) | null = null;
+  private rPh = 0;
+  private rWalk = 0;
+  /** a visit is inside the house: gunfire only scares Ozymandias, not the whole turtle */
+  indoor = false;
   lookAt: THREE.Vector3 | null = null;
   near = false;
   hold = false;
@@ -685,35 +737,47 @@ class Caravan {
   awayT = 0;
   dwell = 0;
   readonly lastHunter = new THREE.Vector3(NaN, 0, 0);
-  readonly rugDist: number;
-  private front: number;
-  private headY: number;
-  private pack: THREE.Vector3;
+  readonly rugDist = 4.2;
+  hooks: MerchantHooks | null = null;
 
-  constructor(private ctx: Ctx, readonly rig: RigInstance, readonly root: THREE.Object3D, meta: any, home: THREE.Vector3 | null, rider: RigInstance | null) {
+  constructor(private ctx: Ctx, readonly rig: RigInstance, meta: any, home: THREE.Vector3 | null, rider: RigInstance | null) {
+    this.root = rig.root;
+    this.meta = meta ?? {};
     for (const p of rig.geo.parts) {
       this.n[p.name] = rig.nodes[p.name];
       this.rest[p.name] = p.offset.clone();
       this.restRot[p.name] = p.rest.clone();
     }
-    const r = meta?.retract ?? {};
+    const r = this.meta.retract ?? {};
     for (const k of Object.keys(r)) this.ret[k] = new THREE.Vector3(r[k][0], r[k][1], r[k][2]);
-    if (typeof meta?.shellDrop === 'number') this.dropM = meta.shellDrop;
-    this.rugDist = meta?.rugDist ?? 4.2;
-    this.front = meta?.front ?? 3.1;
-    this.headY = meta?.headY ?? 2.0;
-    const pk = meta?.pack ?? [0, 3.2, 0];
-    this.pack = new THREE.Vector3(pk[0], pk[1], pk[2]);
-    const swing: string[] = Array.isArray(meta?.swing) ? meta.swing : [];
+    if (typeof this.meta.shellDrop === 'number') this.dropM = this.meta.shellDrop;
+    if (typeof this.meta.dig === 'number') this.digM = this.meta.dig;
+    const swing: string[] = Array.isArray(this.meta.swing) ? this.meta.swing : [];
     swing.forEach((name, i) => {
       const o = this.n[name];
       if (!o) return;
-      const amp = name.startsWith('lantern') ? 1.5 : name === 'kettle' ? 1.3 : name === 'sign' ? 0.5 : name.startsWith('bag') ? 0.45 : 1;
-      this.swings.push({ o, x: 0, z: 0, vx: 0, vz: 0, amp, ph: i * 1.9, head: false });
+      const amp = name.startsWith('lantern') ? 1.5 : name === 'chime' ? 1.9 : name === 'tree' ? 0.08 : name === 'canopy' ? 0.22 : 1;
+      this.swings.push({ o, x: 0, z: 0, vx: 0, vz: 0, amp, ph: i * 1.9, head: false, name });
     });
-    this.home = (home ?? root.position).clone();
+    (this.meta.shutters ?? []).forEach((name: string, i: number) => {
+      const o = this.n[name];
+      if (o) this.shut.push({ o, open: this.restRot[name]?.y ?? 0, k: 0, want: 0, delay: i * 0.17 });
+    });
+    if (typeof this.meta.door?.open === 'number') this.doorOpen = this.meta.door.open;
+    if (typeof this.meta.ramp?.tilt === 'number') this.rampTilt = this.meta.ramp.tilt;
+    const st = this.meta.ramp?.stow;
+    if (st) this.rampStow.set(st[0], st[1], st[2]);
+    this.home = (home ?? this.root.position).clone();
     this.pickWaypoint();
-    this.rider = rider ? new Tamsin(ctx, rider, rider.root, rider.geo.spec.meta ?? {}) : null;
+    this.rider = null;
+    if (rider) {
+      this.rider = new Tamsin(ctx, rider, rider.root, rider.geo.spec.meta ?? {});
+      (this.n.shell ?? this.root).add(rider.root);
+      const pp = this.meta.porch ?? [1.98, 3.0, 0.86];
+      this.rPos.set(pp[0], pp[1], pp[2]);
+    }
+    this.poseHouse(0);
+    this.poseRider(0);
   }
 
   get hidden() {
@@ -722,24 +786,33 @@ class Caravan {
   private get yaw() {
     return this.root.rotation.y;
   }
+  /** a point in his root space (metres) to world space */
+  toWorld(v: ArrayLike<number>, out: THREE.Vector3) {
+    return this.root.localToWorld(out.set(v[0], v[1], v[2]));
+  }
   center(out: THREE.Vector3) {
     const s = this.n.shell;
-    if (s) return s.localToWorld(out.set(0, 0.75, -0.05));
-    out.copy(this.root.position).y += 1.7;
+    if (s) return s.localToWorld(out.set(0, 1.0, 0));
+    out.copy(this.root.position).y += 2.3;
     return out;
   }
-  /** between his eyes */
-  headPos(out: THREE.Vector3) {
+  /** between Gobi's eyes */
+  beastHead(out: THREE.Vector3) {
     const h = this.n.head;
-    if (h) return h.localToWorld(out.set(0, 0.17, 0.47));
-    out.copy(this.root.position).y += this.headY;
-    return out;
+    if (h) return h.localToWorld(out.set(0, 0.2, 0.55));
+    return this.root.localToWorld(out.set(0, 2.2, 5));
+  }
+  /** Ozymandias's head (the one who talks) */
+  headPos(out: THREE.Vector3) {
+    return this.rider ? this.rider.headPos(out) : this.beastHead(out);
   }
   framingTop(out: THREE.Vector3) {
-    return this.headPos(out).add(_a.set(0, 0.55, 0));
+    return this.rider ? this.rider.framingTop(out) : this.beastHead(out).add(_a.set(0, 0.6, 0));
   }
+  /** the basket on the counter the wares come out of (and go back into) */
   packPoint(out: THREE.Vector3, lateral: number) {
-    return this.root.localToWorld(out.set(this.pack.x + lateral, this.pack.y - this.ch.drop * this.dropM, this.pack.z));
+    const pk = this.meta.pack ?? [-0.88, 4.2, -0.35];
+    return this.root.localToWorld(out.set(pk[0], pk[1], pk[2] + lateral));
   }
   coinPoint(out: THREE.Vector3) {
     if (this.rider) return this.rider.coinPoint(out);
@@ -748,22 +821,36 @@ class Caravan {
   faceYaw(yaw: number | null) {
     this.yawTarget = yaw;
   }
+  /** the yaw that turns his porch (+X) toward a point */
+  porchYawTo(p: THREE.Vector3) {
+    return Math.atan2(-(p.z - this.root.position.z), p.x - this.root.position.x);
+  }
   readyToGreet() {
-    const turned = this.yawTarget === null || Math.abs(wrapPi(this.yawTarget - this.yaw)) < 0.25;
+    const turned = this.yawTarget === null || Math.abs(wrapPi(this.yawTarget - this.yaw)) < 0.12;
     return this.mode === 'out' && turned && (!this.rider || this.rider.mode === 'out');
   }
-  /** the arrival scene: he plants his feet and turns; Tamsin ducks on his back */
+  /** the arrival scene: he stops and turns his porch to the rider; Ozymandias ducks */
   startle() {
     this.halt = true;
+    this.resumeT = -1;
     if (this.rider) {
       this.rider.threat(1);
       this.rider.hold = true;
     }
   }
+  /** a visit is over: he lingers, then walks on */
+  resume(after: number) {
+    this.resumeT = after;
+    this.yawTarget = null;
+  }
 
   threat(level = 1) {
+    if (this.indoor) {
+      this.rider?.threat(level);
+      return;
+    }
     this.calm = 0;
-    this.calmNeed = 2 + rnd.next() * 1.2;
+    this.calmNeed = 3 + rnd.next() * 1.5;
     this.rider?.threat(level);
     if (this.hidden) {
       if (level >= 1 && this.mode === 'hidden' && this.grumbleCd <= 0) this.grumble(0.05);
@@ -784,65 +871,126 @@ class Caravan {
       case 'out':
         return r;
       case 'emerging':
-        return Math.max(r, 1.2 - this.mt);
+        return Math.max(r, 2.6 - this.mt);
       case 'peek':
-        return Math.max(r, Math.max(0, 0.55 + this.peekHold - this.mt) + 1.2);
+        return Math.max(r, Math.max(0, 0.8 + this.peekHold - this.mt) + 2.6);
       default:
-        return Math.max(r, 1.2 + this.calmNeed);
+        return Math.max(r, 3 + this.calmNeed);
     }
   }
-  say(mood: 'neutral' | 'laugh' | 'squinty', dur = 1.2) {
-    this.talkT = dur;
-    void mood;
+  say(mood: Mood, dur = 1.2) {
+    this.rider?.say(mood, dur);
   }
   nod() {
-    this.nodT = 0.9;
+    this.rider?.nod();
   }
   shake() {
-    this.shakeT = 1.0;
     this.rider?.shake();
   }
-  /** a slow, heavy greeting: a nod and a lifted forefoot; Tamsin waves her cane */
+  /** Ozymandias waves his cane; Gobi nods and lifts a forefoot */
   wave(d = 1.6) {
-    this.nodT = 0.9;
-    this.stompT = 1.1;
+    if (!this.indoor) {
+      this.nodT = 1.2;
+      this.stompT = 1.4;
+    }
     this.rider?.wave(d);
   }
   heaveKick() {
-    this.heaveV += 0.7;
-    for (const s of this.swings) s.vx -= 2.2 * s.amp;
     this.rider?.heaveKick();
+  }
+  /** door, shutters and gangplank: what the house should be doing */
+  setDoor(open: boolean) {
+    if (open && this.doorWant < 0.5 && this.doorK < 0.5) this.ctx.sfx('door_creak', this.toWorld(this.meta.doorway ?? [1.75, 3, 0.1], _tw), 0.55, 1.1);
+    this.doorWant = open ? 1 : 0;
+  }
+  setRamp(down: boolean) {
+    if (down !== this.rampWant > 0.5) this.ctx.sfx('door_creak', this.rampFoot(_tw), 0.5, 0.7);
+    this.rampWant = down ? 1 : 0;
+    if (down) this.rampLanded = false;
+  }
+  get rampDown() {
+    return this.rampK >= 0.999;
+  }
+  rampFoot(out: THREE.Vector3) {
+    const f = this.meta.ramp?.foot ?? [5.35, 0.08, 0.1];
+    return this.toWorld(f, out);
+  }
+  /** Ozymandias walks his path to the counter (in) or back out to the porch */
+  riderWalk(inside: boolean, done?: () => void) {
+    const pts: number[][] = (this.meta.ozPath ?? []).slice();
+    if (!pts.length || !this.rider) {
+      done?.();
+      return;
+    }
+    if (!inside) pts.reverse();
+    const y = this.meta.porch?.[1] ?? 3.0;
+    this.rPath = [this.rPos.clone(), ...pts.map((p) => new THREE.Vector3(p[0], y, p[1]))];
+    this.rS = 0;
+    this.rDone = done ?? null;
+  }
+  /** put him straight at his place (no walk) */
+  riderAt(inside: boolean) {
+    const p = inside ? this.meta.counter : this.meta.porch;
+    if (p) this.rPos.set(p[0], p[1], p[2]);
+    this.rPath = null;
+    this.rYaw = this.rTurn = Math.PI / 2;
+  }
+  get riderWalking() {
+    return !!this.rPath;
   }
 
   private setMode(m: Mode) {
     this.mode = m;
     this.mt = 0;
     Object.assign(this.from, this.ch);
+    this.digFrom = this.dig;
     this.thumped = this.ch.drop > 0.95;
-    if (m === 'hiding' && this.thumped) this.grumble(0.08);
+    if (m === 'hiding') {
+      for (const s of this.shut) s.want = 1;
+      this.doorWant = 0;
+      this.rampWant = 0;
+      if (this.thumped) this.grumble(0.08);
+    }
   }
   private grumble(delay: number) {
     if (this.grumbleCd > 0) return;
-    this.grumbleCd = 1.6;
+    this.grumbleCd = 2.2;
     this.grumbleAt = delay;
   }
-  /** the shell hits the sand: squash, the whole pack rattles, a cloud of dust */
+  /** the shell hits the sand: squash, the whole house rattles, a cloud of dust */
   private thump() {
-    this.sqV += 1.1;
+    this.sqV += 0.8;
     for (const s of this.swings) {
-      s.vx += (rnd.next() - 0.5) * 7 * s.amp;
-      s.vz += (rnd.next() - 0.5) * 7 * s.amp;
+      s.vx += (rnd.next() - 0.5) * 6 * s.amp;
+      s.vz += (rnd.next() - 0.5) * 6 * s.amp;
     }
     const p = this.root.position;
-    this.ctx.sfx('board_land', p, 0.6, 0.6);
-    this.ctx.sfx('skeleton_rattle', p, 0.5, 0.75);
-    this.ctx.fx.dust({ x: p.x, y: p.y + 0.2, z: p.z }, 1.5, P.sand0, 9);
-    this.grumble(0.2);
+    this.ctx.sfx('board_land', p, 0.8, 0.45);
+    this.ctx.sfx('quake_rumble', p, 0.45, 1.2);
+    this.ctx.fx.dust({ x: p.x, y: p.y + 0.3, z: p.z }, 2.4, P.sand0, 12);
+    this.grumble(0.3);
+  }
+  /** sand bursting out round the rim as he wiggles down (or heaves up) */
+  private rimBurst(power: number) {
+    const a = rnd.next() * Math.PI * 2;
+    const p = this.root.localToWorld(_tw.set(Math.sin(a) * 2.85, 0, this.CC.z + Math.cos(a) * 3.7));
+    p.y = this.ctx.world.groundAt(p.x, p.z) + 0.1;
+    this.ctx.fx.sandBurst({ x: p.x, y: p.y, z: p.z }, power);
+  }
+  /** grains pouring off the dome as he rises */
+  private shellPour() {
+    const S = this.n.shell, R = this.rest.shell;
+    if (!S || !R) return;
+    const a = rnd.next() * Math.PI * 2, th = 0.75 + rnd.next() * 0.6;
+    const loc = _tw.set(Math.sin(th) * Math.sin(a) * 2.7, Math.cos(th) * 1.95, Math.sin(th) * Math.cos(a) * 3.5).add(this.CC).sub(R);
+    const p = S.localToWorld(loc);
+    this.ctx.particles.emit({ pos: { x: p.x, y: p.y, z: p.z }, count: 5, vel: { x: Math.sin(a) * 0.6, y: -0.2, z: Math.cos(a) * 0.6 }, spread: 0.5, life: [0.6, 1.1], size: [0.06, 0.04], sprite: ['grain0', 'grain1', 'grain2', 'grain3'], color: [P.sand0, P.sand1, P.sand2], gravity: 9, ground: true, bounce: 0.1 });
+    if (rnd.chance(0.3)) this.ctx.particles.emit({ pos: { x: p.x, y: p.y, z: p.z }, count: 1, vel: { x: 0, y: -0.3, z: 0 }, spread: 0.3, life: [0.8, 1.5], size: [0.5, 1.4], sprite: ['puff0', 'puff1', 'cloud0'], color: [P.sand0, P.sand1], alpha: 0.55, drag: 2, rot: 6, rotSpeed: 0.6 });
   }
 
   private pickWaypoint() {
-    this.wpA += 0.55 + rnd.next() * 0.35;
-    const r = 5.5 + rnd.next() * 2; // inside the cleared camp disc (RegionGen flattens ~10 m)
+    this.wpA += 0.6 + rnd.next() * 0.35;
+    const r = 3.6 + rnd.next() * 1.6; // inside the cleared camp (RegionGen flattens the post's disc)
     this.wp.set(this.home.x + Math.cos(this.wpA) * r, 0, this.home.z + Math.sin(this.wpA) * r);
   }
 
@@ -853,7 +1001,7 @@ class Caravan {
     const cols = this.ctx.world.colliders;
     if (this.col) cols.remove(this.col);
     const c = this.center(_v);
-    this.col = cols.circle(c.x, c.z, 1.75, p.y, p.y + 2.7, { tag: 'caravan', solid: true, bullets: true });
+    this.col = cols.circle(c.x, c.z, 3.0, p.y, p.y + 6.6, { tag: 'turtle', solid: true, bullets: true });
     this.colAt.copy(p);
   }
 
@@ -864,150 +1012,180 @@ class Caravan {
     this.grumbleCd -= dt;
     if (this.grumbleAt >= 0) {
       this.grumbleAt -= dt;
-      if (this.grumbleAt < 0) this.ctx.sfx('camel_grunt', this.root.position, 0.6, 0.5);
+      if (this.grumbleAt < 0) this.ctx.sfx('camel_grunt', this.root.position, 0.7, 0.32);
     }
-    // ---- the shell channels (slower and heavier than Tamsin's)
+    // ---- hiding: in, down onto the plastron, then wiggle down into the sand
     const ch = this.ch, f = this.from, mt = this.mt;
+    let digging = 0;
     switch (this.mode) {
-      case 'hiding':
-        ch.neck = mix(f.neck, 1, Ease.outCubic(c01(mt / 0.3)));
-        ch.limb = mix(f.limb, 1, Ease.outCubic(c01((mt - 0.05) / 0.32)));
-        ch.tail = mix(f.tail, 1, Ease.outCubic(c01((mt - 0.08) / 0.3)));
-        ch.tuck = mix(f.tuck, 1, Ease.outQuad(c01((mt - 0.1) / 0.4)));
-        ch.drop = mix(f.drop, 1, Ease.inQuad(c01((mt - 0.28) / 0.2)));
+      case 'hiding': {
+        ch.neck = mix(f.neck, 1, Ease.outCubic(c01(mt / 0.45)));
+        ch.limb = mix(f.limb, 1, Ease.outCubic(c01((mt - 0.08) / 0.45)));
+        ch.tail = mix(f.tail, 1, Ease.outCubic(c01((mt - 0.12) / 0.4)));
+        ch.tuck = mix(f.tuck, 1, Ease.outQuad(c01((mt - 0.15) / 0.5)));
+        ch.drop = mix(f.drop, 1, Ease.inQuad(c01((mt - 0.45) / 0.28)));
         if (!this.thumped && ch.drop >= 1) {
           this.thumped = true;
           this.thump();
+          if (this.digFrom < 0.5) this.ctx.sfx('sand_burst', this.root.position, 0.7, 0.7);
         }
-        if (mt > 0.8) {
+        const dk = c01((mt - 0.85) / 1.7);
+        this.dig = mix(this.digFrom, 1, Ease.inOutQuad(dk));
+        if (dk > 0 && dk < 1) digging = 1;
+        if (mt > 2.7) {
           this.mode = 'hidden';
           this.mt = 0;
         }
         break;
+      }
       case 'hidden':
         ch.neck = ch.limb = ch.tail = ch.drop = ch.tuck = 1;
+        this.dig = 1;
         if (!this.hold) this.calm += dt;
         if (this.calm >= this.calmNeed) {
           this.setMode('peek');
-          this.peekHold = 0.8 + rnd.next() * 0.6;
+          this.peekHold = 1.0 + rnd.next() * 0.8;
         }
         break;
       case 'peek':
-        ch.neck = mix(f.neck, PEEK_C, Ease.outCubic(c01(mt / 0.55)));
-        ch.tuck = mix(f.tuck, 0, Ease.outCubic(c01(mt / 0.45)));
+        // eyes first, up out of the sand
+        ch.neck = mix(f.neck, PEEK_G, Ease.outCubic(c01(mt / 0.8)));
+        ch.tuck = mix(f.tuck, 0, Ease.outCubic(c01(mt / 0.6)));
         ch.limb = ch.tail = ch.drop = 1;
-        if (mt > 0.55 + this.peekHold) this.setMode('emerging');
+        this.dig = 1;
+        if (mt > 0.8 + this.peekHold) {
+          this.setMode('emerging');
+          this.ctx.sfx('sand_rise', this.root.position, 0.8, 0.75);
+          this.ctx.sfx('quake_rumble', this.root.position, 0.35, 1.4);
+        }
         break;
-      case 'emerging':
-        ch.neck = mix(f.neck, 0, Ease.outBack(c01(mt / 0.7)));
+      case 'emerging': {
+        // he heaves up out of the sand, then stands
+        const uk = c01(mt / 1.5);
+        this.dig = mix(this.digFrom, 0, Ease.inOutQuad(uk));
+        if (uk > 0 && uk < 1) digging = 0.7;
+        ch.neck = mix(f.neck, 0, Ease.outBack(c01((mt - 0.2) / 0.9)));
         ch.tuck = 0;
-        ch.drop = mix(f.drop, 0, Ease.inOutQuad(c01((mt - 0.15) / 0.55)));
-        ch.limb = mix(f.limb, 0, Ease.outCubic(c01((mt - 0.15) / 0.55)));
-        ch.tail = mix(f.tail, 0, Ease.outCubic(c01((mt - 0.45) / 0.5)));
-        if (mt > 1.2) {
+        ch.drop = mix(f.drop, 0, Ease.inOutQuad(c01((mt - 1.35) / 0.7)));
+        ch.limb = mix(f.limb, 0, Ease.outCubic(c01((mt - 1.3) / 0.7)));
+        ch.tail = mix(f.tail, 0, Ease.outCubic(c01((mt - 1.7) / 0.6)));
+        if (mt > 1.6 && this.shut.some((s) => s.want > 0)) for (const s of this.shut) s.want = 0;
+        if (mt > 2.6) {
           this.mode = 'out';
           this.mt = 0;
-          this.sqV -= 0.4;
-          this.pauseT = Math.max(this.pauseT, 1.5);
+          this.sqV -= 0.3;
+          this.pauseT = Math.max(this.pauseT, 2.5);
           const cb = this.onOut;
           this.onOut = null;
           cb?.();
         }
         break;
+      }
       default:
         ch.neck = ch.limb = ch.tail = ch.drop = ch.tuck = 0;
+        this.dig = 0;
+    }
+    this.wiggle = damp(this.wiggle, digging, 6, dt);
+    if (digging > 0) {
+      this.burstT -= dt;
+      if (this.burstT <= 0) {
+        this.burstT = 0.09 + rnd.next() * 0.08;
+        this.rimBurst(0.55 + digging * 0.4);
+        if (this.mode === 'emerging') this.shellPour();
+      }
+      if (this.mode === 'emerging' && rnd.chance(dt * 30)) this.shellPour();
     }
     for (let s = 0; s < 2; s++) {
       const h = dt / 2;
-      this.sqV += (-140 * this.sq - 9 * this.sqV) * h;
+      this.sqV += (-120 * this.sq - 9 * this.sqV) * h;
       this.sq += this.sqV * h;
-      this.heaveV += (-30 * this.heave - 5 * this.heaveV) * h;
+      this.heaveV += (-26 * this.heave - 5 * this.heaveV) * h;
       this.heave += this.heaveV * h;
     }
-    // ---- walking his loop round the camp
+    // ---- walking his loop round the camp (or turning his porch to a customer)
     const root = this.root;
     const out = this.mode === 'out';
+    if (this.resumeT >= 0) {
+      this.resumeT -= dt;
+      if (this.resumeT < 0) this.halt = false;
+    }
     let moving = false, turning = 0;
     const hunter = this.lookAt;
     if (out && this.yawTarget !== null) {
       const d = wrapPi(this.yawTarget - root.rotation.y);
-      const step = Math.sign(d) * Math.min(Math.abs(d), 0.9 * dt);
-      root.rotation.y += step;
+      root.rotation.y += Math.sign(d) * Math.min(Math.abs(d), 0.75 * dt);
       turning = Math.abs(d) > 0.02 ? 1 : 0;
     } else if (out && !this.halt) {
       this.pauseT -= dt;
-      const blocked = hunter && Math.hypot(hunter.x - root.position.x, hunter.z - root.position.z) < 4.6 && _b.set(hunter.x - root.position.x, 0, hunter.z - root.position.z).normalize().dot(_c.set(Math.sin(root.rotation.y), 0, Math.cos(root.rotation.y))) > 0.5;
+      const blocked = hunter && Math.hypot(hunter.x - root.position.x, hunter.z - root.position.z) < 7.5 && _b.set(hunter.x - root.position.x, 0, hunter.z - root.position.z).normalize().dot(_c.set(Math.sin(root.rotation.y), 0, Math.cos(root.rotation.y))) > 0.45;
       if (blocked) this.pauseT = Math.max(this.pauseT, 0.8);
       if (this.pauseT <= 0) {
         const dx = this.wp.x - root.position.x, dz = this.wp.z - root.position.z;
         const dist = Math.hypot(dx, dz);
-        if (dist < 1.2) {
+        if (dist < 1.4) {
           this.pickWaypoint();
-          if (rnd.chance(0.4)) this.pauseT = 2.5 + rnd.next() * 3.5;
+          if (rnd.chance(0.45)) this.pauseT = 3 + rnd.next() * 4;
         } else {
           const want = Math.atan2(dx, dz);
           const d = wrapPi(want - root.rotation.y);
-          root.rotation.y += Math.sign(d) * Math.min(Math.abs(d), 0.4 * dt);
-          const v = 0.42 * Math.max(0.25, Math.cos(Math.min(Math.abs(d), 1.4)));
+          root.rotation.y += Math.sign(d) * Math.min(Math.abs(d), 0.32 * dt);
+          const v = 0.5 * Math.max(0.2, Math.cos(Math.min(Math.abs(d), 1.4)));
           root.position.x += Math.sin(root.rotation.y) * v * dt;
           root.position.z += Math.cos(root.rotation.y) * v * dt;
           moving = true;
-          this.gait += (v * dt) / 1.1;
+          this.gait += (v * dt) / 1.6;
         }
       }
     }
-    if (turning) this.gait += dt * 0.55;
+    if (turning) this.gait += dt * 0.42;
     root.position.y = this.ctx.world.groundAt(root.position.x, root.position.z);
-    this.walk = damp(this.walk, moving ? 1 : turning ? 0.6 : 0, 3, dt);
-    if (!moving && !turning) this.gait += (Math.round(this.gait * 2) / 2 - this.gait) * Math.min(1, dt * 2); // settle onto both feet
+    this.walk = damp(this.walk, moving ? 1 : turning ? 0.7 : 0, 2.5, dt);
+    if (!moving && !turning) this.gait += (Math.round(this.gait * 2) / 2 - this.gait) * Math.min(1, dt * 1.5); // settle onto all four feet
     this.moveCollider();
-    // ---- gestures and looking
-    this.talkT -= dt;
+    // ---- head: looking about, at the customer, nodding
     this.nodT -= dt;
-    this.shakeT -= dt;
     this.stompT -= dt;
     const S = this.n.shell;
-    let ty = Math.sin(this.t * 0.21) * 0.3, tp = 0.05 + Math.sin(this.t * 0.17) * 0.05;
+    let ty = Math.sin(this.t * 0.19) * 0.35, tp = 0.04 + Math.sin(this.t * 0.15) * 0.06;
     if (hunter && S && !moving) {
       const loc = S.worldToLocal(_v.copy(hunter));
-      const lx = loc.x, ly = loc.y - 1.1, lz = loc.z - 2.4;
-      ty = clamp(Math.atan2(lx, lz), -0.7, 0.7);
-      tp = clamp(-Math.atan2(ly, Math.hypot(lx, lz)), -0.35, 0.3);
+      const lx = loc.x, ly = loc.y - 0.8, lz = loc.z - 4.6;
+      ty = clamp(Math.atan2(lx, lz), -0.85, 0.85);
+      tp = clamp(-Math.atan2(ly, Math.hypot(lx, lz)), -0.3, 0.3);
     }
     if (this.hidden) ty = tp = 0;
     if (this.mode === 'peek') {
-      ty = Math.sin(mt * 2.2) * 0.25;
-      tp = -0.05;
+      ty = Math.sin(mt * 1.6) * 0.3;
+      tp = -0.08;
     }
-    this.hy = damp(this.hy, ty, 2.2, dt);
-    this.hp = damp(this.hp, tp, 2.2, dt);
+    this.hy = damp(this.hy, ty, 1.8, dt);
+    this.hp = damp(this.hp, tp, 1.8, dt);
     const gp = this.gait * Math.PI * 2;
-    let headYaw = this.hy, headPitch = this.hp + Math.sin(gp * 2) * 0.035 * this.walk;
-    if (this.nodT > 0) headPitch += Math.sin((0.9 - this.nodT) * 9) * 0.16 * Math.min(1, this.nodT * 2.5);
-    if (this.shakeT > 0) headYaw += Math.sin((1.0 - this.shakeT) * 11) * 0.22 * Math.min(1, this.shakeT * 2.5);
+    let headYaw = this.hy, headPitch = this.hp + Math.sin(gp * 2) * 0.03 * this.walk;
+    if (this.nodT > 0) headPitch += Math.sin((1.2 - this.nodT) * 7) * 0.14 * Math.min(1, this.nodT * 2);
     const outK = 1 - ch.neck;
-    const talking = this.talkT > 0 && !this.hidden;
-    this.jaw = damp(this.jaw, talking ? 0.06 + Math.abs(Math.sin(this.t * 7.5)) * 0.2 : 0.01, 14, dt);
-    // blinks (slow, heavy lids), shut tight inside the shell, a wary squint when peeking
+    this.jaw = damp(this.jaw, (this.nodT > 0 ? 0.08 : 0.01) * outK, 6, dt);
+    // slow, heavy blinks; shut tight while hidden, a wary squint while peeking
     this.blinkT -= dt;
     if (this.blinkT <= 0) {
-      this.blinkOn = 0.22;
-      this.blinkT = 3 + rnd.next() * 4;
+      this.blinkOn = 0.3;
+      this.blinkT = 3.5 + rnd.next() * 4;
     }
     this.blinkOn -= dt;
-    const lidK = this.hidden ? 1 : this.mode === 'peek' ? 0.45 : this.blinkOn > 0 ? Math.sin((this.blinkOn / 0.22) * Math.PI) : talking ? 0.12 : 0;
+    const lidK = this.hidden ? 1 : this.mode === 'peek' ? 0.4 : this.blinkOn > 0 ? Math.sin((this.blinkOn / 0.3) * Math.PI) : 0;
     // ---- pose
     const n = this.n, R = this.rest;
     if (S && R.shell) {
-      const bob = (1 - Math.abs(Math.cos(gp * 2))) * 0.03 * this.walk;
+      const bob = (1 - Math.abs(Math.cos(gp * 2))) * 0.035 * this.walk;
       S.position.copy(R.shell);
-      S.position.y += bob - ch.drop * this.dropM;
-      S.scale.set(1 + this.sq * 0.4, 1 - this.sq, 1 + this.sq * 0.4);
-      S.rotation.set(this.heave * 0.5 + Math.sin(gp * 2 + 0.6) * 0.012 * this.walk, 0, Math.sin(gp) * 0.022 * this.walk);
+      S.position.y += bob - ch.drop * this.dropM - this.dig * this.digM;
+      S.scale.set(1 + this.sq * 0.3, 1 - this.sq * 0.6, 1 + this.sq * 0.3);
+      const wig = this.wiggle * (0.6 + 0.4 * Math.sin(this.t * 2.3));
+      S.rotation.set(this.heave * 0.4 + Math.sin(gp * 2 + 0.6) * 0.01 * this.walk + Math.sin(this.t * 7.3) * 0.012 * wig, Math.sin(this.t * 5.1) * 0.01 * wig, Math.sin(gp) * 0.018 * this.walk + Math.sin(this.t * 9.5) * 0.035 * wig);
     }
     this.place('neck', ch.neck);
-    n.neck?.rotation.set(ch.tuck * 0.25 + Math.sin(this.t * 0.9) * 0.02 * outK, headYaw * 0.35 * (1 - ch.tuck), 0);
-    n.head?.rotation.set(headPitch + ch.tuck * 0.3, headYaw * 0.65 * (1 - ch.tuck), 0);
+    n.neck?.rotation.set(ch.tuck * 0.2 + Math.sin(this.t * 0.7) * 0.02 * outK, headYaw * 0.35 * (1 - ch.tuck), 0);
+    n.head?.rotation.set(headPitch + ch.tuck * 0.25, headYaw * 0.65 * (1 - ch.tuck), 0);
     if (n.jaw) n.jaw.rotation.x = this.jaw;
     for (const [lid, eye] of [['lid_l', 'eye_l'], ['lid_r', 'eye_r']]) {
       const lo = n[lid], rr = this.restRot[lid];
@@ -1017,39 +1195,140 @@ class Caravan {
     for (const [leg, off, side] of LEGS) {
       const up = n['leg_' + leg], ft = n['foot_' + leg];
       const ph = (this.gait + off) * Math.PI * 2;
-      const swingPh = Math.sin(ph) > 0 ? Math.sin(ph) : 0; // lifting half of the cycle
+      const swingPh = Math.sin(ph) > 0 ? Math.sin(ph) : 0; // the lifting half of the cycle
       const a = this.walk * (1 - ch.limb);
       let lift = swingPh * a;
-      if (leg === 'fl' && this.stompT > 0) lift = Math.max(lift, Math.sin(((1.1 - this.stompT) / 1.1) * Math.PI) * (1 - ch.limb));
+      if (leg === 'fl' && this.stompT > 0) lift = Math.max(lift, Math.sin(((1.4 - this.stompT) / 1.4) * Math.PI) * (1 - ch.limb));
       this.place('leg_' + leg, ch.limb);
       if (up) {
-        up.position.y += lift * 0.07;
-        up.rotation.set(Math.cos(ph) * 0.2 * a - lift * 0.12, 0, side * lift * 0.06);
+        up.position.y += lift * 0.16;
+        up.rotation.set(Math.cos(ph) * 0.16 * a - lift * 0.1, 0, side * lift * 0.05);
       }
-      ft?.rotation.set(lift * 0.38 + ch.limb * 0.55, 0, 0);
+      ft?.rotation.set(lift * 0.3 + ch.limb * 0.45, 0, 0);
     }
     this.place('tail', ch.tail);
-    if (n.tail) n.tail.rotation.set(0, Math.sin(gp) * 0.18 * this.walk + Math.sin(this.t * 0.7) * 0.05, 0);
-    // the load swings: springs that lag behind his sway and kick on every footfall
-    const roll = S ? S.rotation.z : 0;
+    if (n.tail) n.tail.rotation.set(0, Math.sin(gp) * 0.16 * this.walk + Math.sin(this.t * 0.6) * 0.05, 0);
+    // ---- the swinging things: lanterns, chime, pots, and the tree in the wind
+    const roll = S ? S.rotation.z : 0, pitch = S ? S.rotation.x : 0;
     for (const s of this.swings) {
-      const rr = this.restRot[s.o.name];
-      const tx = Math.sin(this.t * 0.8 + s.ph) * 0.02 * s.amp - this.heave * 0.4;
-      const tz = -roll * 2.4 * s.amp;
-      s.vx += (-28 * (s.x - tx) - 2.4 * s.vx) * dt;
-      s.vz += (-28 * (s.z - tz) - 2.4 * s.vz) * dt;
+      const rr = this.restRot[s.name];
+      let tx = Math.sin(this.t * 0.8 + s.ph) * 0.02 * s.amp - this.heave * 0.4 - pitch * 1.5 * s.amp;
+      let tz = -roll * 2.4 * s.amp;
+      if (s.name === 'tree' || s.name === 'canopy') {
+        // gusts: a slow sway with a quicker shiver in the leaves
+        const gust = 0.5 + 0.5 * noise.n2(this.t * 0.12, s.ph);
+        tx += (Math.sin(this.t * 0.55 + s.ph) * 0.6 + noise.n2(this.t * 0.9, 3.1 + s.ph) * 0.4) * 0.05 * gust;
+        tz += (Math.sin(this.t * 0.43 + 1.3) * 0.6 + noise.n2(this.t * 0.8, 7.7 + s.ph) * 0.4) * 0.06 * gust;
+      }
+      const k = s.name === 'tree' ? 12 : s.name === 'canopy' ? 16 : 28;
+      s.vx += (-k * (s.x - tx) - 2.4 * s.vx) * dt;
+      s.vz += (-k * (s.z - tz) - 2.4 * s.vz) * dt;
       s.x = clamp(s.x + s.vx * dt, -0.7, 0.7);
       s.z = clamp(s.z + s.vz * dt, -0.7, 0.7);
       s.o.rotation.set((rr?.x ?? 0) + s.x, rr?.y ?? 0, (rr?.z ?? 0) + s.z);
     }
-    // ---- Tamsin rides along
+    this.poseHouse(dt);
+    // smoke from the stovepipe (not while he is dug in)
+    this.smokeT -= dt;
+    if (this.smokeT <= 0 && this.dig < 0.3) {
+      this.smokeT = 0.35 + rnd.next() * 0.3;
+      const c = this.toWorld(this.meta.chimney ?? [-1.35, 6.75, -1.15], _tw);
+      c.y -= this.dig * this.digM + ch.drop * this.dropM;
+      this.ctx.particles.emit({ pos: { x: c.x, y: c.y, z: c.z }, count: 1, vel: { x: 0.18, y: 0.55, z: 0.06 }, spread: 0.08, life: [2.2, 3.4], size: [0.16, 0.9], sprite: ['puff0', 'puff1', 'puff2', 'cloud0'], color: [0xb8b0a4, 0x8e877c], alpha: 0.42, drag: 0.25, rot: 6, rotSpeed: 0.4, fadeIn: 0.2 });
+    }
+    // ---- Ozymandias
     const rd = this.rider;
     if (rd) {
       if (this.hidden && !rd.hidden) rd.threat(1);
       rd.lookAt = this.lookAt;
-      rd.near = this.near && !this.hidden;
+      rd.near = this.near && !this.hidden && !this.indoor && !this.rPath;
+      this.poseRider(dt);
       rd.update(dt);
     }
+  }
+
+  /** door, shutters, gangplank */
+  private poseHouse(dt: number) {
+    const n = this.n;
+    this.doorK = dt > 0 ? damp(this.doorK, this.doorWant, 3.2, dt) : this.doorWant;
+    if (n.door) n.door.rotation.set(0, this.doorOpen * Ease.inOutQuad(this.doorK), 0);
+    for (const s of this.shut) {
+      if (dt <= 0) s.k = s.want;
+      else if (s.want > s.k) {
+        // banged shut, one after another
+        s.delay -= dt;
+        if (s.delay <= 0) {
+          s.k = Math.min(1, s.k + dt * 4.5);
+          if (s.k >= 1) {
+            this.ctx.sfx('poster_slam', s.o.getWorldPosition(_tw), 0.4, 0.9 + rnd.next() * 0.3);
+            s.delay = 0.12 + rnd.next() * 0.25;
+          }
+        }
+      } else {
+        s.k = Math.max(s.want, s.k - dt * 1.6);
+        if (s.k <= s.want) s.delay = 0.12 + rnd.next() * 0.25;
+      }
+      const e = s.want > 0 ? Ease.inQuad(s.k) : Ease.outCubic(s.k);
+      s.o.rotation.set(0, mix(s.open, 0, e), 0);
+    }
+    // the gangplank slides out from under the porch, then tips down onto the sand
+    const r = n.ramp, rest = this.rest.ramp;
+    if (!r || !rest) return;
+    const was = this.rampK;
+    this.rampK = dt > 0 ? (this.rampWant > this.rampK ? Math.min(this.rampWant, this.rampK + dt / 2.1) : Math.max(this.rampWant, this.rampK - dt / 1.8)) : this.rampWant;
+    const k = this.rampK;
+    const slide = Ease.inOutQuad(c01(k / 0.5)), tip = c01((k - 0.5) / 0.5);
+    const drop = this.rampWant > 0.5 ? Ease.inQuad(tip) : Ease.inOutQuad(tip);
+    r.position.copy(rest).addScaledVector(this.rampStow, 1 - slide);
+    r.rotation.set(0, 0, this.rampTilt * (1 - drop));
+    if (dt > 0 && was < 1 && k >= 1 && !this.rampLanded) {
+      this.rampLanded = true;
+      const f = this.rampFoot(_tw);
+      this.ctx.sfx('board_land', f, 0.7, 0.55);
+      this.ctx.fx.dust({ x: f.x, y: f.y + 0.1, z: f.z }, 0.9, P.sand0, 6);
+      this.ctx.fx.sandBurst({ x: f.x, y: f.y + 0.05, z: f.z }, 0.5);
+    }
+  }
+
+  /** Ozymandias's place on the porch / his walk in and out of the house */
+  private poseRider(dt: number) {
+    const rr = this.rider?.root, R = this.rest.shell;
+    if (!rr || !R) return;
+    let walking = 0;
+    const path = this.rPath;
+    if (path && dt > 0) {
+      this.rS += OZ_SPEED * dt;
+      let s = this.rS, i = 0;
+      for (; i < path.length - 1; i++) {
+        const L = path[i].distanceTo(path[i + 1]);
+        if (s <= L) break;
+        s -= L;
+      }
+      if (i >= path.length - 1) {
+        this.rPos.copy(path[path.length - 1]);
+        this.rPath = null;
+        this.rTurn = Math.PI / 2;
+        const cb = this.rDone;
+        this.rDone = null;
+        cb?.();
+      } else {
+        const a = path[i], b = path[i + 1];
+        const L = Math.max(1e-4, a.distanceTo(b));
+        this.rPos.lerpVectors(a, b, s / L);
+        this.rTurn = Math.atan2(b.x - a.x, b.z - a.z);
+        walking = 1;
+      }
+    }
+    if (dt > 0) {
+      const d = wrapPi(this.rTurn - this.rYaw);
+      this.rYaw += Math.sign(d) * Math.min(Math.abs(d), 5 * dt);
+      this.rWalk = damp(this.rWalk, walking, 8, dt);
+      this.rPh += dt * 8.5 * this.rWalk;
+    }
+    // a tortoise's waddle: rock side to side, a little bob on each step
+    rr.position.copy(this.rPos).sub(R);
+    rr.position.y += Math.abs(Math.sin(this.rPh)) * 0.035 * this.rWalk;
+    rr.rotation.set(0.04 * this.rWalk, this.rYaw, Math.sin(this.rPh) * 0.085 * this.rWalk);
   }
 
   private place(name: string, k: number) {
@@ -1067,10 +1346,10 @@ class Caravan {
     this.rider?.restPose();
   }
 
-  /** where the customer stands to trade (the interact prompt follows him) */
+  /** where the customer stands to trade (the interact prompt follows him): the foot of his gangplank */
   frontPoint(out: THREE.Vector3) {
-    const a = this.root.rotation.y;
-    out.set(this.root.position.x + Math.sin(a) * (this.front + 1.8), 0, this.root.position.z + Math.cos(a) * (this.front + 1.8));
+    const f = this.meta.ramp?.foot ?? [5.35, 0.08, 0.1];
+    this.root.localToWorld(out.set(f[0] + 1.2, 0, f[2]));
     out.y = this.ctx.world.groundAt(out.x, out.z);
     return out;
   }
@@ -1081,7 +1360,7 @@ class Caravan {
   }
 }
 
-type Merchant = Tamsin | Caravan;
+type Merchant = Tamsin | Turtle;
 
 // ================================================================== the wares as rigid bodies
 type BodyState = 'wait' | 'free' | 'held' | 'sold' | 'pack' | 'gone';
@@ -1149,6 +1428,63 @@ function itemObject(key: string, mat: THREE.Material): { obj: THREE.Group; he: T
   return { obj: g, he: new THREE.Vector3(0.08, 0.08, 0.08) };
 }
 
+/** a visit to the turtle house: talk on the porch, walk in, the shop inside, walk out */
+interface Visit {
+  g: Turtle;
+  hooks: MerchantHooks;
+  phase: 'talk' | 'enter' | 'shop' | 'exit' | 'bye';
+  t: number;
+  // the porch talk
+  asked: Set<number>;
+  plaques: FloatText3D[];
+  plaqueT: number;
+  showAt: number;
+  hover: number;
+  go: 'enter' | 'bye' | null;
+  goAt: number;
+  // the hunter on foot (a copy of his rig), along a path in Gobi's root space
+  actor: RigInstance | null;
+  path: THREE.Vector3[];
+  wp: THREE.Vector3[];
+  cum: number[];
+  s: number;
+  walkPh: number;
+  walkAmt: number;
+  lastStep: number;
+  yaw: number;
+  standYaw: number;
+  heading: number;
+  breath: number;
+  // the camera
+  base: { pos: THREE.Vector3; look: THREE.Vector3; fov: number };
+  cp: THREE.Vector3;
+  cl: THREE.Vector3;
+  doorAt: number;
+  from: { pos: THREE.Vector3; look: THREE.Vector3; fov: number };
+  outAt: number;
+  ozGo: boolean;
+  skip: boolean;
+}
+const _ndc = new THREE.Vector2();
+
+/** a walk cycle for the hunter's rig (legs, arm swing, a little twist), or breathing while he stands */
+function strideVisitor(r: RigInstance, ph: number, amt: number, t: number) {
+  const n = r.nodes;
+  const s = Math.sin(ph);
+  const set = (k: string, x: number, y = 0, z = 0) => n[k]?.rotation.set(x, y, z);
+  set('thigh_l', -s * 0.55 * amt);
+  set('thigh_r', s * 0.55 * amt);
+  set('shin_l', Math.max(0, Math.sin(ph + 1.4)) * 0.85 * amt);
+  set('shin_r', Math.max(0, Math.sin(ph + 1.4 + Math.PI)) * 0.85 * amt);
+  set('arm_l', s * 0.42 * amt + Math.sin(t * 1.6) * 0.02, 0, 0.08);
+  set('fore_l', -0.25 - Math.max(0, s) * 0.3 * amt);
+  set('arm_r', 0.08 - s * 0.4 * amt + Math.sin(t * 1.6 + 0.5) * 0.02, 0, -0.14);
+  set('fore_r', -0.3 - Math.max(0, -s) * 0.3 * amt);
+  set('torso', 0.05 * amt + Math.sin(t * 1.6) * 0.015 * (1 - amt), Math.sin(ph) * 0.09 * amt, Math.cos(ph) * 0.03 * amt);
+  set('head', -0.04 + Math.sin(t * 0.7) * 0.03 * (1 - amt), Math.sin(t * 0.45) * 0.12 * (1 - amt), 0);
+  if (n['pelvis']) n['pelvis'].rotation.y = -Math.sin(ph) * 0.06 * amt;
+}
+
 interface Arrival {
   her: Merchant;
   hooks: MerchantHooks;
@@ -1178,7 +1514,7 @@ export class Shop {
   private bar: HTMLDivElement;
   private done: (() => void) | null = null;
   private t = 0;
-  private phase: 'off' | 'arrive' | 'browse' | 'leave' = 'off';
+  private phase: 'off' | 'arrive' | 'browse' | 'leave' | 'visit' = 'off';
   private pt = 0;
   private puppets = new Map<object, Merchant>();
   private her: Merchant | null = null;
@@ -1218,6 +1554,15 @@ export class Shop {
   private lastComment = new Map<string, number>();
   private commented = new Set<Body>();
   private greeted = false;
+  // a visit to the turtle house
+  private visit: Visit | null = null;
+  private visitWares: Ware[] | null = null;
+  /** the shop is set up inside the house */
+  private indoor = false;
+  /** where the warm fill light hangs (null: in front of the merchant) */
+  private lightAt: THREE.Vector3 | null = null;
+  /** force his lines to one side of his head (1 / -1; 0 = the open side) */
+  private speechForce = 0;
   // the rug's light pools
   private rugSpot: { m: VoxelMaterial; u: SpotUniforms } | null = null;
   private bosses = new Set<{ alive?: boolean }>();
@@ -1254,17 +1599,18 @@ export class Shop {
     let p = this.puppets.get(rig);
     if (!p) {
       const meta = rig.geo.spec.meta ?? {};
-      p = meta.caravan ? new Caravan(this.ctx, rig, rig.root, meta, hooks?.home ?? null, hooks?.rider ?? null) : new Tamsin(this.ctx, rig, rig.root, meta);
+      p = meta.turtleHouse ? new Turtle(this.ctx, rig, meta, hooks?.home ?? null, hooks?.rider ?? null) : new Tamsin(this.ctx, rig, rig.root, meta);
       this.puppets.set(rig, p);
     }
+    if (p instanceof Turtle && hooks) p.hooks = hooks;
     if (this.owns(p)) return; // the shop / its arrival scene drives her
     const h = Math.min(dt, 1 / 20);
     if (h <= 0) return;
     const d = hunter ? hunter.distanceTo(rig.root.position) : 99;
-    if (p.kind === 'caravan') {
-      // the big fellow only minds a gun really pointed at him, and outlaws nearby
-      if (d < 25 && this.cam.aim > 0.5 && this.aimedAt(p)) p.threat(0.5);
-      if (this.danger(p.root.position, 16)) p.threat(0.6);
+    if (p instanceof Turtle) {
+      // a gun pointed at Ozymandias sends him into his shell; outlaws near and Gobi digs in
+      if (d < 25 && p.rider && !p.hidden && this.aimedAt(p)) p.rider.threat(0.5);
+      if (this.danger(p.root.position, DIG_R)) p.threat(1);
     } else if (d < 25 && this.aimedAt(p)) p.threat(0.5);
     p.near = d < 12;
     p.lookAt = hunter && d < 14 ? _w.copy(hunter).add(_a.set(0, 1.45, 0)) : null;
@@ -1290,7 +1636,7 @@ export class Shop {
       if (p.awayT > REARM_T) p.armed = true;
       return;
     }
-    if (d > ARRIVE_R || this.active || this.arrival || !p.root.parent) {
+    if (d > (p instanceof Turtle ? ARRIVE_R_T : ARRIVE_R) || p.hidden || this.active || this.arrival || !p.root.parent) {
       p.dwell = 0;
       return;
     }
@@ -1326,12 +1672,12 @@ export class Shop {
   /** where the customer stands to trade with a walking merchant (null: a standing one) */
   merchantFront(rig: RigInstance, out: THREE.Vector3) {
     const p = this.puppets.get(rig);
-    return p instanceof Caravan ? p.frontPoint(out) : null;
+    return p instanceof Turtle ? p.frontPoint(out) : null;
   }
 
   /** her (his) lines and name */
   private get voice() {
-    return this.her?.kind === 'caravan' ? VOICE_C : VOICE_T;
+    return this.her?.kind === 'turtle' ? VOICE_C : VOICE_T;
   }
 
   // ---------------------------------------------------------------- the arrival scene
@@ -1348,35 +1694,24 @@ export class Shop {
     cam.getWorldDirection(_v);
     const l0 = p0.clone().addScaledVector(_v, 6);
     let keys: { P: THREE.Vector3[]; L: THREE.Vector3[]; F: number[] };
-    if (her.kind === 'caravan') {
-      // he plants his feet and turns to face the rider
+    if (her instanceof Turtle) {
+      // Gobi stops and turns his porch to the rider; the camera cranes past the
+      // TRADING POST sign over his head, then down to a low shot of Ozymandias on his porch
       const hp = this.hunter ?? p0;
-      const a = Math.atan2(hp.x - H.x, hp.z - H.z);
+      const a = her.porchYawTo(hp);
       her.faceYaw(a);
-      const F = new THREE.Vector3(Math.sin(a), 0, Math.cos(a)), L = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a));
-      const s0 = Math.sign(_a.copy(p0).sub(H).dot(L)) || 1;
-      // a beat alongside his load: lantern, saddlebag and pots swinging past the lens...
-      const pGoods = H.clone().addScaledVector(L, s0 * 2.7).addScaledVector(F, 0.4);
-      pGoods.y = H.y + 3.0;
-      const lGoods = H.clone().addScaledVector(L, s0 * 1.0).addScaledVector(F, 1.1);
-      lGoods.y = H.y + 3.4;
-      // ...then round to his face
-      const face = H.clone().addScaledVector(F, 3.0);
-      face.y = H.y + 2.0;
-      let pNear: THREE.Vector3 | null = null;
-      for (const s of [s0, -s0]) {
-        if (pNear) break;
-        const q = H.clone().addScaledVector(F, 5.4).addScaledVector(L, s * 0.9);
-        q.y = Math.max(H.y, this.ctx.world.groundAt(q.x, q.z)) + 1.75;
-        if (this.clearView(q, face)) pNear = q;
-      }
-      if (!pNear) {
-        pNear = H.clone().addScaledVector(F, 5.2).addScaledVector(L, s0 * 0.9);
-        pNear.y = H.y + 2.4;
-      }
+      const X = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a)), Z = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
+      const at = (x: number, y: number, z: number) => H.clone().addScaledVector(X, x).addScaledVector(Z, z).add(_a.set(0, y, 0));
+      const ground = (q: THREE.Vector3, lift: number) => {
+        q.y = Math.max(q.y, ctx.world.groundAt(q.x, q.z) + lift);
+        return q;
+      };
+      const pSign = ground(at(3.6, 5.9, 7.4), 1), lSign = at(-0.15, 4.4, 1.2);
+      const pNear = ground(at(6.4, 2.05, 2.5), 0.6), lNear = at(1.98, 4.25, 1.55);
       this.pivot.copy(H);
-      this.fwdAng = a;
-      keys = { P: [p0, pGoods, pNear], L: [l0, lGoods, face], F: [cam.fov, 52, 42] };
+      this.fwdAng = Math.atan2(X.x, X.z);
+      this.lightAt = at(3.0, 4.6, 1.0);
+      keys = { P: [p0, pSign, pNear], L: [l0, lSign, lNear], F: [cam.fov, 50, 40] };
     } else {
       const a = her.root.rotation.y;
       const F = new THREE.Vector3(Math.sin(a), 0, Math.cos(a)), L = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a));
@@ -1456,7 +1791,7 @@ export class Shop {
     } else if (inp.wasPressed('Escape')) return this.abortArrival();
     else if (A.t > 0.9 && (inp.wasPressed('Mouse0') || inp.wasPressed('Space') || inp.wasPressed('KeyT') || inp.wasPressed('Enter'))) return this.openFromArrival();
     // ---- the camera: riding rig -> up past the sign -> down to her
-    const T = 2.7;
+    const T = her instanceof Turtle ? 3.2 : 2.7;
     const u = smoother(A.t / T) * 2;
     catmull(A.P, u, this.shot.pos);
     catmull(A.L, u, this.shot.look);
@@ -1471,7 +1806,7 @@ export class Shop {
     }
     this.handheld(Math.min(1, A.t / 1.5));
     // ---- her: in the shell until the camera finds her, then eyes first, then out
-    if (!A.coaxed && A.t > 2.45) {
+    if (!A.coaxed && A.t > T - 0.25) {
       A.coaxed = true;
       her.coax(0.85);
     }
@@ -1495,6 +1830,7 @@ export class Shop {
     const A = this.arrival;
     if (!A) return;
     this.arrival = null;
+    if (A.her instanceof Turtle) return this.startTalk(A.her, A.hooks);
     const wares = A.hooks.stock?.() ?? [];
     void this.open(A.her.root.position.clone(), 0, wares, A.her.root.position, { her: A.her });
   }
@@ -1509,6 +1845,7 @@ export class Shop {
     A.her.lookAt = null;
     A.her.halt = false;
     A.her.faceYaw(null);
+    if (A.her instanceof Turtle) A.her.resume(0.5);
     this.cam.setCine(null);
     eng.letterbox(false, 0.4);
     eng.input.enabled = this.inputWas;
@@ -1521,6 +1858,11 @@ export class Shop {
     this.clearSpeech();
     this.her = null;
     this.phase = 'off';
+    this.visitWares = null;
+    this.lightAt = null;
+    const d = this.done;
+    this.done = null;
+    d?.();
   }
 
   /** where the riding rig would put the camera right now (the leaving dolly lands here) */
@@ -1593,7 +1935,8 @@ export class Shop {
         // beside her head, on the open side of the frame
         const head = her.headPos(_v);
         const nx = _b.copy(head).project(cam).x;
-        if (nx > 0.3) this.speechSide = -1;
+        if (this.speechForce) this.speechSide = this.speechForce;
+        else if (nx > 0.3) this.speechSide = -1;
         else if (nx < -0.1) this.speechSide = 1;
         const right = _a.set(1, 0, 0).applyQuaternion(cam.quaternion);
         this.speech.anchor.copy(head).addScaledVector(right, this.speechSide * (0.24 + this.speech.mesh.scale.x * 0.5));
@@ -1628,7 +1971,8 @@ export class Shop {
       if (t < 0 || t > 30) return false;
       return _a.copy(o).addScaledVector(d, t).distanceTo(c) < r;
     };
-    if (hit(p.center(_v), p.kind === 'caravan' ? 1.6 : 0.6)) return true;
+    if (p instanceof Turtle) return !!p.rider && !p.rider.hidden && (hit(p.rider.center(_v), 0.6) || hit(p.rider.headPos(_v), 0.26));
+    if (hit(p.center(_v), 0.6)) return true;
     return !p.hidden && hit(p.headPos(_v), 0.26);
   }
 
@@ -1641,8 +1985,8 @@ export class Shop {
       const close = this.hunter ? this.hunter.distanceTo(c) < 7 : false;
       const t = _a.copy(c).sub(o).dot(d);
       const miss = t > 0 && t < 40 ? _a.copy(o).addScaledVector(d, t).distanceTo(c) : 99;
-      const big = p.kind === 'caravan';
-      if ((close && (!big || this.hunter!.distanceTo(c) < 11)) || miss < (big ? 3 : 2.2)) p.threat(1);
+      const big = p instanceof Turtle;
+      if ((close && (!big || this.hunter!.distanceTo(c) < 12)) || miss < (big ? 4 : 2.2)) p.threat(1);
     }
   }
 
@@ -1651,16 +1995,516 @@ export class Shop {
     for (const p of this.puppets.values()) {
       if (!p.root.parent || this.owns(p)) continue;
       const c = p.center(_v);
-      const reach = r < 0 ? -r : r + 7;
+      const reach = r < 0 ? -r + (p instanceof Turtle ? 3 : 0) : r + (p instanceof Turtle ? 10 : 7);
       if (c.distanceTo(_a.set(pos.x, pos.y, pos.z)) < reach) p.threat(1.5);
     }
+  }
+
+  // ---------------------------------------------------------------- the turtle house: a visit
+  // Talk to Ozymandias on his porch (3D Alagard answers to pick), then walk up
+  // the gangplank and in at the door behind him; the shop happens inside, and
+  // leaving walks you back out and down to your board.
+
+  /** after the arrival greeting: his porch, and a few things to say to him */
+  private startTalk(g: Turtle, hooks: MerchantHooks) {
+    const eng = this.ctx.engine;
+    this.her = g;
+    this.active = true;
+    eng.paused = true;
+    eng.input.setWantLock(false);
+    this.visit = {
+      g, hooks, phase: 'talk', t: 0, asked: new Set(), plaques: [], plaqueT: 0, showAt: 0.4, hover: -1, go: null, goAt: 0,
+      actor: null, path: [], wp: [], cum: [0], s: 0, walkPh: 0, walkAmt: 0, lastStep: 0, yaw: 0, standYaw: 0, heading: 0, breath: 0,
+      base: { pos: this.shot.pos.clone(), look: this.shot.look.clone(), fov: this.shot.fov },
+      cp: new THREE.Vector3(), cl: new THREE.Vector3(), doorAt: -1, from: { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50 }, outAt: -1, ozGo: false, skip: false,
+    };
+    this.phase = 'visit';
+    this.speechForce = 1;
+    this.bar.innerHTML = `click or press 1-${TALK.length} to answer &nbsp;·&nbsp; ESC to ride on`;
+    this.bar.style.display = 'block';
+  }
+
+  private updateVisit(h: number) {
+    const v = this.visit!;
+    const inp = this.input;
+    v.t += h;
+    if ((v.phase === 'enter' || v.phase === 'exit') && v.t > 0.6 && (inp.wasPressed('Space') || inp.wasPressed('Enter') || inp.wasPressed('Mouse0') || inp.wasPressed('Escape'))) v.skip = true;
+    switch (v.phase) {
+      case 'talk':
+        this.updateTalk(v, h);
+        break;
+      case 'enter':
+        this.updateEnter(v, h);
+        break;
+      case 'exit':
+        this.updateExit(v, h);
+        break;
+      case 'bye':
+        this.updateBye(v, h);
+        break;
+    }
+    if (!this.visit) return; // it ended this frame
+    v.g.near = false;
+    v.g.update(h);
+    this.updateSpeech(h);
+    this.warmUp(h, v.phase === 'bye' || (v.phase === 'exit' && v.outAt >= 0) ? 0 : 1);
+  }
+
+  // ---- talk
+  private updateTalk(v: Visit, h: number) {
+    const inp = this.input, g = v.g;
+    // the camera holds on him, breathing
+    this.shot.pos.copy(v.base.pos);
+    this.shot.look.copy(v.base.look);
+    this.shot.fov = v.base.fov;
+    this.handheld(1);
+    g.lookAt = this.hunter ? _w.copy(this.hunter).add(_a.set(0, 1.5, 0)) : null;
+    // the answers come up once he has said his piece
+    if (!v.plaques.length && !v.go && v.t >= v.showAt && (!this.speech || this.speech.done) && !this.pendingLine) this.showChoices(v);
+    this.placeChoices(v, h);
+    let pick = -1;
+    if (v.plaques.length && v.t - v.plaqueT > 0.3) {
+      for (let k = 0; k < TALK.length; k++) if (inp.wasPressed('Digit' + (k + 1)) || inp.wasPressed('Numpad' + (k + 1))) pick = k;
+      if (v.hover >= 0 && inp.wasPressed('Mouse0')) pick = v.hover;
+    }
+    if (inp.wasPressed('Escape') || inp.wasPressed('KeyT')) pick = TALK.length - 1;
+    if (pick >= 0) this.choose(v, pick);
+    if (v.go && v.t >= v.goAt) {
+      if (v.go === 'enter') this.startEnter(v);
+      else this.startBye(v);
+    }
+  }
+
+  private showChoices(v: Visit) {
+    v.plaqueT = v.t;
+    const halfH = 1.4 * Math.tan((this.shot.fov * Math.PI) / 360);
+    v.plaques = TALK.map((c, i) => {
+      const old = v.asked.has(i) && !c.go;
+      const ft = new FloatText3D(`${i + 1}.  ${c.q}`, { size: halfH * 0.072, px: 44, cps: 70, wrap: 60, align: 'left', hdr: old ? 0.8 : 1.2, color: old ? '#cdbb98' : '#fff3d6', glow: old ? '#6a4a28' : '#ffb070' });
+      ft.mesh.renderOrder = 991;
+      this.ctx.scene.add(ft.mesh);
+      return ft;
+    });
+    this.ctx.sfx('card_flip', null, 0.25, 0.9);
+  }
+
+  /** the answers float in a column on the open side of the frame, a little in front of the lens */
+  private placeChoices(v: Visit, h: number) {
+    if (!v.plaques.length) return;
+    const cam = this.ctx.camera;
+    const pos = this.shot.pos;
+    const fwd = _a.subVectors(this.shot.look, pos).normalize();
+    const right = _b.crossVectors(fwd, UP).normalize();
+    const up = _c.crossVectors(right, fwd);
+    const D = 1.4, halfH = D * Math.tan((this.shot.fov * Math.PI) / 360);
+    const halfW = halfH * (this.ctx.engine.width / Math.max(1, this.ctx.engine.height));
+    // hover: the plaque under the cursor
+    this.ray.setFromCamera(_ndc.set(this.input.ndcX, this.input.ndcY), cam);
+    let hov = -1;
+    v.plaques.forEach((ft, i) => {
+      ft.mesh.updateMatrixWorld();
+      if (ft.visibleAmount > 0.5 && this.ray.intersectObject(ft.mesh, false).length) hov = i;
+    });
+    if (hov >= 0 && hov !== v.hover) this.ctx.sfx('ui_hover', null, 0.3, 1.1);
+    v.hover = hov;
+    v.plaques.forEach((ft, i) => {
+      ft.hover = damp(ft.hover, i === hov ? 1 : 0, 12, h);
+      const w = ft.mesh.scale.x / Math.max(0.5, (1 + ft.hover * 0.12) * (0.92 + 0.08 * ft.visibleAmount));
+      ft.anchor.copy(pos).addScaledVector(fwd, D).addScaledVector(right, -0.9 * halfW + w * 0.5 + ft.hover * 0.025).addScaledVector(up, (-0.04 - i * 0.15) * halfH);
+      ft.update(h, cam);
+    });
+  }
+
+  private choose(v: Visit, i: number) {
+    if (v.go) return;
+    const c = TALK[i];
+    v.asked.add(i);
+    for (const ft of v.plaques) {
+      ft.show(false);
+      this.fading.push(ft);
+    }
+    v.plaques = [];
+    v.hover = -1;
+    this.ctx.sfx('ui_click', null, 0.45);
+    this.speak(rnd.pick(c.a), c.go === 'bye' ? 'neutral' : 'laugh');
+    v.g.nod();
+    if (c.go) {
+      v.go = c.go;
+      v.goAt = v.t + (c.go === 'enter' ? 1.3 : 0.5);
+    } else v.showAt = v.t + 1.1;
+  }
+
+  // ---- walking in
+  private startEnter(v: Visit) {
+    const g = v.g;
+    v.phase = 'enter';
+    v.t = 0;
+    v.go = null;
+    v.doorAt = -1;
+    v.ozGo = false;
+    v.skip = false;
+    this.bar.style.display = 'none';
+    g.setRamp(true);
+    g.lookAt = null;
+    this.speechForce = 0;
+    const F = g.meta.ramp?.foot ?? [5.35, 0.08, 0.1], T = g.meta.ramp?.top ?? [2.4, 3, 0.1];
+    const fl = g.meta.porch?.[1] ?? 3.0, st = g.meta.room?.stand ?? [0.85, fl, -0.95];
+    this.dismount(v, [[8.3, 0, 1.3], [F[0] + 0.75, 0, F[2] + 0.15], [F[0] - 0.1, F[1], F[2]], [T[0], T[1], T[2]], [1.55, fl, 0.1], [0.92, fl, 0.1], st]);
+    // looking back up the shop at Ozymandias from where he stands
+    v.standYaw = Math.atan2(-Math.cos(g.root.rotation.y), Math.sin(g.root.rotation.y));
+    this.followTarget(v, v.cp, v.cl);
+  }
+
+  /** he parks his board beside the gangplank, steps off, and a walking copy of his rig takes over */
+  private dismount(v: Visit, path: number[][]) {
+    const g = v.g, hk = v.hooks.hunter, ctx = this.ctx;
+    const a = g.root.rotation.y;
+    v.heading = Math.atan2(Math.cos(a), -Math.sin(a)); // pointing away from the porch
+    const bp = g.toWorld([8.1, 0, 2.4], new THREE.Vector3());
+    bp.y = ctx.world.groundAt(bp.x, bp.z);
+    const b = v.hooks.board;
+    if (b?.place) b.place(bp.x, bp.y, bp.z, v.heading);
+    if (hk?.root) {
+      hk.root.position.copy(b?.pos ?? bp);
+      hk.root.quaternion.setFromAxisAngle(UP, v.heading);
+    }
+    this.setPath(v, path);
+    if (!hk) return;
+    hk.rig.root.visible = false;
+    const actor = new RigInstance(hk.rig.geo, { material: hk.rig.material });
+    if (hk.gun) {
+      const gun = new RigInstance(hk.gun.geo, { material: hk.gun.material });
+      const holder = new THREE.Group();
+      holder.rotation.x = Math.PI / 2;
+      holder.add(gun.root);
+      if (!actor.attach('hip_r', holder)) actor.nodes['pelvis']?.add(holder);
+    }
+    actor.setExpression('determined');
+    ctx.scene.add(actor.root);
+    v.actor = actor;
+    v.yaw = Math.atan2(v.wp[1].x - v.wp[0].x, v.wp[1].z - v.wp[0].z);
+    this.walkActor(v, 0, false);
+  }
+
+  /** the hunter's walk (turtle root space; points near y 0 follow the sand) */
+  private setPath(v: Visit, path: number[][]) {
+    v.path = path.map((p) => new THREE.Vector3(p[0], p[1], p[2]));
+    v.wp = v.path.map((p) => {
+      const w = v.g.toWorld([p.x, p.y, p.z], new THREE.Vector3());
+      if (p.y < 0.2) w.y = this.ctx.world.groundAt(w.x, w.z);
+      return w;
+    });
+    v.cum = [0];
+    for (let i = 1; i < v.wp.length; i++) v.cum.push(v.cum[i - 1] + v.wp[i].distanceTo(v.wp[i - 1]));
+    v.s = 0;
+  }
+
+  /** walk (or stand and breathe); true once he is at the end of his path */
+  private walkActor(v: Visit, h: number, go: boolean) {
+    const a = v.actor, W = v.wp;
+    if (!W.length) return true;
+    const total = v.cum[v.cum.length - 1];
+    let i = 0;
+    for (; i < W.length - 2 && v.s > v.cum[i + 1]; i++);
+    const ramp = v.path[i].y > 0.2 !== v.path[i + 1].y > 0.2 || (v.path[i].y > 0.2 && Math.abs(v.path[i].y - v.path[i + 1].y) > 0.3);
+    const moving = go && v.s < total - 1e-4;
+    if (moving) v.s = Math.min(total, v.s + h * (ramp ? 1.15 : 1.5));
+    for (i = 0; i < W.length - 2 && v.s > v.cum[i + 1]; i++);
+    const L = Math.max(1e-4, v.cum[i + 1] - v.cum[i]);
+    const k = c01((v.s - v.cum[i]) / L);
+    const p = _tw.lerpVectors(W[i], W[i + 1], k);
+    if (v.path[i].y < 0.2 && v.path[i + 1].y < 0.2) p.y = this.ctx.world.groundAt(p.x, p.z);
+    const want = moving ? Math.atan2(W[i + 1].x - W[i].x, W[i + 1].z - W[i].z) : v.s >= total - 1e-4 ? v.standYaw : v.yaw;
+    const dy = wrapPi(want - v.yaw);
+    v.yaw += Math.sign(dy) * Math.min(Math.abs(dy), 7 * h);
+    v.walkAmt = damp(v.walkAmt, moving ? 1 : 0, 6, h);
+    v.walkPh += h * 7.2 * v.walkAmt;
+    v.breath += h;
+    if (!a) return v.s >= total - 1e-4;
+    strideVisitor(a, v.walkPh, v.walkAmt, v.breath);
+    a.root.position.copy(p);
+    a.root.position.y += Math.abs(Math.cos(v.walkPh)) * 0.03 * v.walkAmt;
+    a.root.rotation.set(0, v.yaw, 0);
+    // footfalls: sand, then hollow planks
+    if (v.walkAmt > 0.3 && Math.floor(v.walkPh / Math.PI) !== v.lastStep) {
+      v.lastStep = Math.floor(v.walkPh / Math.PI);
+      if (v.path[i].y < 0.2 && v.path[i + 1].y < 0.2) {
+        this.ctx.sfx('footstep_sand', p, 0.3, 0.9 + rnd.next() * 0.2);
+        this.ctx.particles.emit({ pos: { x: p.x, y: p.y + 0.04, z: p.z }, count: 4, spread: 1.0, up: 1.0, life: [0.4, 0.8], size: [0.05, 0.03], sprite: ['grain0', 'grain1', 'grain2'], color: [P.sand0, P.sand1], gravity: 9, ground: true });
+      } else this.ctx.sfx('board_land', p, 0.09, 1.9 + rnd.next() * 0.2);
+    }
+    return v.s >= total - 1e-4;
+  }
+
+  /** the follow camera's target while he walks up: behind his shoulder, squaring up on the door */
+  private followTarget(v: Visit, pos: THREE.Vector3, look: THREE.Vector3) {
+    const g = v.g;
+    const sTop = v.cum[3] ?? 0, sI = v.cum[5] ?? 1;
+    const k = smoother((v.s - (sTop - 1.2)) / Math.max(0.1, sI - sTop + 1.2));
+    const ap = v.actor ? g.root.worldToLocal(_l.copy(v.actor.root.position)) : g.root.worldToLocal(_l.copy(v.wp[0] ?? g.root.position));
+    pos.set(mix(3.0, 1.85, k), mix(1.75, 1.6, k), mix(2.2, 0, k)).add(ap);
+    look.set(mix(-1.8, -1.6, k), mix(1.15, 1.3, k), mix(-0.3, 0, k)).add(ap);
+    g.root.localToWorld(pos);
+    g.root.localToWorld(look);
+    pos.y = Math.max(pos.y, this.ctx.world.groundAt(pos.x, pos.z) + 0.6);
+  }
+
+  private updateEnter(v: Visit, h: number) {
+    const g = v.g, rm = g.meta.room ?? {};
+    // Ozymandias goes in ahead and opens up
+    if (!v.ozGo && v.t > 0.45) {
+      v.ozGo = true;
+      g.setDoor(true);
+      g.riderWalk(true);
+    }
+    const arrived = this.walkActor(v, h, g.rampDown && v.t > 1.0);
+    if (v.skip) return this.enterShop(v);
+    const sI = v.cum[5] ?? 0;
+    if (v.doorAt < 0 && v.s >= sI - 0.05) {
+      v.doorAt = v.t;
+      v.from.pos.copy(this.shot.pos);
+      v.from.look.copy(this.shot.look);
+      v.from.fov = this.shot.fov;
+    }
+    if (v.doorAt < 0) {
+      // over his shoulder up the gangplank, settling in from the porch shot
+      this.followTarget(v, _a, _b);
+      v.cp.lerp(_a, 1 - Math.exp(-3.2 * h));
+      v.cl.lerp(_b, 1 - Math.exp(-4 * h));
+      const e = smoother(v.t / 1.8);
+      this.shot.pos.lerpVectors(v.base.pos, v.cp, e);
+      this.shot.look.lerpVectors(v.base.look, v.cl, e);
+      this.shot.fov = mix(v.base.fov, 52, e);
+    } else {
+      // through the door after him, to the doorway shot of the shop
+      const k = smoother((v.t - v.doorAt) / 1.7);
+      const pts = [v.from.pos, g.toWorld([2.15, 4.48, 0.1], new THREE.Vector3()), g.toWorld(rm.cam ?? [1.3, 4.38, 0.1], new THREE.Vector3())];
+      catmull(pts, k * 2, this.shot.pos);
+      this.shot.look.lerpVectors(v.from.look, g.toWorld(rm.look ?? [-0.8, 3.75, -0.35], _c), smoother(k * 1.15));
+      this.shot.fov = mix(v.from.fov, 50, k);
+      if (k >= 1 && arrived) this.enterShop(v);
+    }
+    this.handheld(0.6);
+  }
+
+  /** in the house: the shop opens (the wares tumble out of his basket onto the rug) */
+  private enterShop(v: Visit) {
+    const g = v.g, rm = g.meta.room ?? {};
+    v.phase = 'shop';
+    v.s = v.cum[v.cum.length - 1];
+    this.walkActor(v, 0.5, false);
+    if (g.riderWalking || !v.ozGo) g.riderAt(true);
+    g.setDoor(true);
+    if (!g.rampDown) g.setRamp(true);
+    g.indoor = true;
+    this.indoor = true;
+    this.lightAt = g.toWorld(rm.lamp ?? [-0.85, 4.6, 0.15], new THREE.Vector3());
+    if (v.skip) {
+      // skipped the walk: cut straight to the doorway shot
+      g.toWorld(rm.cam ?? [1.3, 4.38, 0.1], this.shot.pos);
+      g.toWorld(rm.look ?? [-0.8, 3.75, -0.35], this.shot.look);
+      this.shot.fov = 50;
+    }
+    v.skip = false;
+    const wares = this.visitWares ?? v.hooks.stock?.() ?? [];
+    this.visitWares = null;
+    this.greeted = false; // he says hello again behind his counter
+    void this.begin(g.root.position.clone(), 0, wares, g.root.position, g);
+  }
+
+  // ---- walking out
+  /** the wares are back in his basket: walk out of the door, down the gangplank and onto the board */
+  private startExit() {
+    const v = this.visit;
+    if (!v) return this.finish();
+    const g = v.g;
+    this.clearWares();
+    this.phase = 'visit';
+    this.indoor = false;
+    g.indoor = false;
+    v.phase = 'exit';
+    v.t = 0;
+    v.outAt = -1;
+    v.ozGo = false;
+    v.skip = false;
+    v.from.pos.copy(this.shot.pos);
+    v.from.look.copy(this.shot.look);
+    v.from.fov = this.shot.fov;
+    const F = g.meta.ramp?.foot ?? [5.35, 0.08, 0.1], T = g.meta.ramp?.top ?? [2.4, 3, 0.1];
+    const fl = g.meta.porch?.[1] ?? 3.0, st = g.meta.room?.stand ?? [0.85, fl, -0.95];
+    this.setPath(v, [st, [0.92, fl, 0.1], [1.55, fl, 0.1], [T[0], T[1], T[2]], [F[0] - 0.1, F[1], F[2]], [F[0] + 0.75, 0, F[2] + 0.15], [8.1, 0, 2.4]]);
+    v.standYaw = v.heading;
+    v.cp.copy(this.shot.pos);
+    v.cl.copy(this.shot.look);
+  }
+
+  private updateExit(v: Visit, h: number) {
+    const g = v.g, eng = this.ctx.engine;
+    const arrived = this.walkActor(v, h, v.t > 0.45 && v.outAt < 0);
+    // Ozymandias follows him out to see him off from the porch
+    if (!v.ozGo && v.s > (v.cum[2] ?? 0) + 0.4) {
+      v.ozGo = true;
+      g.riderWalk(false, () => {
+        g.setDoor(false);
+        g.wave(2.2);
+      });
+    }
+    if (v.skip && v.outAt < 0) {
+      v.s = v.cum[v.cum.length - 1];
+      this.walkActor(v, 0.5, false);
+      if (g.riderWalking) {
+        g.riderAt(false);
+        g.setDoor(false);
+      }
+    }
+    if (v.outAt < 0 && (arrived || v.skip)) {
+      // back on his board: the camera returns to the saddle
+      v.outAt = v.t;
+      v.skip = false;
+      if (v.actor) {
+        v.actor.root.removeFromParent();
+        v.actor = null;
+      }
+      if (v.hooks.hunter) v.hooks.hunter.rig.root.visible = true;
+      this.ctx.sfx('board_land', this.hunter ?? g.root.position, 0.4, 1.2);
+      this.cam.yaw = v.heading;
+      this.ridingPose(this.camHome);
+      v.from.pos.copy(this.shot.pos);
+      v.from.look.copy(this.shot.look);
+      v.from.fov = this.shot.fov;
+      eng.letterbox(false, 0.9);
+      g.setRamp(false);
+    }
+    if (v.outAt >= 0) {
+      const k = smoother((v.t - v.outAt) / 1.4);
+      this.shot.pos.lerpVectors(v.from.pos, this.camHome.pos, k);
+      this.shot.look.lerpVectors(v.from.look, this.camHome.look, smoother(k * 1.15));
+      this.shot.fov = mix(v.from.fov, this.camHome.fov, k);
+      this.handheld(1 - k);
+      if (k >= 1) this.endVisit();
+      return;
+    }
+    // out through the door ahead of him, then watch him come out and down the gangplank
+    const A = g.toWorld([3.7, 4.4, 1.9], _a);
+    const B = g.toWorld([8.9, 2.3, 4.4], _b);
+    const ka = smoother(v.t / 1.3);
+    const sD = v.cum[2] ?? 0, total = v.cum[v.cum.length - 1];
+    const kb = smoother((v.s - sD) / Math.max(0.1, total - sD));
+    if (ka < 1) catmull([v.from.pos, g.toWorld([2.2, 4.5, 0.1], new THREE.Vector3()), A.clone()], ka * 2, this.shot.pos);
+    else this.shot.pos.lerpVectors(A, B, kb);
+    const head = v.actor ? _c.copy(v.actor.root.position).add(_l.set(0, 1.25, 0)) : g.toWorld([1.5, 4.2, 0.1], _c);
+    v.cl.lerp(head, 1 - Math.exp(-4 * h));
+    this.shot.look.lerpVectors(v.from.look, v.cl, smoother(v.t / 0.9));
+    this.shot.fov = mix(v.from.fov, 50, ka);
+    this.handheld(0.7);
+  }
+
+  // ---- riding on from the porch
+  private startBye(v: Visit) {
+    v.phase = 'bye';
+    v.t = 0;
+    v.go = null;
+    this.bar.style.display = 'none';
+    v.g.wave(2.0);
+    this.ridingPose(this.camHome);
+    v.from.pos.copy(this.shot.pos);
+    v.from.look.copy(this.shot.look);
+    v.from.fov = this.shot.fov;
+    this.ctx.engine.letterbox(false, 1.2);
+  }
+
+  private updateBye(v: Visit, h: number) {
+    void h;
+    const k = smoother((v.t - 0.7) / 1.6);
+    this.orbit(v.from.pos, this.camHome.pos, k, this.shot.pos);
+    this.shot.look.copy(v.from.look).lerp(this.camHome.look, smoother(k * 1.2));
+    this.shot.fov = mix(v.from.fov, this.camHome.fov, k);
+    this.handheld(1 - k);
+    if (k >= 1) this.endVisit();
+  }
+
+  /** the visit is over (or called off): everything back, the camera in the saddle */
+  private endVisit() {
+    const v = this.visit;
+    if (!v) return;
+    this.visit = null;
+    const eng = this.ctx.engine, g = v.g;
+    if (v.actor) v.actor.root.removeFromParent();
+    if (v.hooks.hunter) v.hooks.hunter.rig.root.visible = true;
+    for (const ft of v.plaques) ft.dispose();
+    if (this.bodies.length) this.clearWares();
+    g.indoor = false;
+    g.lookAt = null;
+    if (!g.riderWalking) g.setDoor(false);
+    g.setRamp(false);
+    g.resume(3.5);
+    g.armed = false;
+    g.awayT = 0;
+    this.indoor = false;
+    this.lightAt = null;
+    this.speechForce = 0;
+    this.cam.setCine(null);
+    eng.letterbox(false, 0.5);
+    this.restoreGrade();
+    this.holdLight(0);
+    this.clearSpeech();
+    this.tip.style.display = 'none';
+    this.bar.style.display = 'none';
+    eng.input.enabled = true;
+    eng.input.setWantLock(true);
+    eng.paused = false;
+    this.active = false;
+    this.her = null;
+    this.phase = 'off';
+    const d = this.done;
+    this.done = null;
+    d?.();
+  }
+
+  /** pressed T at his gangplank: the same scene as riding up (he turns, Ozymandias greets you, you talk) */
+  private visitByKey(g: Turtle, wares: Ware[]) {
+    if (g.hidden) {
+      this.ctx.toast(VOICE_C.title, '#ffd36b', 'Gobi is dug in. Come back when it is quiet.');
+      return Promise.resolve();
+    }
+    this.visitWares = wares;
+    return new Promise<void>((res) => {
+      this.done = res;
+      this.startArrival(g, { ...(g.hooks ?? {}), stock: () => wares });
+    });
+  }
+
+  /** where the hunter stands right now (the walking copy of him during a visit) */
+  private hunterAt(): THREE.Vector3 | null {
+    const a = this.visit?.actor;
+    if (a && a.root.parent) return a.root.position;
+    return this.hunter;
+  }
+
+  /** take the wares and the rug away (the shop is done with them) */
+  private clearWares() {
+    for (const b of this.bodies) {
+      this.group.remove(b.obj);
+      (b.obj.children[0] as THREE.Mesh | undefined)?.geometry.dispose();
+      b.spot.m.dispose();
+    }
+    this.bodies = [];
+    if (this.rug) this.group.remove(this.rug);
+    this.tip.style.display = 'none';
+    this.bar.style.display = 'none';
+    this.hovered = null;
   }
 
   // ---------------------------------------------------------------- the shop
   /** open at a rug position in front of the merchant; resolves when the player leaves */
   open(rugAt: THREE.Vector3, facing: number, wares: Ware[], merchantPos: THREE.Vector3, _opts?: unknown): Promise<void> {
     const o = _opts as { her?: unknown } | undefined;
-    const viaArrival = o && (o.her instanceof Tamsin || o.her instanceof Caravan) ? o.her : null;
+    const viaArrival = o && o.her instanceof Tamsin ? o.her : null;
+    if (!viaArrival && !this.active && !this.arrival && !this.visit) {
+      // the turtle house: you talk to Ozymandias first, then go inside
+      const her = this.findHer(rugAt, merchantPos);
+      if (her instanceof Turtle) return this.visitByKey(her, wares);
+    }
     return this.begin(rugAt, facing, wares, merchantPos, viaArrival);
   }
 
@@ -1709,14 +2553,23 @@ export class Shop {
       this.pivot.copy(merchantPos);
       this.fwdAng = facing + Math.PI;
     }
-    C.y = ctx.world.groundAt(C.x, C.z);
     const g = this.group;
-    g.position.copy(C);
-    g.position.y += 0.004;
-    const nrm = new THREE.Vector3();
-    ctx.world.normal(C.x, C.z, nrm);
-    if (nrm.lengthSq() < 0.5 || nrm.y < 0.95) nrm.lerp(UP, 0.6).normalize();
-    g.quaternion.setFromUnitVectors(UP, nrm).multiply(_q.setFromAxisAngle(UP, yaw));
+    if (this.indoor && her instanceof Turtle) {
+      // on the floor of the house, the rug's long side across the doorway view,
+      // unrolling from his counter toward the door
+      her.toWorld(her.meta.room?.rug ?? [-0.25, 3, -0.3], C);
+      g.position.copy(C);
+      g.position.y += 0.004;
+      g.quaternion.copy(her.root.quaternion).multiply(_q.setFromAxisAngle(UP, -Math.PI / 2));
+    } else {
+      C.y = ctx.world.groundAt(C.x, C.z);
+      g.position.copy(C);
+      g.position.y += 0.004;
+      const nrm = new THREE.Vector3();
+      ctx.world.normal(C.x, C.z, nrm);
+      if (nrm.lengthSq() < 0.5 || nrm.y < 0.95) nrm.lerp(UP, 0.6).normalize();
+      g.quaternion.setFromUnitVectors(UP, nrm).multiply(_q.setFromAxisAngle(UP, yaw));
+    }
     g.updateMatrixWorld(true);
     this.gq.copy(g.quaternion).invert();
     // ---- rug
@@ -1760,7 +2613,7 @@ export class Shop {
       const { obj, he } = itemObject(w.model, spot.m);
       obj.visible = false;
       g.add(obj);
-      const x = (i - (nW - 1) / 2) * 0.42 + (rnd.next() - 0.5) * 0.06;
+      const x = (i - (nW - 1) / 2) * (this.indoor ? 0.36 : 0.42) + (rnd.next() - 0.5) * 0.06;
       const z = (i % 2 ? 0.12 : -0.1) + (rnd.next() - 0.5) * 0.06;
       const slot = new THREE.Vector3(x, this.rugTop + he.y, z);
       const I = new THREE.Vector3((he.y * he.y + he.z * he.z) / 3, (he.x * he.x + he.z * he.z) / 3, (he.x * he.x + he.y * he.y) / 3);
@@ -1810,6 +2663,7 @@ export class Shop {
       this.greeted = true;
       this.pendingLine = { text: rnd.pick(this.voice.lines.hello), mood: 'laugh', at: (her ? her.outIn() : 0) + 0.15 };
     }
+    if (this.indoor) return Promise.resolve(); // the visit resolves when he is back on his board
     return new Promise((res) => (this.done = res));
   }
 
@@ -1849,10 +2703,26 @@ export class Shop {
    * wall or hunter in the lens).
    */
   private planShot() {
+    if (this.indoor && this.her instanceof Turtle) {
+      // inside: from the doorway, him behind his counter, the rug of wares between
+      const t = this.her, rm = t.meta.room ?? {};
+      t.toWorld(rm.cam ?? [1.3, 4.38, 0.1], this.camMain.pos);
+      t.toWorld(rm.look ?? [-0.8, 3.75, -0.35], this.camMain.look);
+      const g = this.group, wx = Math.min(this.rugHalf.x, 0.95);
+      const subject = [
+        t.framingTop(new THREE.Vector3()),
+        g.localToWorld(new THREE.Vector3(-wx, this.rugTop, 0.2)),
+        g.localToWorld(new THREE.Vector3(wx, this.rugTop, 0.2)),
+        g.localToWorld(new THREE.Vector3(-wx, this.rugTop, -0.3)),
+        g.localToWorld(new THREE.Vector3(wx, this.rugTop, -0.3)),
+      ];
+      this.camMain.fov = this.fitShot(this.camMain.pos, subject, this.camMain.look);
+      this.focus.copy(this.camMain.look);
+      return;
+    }
     const H = this.pivot, a = this.fwdAng;
     const F = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
     const L = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a));
-    const big = this.her?.kind === 'caravan';
     const rd = this.her ? this.her.rugDist : 1.05;
     const spot = (s: number, k: number, lift: number) => {
       const p = H.clone().addScaledVector(F, rd + 2.4 * k).addScaledVector(L, 2.0 * k * s);
@@ -1862,13 +2732,13 @@ export class Shop {
     let pref = 1;
     if (this.hunter) pref = spot(1, 1, 1).distanceToSquared(this.hunter) >= spot(-1, 1, 1).distanceToSquared(this.hunter) ? 1 : -1;
     const head = this.her ? this.her.headPos(new THREE.Vector3()) : H.clone().add(_a.set(0, 1.2, 0));
-    if (!big) head.y = H.y + 1.2;
+    head.y = H.y + 1.2;
     const rug = this.group.position.clone();
     rug.y += 0.2;
     let pos: THREE.Vector3 | null = null, side = pref;
     search: for (const kk of [1, 0.8, 0.62])
       for (const s of [pref, -pref])
-        for (const lift of big ? [1.35, 1.75] : [1.0, 1.35]) {
+        for (const lift of [1.0, 1.35]) {
           const p = spot(s, kk, lift);
           if (this.clearView(p, head) && this.clearView(p, rug)) {
             pos = p;
@@ -1879,13 +2749,13 @@ export class Shop {
     if (!pos) pos = spot(pref, 0.62, 1.7); // crowded: look down over whatever is in the way
     this.camMain.pos.copy(pos);
     this.camMain.look.copy(H).addScaledVector(F, rd * 0.45).addScaledVector(L, 0.1 * side);
-    this.camMain.look.y = H.y + (big ? 1.2 : 0.66);
+    this.camMain.look.y = H.y + 0.66;
     // fit her (hat to toes) and the rug inside the letterboxed frame
     // (where the wares land: across the rug, a little toward the customer)
     const g = this.group, wx = Math.min(this.rugHalf.x, 1.05);
     const subject = [
       this.her ? this.her.framingTop(new THREE.Vector3()) : H.clone().add(_a.set(0, 1.65, 0)),
-      big ? H.clone().addScaledVector(F, rd - 1.2) : H.clone().addScaledVector(F, 0.3),
+      H.clone().addScaledVector(F, 0.3),
       g.localToWorld(new THREE.Vector3(-wx, this.rugTop, 0.3)),
       g.localToWorld(new THREE.Vector3(wx, this.rugTop, 0.3)),
       g.localToWorld(new THREE.Vector3(-wx, this.rugTop, -0.62)),
@@ -1967,6 +2837,7 @@ export class Shop {
   }
 
   dispose() {
+    if (this.visit) this.endVisit();
     if (this.arrival) this.abortArrival();
     if (this.active) this.finish();
     for (const u of this.unsub) u();
@@ -1974,7 +2845,7 @@ export class Shop {
     this.tip.remove();
     this.bar.remove();
     this.rugSpot?.m.dispose();
-    for (const p of this.puppets.values()) if (p instanceof Caravan) p.dispose();
+    for (const p of this.puppets.values()) if (p instanceof Turtle) p.dispose();
   }
 
   /** start leaving: a farewell beat (she waves her cane), wares back in her pack, then the dolly back to the saddle */
@@ -2036,6 +2907,8 @@ export class Shop {
     this.borrowed = false;
     this.hovered = null;
     this.warm = 0;
+    this.indoor = false;
+    this.lightAt = null;
     eng.paused = false;
     eng.input.setWantLock(true);
     this.active = false;
@@ -2095,7 +2968,8 @@ export class Shop {
 
   /** where the hunter keeps his loot (his hip), or just below the lens */
   private satchel(out: THREE.Vector3) {
-    if (this.hunter) return out.copy(this.hunter).add(_a.set(0, 0.95, 0));
+    const hp = this.hunterAt();
+    if (hp) return out.copy(hp).add(_a.set(0, 0.95, 0));
     const cam = this.ctx.camera;
     cam.getWorldDirection(_a);
     return out.copy(cam.position).addScaledVector(_a, 0.7).add(_b.set(0, -0.55, 0));
@@ -2121,6 +2995,7 @@ export class Shop {
       ctx.particles.update(h, ctx.world.env.fog);
     }
     if (this.arrival) return this.updateArrival(h);
+    if (this.visit && this.phase === 'visit') return this.updateVisit(h);
     const inp = this.input;
     if (this.phase !== 'leave' && (inp.wasPressed('Escape') || inp.wasPressed('KeyT'))) this.close();
     const her = this.her;
@@ -2182,7 +3057,11 @@ export class Shop {
     this.punch = Math.max(0, this.punch - h * 3);
     this.updateCamera(h);
     this.warmUp(h, this.phase === 'leave' && this.leaveSplit ? 0 : 1);
-    if (this.phase === 'leave' && this.pt > 2.0 && (this.bodies.every((b) => b.state === 'gone') || this.pt > 2.6)) this.finish();
+    if (this.visit?.actor) this.walkActor(this.visit, h, false); // the hunter, waiting by the rug
+    if (this.phase === 'leave' && this.pt > (this.indoor ? 1.5 : 2.0) && (this.bodies.every((b) => b.state === 'gone') || this.pt > 2.6)) {
+      if (this.indoor && this.visit) this.startExit();
+      else this.finish();
+    }
   }
 
   private updateCamera(h: number) {
@@ -2205,7 +3084,7 @@ export class Shop {
       P1.lerp(head, 0.18 * k);
       L1.lerp(head, 0.45 * k);
       fov1 -= 5 * k;
-      if (this.pt > 0.9) {
+      if (this.pt > 0.9 && !this.indoor) {
         // ...then the dolly back to the saddle
         if (!this.leaveSplit) {
           this.leaveSplit = true;
@@ -2223,7 +3102,8 @@ export class Shop {
       }
     }
     const e = smoother(this.camK);
-    this.orbit(this.camFrom.pos, P1, e, this.shot.pos);
+    if (this.indoor) this.shot.pos.lerpVectors(this.camFrom.pos, P1, e);
+    else this.orbit(this.camFrom.pos, P1, e, this.shot.pos);
     const el = smoother(this.camK * 1.25);
     this.shot.look.copy(this.camFrom.look).lerp(L1, el);
     this.shot.fov = mix(this.camFrom.fov, fov1, e) - 2.5 * this.punch * this.punch;
@@ -2324,7 +3204,7 @@ export class Shop {
     this.ctx.fx.dust({ x: start.x, y: start.y, z: start.z }, 0.22, P.sand1, 2);
     this.group.worldToLocal(start);
     b.p.copy(start);
-    const T = (this.her?.kind === 'caravan' ? 0.95 : 0.64) + rnd.next() * 0.14; // a longer fall from his tall pack
+    const T = (this.her instanceof Turtle ? 0.72 : 0.64) + rnd.next() * 0.14; // out of his basket on the counter
     b.v.copy(b.slot).sub(b.p).multiplyScalar(1 / T);
     b.v.y += 0.5 * G * T;
     b.q.setFromEuler(new THREE.Euler(rnd.next() * 6.28, rnd.next() * 6.28, rnd.next() * 6.28));
@@ -2341,6 +3221,7 @@ export class Shop {
 
   private floorAt(x: number, z: number) {
     if (Math.abs(x) <= this.rugHalf.x && Math.abs(z) <= this.rugHalf.y) return this.rugTop;
+    if (this.indoor) return 0; // the floorboards
     // off the rug: the real sand, measured from the rug's plane
     const w = this.group.localToWorld(_f.set(x, 0, z));
     return clamp(this.ctx.world.groundAt(w.x, w.z) - w.y, -0.3, 0.4);
@@ -2563,8 +3444,9 @@ export class Shop {
     }
     // from the hunter's gun hand when we know where he stands
     const muzzle = new THREE.Vector3();
-    if (this.hunter) {
-      muzzle.copy(this.hunter).y += 1.25;
+    const hp = this.hunterAt();
+    if (hp) {
+      muzzle.copy(hp).y += 1.25;
       muzzle.addScaledVector(new THREE.Vector3().subVectors(hitP, muzzle).normalize(), 0.45);
     } else muzzle.copy(o).addScaledVector(d, 0.8).y -= 0.3;
     const dir = new THREE.Vector3().subVectors(hitP, muzzle).normalize();
@@ -2597,7 +3479,8 @@ export class Shop {
       her.threat(1);
       if (!this.scolded) {
         this.scolded = true;
-        her.onOut = () => {
+        const who = her instanceof Turtle && her.rider ? her.rider : her; // indoors only he ducks
+        who.onOut = () => {
           if (!this.active || this.her !== her) return;
           this.speak(rnd.pick(this.voice.lines.shot), 'squinty');
           her.shake();
@@ -2622,7 +3505,8 @@ export class Shop {
     const H = this.pivot, a = this.fwdAng;
     L.t = 0;
     L.dur = 1e9;
-    L.l.position.set(H.x + Math.sin(a) * 0.85, H.y + 1.3, H.z + Math.cos(a) * 0.85);
+    if (this.lightAt) L.l.position.copy(this.lightAt);
+    else L.l.position.set(H.x + Math.sin(a) * 0.85, H.y + 1.3, H.z + Math.cos(a) * 0.85);
     L.l.color.setHex(0xffb064);
     L.l.distance = 6;
     const I = 2.4 * k * (0.93 + 0.07 * noise.n2(this.t * 3.1, 0.7));

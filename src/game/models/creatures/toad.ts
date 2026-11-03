@@ -337,7 +337,7 @@ function toad(cfg: ToadCfg): RigSpec {
 
   // ---------------------------------------------------------------- pose
   const PIV = T(0, 4, -40), NECK = T(0, 30, 14);
-  const A = mama ? -0.22 : 0, H = mama ? 0.1 : 0;
+  const A = mama ? -0.3 : 0, H = mama ? 0.2 : 0;
   // ---------------------------------------------------------------- the forms (toad space, T units)
   const trunkT: Prim[] = [
     { c: T(0, 21, -16), r: T(33, 16.5, 30), rot: [-0.28, 0, 0] }, // main body
@@ -354,7 +354,7 @@ function toad(cfg: ToadCfg): RigSpec {
   ];
   const glands: Prim[] = [];
   for (const sx of [1, -1]) {
-    headT.push({ c: T(sx * 12.6, 40.6, 23.5), r: T(7.6, 4.4, 9.6), rot: [0.05, sx * 0.25, 0] }); // heavy hooded upper lid
+    headT.push({ c: T(sx * 12.2, 42.6, 24.4), r: T(6.8, 3.3, 8.6), rot: [0.05, sx * 0.25, 0], k: 2.4 * s }); // heavy hooded upper lid
     // cranial crests: a ridge inside each eye, bending back behind it
     headT.push({ a: T(sx * 6.5, 40.2, 35), b: T(sx * 8.6, 41.4, 26), r0: 1.5 * s, r1: 1.9 * s, k: 1.6 * s });
     headT.push({ a: T(sx * 8.6, 41.4, 26), b: T(sx * 12.8, 40, 17), r0: 1.8 * s, r1: 1.4 * s, k: 1.6 * s });
@@ -363,7 +363,7 @@ function toad(cfg: ToadCfg): RigSpec {
     glands.push({ c: T(sx * 18, 36.6, -1), r: T(6, 4.6, 7.5), rot: [-0.08, sx * 0.46, 0], k: 2.2 * s });
   }
   const mouthY = (z: number) => 25.3 + Math.max(0, z - 15) * 0.05; // T units, head space
-  const EYE_T: V3 = [14.6, 38.6, 25.6];
+  const EYE_T: V3 = [15.6, 39.6, 27.2];
 
   // pitch Mama back into the chair, then lift her so the rump sits on the seat
   let pose = new Pose(PIV, A, 0, NECK, H);
@@ -384,7 +384,7 @@ function toad(cfg: ToadCfg): RigSpec {
   const trunk = trunkT.map((q) => pose.prim(q));
   const head = [...headT, ...glands].map((q) => pose.prim(q, true));
   const all = [...trunk, ...head];
-  const K = 6.5 * s;
+  const K = 5 * s;
   const F = new Field(all, K);
   const sdf0 = (p: V3) => F.d(p[0], p[1], p[2]);
   const eyeL = pose.head(T(EYE_T[0], EYE_T[1], EYE_T[2])), eyeR: V3 = [-eyeL[0], eyeL[1], eyeL[2]];
@@ -612,11 +612,24 @@ function toad(cfg: ToadCfg): RigSpec {
     const tc = pose.head(T(0, mouthY(32) - 3.4, 32));
     ell(jaw, tc, [8.5 * s, Math.max(1.2, 1.9 * s), 9 * s], (x, y, z) => (h01(x, y, z, 4) > 0.8 ? mulc(MOUTH.tongue, 1.08) : MOUTH.tongue), { under: true, rot: [pose.a + pose.h, 0, 0], keep: (_a, _b, _c, x, y, z) => cav(toT(pose.unHead([x + 0.5, y + 0.5, z + 0.5])), 1.05) });
   }
-  // eye sockets
-  for (const e of [eyeL, eyeR]) ell(headM, e, [eR * 0.97, eR * 0.97, eR * 0.97], 0, { carve: true });
+  // eye sockets, and a clear opening along each gaze so the globes bulge out of the head instead of hiding in it
+  const gazeT0 = norm3([0.62, 0.38, 0.69]);
+  for (const [e, sx] of [[eyeL, 1], [eyeR, -1]] as [V3, number][]) {
+    ell(headM, e, [eR * 0.97, eR * 0.97, eR * 0.97], 0, { carve: true });
+    const g = norm3(pose.dir([sx * gazeT0[0], gazeT0[1], gazeT0[2]], true));
+    const del2: V3[] = [];
+    headM.forEach((x, y, z) => {
+      const v: V3 = [x + 0.5 - e[0], y + 0.5 - e[1], z + 0.5 - e[2]];
+      const al = dot3(v, g);
+      if (al <= 0 || al > eR * 2.4) return;
+      const lat = Math.hypot(v[0] - g[0] * al, v[1] - g[1] * al, v[2] - g[2] * al);
+      if (lat < eR * (0.8 + 0.12 * (al / eR))) del2.push([x, y, z]);
+    });
+    for (const [x, y, z] of del2) headM.del(x, y, z);
+  }
 
   // ---------------------------------------------------------------- golden eyes with horizontal pupils
-  const gazeT = norm3([0.74, 0.3, 0.6]);
+  const gazeT = norm3([0.62, 0.38, 0.69]);
   const gaze = norm3(pose.dir(gazeT, true));
   const toadEye = (m: VoxelModel, c: V3, f: V3) => {
     const e1 = norm3(cross3([0, 1, 0], f)); // horizontal across the eye
@@ -637,6 +650,9 @@ function toad(cfg: ToadCfg): RigSpec {
       if (w > 0.42) return mixc(EYE.gold, EYE.goldLo, 0.55); // shaded under the hooded lid
       return w < -0.25 ? EYE.goldHi : EYE.gold;
     }, { fl: VF.SOLID });
+    // eye-shine: a toad's gold iris catches the firelight and holds it, so it stays gold even in the shadow side
+    const IRIS = new Set([EYE.gold, EYE.goldHi, EYE.goldLo, mixc(EYE.gold, EYE.goldLo, 0.55)]);
+    paint(m, (_x, _y, _z, c) => IRIS.has(c & 0xffffff), (x, y, z) => mulc((m.get(x, y, z) ?? EYE.gold) & 0xffffff, 0.86), VF.EMISSIVE);
     // catchlights (the same corner on both eyes)
     const hl = norm3(add3(add3(f, [0, 0.62, 0]), [0.22, 0, 0.3]));
     const best = { v: null as V3 | null, s: -1e9 };

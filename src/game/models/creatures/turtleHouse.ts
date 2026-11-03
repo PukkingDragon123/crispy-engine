@@ -248,8 +248,8 @@ function buildHouse(m: VoxelModel) {
       const t = (M(x) - x1) / (px + 0.12 - x1);
       m.set(x, Math.floor(U(5.02 - t * 0.45)), z, Math.floor(M(z) / 0.12) % 2 ? ROOF.tin : ROOF.tinD, VF.METAL);
     }
-  ell(m, P(1.62, floor + 0.42, 0.9), [U(0.16), U(0.05), U(0.28)], WOOD.hi);
-  for (const z of [0.68, 1.12]) cap(m, P(1.62, floor, z), P(1.62, floor + 0.4, z), U(0.04), U(0.04), WOOD.dark);
+  ell(m, P(1.62, floor + 0.42, -0.85), [U(0.16), U(0.05), U(0.26)], WOOD.hi);
+  for (const z of [-0.65, -1.05]) cap(m, P(1.62, floor, z), P(1.62, floor + 0.4, z), U(0.04), U(0.04), WOOD.dark);
   vessel(m, P(2.25, floor, -1.15), [2.2, 2.8, 3.0, 2.8, 2.6], (row, x, z) => (row === 4 ? CLAY.shade : h01(x, row, z, 4) > 0.8 ? CLAY.hi : CLAY.base), { seed: 9 });
   ell(m, P(2.25, floor + 0.55, -1.15), [U(0.22), U(0.16), U(0.22)], (x, y, z) => (h01(x, y, z, 3) > 0.85 ? 0xe86a8a : LEAF.b), { keep: (lx, ly) => ly > -0.3 || lx > 0.4 });
   // brackets under the porch, down to the shell
@@ -509,7 +509,7 @@ export function turtleHouseRig(): RigSpec {
   buildTree(rig);
   buildDoor(rig);
   buildShutter(rig, 'shut_fa', [-1.25, 3.9, H.z1 + 2 * VS], [1, 0, 0], 0.4, 0.7, -1.75);
-  buildShutter(rig, 'shut_fb', [-0.45 - VS, 3.9, H.z1 + 2 * VS], [-1, 0, 0], 0.4, 0.7, 1.75);
+  buildShutter(rig, 'shut_fb', [-0.45, 3.9, H.z1 + 2 * VS], [-1, 0, 0], 0.4, 0.7, 1.75);
   buildShutter(rig, 'shut_sa', [H.x0 - 2 * VS, 3.9, -0.6], [0, 0, 1], 0.4, 0.7, -1.75);
   buildShutter(rig, 'shut_sb', [H.x0 - 2 * VS, 3.9, 0.2 - VS], [0, 0, -1], 0.4, 0.7, 1.75);
   buildRamp(rig);
@@ -542,13 +542,17 @@ export function turtleHouseRig(): RigSpec {
     swing: ['lantern_a', 'lantern_b', 'chime', 'pots', 'tree', 'canopy'],
     /** shutters and the door: closed = rotation 0; open = their rest rotation */
     shutters: ['shut_fa', 'shut_fb', 'shut_sa', 'shut_sb'],
-    door: { part: 'door', open: -1.65 },
+    door: { part: 'door', open: 1.65 }, // swings out onto the porch
     /** level at rest; `stow` slides it in under the porch, `tilt` lowers it to the sand */
-    ramp: { part: 'ramp', tilt: RAMP_TILT, stow: [-3.95, -0.24, 0], foot: [H.porchX + 2.9, 0.08, 0.1], top: [H.porchX - 0.05, H.floor, 0.1] },
+    ramp: { part: 'ramp', tilt: RAMP_TILT, stow: [-3.95, -0.26, 0], foot: [H.porchX + 2.9, 0.08, 0.1], top: [H.porchX - 0.05, H.floor, 0.1] },
     /** in root space (m): the doorway, a spot inside the door, the room's camera, where the wares come from */
     doorway: [H.x1 + 0.35, H.floor, 0.1],
     inside: [0.75, H.floor, 0.1],
-    room: { rug: [-0.05, H.floor, -0.1], cam: [1.2, 4.42, 1.0], look: [-0.8, 3.75, -0.2], stand: [0.85, H.floor, -0.95], lamp: [-0.85, 4.6, 0.15] },
+    /** Ozymandias's walk from the porch, in at the door, round the counter's end to his place behind it (x, z at floor level) */
+    ozPath: [[J.porch[0], J.porch[2]], [2.0, 0.1], [1.6, 0.1], [0.95, 0.1], [-0.3, 0.86], [-1.38, 0.86], [J.counter[0], J.counter[2]]],
+    porch: J.porch,
+    counter: J.counter,
+    room: { rug: [-0.25, H.floor, -0.3], cam: [1.3, 4.38, 0.1], look: [-0.8, 3.75, -0.35], stand: [0.85, H.floor, -0.95], lamp: [-0.85, 4.6, 0.15] },
     pack: [-0.88, H.floor + 1.2, -0.35],
     chimney: [-1.35, 6.75, -1.15],
     eyes: 'voxel',

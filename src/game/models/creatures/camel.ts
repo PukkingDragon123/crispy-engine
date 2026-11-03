@@ -20,7 +20,7 @@ import type { RigSpec, V3 } from '../../../engine/voxel/Rig';
 import type { RigInstance } from '../../../engine/voxel/Rig';
 import { RBm, Sc, M3, VF, mix, mulRGB, hash3, noise, ell, cap, tube, paint, hollow, lumpy } from '../enemies/real/rk';
 import { VoxelModel } from '../../../engine/voxel/VoxelModel';
-import { blob, Prim, splitInto, wetEye, thicken, smoothVox, fur as cfur } from './ckit';
+import { Prim, splitInto, wetEye, thicken, smoothVox, fur as cfur } from './ckit';
 
 const VS = 1 / 40;
 export const CAMEL_EXPRESSIONS = ['neutral', 'bored', 'smug', 'spit'];
@@ -54,6 +54,78 @@ function legCoat(x: number, y: number, z: number) {
   const Y = M(y);
   const c = coatFur(x, y, z);
   return Y < 0.7 ? mix(c, 0xd8c4a0, Math.min(0.5, (0.7 - Y) * 1.2)) : c;
+}
+
+/**
+ * Organic smooth union of ellipsoids / tapered capsules (+ smooth subtractions),
+ * evaluated block by block with only the primitives that can reach each block
+ * (same maths as ckit's blob, much faster for a big body).
+ */
+function fastBlob(m: VoxelModel, prims: Prim[], col: (x: number, y: number, z: number) => number, k: number, disp: (x: number, y: number, z: number) => number) {
+  const box = prims.map((q) => {
+    const pad = k + 2.5;
+    if (q.a && q.b) {
+      const R = Math.max(q.r0 ?? 1, q.r1 ?? 1) + pad;
+      return [Math.min(q.a[0], q.b[0]) - R, Math.min(q.a[1], q.b[1]) - R, Math.min(q.a[2], q.b[2]) - R, Math.max(q.a[0], q.b[0]) + R, Math.max(q.a[1], q.b[1]) + R, Math.max(q.a[2], q.b[2]) + R];
+    }
+    const R = Math.max(q.r![0], q.r![1], q.r![2]) + pad;
+    return [q.c![0] - R, q.c![1] - R, q.c![2] - R, q.c![0] + R, q.c![1] + R, q.c![2] + R];
+  });
+  const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+  prims.forEach((q, i) => {
+    if (q.sub) return;
+    for (let a = 0; a < 3; a++) {
+      lo[a] = Math.min(lo[a], box[i][a]);
+      hi[a] = Math.max(hi[a], box[i][a + 3]);
+    }
+  });
+  const sd = (q: Prim, px: number, py: number, pz: number) => {
+    if (q.a && q.b) {
+      const a = q.a, b = q.b;
+      const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+      const ax = px - a[0], ay = py - a[1], az = pz - a[2];
+      const t = Math.max(0, Math.min(1, (ax * dx + ay * dy + az * dz) / (dx * dx + dy * dy + dz * dz || 1e-6)));
+      return Math.hypot(ax - dx * t, ay - dy * t, az - dz * t) - ((q.r0 ?? 1) + ((q.r1 ?? q.r0 ?? 1) - (q.r0 ?? 1)) * t);
+    }
+    const c = q.c!, r = q.r!;
+    const vx = px - c[0], vy = py - c[1], vz = pz - c[2];
+    const k0 = Math.hypot(vx / r[0], vy / r[1], vz / r[2]);
+    const k1 = Math.hypot(vx / (r[0] * r[0]), vy / (r[1] * r[1]), vz / (r[2] * r[2])) || 1e-6;
+    return (k0 * (k0 - 1)) / k1;
+  };
+  const smin = (a: number, b: number) => {
+    const h = Math.max(k - Math.abs(a - b), 0) / k;
+    return Math.min(a, b) - h * h * k * 0.25;
+  };
+  const B = 8;
+  for (let bx = Math.floor(lo[0]); bx <= hi[0]; bx += B)
+    for (let by = Math.floor(lo[1]); by <= hi[1]; by += B)
+      for (let bz = Math.floor(lo[2]); bz <= hi[2]; bz += B) {
+        const act: Prim[] = [];
+        prims.forEach((q, i) => {
+          const b = box[i];
+          if (b[0] <= bx + B && b[3] >= bx && b[1] <= by + B && b[4] >= by && b[2] <= bz + B && b[5] >= bz) act.push(q);
+        });
+        if (!act.some((q) => !q.sub)) continue;
+        for (let i = bx; i < bx + B; i++)
+          for (let j = by; j < by + B; j++)
+            for (let kk = bz; kk < bz + B; kk++) {
+              const px = i + 0.5, py = j + 0.5, pz = kk + 0.5;
+              let d = 1e9;
+              let first = true;
+              for (const q of act) {
+                const di = sd(q, px, py, pz);
+                if (q.sub) d = -smin(-d, di);
+                else if (first) {
+                  d = di;
+                  first = false;
+                } else d = smin(d, di);
+              }
+              if (d > 2.5) continue;
+              if (d + disp(px, py, pz) > 0) continue;
+              m.set(i, j, kk, col(i, j, kk));
+            }
+      }
 }
 
 const N6: [number, number, number][] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
@@ -93,7 +165,13 @@ function kilim(Y: number, Z: number, edge: number) {
   return bz % 3 === 1 ? KILIM.green : KILIM.red;
 }
 
+let cached: RigSpec | null = null;
+/** memoised: the sculpt takes a moment and every caller shares the same spec */
 export function camelRig(): RigSpec {
+  return (cached ??= buildCamel());
+}
+
+function buildCamel(): RigSpec {
   const rb = new RBm('camel_dromedary', VS);
 
   // ================================================================ one organic mass: torso, hump, neck, head
@@ -129,7 +207,7 @@ export function camelRig(): RigSpec {
     E([0.03, 1.958, 1.815], [0.036, 0.034, 0.034]),
     E([-0.03, 1.958, 1.815], [0.036, 0.034, 0.034]),
   ];
-  blob(mass, prims, coat, { k: 3.2, disp: (x, y, z) => (noise.n3(x * 0.12, y * 0.12, z * 0.12) * 0.35) });
+  fastBlob(mass, prims, coat, 3.2, (x, y, z) => noise.n3(x * 0.12, y * 0.12, z * 0.12) * 0.35);
   smoothVox(mass, 1, 13);
   // the cleft upper lip and slit nostrils
   const del: V3[] = [];

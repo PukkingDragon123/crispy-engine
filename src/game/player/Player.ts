@@ -17,6 +17,7 @@ import { clamp, damp, rnd, wrapAngle } from '../../engine/math/rand';
 import { P } from '../../engine/voxel/palette';
 import { Input } from '../../engine/Input';
 import { PlayerAnim } from '../anim/playerAnim';
+import { CastAnim } from '../anim/castAnim';
 
 export interface PlayerVisuals {
   rig: RigSpec;
@@ -167,6 +168,9 @@ export class Player {
   private kickPhase = 0;
   /** procedural board animation (springs, IK, choreography) */
   private pa = new PlayerAnim();
+  /** skill cast poses (grenade / flick / whistle) layered over the riding pose */
+  private cast = new CastAnim();
+  private castReady = false;
   muzzleWorld = new THREE.Vector3();
   // tunables
   baseGunDamage = 18;
@@ -196,6 +200,8 @@ export class Player {
   private snap: { e: EnemyLike; t: number } | null = null;
   // pose layer (skill / item actions)
   action: { name: string; t: number; dur: number } | null = null;
+  /** where a skill cast throws / points (held from the cast, the view may cut away mid-throw) */
+  castAim: THREE.Vector3 | null = null;
   /** 2D pixel eyes in the skull sockets (Serket-green embers) */
   eyes: RigEyes;
   // callbacks
@@ -372,13 +378,11 @@ export class Player {
     const fx = inp.axis('left', 'right');
     const fz = inp.axis('back', 'forward');
     const cf = this.cam.forward();
-    const rx = -cf.z, rz = cf.x; // right vector for yaw convention
-    let dx = cf.x * fz + -rx * fx * -1, dz = cf.z * fz + -rz * fx * -1;
-    // right = (-cos y, sin y) = (-cf.z, cf.x)
-    dx = cf.x * fz + -cf.z * fx;
-    dz = cf.z * fz + cf.x * fx;
-    void rx;
-    void rz;
+    // W rides where you look and A / D carve across it (right = (-cf.z, cf.x)); S only
+    // sits back on the heel edge to brake, it never swings the board around
+    const fzDir = Math.max(0, fz);
+    let dx = cf.x * fzDir + -cf.z * fx;
+    let dz = cf.z * fzDir + cf.x * fx;
     const dl = Math.hypot(dx, dz);
     if (dl > 1) {
       dx /= dl;
@@ -394,13 +398,18 @@ export class Player {
       jumpReleased: !stunned && inp.up('jump'),
       drift: !stunned && inp.held('drift'),
       boost: !stunned && inp.held('boost'),
+      push: !stunned && inp.hit('push'),
+      fwdTap: !stunned && inp.hit('forward'),
       fx,
       fz,
     };
     if (!this.alive) {
       bi.dirX = bi.dirZ = bi.throttle = 0;
-      bi.jumpHeld = bi.jumpPressed = bi.jumpReleased = bi.drift = bi.boost = false;
+      bi.jumpHeld = bi.jumpPressed = bi.jumpReleased = bi.drift = bi.boost = bi.push = bi.fwdTap = false;
     }
+    // mid power-slide, JUMP is a spin launch (Board), not the dodge below
+    const sliding = this.board.drifting;
+    if (sliding) bi.drift = false;
     // board-slide dodge: hold drift, tap jump (the press is spent on the dodge, not a charged jump)
     this.dodgeCd -= dt;
     this.dodgeT = Math.max(0, this.dodgeT - dt);
@@ -1295,6 +1304,13 @@ export class Player {
     if (A.wantFidgetTwirl && !this.action) this.playAction('twirl', 0.9);
     if (A.dustNow) this.ctx.fx.sandBurst(A.dust, 0.18);
     this.applyAction(dt);
+    if (this.action && CastAnim.owns(this.action.name)) {
+      if (!this.castReady) {
+        this.cast.init(this.rig);
+        this.castReady = true;
+      }
+      this.cast.apply(this.rig, this.action.name, Math.min(1, this.action.t / this.action.dur), this.castAim ?? this.aimPoint, this.animT);
+    }
     A.finish(I);
     // hurt flash decay
     const fxu = this.material.userData.fx.value;

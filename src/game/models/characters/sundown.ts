@@ -1511,6 +1511,96 @@ function outlawMask(o: OutfitId) {
   return { head: mh.m, jaw: mj.m, R };
 }
 
+// ================================================================== SUNGLASSES (round punk shades over the sockets)
+const FRAME = ramp(0x34363d, 0x1c1d22, 0x8c919c, 0x0c0c0e); // gunmetal
+const LENS = { top: 0x0f1015, mid: 0x171a22, low: 0x252c3a, streak: 0xaebdd6, crack: 0xd6dde8 };
+const LENS_C = (s: number): V3 => [(s * 10) / 3, 53.75, 6.6];
+const LENS_R = 2.2;
+/** the glow of his pupils seen through the tint, per eye variant (2x2 voxel columns in front of each pupil) */
+function lensGlow(m: Sc, s: number, v: EyeVar) {
+  if (v === 'dead') return;
+  const c = LENS_C(s);
+  const ci = Math.round(c[0] * S), cj = Math.round(54 * S);
+  for (let di = -2; di <= 1; di++)
+    for (let dj = -2; dj <= 1; dj++) {
+      const ox = di + 0.5, oy = dj + 0.5;
+      const core = Math.abs(ox) < 1 && Math.abs(oy) < 1;
+      if (!core && v !== 'wide') continue;
+      if (Math.abs(ox) > 1 && Math.abs(oy) > 1) continue;
+      if (v === 'shut' && (!core || oy > 0)) continue;
+      let l = 30;
+      while (l > 0 && !m.m.has(ci + di, cj + dj, l)) l--;
+      if (l <= 0) continue;
+      const col = v === 'intense' ? 0x7ee83c : v === 'dim' ? 0x2e5a1c : core ? 0x58b82c : 0x2f6a1c;
+      m.m.set(ci + di, cj + dj, l, col, v === 'intense' || (v === 'wide' && core) ? VF.GLOW : VF.EMISSIVE);
+    }
+}
+/** round shades: dark reflective lenses in thin gunmetal rims, a keyhole bridge, temples hooked round the skull; the right lens is cracked */
+function sunglasses(vl: EyeVar, vr: EyeVar) {
+  const g = sc('glasses');
+  for (const s of [1, -1]) {
+    const c = LENS_C(s);
+    // slightly domed lens
+    g.region([c[0] - 2.5, c[1] - 2.5, 5.6], [c[0] + 2.5, c[1] + 2.5, 7.4], (x, y, z) => {
+      const r = Math.hypot(x - c[0], y - c[1]);
+      if (r > LENS_R) return false;
+      const zf = c[2] + 0.3 - 0.28 * (r / LENS_R) ** 2;
+      return z <= zf && z >= zf - 0.55;
+    }, (x, y) => {
+      const dx = x - c[0], dy = y - c[1];
+      if (Math.abs(dx + dy * 0.9 + 0.9) < 0.22 || Math.abs(dx + dy * 0.9 + 0.2) < 0.13) return LENS.streak; // reflection streaks
+      return dy > 0.9 ? LENS.top : dy < -0.9 ? LENS.low : LENS.mid;
+    }, { flags: M });
+    // thin metal rim
+    g.region([c[0] - 2.8, c[1] - 2.8, 5.8], [c[0] + 2.8, c[1] + 2.8, 7.3], (x, y, z) => {
+      const r = Math.hypot(x - c[0], y - c[1]);
+      return r >= LENS_R - 0.1 && r <= LENS_R + 0.42 && z >= 6.1 && z <= 6.95;
+    }, (x, y) => (y > c[1] + 1.2 ? FRAME.hi : FRAME.base), { flags: M });
+    // hinge + temple arm running back along the skull, hooking down behind
+    g.rbox([s * 5.75, 54.5, 6.25], [0.42, 0.42, 0.45], 0.15, FRAME.base, { flags: M });
+    g.path([[s * 5.95, 54.55, 6.0], [s * 6.45, 54.75, 3.6], [s * 6.55, 54.8, -0.8], [s * 6.35, 54.4, -2.9], [s * 5.95, 53.3, -3.6]], (t) => 0.3 - 0.05 * t, (x, y, z) => (z < -2.4 ? FRAME.dark : FRAME.base), { flags: M });
+    // nose pad
+    g.ell([s * 1.15, 52.75, 6.1], [0.3, 0.42, 0.25], 0x9aa2b0, { flags: M });
+  }
+  // keyhole bridge arching over the nose
+  g.path([[-1.25, 54.35, 6.75], [-0.75, 55.05, 6.95], [0, 55.25, 7.0], [0.75, 55.05, 6.95], [1.25, 54.35, 6.75]], () => 0.27, FRAME.hi, { flags: M });
+  // a crack across the right lens (+ a chipped rim edge)
+  const cr = LENS_C(-1);
+  const crack: V3[] = [[cr[0] - 1.75, cr[1] + 1.2, 7], [cr[0] - 0.9, cr[1] + 0.55, 7], [cr[0] - 0.45, cr[1] + 0.85, 7], [cr[0] + 0.35, cr[1] - 0.1, 7], [cr[0] + 0.25, cr[1] - 0.95, 7]];
+  const branch: V3[] = [[cr[0] - 0.9, cr[1] + 0.55, 7], [cr[0] - 1.1, cr[1] - 0.4, 7]];
+  g.region([cr[0] - 2.3, cr[1] - 2.3, 5.6], [cr[0] + 2.3, cr[1] + 2.3, 7.4], (x, y) => distPoly([x, y, 7], crack) < 0.22 || distPoly([x, y, 7], branch) < 0.16, LENS.crack, { mode: 'paint', flags: M });
+  lensGlow(g, 1, vl);
+  lensGlow(g, -1, vr);
+  shadeRamps(g.m, [FRAME], false);
+  return g.m;
+}
+
+// ================================================================== BANDAGE WRAP (left on his right forearm after using a bandage)
+/**
+ * Linen wound round Sundown's right forearm (between the elbow and the wrist cuff).
+ * Mesh it with `pivot` and add it to the rig's `fore_r` node at the origin.
+ */
+export function forearmWrapModel(kind: 'trail' | 'embalm' = 'trail'): { model: VoxelModel; voxelSize: number; pivot: V3 } {
+  const m = sc('wrap_' + kind);
+  const L = kind === 'embalm' ? ramp(0xdcc690, 0xbea66c, 0xf0dcaa, 0x8a7444) : ramp(0xeee4cc, 0xd2c4a2, 0xfff6e2, 0xa89a78);
+  const cx = -8.5, cz = -0.1, y0 = 27.7, y1 = 31.6, R = 1.22, pitch = 0.82;
+  m.region([cx - 2, y0 - 0.3, cz - 2], [cx + 2, y1 + 0.3, cz + 2], (x, y, z) => {
+    const d = Math.hypot(x - cx, z - cz);
+    if (d < R - 0.05 || d > R + 0.42 || y < y0 || y > y1) return false;
+    return true;
+  }, (x, y, z) => {
+    const a = Math.atan2(z - cz, x - cx);
+    const f = (((y - y0 - (a / (Math.PI * 2)) * pitch) / pitch) % 1 + 1) % 1; // position across the winding strip
+    if (f < 0.16) return L.shade; // overlap edge of each turn
+    if (kind === 'embalm' && Math.abs(f - 0.55) < 0.1) return TOON.gold.base;
+    return L.base;
+  });
+  // the tucked-in end, slightly loose
+  m.cap([cx - R - 0.2, y0 + 0.9, cz + 0.6], [cx - R - 0.45, y0 - 0.2, cz + 0.9], 0.36, 0.26, L.base);
+  shadeRamps(m.m, [L], true);
+  return { model: m.m, voxelSize: SUNDOWN_HD_VS, pivot: vx(mg(J.elbow)) };
+}
+
 // ================================================================== RIG
 const STRAP_OFF: Record<OutfitId, [Env, number]> = {
   punk: [PUNK_ENV, PUNK_T + 0.5],
@@ -1625,7 +1715,15 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     if (!m) eyeCache.set(k, (m = eyeModel('eye_' + side, side === 'l' ? 1 : -1, v)));
     return m;
   };
-  for (const [name, [l, r]] of Object.entries(EYE_EXPR)) if (expressions[name] && (l !== 'normal' || r !== 'normal')) expressions[name].parts = { eye_l: eye('l', l), eye_r: eye('r', r) };
+  const shades = look.shades !== false;
+  const glassCache = new Map<string, VoxelModel>();
+  const glassesOf = (l: EyeVar, r: EyeVar) => {
+    let m = glassCache.get(l + r);
+    if (!m) glassCache.set(l + r, (m = sunglasses(l, r)));
+    return m;
+  };
+  for (const [name, [l, r]] of Object.entries(EYE_EXPR))
+    if (expressions[name] && (l !== 'normal' || r !== 'normal')) expressions[name].parts = { eye_l: eye('l', l), eye_r: eye('r', r), ...(shades ? { glasses: glassesOf(l, r) } : {}) };
 
   const parts: PartSpec[] = [];
   const P = (name: string, model: VoxelModel, joint: V3, parent?: string) => {
@@ -1640,6 +1738,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   P('brow_l', sk.brow_l, J.brow, 'head');
   P('brow_r', sk.brow_r, mg(J.brow), 'head');
   P('hat', hat, J.hat, 'head');
+  if (shades) P('glasses', glassesOf('normal', 'normal'), J.neck, 'head');
   if (mask) {
     P('mask', mask.head, J.neck, 'head');
     mask.jaw.forEach((x, y, z, c, f) => sk.jaw.m.set(x, y, z, c, f)); // the chin cloth rides the jaw
@@ -1704,7 +1803,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   const mm = (p: V3) => [p[0] * U, p[1] * U, p[2] * U];
   const clothCoat = coatish || poncho;
   return {
-    name: `cowboy_${look.hat}_${look.outfit}${mask ? '' : '_nomask'}`,
+    name: `cowboy_${look.hat}_${look.outfit}${mask ? '' : '_nomask'}${shades ? '' : '_noshades'}`,
     voxelSize: SUNDOWN_HD_VS,
     parts,
     sockets,

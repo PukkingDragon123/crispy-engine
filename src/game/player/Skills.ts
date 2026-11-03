@@ -1,5 +1,5 @@
 // Sundown's Serket kit: Pinch (shoulder companion that leaps to sting and helps
-// reload), Scorpion Toss (E), Locust Swarm (C), Dung Bomb (G, bouncing physics
+// reload), Scorpion Toss (E), Scarab Swarm (C), Dung Bomb (G, bouncing physics
 // grenade with a stink cloud).
 // A new hunt starts with only the pistol: the three tarot skills are SEALED until
 // learned from a rank-up card (run/Upgrades.ts `learn*` cards -> Skills.learn).
@@ -9,10 +9,11 @@
 //     scorpions). They aim for the bodies under and around the reticle, bite on
 //     contact, ride the host stinging (venom numbers, frothing poison stacks), and
 //     when the host dies the brood bursts off the corpse onto the next one.
-//  C  Locust Swarm: a roaring flock (boids) of pixel locusts. Free, it hunts the
-//     densest knot of enemies near you; hold C and it pours wherever you look.
-//     Bodies it engulfs are shredded: flecks of linen / bone / chitin / blood
-//     stripped off and whirled away.
+//  C  Scarab Swarm: two fingers to the teeth, a sharp whistle — the sand boils in
+//     front of the prey and a horde of rigged jade scarabs pours out in a living
+//     carpet, swarms up the bodies and eats them (they thrash, cloth and gear are
+//     gnawed off, the eaten fall apart picked pale), then dives back under.
+//  Every cast gets a short camera beat (CAST_CINE) and its own pose (anim/castAnim).
 //  G  Dung Bomb: a heavy, squashing, rolling ball with a sputtering fuse; the blast
 //     throws a ground shockwave, tosses bodies off their feet and leaves a stink
 //     cloud that doubles enemies over coughing.
@@ -24,7 +25,9 @@ import { buildRigGeo, RigGeo, RigInstance, RigSpec } from '../../engine/voxel/Ri
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { VoxelModel, vary } from '../../engine/voxel/VoxelModel';
 import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
-import { SpriteBatch } from '../fx/SpriteBatch';
+import type { EnemyRender } from '../enemies/EnemyRender';
+import type { CineShot } from './CameraRig';
+import { CAST_POSE } from '../anim/castAnim';
 import { modelEntry } from '../models/lookup';
 import { P } from '../../engine/voxel/palette';
 import { VF } from '../../engine/voxel/VoxelModel';
@@ -48,7 +51,7 @@ export type SkillKey = 'E' | 'C' | 'G';
 /** the three tarot skills: card title and skill name */
 export const SKILL_INFO: Record<SkillKey, { card: string; name: string }> = {
   E: { card: 'THE MAGICIAN', name: 'Scorpion Toss' },
-  C: { card: 'THE TOWER', name: 'Locust Swarm' },
+  C: { card: 'THE TOWER', name: 'Scarab Swarm' },
   G: { card: 'THE SUN', name: 'Dung Bomb' },
 };
 /** has the running hunt learned this tarot skill? (keys that aren't sealable, like Z, always are) */
@@ -61,13 +64,27 @@ export function isSkillLearned(key: string) {
 /** skill tuning (damage numbers are before the magic / gun stat scaling) */
 export const SKILL_TUNE = {
   brood: { scale: 0.8, max: 12, gravity: 22, seekSpeed: 10, biteDmg: 8, stingDmg: 6, stingEvery: 0.62, stingStacks: 2, life: 7, hatchLife: 4.5 },
-  swarm: { bugs: 120, maxBugs: 260, dur: 8, dpsBase: 8, dpsPerBug: 1.2, dpsCap: 48, tick: 0.3, steerRange: 30, huntRange: 18 },
+  swarm: { scarabs: 80, maxScarabs: 220, dur: 6, aimRadius: 10, reach: 20, maxHosts: 6, hop: 9, climbSpeed: 1.6, dpsBase: 6, dpsPerScarab: 2.4, dpsCap: 70, tick: 0.4 },
   bomb: { fuse: 1.7, radius: 4.2, dmg: 40, gravity: 20, cloudLife: 5.5, cloudTick: 0.45, coughChance: 0.6 },
 };
 
+/**
+ * Cast camera beats: hard cut to an angle on the cast pose at slight slow-mo, then
+ * back to play (or a beat on what was thrown / summoned). Real-time seconds.
+ * enabled: master switch · slow: time scale during the beat · minGap: no two beats closer
+ * than this · clearance: skip when an enemy is this close · followBomb: ride along behind the dung bomb
+ */
+export const CAST_CINE = { enabled: true, slow: 0.55, minGap: 2.5, clearance: 3.2, followBomb: true };
+type CineKind = 'flick' | 'grenade' | 'whistle' | 'boil' | 'bomb';
+
+/** the swarm's scarabs: the iridescent jade-and-gold beetle rig, instanced through the enemy renderer */
+const SCARAB_RIG = 'scarab_v1';
+const FX0: [number, number, number, number] = [0, 0, 0, 0];
+const WHITE = new THREE.Color(1, 1, 1);
+
 /** what the skills need from a body beyond EnemyLike (enemies have these; bosses may not) */
 type Foe = EnemyLike & { yaw?: number; state?: string; def?: { hitKind?: string }; anim?: { hidden?: boolean } };
-type EnemyVerbs = Partial<Pick<Enemies, 'cough' | 'knockdown' | 'stagger'>>;
+type EnemyVerbs = Partial<Pick<Enemies, 'cough' | 'knockdown' | 'stagger' | 'feed'>>;
 
 interface Brood {
   /** pooled rig (null when Pinch's rig is missing) */
@@ -113,19 +130,26 @@ interface Cloud {
   tick: number;
 }
 
-interface Bug {
+interface Scarab {
   p: THREE.Vector3;
-  v: THREE.Vector3;
-  /** phase on its own tilted orbit around the swarm core, speed (signed), orbit tilt, radius share */
-  ph: number;
-  sp: number;
-  tilt: number;
-  rr: number;
-  tint: number;
-  flap: number;
+  yaw: number;
+  state: 'wait' | 'emerge' | 'run' | 'climb' | 'eat' | 'fall' | 'dive';
+  t: number;
+  /** wait this long under the sand before bursting out */
+  delay: number;
+  host: EnemyLike | null;
+  /** on the host: angle around it (relative to its facing), height share now / where it is headed */
+  att: number;
+  h: number;
+  hT: number;
+  gait: number;
+  sc: number;
+  vy: number;
+  spd: number;
+  wob: number;
+  rot: Float32Array | null;
+  out: THREE.Vector3;
 }
-
-const BUG_TINTS = [0xffffff, 0xf2f6dc, 0xe0eab8, 0xd2dc9e, 0xfff0c8];
 
 export class Skills {
   /** the hunt's live skill kit (HUD / cinematics read it) */
@@ -143,7 +167,7 @@ export class Skills {
   bombs: Bomb[] = [];
   clouds: Cloud[] = [];
   swarmT = 0;
-  swarmBugs: Bug[] = [];
+  scarabs: Scarab[] = [];
   // brood rigs (Pinch's own rig, smaller) — pooled
   private broodGeo: RigGeo | null = null;
   private broodMat: VoxelMaterial;
@@ -154,17 +178,17 @@ export class Skills {
   private bombFuse = new THREE.Vector3();
   private bombR = 0.16;
   private bombPool: { holder: THREE.Group; mesh: THREE.Mesh; mat: VoxelMaterial }[] = [];
-  // locust swarm
-  private bugBatch = new SpriteBatch(420);
+  // scarab swarm
   private swarmLoop: any = null;
-  private swarmCore = new THREE.Vector3();
-  private swarmGoal = new THREE.Vector3();
-  private swarmPrey: EnemyLike | null = null;
-  private swarmRetarget = 0;
-  private swarmFade = 0;
-  private swarmAge = 0;
-  private shredT = new Map<number, number>();
+  private boils: { p: THREE.Vector3; t: number; dur: number; r: number }[] = [];
+  private onHost = new Map<EnemyLike, number>();
+  private feastT = new Map<number, number>();
+  private hooked = false;
   private shredSfxT = 0;
+  // cast camera
+  private cine: { kind: CineKind; t: number; dur: number; at: THREE.Vector3; shot: CineShot } | null = null;
+  private cineLast = -99;
+  private lastReal = 0;
   private time = 0;
   // Pinch
   pinch: RigInstance | null = null;
@@ -200,7 +224,6 @@ export class Skills {
     // the fuse tip sits at the top of the model, a little off-centre (smallItems: fuse leans +x)
     this.bombFuse.set(bb.max.x * 0.45, bb.max.y - 0.01, (bb.min.z + bb.max.z) * 0.5);
     this.bombR = Math.max(0.08, (bb.max.x - bb.min.x) * 0.5) * 1.7;
-    ctx.scene.add(this.bugBatch.mesh);
     // Pinch
     if (spec?.parts) {
       this.pinch = new RigInstance(buildRigGeo(spec, 'pinch:player'));
@@ -221,6 +244,16 @@ export class Skills {
     const inp = this.input;
     const cdr = 1 - this.stats.get('cdr');
     this.time += dt;
+    // the scarabs are drawn inside the enemy render pass (instanced rigs)
+    if (!this.hooked) {
+      const en = this.ctx.enemies as unknown as { drawHooks?: ((r: EnemyRender) => void)[]; render?: EnemyRender };
+      if (en.drawHooks) {
+        en.drawHooks.push((r) => this.drawScarabs(r));
+        en.render?.get(SCARAB_RIG, 320); // build the instanced rig now, not on the first whistle
+        this.hooked = true;
+      }
+    }
+    this.updateCine();
     this.scorpCd -= dt;
     this.swarmCd -= dt;
     if (this.bombCharges < 2) {
@@ -315,20 +348,26 @@ export class Skills {
     const n = 2 + Math.round(this.stats.get('scorpions'));
     if (!echo) this.scorpCd = this.constants.scorpCd * (1 - this.stats.get('cdr'));
     const pl = this.player;
-    pl.playAction('throw', 0.5);
-    pl.express('determined', 0.6);
+    // where it was aimed when cast (the camera may cut away before the release)
+    const aim = pl.aimPoint.clone();
+    const under = pl.aimHit?.enemy ?? null;
+    if (!echo) {
+      pl.castAim = aim;
+      pl.playAction('flick', CAST_POSE.flick.dur);
+      pl.express('determined', 0.6);
+      this.cineStart('flick', 0.5);
+    }
     this.ctx.sfx('scorpion_chitter', pl.pos, 0.6, 1.1);
-    // the brood leave the hand at the release of the throw
-    this.ctx.engine.tweens.after(0.19, () => this.releaseBrood(n, echo));
+    // the brood leave the hand at the release of the flick
+    this.ctx.engine.tweens.after(echo ? 0.02 : CAST_POSE.flick.dur * CAST_POSE.flick.release, () => this.releaseBrood(n, echo, aim, under));
   }
 
-  private releaseBrood(n: number, echo: boolean) {
+  private releaseBrood(n: number, echo: boolean, aim: THREE.Vector3, under: EnemyLike | null) {
     const pl = this.player;
     if (!pl.alive) return;
     const ctx = this.ctx;
     const B = SKILL_TUNE.brood;
     const o = this.handPoint('hand_l', new THREE.Vector3());
-    const aim = pl.aimPoint.clone();
     let dx = aim.x - o.x, dz = aim.z - o.z;
     let d = Math.hypot(dx, dz) || 1;
     if (d > 30) {
@@ -341,7 +380,6 @@ export class Skills {
     dz /= d;
     // targets: the body under the reticle first, then the nearest bodies around the aim point
     const picks: EnemyLike[] = [];
-    const under = pl.aimHit?.enemy;
     if (under && under.alive && !under.flying) picks.push(under);
     const near: { e: EnemyLike; d: number }[] = [];
     for (const e of ctx.enemies.list) {
@@ -651,247 +689,416 @@ export class Skills {
     void dt;
   }
 
-  // ===================================================================== LOCUST SWARM
+  // ===================================================================== SCARAB SWARM
+  /**
+   * Two fingers to the teeth, a sharp whistle — the sand boils in front of the
+   * prey and a horde of jade scarabs bursts out, pours across the ground in a
+   * living carpet, swarms up the bodies and eats them (Enemies.feed: they
+   * thrash, gear and cloth are gnawed off, the eaten fall apart picked pale).
+   * Then the scarabs dive back under the sand.
+   */
   summonSwarm(echo = false) {
-    const S = SKILL_TUNE.swarm;
     const pl = this.player;
-    const count = Math.min(S.maxBugs, Math.round(S.bugs * this.stats.get('swarmSize')));
-    const feet = pl.pos;
-    if (echo && this.swarmT > 0) {
-      // the echo thickens the cloud already circling and keeps it a little longer
-      this.swarmT += 2;
-      this.addBugs(Math.min(S.maxBugs - this.swarmBugs.length, Math.round(count * 0.6)), feet);
-      this.ctx.sfx('divine_power', feet, 0.35, 1.2);
-      this.ctx.fx.sandBurst(feet, 0.9);
+    const S = SKILL_TUNE.swarm;
+    const count = Math.min(S.maxScarabs, Math.round(S.scarabs * this.stats.get('swarmSize')));
+    const aim = pl.aimPoint.clone();
+    if (echo) {
+      // the echo: a second wave boils up behind the first
+      this.ctx.engine.tweens.after(0.2, () => this.erupt(aim, Math.round(count * 0.5), true));
       return;
     }
-    if (!echo) this.swarmCd = this.constants.swarmCd * (1 - this.stats.get('cdr'));
-    this.swarmT = S.dur * Math.sqrt(this.stats.get('swarmSize'));
-    this.swarmFade = 0;
-    this.swarmAge = 0;
-    this.swarmPrey = null;
-    this.swarmRetarget = 0;
-    this.swarmBugs = [];
-    this.shredT.clear();
-    this.addBugs(count, feet);
-    pl.center(this.swarmCore).y += 1.2;
-    // the cast: arms up, the sand erupts locusts, a roar builds
-    pl.playAction('summon', 0.9);
-    pl.express('laugh', 0.9);
-    const ctx = this.ctx;
-    ctx.sfx('divine_power', feet, 0.6);
-    ctx.sfx('whoosh_big', feet, 0.55, 0.9);
-    ctx.sfx('sand_burst', feet, 0.6);
-    ctx.fx.sandBurst(feet, 1.5);
-    ctx.fx.dust({ x: feet.x, y: feet.y + 0.3, z: feet.z }, 1.4, P.sand0, 6);
-    this.swarmLoop?.stop(0.2);
-    this.swarmLoop = ctx.audio.loop('swarm_loop', 0.75);
-    this.castKick(-0.016, 0, 2.2);
-    ctx.toast('LOCUST SWARM', '#c8d870', 'Hold C to steer it');
+    this.swarmCd = this.constants.swarmCd * (1 - this.stats.get('cdr'));
+    pl.castAim = aim;
+    pl.playAction('whistle', CAST_POSE.whistle.dur);
+    pl.express('smug', 1.1);
+    this.cineStart('whistle', 0.95);
+    this.castKick(-0.008, 0, 1);
+    this.ctx.engine.tweens.after(CAST_POSE.whistle.dur * CAST_POSE.whistle.release, () => this.whistle());
+    this.ctx.engine.tweens.after(0.5, () => this.erupt(aim, count, false));
   }
 
-  /** locusts burst up out of the sand around `from` */
-  private addBugs(n: number, from: THREE.Vector3) {
-    for (let i = 0; i < n; i++) {
-      const a = rnd.next() * TAU, r = rnd.next() * 1.6;
-      const p = new THREE.Vector3(from.x + Math.cos(a) * r, from.y + 0.1, from.z + Math.sin(a) * r);
-      const v = new THREE.Vector3(Math.cos(a) * (2 + rnd.next() * 3), 5 + rnd.next() * 6, Math.sin(a) * (2 + rnd.next() * 3));
-      this.swarmBugs.push({ p, v, ph: rnd.next() * TAU, sp: (2.2 + rnd.next() * 2.4) * rnd.sign(), tilt: (rnd.next() - 0.5) * 2.2, rr: 0.45 + rnd.next() * 0.75, tint: BUG_TINTS[Math.floor(rnd.next() * BUG_TINTS.length)], flap: rnd.next() * 10 });
-    }
-  }
-
-  /** the densest knot of enemies within reach of the hunter (the free swarm's prey) */
-  private pickPrey(c: THREE.Vector3): EnemyLike | null {
-    const S = SKILL_TUNE.swarm;
-    const list = this.ctx.enemies.list;
-    let best: EnemyLike | null = null, bestS = -Infinity;
-    for (const e of list) {
-      if (!e.alive || this.hiddenFoe(e)) continue;
-      const dp = Math.hypot(e.pos.x - c.x, e.pos.z - c.z);
-      if (dp > S.huntRange) continue;
-      let nb = 0;
-      for (const o of list) if (o.alive && Math.abs(o.pos.x - e.pos.x) < 4 && Math.abs(o.pos.z - e.pos.z) < 4) nb++;
-      const s = nb * 2 - this.swarmCore.distanceTo(e.pos) * 0.15 - dp * 0.1 + (e === this.swarmPrey ? 1.5 : 0);
-      if (s > bestS) {
-        bestS = s;
-        best = e;
+  /**
+   * A two-finger whistle, synthesized: a breathy sine that leaps up an octave,
+   * holds with a little vibrato and falls off with a flick (no sample needed).
+   */
+  private whistle() {
+    if (!this.player.alive) return;
+    const au = this.ctx.audio as unknown as { ctx?: AudioContext; buses?: Record<string, AudioNode> };
+    const ac = au.ctx;
+    if (ac && ac.state !== 'closed') {
+      try {
+        const out = au.buses?.sfx ?? ac.destination;
+        const t0 = ac.currentTime + 0.005;
+        const env = ac.createGain();
+        env.gain.setValueAtTime(0.0001, t0);
+        env.gain.exponentialRampToValueAtTime(0.2, t0 + 0.035);
+        env.gain.setValueAtTime(0.2, t0 + 0.36);
+        env.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.55);
+        env.connect(out);
+        const osc = ac.createOscillator();
+        osc.type = 'sine';
+        const f = osc.frequency;
+        f.setValueAtTime(1450, t0);
+        f.exponentialRampToValueAtTime(2900, t0 + 0.07);
+        f.linearRampToValueAtTime(3150, t0 + 0.34);
+        f.exponentialRampToValueAtTime(2250, t0 + 0.52);
+        const lfo = ac.createOscillator();
+        lfo.frequency.value = 7.5;
+        const lfoAmp = ac.createGain();
+        lfoAmp.gain.value = 38;
+        lfo.connect(lfoAmp).connect(f);
+        const harm = ac.createOscillator();
+        harm.type = 'sine';
+        harm.frequency.setValueAtTime(2900, t0);
+        harm.frequency.exponentialRampToValueAtTime(5800, t0 + 0.07);
+        harm.frequency.linearRampToValueAtTime(6300, t0 + 0.34);
+        harm.frequency.exponentialRampToValueAtTime(4500, t0 + 0.52);
+        const hg = ac.createGain();
+        hg.gain.value = 0.06;
+        harm.connect(hg).connect(env);
+        osc.connect(env);
+        // the breath through the fingers
+        const n = Math.floor(ac.sampleRate * 0.56);
+        const buf = ac.createBuffer(1, n, ac.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+        const noise = ac.createBufferSource();
+        noise.buffer = buf;
+        const bp = ac.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = 3000;
+        bp.Q.value = 1.6;
+        const ng = ac.createGain();
+        ng.gain.value = 0.22;
+        noise.connect(bp).connect(ng).connect(env);
+        for (const o of [osc, lfo, harm]) {
+          o.start(t0);
+          o.stop(t0 + 0.6);
+        }
+        noise.start(t0);
+      } catch {
+        this.ctx.sfx('squeak', this.player.pos, 0.7, 1.9);
       }
+    } else this.ctx.sfx('squeak', this.player.pos, 0.7, 1.9);
+    this.ctx.sfx('divine_whisper', this.player.pos, 0.3, 1.25);
+  }
+
+  /** bodies the swarm goes for: around where you looked, else the nearest around you */
+  private pickHosts(aim: THREE.Vector3) {
+    const S = SKILL_TUNE.swarm;
+    const pl = this.player;
+    const ok = (e: EnemyLike) => e.alive && !e.flying && !this.hiddenFoe(e);
+    const list = this.ctx.enemies.list.filter(ok);
+    let near = list.filter((e) => Math.hypot(e.pos.x - aim.x, e.pos.z - aim.z) < S.aimRadius);
+    near.sort((a, b) => Math.hypot(a.pos.x - aim.x, a.pos.z - aim.z) - Math.hypot(b.pos.x - aim.x, b.pos.z - aim.z));
+    if (!near.length) {
+      near = list.filter((e) => e.pos.distanceTo(pl.pos) < S.reach);
+      near.sort((a, b) => a.pos.distanceTo(pl.pos) - b.pos.distanceTo(pl.pos));
     }
-    return best;
+    return near.slice(0, S.maxHosts);
+  }
+
+  /** the sand boils in front of the prey and the horde bursts out */
+  private erupt(aim: THREE.Vector3, count: number, echo: boolean) {
+    const ctx = this.ctx;
+    const S = SKILL_TUNE.swarm;
+    const pl = this.player;
+    if (!pl.alive) return;
+    const hosts = this.pickHosts(aim);
+    this.swarmT = Math.max(this.swarmT, S.dur * Math.sqrt(this.stats.get('swarmSize'))) + (echo ? 1.5 : 0);
+    // boils: one a few steps in front of each victim (toward the hunter), or where you looked
+    const boils: THREE.Vector3[] = [];
+    const ground = (v: THREE.Vector3) => (v.y = ctx.world.groundAt(v.x, v.z), v);
+    if (!hosts.length) boils.push(ground(aim.clone()));
+    for (const h of hosts) {
+      const dx = pl.pos.x - h.pos.x, dz = pl.pos.z - h.pos.z;
+      const d = Math.hypot(dx, dz) || 1;
+      const off = Math.min(2.6, d * 0.4) + h.radius;
+      boils.push(ground(new THREE.Vector3(h.pos.x + (dx / d) * off + (rnd.next() - 0.5), 0, h.pos.z + (dz / d) * off + (rnd.next() - 0.5))));
+    }
+    for (const b of boils) {
+      this.boils.push({ p: b, t: 0, dur: 1.5, r: 1.2 });
+      ctx.fx.sandBurst(b, 1.2);
+      ctx.events.emit('groundMark', b.x, b.z, 1.1, 1);
+    }
+    // the horde, split by body size (big bodies get more mouths)
+    const wts = hosts.map((h) => 0.7 + h.radius * h.height * 1.5);
+    const tot = wts.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < count && this.scarabs.length < S.maxScarabs; i++) {
+      let hi = -1;
+      if (hosts.length) {
+        let r = rnd.next() * tot;
+        hi = 0;
+        while (hi < hosts.length - 1 && r > wts[hi]) r -= wts[hi++];
+      }
+      const b = boils[Math.max(0, hi)];
+      const a = rnd.next() * TAU, rr = Math.sqrt(rnd.next()) * 1.1;
+      const p = new THREE.Vector3(b.x + Math.cos(a) * rr, b.y, b.z + Math.sin(a) * rr);
+      this.scarabs.push({ p, yaw: rnd.next() * TAU, state: 'wait', t: 0, delay: Math.pow(rnd.next(), 1.6) * 0.65, host: hi >= 0 ? hosts[hi] : null, att: rnd.next() * TAU, h: 0, hT: 0.12 + rnd.next() * 0.86, gait: rnd.next(), sc: 0.36 + rnd.next() * 0.14, vy: 0, spd: 6 + rnd.next() * 3, wob: rnd.next() * TAU, rot: null, out: new THREE.Vector3() });
+    }
+    ctx.sfx('sand_burst', boils[0], 0.95);
+    ctx.sfx('quake_rumble', boils[0], 0.5, 1.5);
+    ctx.sfx('scorpion_chitter', boils[0], 0.9, 0.7);
+    ctx.sfx('dung_roll_loop', boils[0], 0.35, 1.6);
+    if (!this.swarmLoop) this.swarmLoop = ctx.audio.loop('swarm_loop', 0.6);
+    this.swarmLoop?.setRate(0.62);
+    ctx.shake(0.18);
+    // the camera beat: off Sundown's whistle, onto the boiling sand
+    if (this.cine?.kind === 'whistle') this.cineSwitch('boil', 0.62, boils[0]);
+  }
+
+  private nextHost(p: THREE.Vector3) {
+    return this.ctx.enemies.nearest(p, SKILL_TUNE.swarm.hop, (e) => !e.flying && !this.hiddenFoe(e) && !(e as Foe).isBoss);
+  }
+
+  /** a spot on the host's flank (h: share of its height) — writes out, returns the outward normal in _by */
+  private flank(host: EnemyLike, att: number, h: number, out: THREE.Vector3) {
+    const a = ((host as Foe).yaw ?? 0) + att;
+    _by.set(Math.sin(a), 0, Math.cos(a));
+    const r = host.radius * (0.95 - h * 0.25);
+    return out.set(host.pos.x + _by.x * r, host.pos.y + host.height * h, host.pos.z + _by.z * r);
   }
 
   private updateSwarm(dt: number) {
-    this.bugBatch.begin();
-    if (this.swarmT > 0 || this.swarmFade > 0) this.stepSwarm(dt);
-    this.bugBatch.end(this.ctx.world.env.fog);
-  }
-
-  private stepSwarm(dt: number) {
-    const ctx = this.ctx;
-    const S = SKILL_TUNE.swarm;
-    const pl = this.player;
-    const active = this.swarmT > 0;
-    if (active) {
-      this.swarmT -= dt;
-      if (this.swarmT <= 0) {
-        // it breaks up and scatters
-        this.swarmFade = 0.9;
-        this.swarmLoop?.stop(0.8);
+    if (!this.scarabs.length && !this.boils.length) {
+      if (this.swarmLoop) {
+        this.swarmLoop.stop(0.6);
         this.swarmLoop = null;
-        ctx.sfx('whoosh', this.swarmCore, 0.4, 0.8);
       }
-    } else this.swarmFade -= dt;
-    this.swarmAge += dt;
-    const c = pl.center(_v2);
-    const core = this.swarmCore;
-    // ---- where the swarm goes: held C pours it wherever you look; free, it hunts the densest knot
-    let prey: EnemyLike | null = null;
-    const steer = active && pl.alive && this.input.held('skill2') && this.swarmAge > 0.2;
-    if (steer) {
-      const ap = pl.aimPoint;
-      let gx = ap.x - c.x, gz = ap.z - c.z;
-      const gl = Math.hypot(gx, gz);
-      if (gl > S.steerRange) {
-        gx *= S.steerRange / gl;
-        gz *= S.steerRange / gl;
-      }
-      const goal = this.swarmGoal.set(c.x + gx, 0, c.z + gz);
-      goal.y = Math.max(ap.y, ctx.world.groundAt(goal.x, goal.z)) + 1.1;
-      prey = ctx.enemies.nearest(goal, 3.4, (e) => !this.hiddenFoe(e));
-      this.swarmPrey = prey;
-      this.swarmRetarget = 1;
-    } else if (active) {
-      this.swarmRetarget -= dt;
-      const p0 = this.swarmPrey;
-      if (!p0 || !p0.alive || this.hiddenFoe(p0) || this.swarmRetarget <= 0 || p0.pos.distanceTo(c) > S.huntRange + 6) {
-        this.swarmPrey = this.pickPrey(c);
-        this.swarmRetarget = 1.4;
-      }
-      prey = this.swarmPrey;
-      if (!prey) this.swarmGoal.set(c.x, c.y + 1.4, c.z);
-    }
-    if (prey) this.swarmGoal.set(prey.pos.x, prey.pos.y + prey.height * 0.55, prey.pos.z);
-    // the core chases its goal at a flock's pace
-    const tx = this.swarmGoal.x - core.x, ty = this.swarmGoal.y - core.y, tz = this.swarmGoal.z - core.z;
-    const tl = Math.hypot(tx, ty, tz);
-    if (tl > 1e-4 && active) {
-      const step = Math.min(tl, tl * dt * 4, (steer ? 24 : 16) * dt);
-      core.x += (tx / tl) * step;
-      core.y += (ty / tl) * step;
-      core.z += (tz / tl) * step;
-    }
-    // ---- the flock
-    const bugs = this.swarmBugs;
-    const nB = bugs.length;
-    let cx = 0, cy = 0, cz = 0, vx = 0, vy = 0, vz = 0;
-    for (const b of bugs) {
-      cx += b.p.x;
-      cy += b.p.y;
-      cz += b.p.z;
-      vx += b.v.x;
-      vy += b.v.y;
-      vz += b.v.z;
-    }
-    const inv = 1 / Math.max(1, nB);
-    cx *= inv;
-    cy *= inv;
-    cz *= inv;
-    vx *= inv;
-    vy *= inv;
-    vz *= inv;
-    const engulf = !!prey && Math.hypot(prey.pos.x - core.x, prey.pos.z - core.z) < 3;
-    const R = engulf && prey ? prey.radius + 0.55 : prey ? 1.7 : 2.3;
-    const fade = active ? 1 : Math.max(0, this.swarmFade / 0.9);
-    const t = this.time;
-    const camNear = ctx.camera.position.distanceTo(core) < 70;
-    for (let i = 0; i < nB; i++) {
-      const b = bugs[i];
-      b.ph += b.sp * dt * (engulf ? 1.6 : 1);
-      if (active) {
-        // its own tilted orbit around the core (a churning ball), bobbing
-        const ca = Math.cos(b.ph), sa = Math.sin(b.ph);
-        const rr = R * b.rr;
-        const gx = core.x + ca * rr;
-        const gy = core.y + sa * rr * Math.sin(b.tilt) * 0.75 + Math.sin(t * 3.1 + b.flap) * 0.25;
-        const gz = core.z + sa * rr * Math.cos(b.tilt);
-        // steer: spring to its slot + cohesion + alignment + turbulence; separation from a neighbour
-        let ax = (gx - b.p.x) * 9 + (cx - b.p.x) * 0.7 + (vx - b.v.x) * 0.8 + Math.sin(t * 5.3 + b.flap * 3) * 4;
-        let ay = (gy - b.p.y) * 9 + (cy - b.p.y) * 0.7 + (vy - b.v.y) * 0.8 + Math.cos(t * 4.7 + b.flap * 2) * 3;
-        let az = (gz - b.p.z) * 9 + (cz - b.p.z) * 0.7 + (vz - b.v.z) * 0.8 + Math.sin(t * 6.1 + b.flap * 5) * 4;
-        const o = bugs[(i * 7 + 3 + Math.floor(t * 30)) % nB];
-        if (o !== b) {
-          const sx = b.p.x - o.p.x, sy = b.p.y - o.p.y, sz = b.p.z - o.p.z;
-          const s2 = sx * sx + sy * sy + sz * sz;
-          if (s2 < 0.09 && s2 > 1e-6) {
-            ax += (sx / s2) * 0.8;
-            ay += (sy / s2) * 0.8;
-            az += (sz / s2) * 0.8;
-          }
-        }
-        b.v.x += ax * dt;
-        b.v.y += ay * dt;
-        b.v.z += az * dt;
-        const drag = Math.exp(-2.6 * dt);
-        b.v.multiplyScalar(drag);
-        const sp = b.v.length();
-        if (sp > 26) b.v.multiplyScalar(26 / sp);
-      } else {
-        // scatter: up and away
-        b.v.x += (b.p.x - cx) * dt * 6;
-        b.v.z += (b.p.z - cz) * dt * 6;
-        b.v.y += dt * 9;
-      }
-      b.p.addScaledVector(b.v, dt);
-      const gy = ctx.world.groundAt(b.p.x, b.p.z) + 0.14;
-      if (b.p.y < gy) {
-        b.p.y = gy;
-        b.v.y = Math.abs(b.v.y) * 0.5;
-      }
-      if (camNear) {
-        // wings beating: the sprite flickers between spread and folded
-        const w = 0.16 * (0.85 + (b.flap % 1) * 0.3);
-        const beat = Math.abs(Math.sin(t * 42 + b.flap * 9));
-        this.bugBatch.push(b.p.x, b.p.y, b.p.z, i % 7 === 0 ? (beat > 0.5 ? 'fly0' : 'fly1') : 'locust', w, w * (0.62 + 0.38 * beat), 0, b.tint, fade, b.v, 0.004);
-      }
-    }
-    if (!active) {
-      if (this.swarmFade <= 0) this.swarmBugs = [];
       return;
     }
-    // ---- the haze: grit and a dusky shimmer hanging in the cloud
-    if (camNear && rnd.chance(dt * 14)) ctx.particles.emit({ pos: { x: cx, y: cy, z: cz }, count: 1, spread: 1.2, life: [0.7, 1.3], size: [0.5, 1.3], sprite: ['puff0', 'puff1'], color: [0x8a8050, 0x6e6a3e, 0x9a8a5a], alpha: 0.2, drag: 2, rot: 6, rotSpeed: 0.5, jitter: R * 0.8 });
-    if (camNear && rnd.chance(dt * 20)) ctx.particles.emit({ pos: { x: cx, y: cy, z: cz }, count: 2, spread: 3, life: [0.3, 0.7], size: [0.04, 0.03], sprite: ['grain0', 'grain1', 'dot3'], color: [0xd8c890, 0x8a7a4a, 0xb8c070], gravity: 3, jitter: R, drag: 1 });
-    // ---- shredding whatever it engulfs
-    let engaged = 0;
-    ctx.enemies.inRadius(core, R + 1.4, (e) => {
-      if (this.hiddenFoe(e)) return;
-      const hx = e.pos.x, hy = e.pos.y + e.height * 0.55, hz = e.pos.z;
-      const rr = e.radius + 0.6;
-      const r2 = rr * rr;
-      const hh = e.height * 0.6 + 0.3;
-      let n = 0;
-      for (const b of bugs) {
-        const dx = b.p.x - hx, dz = b.p.z - hz;
-        if (dx * dx + dz * dz < r2 && Math.abs(b.p.y - hy) < hh) n++;
+    const ctx = this.ctx;
+    const S = SKILL_TUNE.swarm;
+    const P = ctx.particles;
+    this.swarmT = Math.max(0, this.swarmT - dt);
+    const ending = this.swarmT <= 0;
+    const camP = ctx.camera.position;
+    // ---- the boiling sand
+    for (let i = this.boils.length - 1; i >= 0; i--) {
+      const b = this.boils[i];
+      b.t += dt;
+      const f = 1 - b.t / b.dur;
+      if (f <= 0) {
+        this.boils.splice(i, 1);
+        continue;
       }
-      if (n < 4) return;
-      engaged++;
-      const tk = (this.shredT.get(e.id) ?? 0) - dt;
+      if (rnd.chance(Math.min(1, dt * 34 * f))) {
+        const a = rnd.next() * TAU, r = Math.sqrt(rnd.next()) * b.r;
+        ctx.fx.sandSpray({ x: b.p.x + Math.cos(a) * r, y: b.p.y + 0.05, z: b.p.z + Math.sin(a) * r }, { x: Math.cos(a) * 0.6, y: 2.2 + rnd.next() * 1.5, z: Math.sin(a) * 0.6 }, 1.1);
+      }
+      if (rnd.chance(Math.min(1, dt * 7 * f))) P.emit({ pos: { x: b.p.x, y: b.p.y + 0.2, z: b.p.z }, count: 1, spread: 0.8, up: 0.6, life: [0.6, 1.1], size: [0.35, 1], sprite: ['puff0', 'puff1'], color: [0xe6cf9f, 0xd8b98a], alpha: 0.55, drag: 2, rot: 6, rotSpeed: 0.5, jitter: b.r * 0.6 });
+    }
+    // ---- the horde
+    const onHost = this.onHost;
+    onHost.clear();
+    let kicks = 0;
+    for (let i = this.scarabs.length - 1; i >= 0; i--) {
+      const s = this.scarabs[i];
+      s.t += dt;
+      const host = s.host;
+      const hostOk = !!host && host.alive && !this.hiddenFoe(host) && !host.flying;
+      switch (s.state) {
+        case 'wait':
+          if (s.t >= s.delay) {
+            s.state = 'emerge';
+            s.t = 0;
+            if (kicks++ < 6) ctx.fx.sandSpray(s.p, { x: 0, y: 2.5, z: 0 }, 0.5);
+          }
+          break;
+        case 'emerge': {
+          const k = Math.min(1, s.t / 0.3);
+          s.p.y = ctx.world.groundAt(s.p.x, s.p.z) + Math.sin(k * Math.PI) * 0.3;
+          if (hostOk) s.yaw = Math.atan2(host!.pos.x - s.p.x, host!.pos.z - s.p.z);
+          if (k >= 1) {
+            s.state = 'run';
+            s.t = 0;
+          }
+          break;
+        }
+        case 'run': {
+          if (!hostOk) s.host = ending ? null : this.nextHost(s.p);
+          const h = s.host;
+          if (ending || (!h && s.t > 1.8)) {
+            s.state = 'dive';
+            s.t = 0;
+            break;
+          }
+          let tx: number, tz: number;
+          if (h) {
+            const a = ((h as Foe).yaw ?? 0) + s.att;
+            tx = h.pos.x + Math.sin(a) * (h.radius + 0.1);
+            tz = h.pos.z + Math.cos(a) * (h.radius + 0.1);
+          } else {
+            tx = s.p.x + Math.sin(s.yaw + 0.8) * 2;
+            tz = s.p.z + Math.cos(s.yaw + 0.8) * 2;
+          }
+          const dx = tx - s.p.x, dz = tz - s.p.z;
+          const d = Math.hypot(dx, dz) || 1;
+          // a living carpet: they stream in with a ripple running through them
+          const want = Math.atan2(dx, dz) + Math.sin(this.time * 8 + s.wob) * 0.35 * Math.min(1, d / 2);
+          s.yaw = dampAngle(s.yaw, want, 12, dt);
+          const sp = s.spd * Math.min(1, s.t * 5 + 0.3);
+          s.p.x += Math.sin(s.yaw) * sp * dt;
+          s.p.z += Math.cos(s.yaw) * sp * dt;
+          s.p.y = ctx.world.groundAt(s.p.x, s.p.z);
+          s.gait += dt * sp * 2.6;
+          if (kicks < 10 && rnd.chance(dt * 1.5) && camP.distanceTo(s.p) < 35) {
+            kicks++;
+            ctx.fx.sandSpray(s.p, { x: -Math.sin(s.yaw) * 0.8, y: 0.3, z: -Math.cos(s.yaw) * 0.8 }, 0.2);
+          }
+          if (h && d < 0.32) {
+            s.state = 'climb';
+            s.t = 0;
+            s.att = Math.atan2(s.p.x - h.pos.x, s.p.z - h.pos.z) - ((h as Foe).yaw ?? 0);
+            s.h = 0.02;
+          }
+          break;
+        }
+        case 'climb':
+        case 'eat': {
+          if (!hostOk || ending) {
+            // the host is gone (or the swarm is done): jump off
+            s.state = 'fall';
+            s.t = 0;
+            s.vy = 1.5 + rnd.next() * 2;
+            if (host) this.flank(host, s.att, s.h, s.p);
+            else _by.set(Math.sin(s.att), 0, Math.cos(s.att));
+            s.out.copy(_by);
+            break;
+          }
+          const hh = host!;
+          s.att += Math.sin(this.time * 2.1 + s.wob) * dt * 0.9;
+          if (s.state === 'climb') {
+            s.h += (dt * S.climbSpeed) / Math.max(0.4, hh.height);
+            s.gait += dt * 6;
+            if (s.h >= s.hT) {
+              s.state = 'eat';
+              s.t = 0;
+            }
+          } else {
+            s.h = clamp(s.h + Math.sin(this.time * 2.7 + s.wob * 3) * dt * 0.12, 0.04, 0.98);
+            s.gait += dt * 1.5;
+          }
+          this.flank(hh, s.att, s.h, s.p);
+          onHost.set(hh, (onHost.get(hh) ?? 0) + (s.state === 'eat' ? 1 : 0.5));
+          break;
+        }
+        case 'fall': {
+          s.vy -= 22 * dt;
+          s.p.addScaledVector(s.out, 1.8 * dt);
+          s.p.y += s.vy * dt;
+          const g = ctx.world.groundAt(s.p.x, s.p.z);
+          if (s.p.y <= g) {
+            s.p.y = g;
+            s.state = ending ? 'dive' : 'run';
+            s.t = 0;
+            s.host = ending ? null : this.nextHost(s.p);
+            s.yaw = Math.atan2(s.out.x, s.out.z);
+          }
+          break;
+        }
+        case 'dive': {
+          // a last scuttle, then nose down into the sand
+          const k = s.t / 0.55;
+          if (k < 0.35) {
+            s.p.x += Math.sin(s.yaw) * s.spd * 0.6 * dt;
+            s.p.z += Math.cos(s.yaw) * s.spd * 0.6 * dt;
+            s.gait += dt * 14;
+          }
+          s.p.y = ctx.world.groundAt(s.p.x, s.p.z);
+          if (s.t > 0.2 && s.t - dt <= 0.2 && kicks++ < 12) ctx.fx.sandSpray(s.p, { x: 0, y: 1.6, z: 0 }, 0.35);
+          if (k >= 1) this.scarabs.splice(i, 1);
+          break;
+        }
+      }
+    }
+    // ---- feeding: every body with scarabs on it is eaten alive
+    let feeding = 0;
+    for (const [host, n] of onHost) {
+      if (n < 1) continue;
+      feeding++;
+      const tk = (this.feastT.get(host.id) ?? 0.12) - dt;
       if (tk > 0) {
-        this.shredT.set(e.id, tk);
-        return;
+        this.feastT.set(host.id, tk);
+        continue;
       }
-      this.shredT.set(e.id, S.tick);
-      const dps = Math.min(S.dpsCap, S.dpsBase + n * S.dpsPerBug);
-      const a = Math.atan2(c.x - hx, c.z - hz);
-      const tdx = Math.cos(a), tdz = -Math.sin(a);
-      const at = new THREE.Vector3(hx, hy, hz);
-      ctx.enemies.damage(e, { base: dps * S.tick, kind: 'magic', source: 'swarm', status: [{ id: 'slow', stacks: 1, dur: 1 }, { id: 'bleed', stacks: 1, dur: 2, chance: 0.2 }], canCrit: false, knock: 0.25, dirX: tdx, dirZ: tdz }, at, new THREE.Vector3(tdx, 0, tdz));
-      this.stripFx(e, n, at);
-    });
-    if (this.swarmLoop) {
-      this.swarmLoop.setVolume(0.6 + Math.min(0.45, engaged * 0.15), 0.25);
-      this.swarmLoop.setRate(1 + Math.min(0.18, engaged * 0.06));
+      this.feastT.set(host.id, S.tick);
+      const at = new THREE.Vector3(host.pos.x, host.pos.y + host.height * 0.55, host.pos.z);
+      this.foes.feed?.(host, n);
+      ctx.enemies.damage(host, { base: Math.min(S.dpsCap, S.dpsBase + n * S.dpsPerScarab) * S.tick, kind: 'magic', source: 'swarm', status: [{ id: 'slow', stacks: 2, dur: 1 }, { id: 'bleed', stacks: 1, dur: 2, chance: 0.25 }], canCrit: false }, at);
+      this.stripFx(host, n * 3, at);
+      if (this.time - this.shredSfxT > 0.16) ctx.sfx('gore_splat', at, 0.22, 1.5 + rnd.next() * 0.2);
+    }
+    if (this.feastT.size > 64) this.feastT.clear();
+    if (this.swarmLoop) this.swarmLoop.setVolume(0.45 + Math.min(0.5, feeding * 0.12) + (ending ? -0.3 : 0), 0.3);
+  }
+
+  /** push the horde into the jade-scarab rig batch (called inside the enemy render pass) */
+  private drawScarabs(render: EnemyRender) {
+    if (!this.scarabs.length) return;
+    const batch = render.get(SCARAB_RIG, 320);
+    const ix = batch.partIndex;
+    const cam = this.ctx.camera.position;
+    const t = this.time;
+    for (const s of this.scarabs) {
+      if (s.state === 'wait') continue;
+      if (!s.rot) s.rot = new Float32Array(batch.nParts * 3);
+      const rot = s.rot;
+      rot.fill(0);
+      const set = (name: string, x: number, y: number, z: number) => {
+        const i = ix[name];
+        if (i === undefined) return;
+        rot[i * 3] = x;
+        rot[i * 3 + 1] = y;
+        rot[i * 3 + 2] = z;
+      };
+      const onBody = (s.state === 'climb' || s.state === 'eat') && !!s.host;
+      let pos = s.p;
+      if (onBody) {
+        // belly to the body, head up its flank, wandering a little around the normal
+        const a = ((s.host as Foe).yaw ?? 0) + s.att;
+        _by.set(Math.sin(a), 0, Math.cos(a));
+        _bz.set(Math.cos(a) * Math.sin(s.wob + t * 0.7) * 0.5, 1, -Math.sin(a) * Math.sin(s.wob + t * 0.7) * 0.5).normalize();
+        _bx.crossVectors(_by, _bz).normalize();
+        _bz.crossVectors(_bx, _by);
+        _m4.makeBasis(_bx, _by, _bz);
+        _q.setFromRotationMatrix(_m4);
+      } else {
+        _q.setFromAxisAngle(UP, s.yaw);
+        if (s.state === 'emerge') _q.multiply(_qa.setFromAxisAngle(AX, -0.7 * (1 - Math.min(1, s.t / 0.3))));
+        else if (s.state === 'dive') {
+          const k = Math.max(0, (s.t / 0.55 - 0.3) / 0.7);
+          _q.multiply(_qa.setFromAxisAngle(AX, 0.9 * Math.min(1, k * 2)));
+          pos = _v3.copy(s.p);
+          pos.y -= k * 0.32 * s.sc;
+        } else if (s.state === 'fall') _q.multiply(_qa.setFromAxisAngle(AX, s.t * 9));
+      }
+      _v2.set(s.sc, s.sc, s.sc);
+      _m4.compose(pos, _q, _v2);
+      // legs: an alternating tripod, fast while running, a creep while climbing, kicking in the air
+      const moving = s.state === 'run' || s.state === 'climb' || s.state === 'dive' ? 1 : s.state === 'eat' ? 0.35 : 0;
+      const air = s.state === 'fall' || s.state === 'emerge' ? 1 : 0;
+      for (let k = 1; k <= 3; k++) {
+        for (const side of [1, -1]) {
+          const ph = s.gait * TAU + ((k + (side > 0 ? 0 : 1)) % 2) * Math.PI;
+          const sweep = Math.sin(ph) * 0.45 * moving;
+          const lift = Math.max(0, Math.cos(ph)) * 0.4 * moving + air * (0.4 + Math.sin(t * 30 + k * 2 + side) * 0.3);
+          set((side > 0 ? 'leg_l' : 'leg_r') + k, 0, -side * sweep, side * lift);
+        }
+      }
+      // mandibles chewing, antennae twitching, wing cases cracking open in the air
+      const chew = s.state === 'eat' ? Math.max(0, Math.sin(t * 22 + s.wob * 7)) : 0.1;
+      set('jaw', chew * 0.35, 0, 0);
+      set('mandible_l', 0, -chew * 0.45, 0);
+      set('mandible_r', 0, chew * 0.45, 0);
+      const ant = Math.sin(t * 6 + s.wob * 5) * 0.2;
+      set('antenna_l', ant, 0, 0.1);
+      set('antenna_r', -ant, 0, -0.1);
+      const wing = air * (0.7 + Math.sin(t * 55 + s.wob) * 0.25);
+      set('wing_l', 0, 0, wing);
+      set('wing_r', 0, 0, -wing);
+      const d = cam.distanceTo(pos);
+      batch.push(_m4, rot, null, d > 34 ? 2 : d > 14 ? 1 : 0, FX0, WHITE, null);
     }
   }
 
@@ -939,6 +1146,141 @@ export class Skills {
     }
   }
 
+  // ===================================================================== CAST CAMERA
+  /**
+   * Snappy camera beats on a cast: a hard cut to an angle on Sundown's pose at
+   * slight slow-mo (0.4–0.65 s real), then either a hard cut back to play or a
+   * beat on what the cast set loose (the boiling sand, the bomb in flight).
+   * Skipped mid-air, while aiming down sights, with a body right on top of him,
+   * during someone else's shot (ult, intros), and within minGap of the last one.
+   */
+  private cineOk() {
+    const pl = this.player;
+    if (!CAST_CINE.enabled || !pl.alive || !pl.board.grounded || pl.aiming) return false;
+    if (pl.cam.cine) return false;
+    if (this.ctx.engine.realTime - this.cineLast < CAST_CINE.minGap) return false;
+    return !this.ctx.enemies.nearest(pl.pos, CAST_CINE.clearance);
+  }
+
+  private cineStart(kind: CineKind, dur: number, at?: THREE.Vector3) {
+    if (!this.cineOk()) return;
+    this.cine = { kind, t: 0, dur, at: (at ?? this.player.pos).clone(), shot: { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50 } };
+    this.cineLast = this.ctx.engine.realTime;
+    this.ctx.engine.slowMo(CAST_CINE.slow, 30);
+    this.frameCine();
+  }
+
+  /** chain to the next beat of a running cine (no-op if the cast wasn't filmed) */
+  private cineSwitch(kind: CineKind, dur: number, at?: THREE.Vector3) {
+    const c = this.cine;
+    if (!c) return;
+    c.kind = kind;
+    c.t = 0;
+    c.dur = dur;
+    if (at) c.at.copy(at);
+    this.frameCine();
+  }
+
+  private cineEnd() {
+    if (!this.cine) return;
+    const shot = this.cine.shot;
+    this.cine = null;
+    if (this.player.cam.cine === shot) this.player.cam.setCine(null, false);
+    this.ctx.engine.slowMo(1, 12);
+  }
+
+  private updateCine() {
+    const now = this.ctx.engine.realTime;
+    const rdt = Math.min(0.1, Math.max(0, now - this.lastReal));
+    this.lastReal = now;
+    const c = this.cine;
+    if (!c) return;
+    const pl = this.player;
+    // something bigger took the camera (the ult, a cutscene): let it have it
+    if (pl.cam.cine && pl.cam.cine !== c.shot) {
+      this.cine = null;
+      return;
+    }
+    c.t += rdt;
+    if (c.t >= c.dur || !pl.alive || this.ctx.engine.paused) {
+      this.cineEnd();
+      return;
+    }
+    // no firing blind and no cheap hits while the view is away
+    pl.fireCd = Math.max(pl.fireCd, 0.06);
+    pl.invuln = Math.max(pl.invuln, 0.12);
+    this.frameCine();
+  }
+
+  /** place this frame's shot relative to Sundown (he keeps riding) / the subject */
+  private frameCine() {
+    const c = this.cine;
+    if (!c) return;
+    const pl = this.player;
+    const s = c.shot;
+    const k = Math.min(1, c.t / c.dur);
+    const ch = pl.center(_v3);
+    const yaw = pl.cam.yaw;
+    const fx = Math.sin(yaw), fz = Math.cos(yaw);
+    const rx = -Math.cos(yaw), rz = Math.sin(yaw);
+    switch (c.kind) {
+      case 'flick': {
+        // low three-quarter front from his right, looking past him down the throw
+        const d = 2.4 - k * 0.35;
+        s.pos.set(ch.x + rx * d + fx * 1.1, ch.y + 0.05, ch.z + rz * d + fz * 1.1);
+        s.look.set(ch.x + fx * 1.8, ch.y + 0.25, ch.z + fz * 1.8);
+        s.fov = 52 - k * 4;
+        break;
+      }
+      case 'grenade': {
+        // over the right shoulder, high and out: the wind-up and the arc leaving
+        s.pos.set(ch.x - fx * 1.25 + rx * (2 - k * 0.3), ch.y + 0.8, ch.z - fz * 1.25 + rz * (2 - k * 0.3));
+        s.look.set(ch.x + fx * 4, ch.y + 0.6, ch.z + fz * 4);
+        s.fov = 56;
+        break;
+      }
+      case 'whistle': {
+        // push in on the skull as he whistles
+        const hx = ch.x, hy = ch.y + 0.5, hz = ch.z;
+        const d = 1.45 - k * 0.3;
+        s.pos.set(hx + fx * d + rx * 0.62, hy - 0.02, hz + fz * d + rz * 0.62);
+        s.look.set(hx, hy + 0.04, hz);
+        s.fov = 44 - k * 3;
+        break;
+      }
+      case 'boil': {
+        // the sand bursting at the prey, seen from the hunter's side, drifting
+        const b = c.at;
+        let dx = b.x - ch.x, dz = b.z - ch.z;
+        const L = Math.hypot(dx, dz) || 1;
+        dx /= L;
+        dz /= L;
+        const back = Math.min(6, L * 0.6);
+        s.pos.set(b.x - dx * back - dz * (2 + k * 0.7), b.y + 2.3, b.z - dz * back + dx * (2 + k * 0.7));
+        s.look.set(b.x, b.y + 0.45, b.z);
+        s.fov = 56;
+        break;
+      }
+      case 'bomb': {
+        // ride along behind the ball
+        const bomb = this.bombs[this.bombs.length - 1];
+        if (!bomb) {
+          this.cineEnd();
+          return;
+        }
+        const hs = Math.hypot(bomb.vel.x, bomb.vel.z) || 1;
+        const vx = bomb.vel.x / hs, vz = bomb.vel.z / hs;
+        s.pos.set(bomb.pos.x - vx * 3.2 + vz * 0.8, bomb.pos.y + 1.3, bomb.pos.z - vz * 3.2 - vx * 0.8);
+        s.look.set(bomb.pos.x + vx * 1.5, bomb.pos.y - 0.2, bomb.pos.z + vz * 1.5);
+        s.fov = 58;
+        break;
+      }
+    }
+    // never inside a dune
+    s.pos.y = Math.max(s.pos.y, this.ctx.world.groundAt(s.pos.x, s.pos.z) + 0.4);
+    pl.cam.setCine(s, false);
+  }
+
   // ===================================================================== DUNG BOMB
   throwBomb(echo = false) {
     if (!echo) {
@@ -946,19 +1288,24 @@ export class Skills {
       if (this.bombRecharge <= 0) this.bombRecharge = this.constants.bombRecharge * (1 - this.stats.get('cdr'));
     }
     const pl = this.player;
-    pl.playAction('lob', 0.45);
-    this.ctx.sfx('dung_kick', pl.pos, 0.3, 0.8);
-    // it leaves the hand at the bottom of the underhand swing
-    this.ctx.engine.tweens.after(0.2, () => this.launchBomb(echo));
+    const aim = pl.aimPoint.clone();
+    if (!echo) {
+      pl.castAim = aim;
+      pl.playAction('grenade', CAST_POSE.grenade.dur);
+      pl.express('determined', 0.7);
+      this.cineStart('grenade', 0.62);
+      this.ctx.sfx('dung_kick', pl.pos, 0.3, 0.8);
+    }
+    // it leaves the hand at the top of the overhand whip
+    this.ctx.engine.tweens.after(echo ? 0.02 : CAST_POSE.grenade.dur * CAST_POSE.grenade.release, () => this.launchBomb(echo, aim));
   }
 
-  private launchBomb(echo: boolean) {
+  private launchBomb(echo: boolean, aim: THREE.Vector3) {
     const pl = this.player;
     if (!pl.alive) return;
     const ctx = this.ctx;
     const Bt = SKILL_TUNE.bomb;
     const o = this.handPoint('hand_l', new THREE.Vector3());
-    const aim = pl.aimPoint;
     const jit = echo ? 1.8 : 0;
     let dx = aim.x - o.x + (rnd.next() - 0.5) * jit, dz = aim.z - o.z + (rnd.next() - 0.5) * jit;
     let d = Math.hypot(dx, dz) || 1;
@@ -975,7 +1322,10 @@ export class Skills {
     this.bombs.push({ pos: o.clone(), vel: v, fuse: Bt.fuse, q: new THREE.Quaternion().setFromAxisAngle(UP, rnd.next() * TAU), bounces: 0, sq: 0, sqV: 0, sputter: 0 });
     ctx.sfx('whoosh', o, 0.7, 0.85);
     ctx.sfx('dynamite_fuse', o, 0.55);
-    this.castKick(0.01, -0.008, 0.8);
+    pl.smear(o.clone(), 1.2);
+    this.castKick(0.012, -0.008, 0.9);
+    // the camera rides along behind it for a beat
+    if (!echo && this.cine?.kind === 'grenade' && CAST_CINE.followBomb) this.cineSwitch('bomb', 0.5);
   }
 
   private bombSlot(i: number) {

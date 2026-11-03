@@ -693,7 +693,8 @@ export class HubScene implements GameScene {
           lens.renderOrder = 3;
         }
         const seat = chSpec.meta!.seat as number[], piv = chSpec.meta!.pivot as number[];
-        this.mama.root.position.set(seat[0] - piv[0], seat[1] - piv[1] - 0.015, seat[2] - piv[2] + 0.05);
+        this.mama.root.position.set(seat[0] - piv[0], seat[1] - piv[1] - 0.015, seat[2] - piv[2] + 0.02);
+        this.mama.root.scale.setScalar(1.18);
         this.chair.nodes['chair']?.add(this.mama.root);
       }
     }
@@ -715,13 +716,13 @@ export class HubScene implements GameScene {
     toadlet('toadlet_v1', this.firePos.x + 0.55, 0, fpFront + 0.12, Math.PI - 0.5, true, s, 0.88);
     if (this.chair?.nodes['chair']) toadlet('toadlet_v1', -0.452, 0.8 - ((chSpec?.meta?.pivot as number[])?.[1] ?? 1.21), 0.02, 0.1, false, this.chair.nodes['chair']);
     if (this.chair) {
-      const stand = new THREE.Vector2(this.firePos.x + 0.27, fpFront + 0.45);
+      const stand = new THREE.Vector2(3.55, -1.15);
       this.mamaHead.set(CH_AT.x - 0.08, 1.0, CH_AT.z + 0.14);
       station({
         id: 'hearth', label: 'Mama Toad', title: 'THE HEARTH', short: 'HEARTH', sub: 'Mama Toad keeps the kettle on', verb: 'Chat with Mama',
-        stand, face: -2.1, at: this.firePos.clone(), r: 0.8, objs: [this.chair.root], pose: 'hearth',
+        stand, face: -2.35, at: this.firePos.clone(), r: 0.8, objs: [this.chair.root], pose: 'hearth',
         via: [new THREE.Vector2(stand.x - 0.08, LANE_Z)], slot: [-0.86, 0.84, 'left'],
-        shot: { pos: new THREE.Vector3(2.0, 1.3, 0.5), look: new THREE.Vector3(), fov: 40, subject: new THREE.Vector3(CH_AT.x - 0.02, 0.92, CH_AT.z + 0.05), ndc: [-0.35, -0.05] },
+        shot: { pos: new THREE.Vector3(1.75, 1.1, -0.12), look: new THREE.Vector3(), fov: 42, subject: new THREE.Vector3(CH_AT.x - 0.02, 0.98, CH_AT.z + 0.05), ndc: [-0.3, 0.0] },
       });
     }
     // the wardrobe and the cheval mirror (the dressing corner by the right window)
@@ -792,7 +793,7 @@ export class HubScene implements GameScene {
         id: 'bench', label: 'Weapon Bench', title: 'THE WORKBENCH', short: 'WORKBENCH', sub: 'tune your iron', verb: 'Tune the gun',
         stand: bst, face: Math.PI, at: gp.clone(), r: 0.75, objs: [wb], pose: 'bench',
         via: [new THREE.Vector2(-1.15, LANE_Z), new THREE.Vector2(bst.x + 0.4, bst.y + 0.75)], slot: [-0.86, 0.84, 'left'], surf: wbSm.meta.top, reach: 0.4,
-        shot: { pos: new THREE.Vector3(bst.x + 1.32, 1.5, bst.y - 0.08), look: new THREE.Vector3(), fov: 46, subject: new THREE.Vector3(bst.x, 1.42, bst.y), ndc: [-0.28, 0.05] },
+        shot: { pos: new THREE.Vector3(bst.x + 1.32, 1.5, bst.y - 0.08), look: new THREE.Vector3(), fov: 46, subject: new THREE.Vector3(bst.x, 1.18, bst.y), ndc: [-0.26, -0.02] },
       });
     }
 
