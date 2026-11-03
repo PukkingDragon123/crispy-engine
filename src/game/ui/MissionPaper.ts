@@ -381,7 +381,7 @@ class Note {
   setQuest(q: PaperQuest, compact: boolean, q2: number, force = false) {
     this.q = q;
     const title = q.title;
-    const maxW = compact ? 140 : 214;
+    const maxW = compact ? 180 : 214;
     const obj = wrapInk(q.objective, maxW - PAD * 2, 16, compact ? 1 : 2);
     const prog = q.progress ? wrapInk(q.progress, maxW - PAD * 2 - 11, 16, 1)[0] : '';
     const reward = compact || !q.reward ? '' : wrapInk(q.reward, maxW - PAD * 2, 16, 1)[0];

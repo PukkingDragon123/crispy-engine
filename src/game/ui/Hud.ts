@@ -640,7 +640,9 @@ export class Hud {
         // beside the watch: how to cut the break short
         const wy = Math.round(py + 14 * k + WATCH_DROP * k) - drop;
         const ringing = (s.bell ?? 0) > 0.02;
-        const l1 = ringing ? 'RINGING' : this.touch ? 'HOLD THE WATCH' : 'HOLD TO RING', l2 = this.touch && !ringing ? 'TO RING THE BELL' : 'THE BELL';
+        // (one line on a phone, where the left side is crowded)
+        const small = H < 250;
+        const l1 = ringing ? 'RINGING' : this.touch ? 'HOLD THE WATCH' : 'HOLD TO RING', l2 = small && this.touch ? '' : this.touch && !ringing ? 'TO RING THE BELL' : 'THE BELL';
         const ex = Math.round(cx - 28 * k);
         const col = ringing ? UI.brass.h : 'rgba(240,220,180,0.92)';
         if (!this.touch) {
@@ -648,7 +650,7 @@ export class Hud {
           this.blit(kc, ex - Math.ceil(measure(c, l1, 16)) - kc.width - 4, wy - 15);
         }
         text(c, l1, ex, wy - 13, col, 16, 'right');
-        text(c, l2, ex, wy + 1, col, 16, 'right');
+        if (l2) text(c, l2, ex, wy + 1, col, 16, 'right');
       } else text(c, s.zone, cx, Math.round(py + 15 * k + (tl < 900 ? 14 : 3) * k) + 4 - drop, 'rgba(240,220,180,0.85)', 16, 'center');
     } else if (!s.boss) {
       if (s.wave !== this.lastWave) {

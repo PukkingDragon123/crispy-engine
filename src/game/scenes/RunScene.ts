@@ -471,7 +471,7 @@ export class RunScene implements GameScene {
     });
     // a bell snake coils around the board: mash to break free
     ev.on('snakeWrap', async (sn: any) => {
-      const r = await this.qte.run({ kind: 'mash', key: 'KeyE', label: 'BREAK FREE', duration: 2.2, target: 12 });
+      const r = await this.qte.run({ kind: 'mash', key: 'KeyE', label: 'BREAK FREE', duration: 2.2, target: 12, at: () => this.player.center(this.hudHero) });
       if (this.enemies.wrapping !== sn) return;
       ev.emit(r === 'fail' ? 'snakeWrapCrush' : 'snakeWrapBreak', sn, r === 'perfect' ? 1.8 : 1);
     });

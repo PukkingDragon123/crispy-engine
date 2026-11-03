@@ -7,6 +7,7 @@
 // touch layer can put its Alagard line under it.
 import type { Input } from '../../engine/Input';
 import type { AudioEngine } from '../../engine/audio/AudioEngine';
+import { isTouchDevice } from './TouchControls';
 
 export type QteResult = 'perfect' | 'good' | 'fail';
 type P3 = { x: number; y: number; z: number };
@@ -28,6 +29,8 @@ interface Active {
   done?: { r: QteResult; t: number };
 }
 
+/** on touch a key cap only stays where it names a direction (swipe sequences, the balance sides) */
+const TOUCH_WORD: Record<string, string> = { W: 'UP', A: 'LEFT', S: 'DOWN', D: 'RIGHT' };
 const KEYNAME: Record<string, string> = { KeyW: 'W', KeyA: 'A', KeyS: 'S', KeyD: 'D', Space: 'SPACE', KeyZ: 'Z', KeyF: 'F', KeyE: 'E', Mouse0: 'LMB', KeyQ: 'Q', KeyR: 'R' };
 
 export class Qte {
@@ -35,6 +38,7 @@ export class Qte {
   ctx: CanvasRenderingContext2D;
   active: Active | null = null;
   private scale = 2;
+  private touch = isTouchDevice();
   /** world -> screen (css px); defaults to the run HUD's projector */
   project: ((p: P3) => { x: number; y: number; visible: boolean; behind?: boolean }) | null = null;
   /** where the live prompt is drawn when it follows a threat (css px: centre and the bottom of the prompt) */
@@ -257,6 +261,12 @@ export class Qte {
     c.fillRect(Math.round(x), y, Math.round(w * Math.max(0, Math.min(1, f))), 3);
   }
   private keycap(t: string, x: number, y: number, s = 1, col = '#fff3d6') {
+    if (this.touch) {
+      // the touch layer's Alagard line says what to do; keys mean nothing on glass
+      const w = TOUCH_WORD[t];
+      if (!w) return;
+      t = w;
+    }
     const c = this.ctx;
     const w = Math.round((t.length > 1 ? 8 + t.length * 5 : 13) * s), h = Math.round(13 * s);
     c.fillStyle = '#2a1810';
