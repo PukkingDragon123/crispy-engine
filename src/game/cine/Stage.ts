@@ -429,7 +429,7 @@ export class ChoiceStage {
     const lay = new THREE.Group();
     word.group.rotation.x = -Math.PI / 2;
     lay.add(word.group);
-    lay.position.copy(p).add(new THREE.Vector3(0, -0.035, 0));
+    lay.position.copy(p).add(new THREE.Vector3(0, -0.004, 0));
     lay.rotation.y = Math.atan2(this.toH.x, this.toH.z);
     this.group.add(lay);
     word.enter('none');
@@ -451,7 +451,7 @@ export class ChoiceStage {
   }
 
   private pushOpt(a: { root: THREE.Object3D; pick: THREE.Object3D[]; kind: OptObj['kind']; focus: THREE.Vector3; labelAt: THREE.Vector3; i: number; o: ChoiceOption; normal: THREE.Vector3; notice?: THREE.Mesh; word?: VoxelWord }) {
-    const label = new FloatText3D(`${a.i + 1}  ${a.o.title.toUpperCase()}`, { size: 0.14, px: 56, cps: 55, wrap: 22, color: '#fff3d6', glow: '#ffb070', hdr: 1.25 });
+    const label = new FloatText3D(`${a.i + 1}  ${a.o.title.toUpperCase()}`, { size: 0.17, px: 64, cps: 55, wrap: 22, color: '#fff3d6', glow: '#ff9a3a', hdr: 1.3 });
     label.anchor.copy(a.labelAt);
     const det = [a.o.body, a.o.footer ? `- ${a.o.footer} -` : ''].filter(Boolean).join('\n');
     const detail = new FloatText3D(det, { size: 0.09, px: 48, cps: 90, wrap: 30, color: '#f6e6c4', glow: '#c08040', hdr: 1.1 });
@@ -569,7 +569,8 @@ export class ChoiceStage {
     const who = l.who ?? 0;
     const head = this.headOf(who);
     const t = new FloatText3D(l.text, { size: 0.105, px: 60, cps: 34, wrap: 30, color: who === 'sundown' ? '#fff3d6' : '#ffe9c4', glow: who === 'sundown' ? '#ffb070' : '#d0803a', hdr: 1.3 });
-    const w = head.clone().add(new THREE.Vector3(0, who === 'sundown' ? 0.5 : 0.55, 0)).addScaledVector(this.right, who === 'sundown' ? -0.35 : 0.4);
+    // beside the speaker's head (above it would leave the frame in a medium shot)
+    const w = head.clone().add(new THREE.Vector3(0, 0.12, 0)).addScaledVector(this.right, who === 'sundown' ? -0.85 : 0.9);
     t.anchor.copy(w);
     this.lensAt.set(t, w);
     (t.mesh.material as THREE.MeshBasicMaterial).fog = false;

@@ -322,7 +322,11 @@ export class RunScene implements GameScene {
     this.equipment = new Equipment(this.ctx, this.player);
     this.gearLoot = new GearPickups(this.ctx, this.player, this.equipment, e.input, this.hud);
     this.gearHud = new GearHud(this.hud3d.scene, this.hud, this.equipment);
-    this.picker = new CardPicker(this.ctx, this.upgrades, e.input, () => this.player.pos, { cam: this.camRig, hero: () => this.player });
+    this.picker = new CardPicker(this.ctx, this.upgrades, e.input, () => this.player.pos, {
+      cam: this.camRig,
+      hero: () => this.player,
+      bulletCam: () => ({ shooter: this.player, hud: (on) => this.hud.setVisible(on), held: () => this.pausedByUser }),
+    });
     this.inter = new Interactions(this.player);
     this.choice = new Choice(this.ctx, e.input);
     this.shop = new Shop(this.ctx, e.input, this.camRig);
@@ -1005,7 +1009,7 @@ export class RunScene implements GameScene {
       this.cavePit.stageUpdate(dt, rdt);
       return;
     }
-    this.codexRun?.update(rdt);
+    if (!this.picker.cinematic) this.codexRun?.update(rdt);
     const e = this.engine;
     this.run.time += dt;
     // pause toggle (simple until poster scene)
@@ -1041,7 +1045,7 @@ export class RunScene implements GameScene {
     }
     this.hud.suppressHint = this.picker.active || this.ult.active || modal || this.pausedByUser;
     // cinematic moments own the screen: no HUD over the rank-up, the turtle-house visit or a gear reveal
-    const cineHud = this.picker.active || this.shop.active || this.gearLoot.active || !!this.treasure?.modal;
+    const cineHud = this.picker.cinematic || this.shop.active || this.gearLoot.active || !!this.treasure?.modal;
     if (cineHud !== this.cineHudHidden) {
       this.cineHudHidden = cineHud;
       this.hud.setVisible(!cineHud);

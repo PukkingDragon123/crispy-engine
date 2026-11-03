@@ -918,9 +918,9 @@ export class BulletCam {
     this.dist = 0;
     // the profile shot of the muzzle (full cut)
     const mz = this.muzzleShot;
-    mz.pos.copy(this.M0).addScaledVector(this.right, 0.42 * this.side).addScaledVector(this.D, 0.55).addScaledVector(this.upP, 0.1);
-    mz.look.copy(this.M0).addScaledVector(this.D, 0.06);
-    mz.fov = 36;
+    mz.pos.copy(this.M0).addScaledVector(this.right, 0.72 * this.side).addScaledVector(this.D, 0.62).addScaledVector(this.upP, 0.12);
+    mz.look.copy(this.M0).addScaledVector(this.D, 0.04);
+    mz.fov = 34;
     mz.roll = 0;
     this.recoilV += 22;
     this.cock = 0;
@@ -941,11 +941,11 @@ export class BulletCam {
     for (const s of [-1, 1]) p.emit({ pos: C, count: 5, vel: { x: R.x * s * 2.6 + U.x * 0.5, y: R.y * s * 2.6 + U.y * 0.5, z: R.z * s * 2.6 + U.z * 0.5 }, spread: 0.7, life: [0.05, 0.1], size: [0.035, 0.08], sprite: FLAME, additive: true, color: [0xffc060, 0xfff0c0], drag: 9 });
     // burning powder grains, then smoke: a plume and a ring rolling off the muzzle
     p.emit({ pos: M, count: 24, vel: { x: D.x * 4, y: D.y * 4, z: D.z * 4 }, spread: 2.4, life: [0.12, 0.35], size: [0.012, 0.004], sprite: ['spark', 'glow8'], additive: true, color: [0xffb050, 0xff8a2a, 0xffd080], drag: 2.4, gravity: 4, stretch: 0.01 });
-    p.emit({ pos: _v.copy(M).addScaledVector(D, 0.1), count: 5, vel: { x: D.x * 1.3, y: D.y * 1.3, z: D.z * 1.3 }, spread: 0.45, life: [0.5, 0.9], size: [0.06, 0.3], sprite: PUFF, color: SMOKE, alpha: 0.5, drag: 2.4, rot: 6, rotSpeed: 0.5 });
+    p.emit({ pos: _v.copy(M).addScaledVector(D, 0.12), count: 4, vel: { x: D.x * 1.3, y: D.y * 1.3, z: D.z * 1.3 }, spread: 0.45, life: [0.5, 0.9], size: [0.04, 0.22], sprite: PUFF, color: SMOKE, alpha: 0.42, drag: 2.4, rot: 6, rotSpeed: 0.5, delay: 0.03 });
     for (let k = 0; k < 16; k++) {
       const a = (k / 16) * Math.PI * 2;
       const dx = R.x * Math.cos(a) + U.x * Math.sin(a), dy = R.y * Math.cos(a) + U.y * Math.sin(a), dz = R.z * Math.cos(a) + U.z * Math.sin(a);
-      p.emit({ pos: { x: M.x + D.x * 0.06 + dx * 0.03, y: M.y + D.y * 0.06 + dy * 0.03, z: M.z + D.z * 0.06 + dz * 0.03 }, count: 1, vel: { x: dx * 0.9 + D.x * 0.6, y: dy * 0.9 + D.y * 0.6, z: dz * 0.9 + D.z * 0.6 }, life: [0.55, 0.85], size: [0.045, 0.13], sprite: PUFF, color: SMOKE, alpha: 0.55, drag: 2.8, rot: 6, rotSpeed: 0.4 });
+      p.emit({ pos: { x: M.x + D.x * 0.07 + dx * 0.03, y: M.y + D.y * 0.07 + dy * 0.03, z: M.z + D.z * 0.07 + dz * 0.03 }, count: 1, vel: { x: dx * 0.9 + D.x * 0.6, y: dy * 0.9 + D.y * 0.6, z: dz * 0.9 + D.z * 0.6 }, life: [0.55, 0.85], size: [0.022, 0.075], sprite: PUFF, color: SMOKE, alpha: 0.42, drag: 2.8, rot: 6, rotSpeed: 0.4 });
     }
     this.ripples.spawn(_v.copy(M).addScaledVector(D, 0.06), D, 0.32, 0.5, 1.4, Math.random() * 6);
     // hanging dust in the air along the line: it streaks past the riding camera
@@ -1086,7 +1086,7 @@ export class BulletCam {
     const spr = tg.kind === 'skull' ? GRAIN : F.sprite;
     p.emit({ pos: X, count: 70, vel: { x: D.x * 5, y: D.y * 5 + 0.6, z: D.z * 5 }, spread: 3.0, gravity: F.gravity, drag: 0.5, life: [0.5, 1.2], size: [0.045, 0.022], sprite: spr, color: wet, stretch: 0.03, ground: true });
     p.emit({ pos: X, count: 34, vel: { x: D.x * 2.2, y: D.y * 2.2, z: D.z * 2.2 }, spread: 2.2, life: [0.6, 1.4], size: [0.018, 0.01], sprite: ['dot2', 'dot3'], color: wet, drag: 1.2, gravity: 2 });
-    p.emit({ pos: _v.copy(X).addScaledVector(D, 0.08), count: 7, vel: { x: D.x * 1.5, y: D.y * 1.5, z: D.z * 1.5 }, spread: 1.0, life: [1.1, 2.0], size: [0.08, 0.4 + tg.r * 0.6], sprite: PUFF, color: tg.kind === 'skull' ? [0xeadcc0, 0xf3e8cf] : F.mist, alpha: 0.5, drag: 1.8, rot: 6, rotSpeed: 0.4, jitter: 0.06 });
+    p.emit({ pos: _v.copy(X).addScaledVector(D, 0.08), count: 8, vel: { x: D.x * 1.6, y: D.y * 1.6, z: D.z * 1.6 }, spread: 1.0, life: [1.2, 2.2], size: [0.09, 0.48 + tg.r * 0.7], sprite: PUFF, color: tg.kind === 'skull' ? [0xeadcc0, 0xf3e8cf] : F.mist, alpha: 0.5, drag: 1.8, rot: 6, rotSpeed: 0.4, jitter: 0.06 });
     p.emit({ pos: X, count: 20, vel: { x: D.x * 4, y: D.y * 4 + 0.5, z: D.z * 4 }, spread: 3.2, life: [0.6, 1.2], size: [0.03, 0.026], sprite: ['bone', 'pebble'], color: BONE, gravity: 13, ground: true, bounce: 0.3, rot: 6, rotSpeed: 12 });
     p.emit({ pos: X, count: 1, life: [0.12, 0.12], size: [0.3, 0.7], sprite: ['flash0', 'flash2'], additive: true, color: tg.kind === 'skull' ? 0xfff2d0 : 0xffd8c8, alpha: 0.7, sizeJitter: 0 });
     this.ripples.spawn(X, D, tg.r * 2.4, 0.5, 1.1, 1);

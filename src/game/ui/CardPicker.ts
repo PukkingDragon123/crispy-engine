@@ -197,6 +197,11 @@ export class CardPicker {
     this.hitGroup.removeFromParent();
   }
 
+  /** the rank-up owns the screen: its bullet-cam opener or the card stage */
+  get cinematic() {
+    return this.active || this.bulletOn;
+  }
+
   /** queue a pick (multiple rank-ups) */
   request() {
     this.queue++;
