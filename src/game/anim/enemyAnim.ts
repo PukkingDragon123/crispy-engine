@@ -854,8 +854,10 @@ function quad(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   const legLen = e.def.height * 0.55;
   const amp = legLen * lerp(0.3, 0.55, gallop) * clamp01(sp / 1.2);
   const rate = sp > 0.15 ? clamp(gallop > 0.5 ? 1.7 + sp * 0.06 : cycleRate(sp, Math.max(0.05, amp), duty), 0.6, 3.4) : 0;
-  a.gait += rate * dt;
+  a.gait += rate * dt * (1 - a.low * 0.3);
   const G = gallop > 0.5 ? GAITS.gallop : sp < 1.6 ? GAITS.walk4 : GAITS.trot;
+  // low health: the right hind leg is held up and tucked, the body rolls onto the good side each stride
+  const limpK = a.low;
   const swingF = lerp(0.42, 0.85, gallop) * moving;
   const swingB = lerp(0.38, 0.75, gallop) * moving;
   const legs: [string, number, boolean][] = [
@@ -871,15 +873,16 @@ function quad(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
     const l = leg(a.gait + off, duty, _leg);
     const sw = l.sweep * (front ? swingF : swingB);
     const lift = l.lift * moving;
-    footfall(e, a, env, li++, l.stance && moving > 0.5, (front ? 0.35 : -0.3) * e.def.height + l.sweep * amp, (k[1] === 'l' ? 1 : -1) * 0.15, 0.4 + gallop * 0.3, 0.3 + gallop * 1.1);
+    const limp = k === 'br' ? limpK : 0;
+    footfall(e, a, env, li++, l.stance && moving > 0.5 && limp < 0.5, (front ? 0.35 : -0.3) * e.def.height + l.sweep * amp, (k[1] === 'l' ? 1 : -1) * 0.15, 0.4 + gallop * 0.3, 0.3 + gallop * 1.1);
     if (front) {
       S(e, 'leg_' + k, -sw - crouch * 0.3, 0, 0);
       S(e, 'shin_' + k, lift * 1.0 + crouch * 0.7, 0, 0);
       S(e, 'paw_' + k, lift * 0.8 - (l.stance ? l.sweep * 0.2 * moving : 0) - crouch * 0.3, 0, 0);
     } else {
-      S(e, 'leg_' + k, -sw - crouch * 0.55, 0, 0);
-      S(e, 'shin_' + k, -lift * 0.9 + crouch * -0.6 - 0.05, 0, 0);
-      S(e, 'paw_' + k, lift * 0.9 + crouch * 0.5, 0, 0);
+      S(e, 'leg_' + k, -sw * (1 - limp * 0.75) - crouch * 0.55 - limp * 0.3, 0, 0);
+      S(e, 'shin_' + k, -lift * 0.9 * (1 - limp) + crouch * -0.6 - 0.05 - limp * 0.75, 0, 0);
+      S(e, 'paw_' + k, lift * 0.9 + crouch * 0.5 + limp * 0.65, 0, 0);
     }
   }
   // spine: gallop flexes and extends the back; trot keeps it level
@@ -887,8 +890,9 @@ function quad(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   const bob = Math.abs(Math.sin(a.gait * TAU * (gallop > 0.5 ? 1 : 2))) * lerp(0.02, 0.07, gallop) * moving;
   a.lean.step(clamp(sp * 0.008, 0, 0.12), dt);
   a.bank.step(clamp(-a.turn * sp * 0.01, -0.3, 0.3), dt);
-  RO(e, 0, bob - crouch * 0.14 - Math.max(0, -a.bounce.x) * 0.02, 0);
-  RR(e, -flex * 0.6 + crouch * 0.12 + a.flP.x * 0.4, 0, a.bank.x + a.flR.x * 0.5);
+  const hobble = limpK * moving * Math.max(0, Math.sin(a.gait * TAU + G.br * TAU));
+  RO(e, 0, bob - crouch * 0.14 - Math.max(0, -a.bounce.x) * 0.02 - hobble * 0.035, 0);
+  RR(e, -flex * 0.6 + crouch * 0.12 + a.flP.x * 0.4 + limpK * 0.05, 0, a.bank.x + a.flR.x * 0.5 + hobble * 0.09 + limpK * 0.04);
   S(e, 'chest', flex + Math.sin(a.breath) * 0.02, -a.turn * 0.05, 0);
   // head: stabilised, looks at the prey; snarls when winding up
   const toX = env.player.x - e.pos.x, toZ = env.player.z - e.pos.z;
@@ -897,7 +901,7 @@ function quad(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   const look = lookAngles(lx, env.player.y + 0.6 - (e.pos.y + e.height), lz, 0.9, 0.5);
   a.headY.step(look.yaw, dt);
   a.headP.step(-look.pitch * 0.6, dt);
-  let nP = -flex * 0.8 + 0.05 + crouch * 0.25;
+  let nP = -flex * 0.8 + 0.05 + crouch * 0.25 + limpK * 0.22;
   let hP = a.headP.x + Math.sin(a.gait * TAU * 2) * 0.05 * moving;
   let hY = a.headY.x;
   let jaw = sp > 3 ? 0.12 + Math.sin(t * 14) * 0.05 : 0.02; // panting
@@ -912,7 +916,7 @@ function quad(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   }
   // pounce: coil → stretch out in flight → absorb the landing
   if (st === 'leap') {
-    const k = clamp01(e.stateT / 0.75);
+    const k = clamp01(e.stateT / e.leapDur);
     const ext = Math.sin(k * PI);
     if (env.fx && e.stateT <= env.dt * 1.5 && env.camDist < 40) env.fx.burst(e.pos.x, e.pos.y + 0.1, e.pos.z, 'sand', 0.9);
     S(e, 'leg_fl', -1.2 * ext, 0, 0);
@@ -926,9 +930,10 @@ function quad(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
     RR(e, lerp(-0.2, 0.25, k), 0, 0);
     jaw = 0.6;
   }
-  // taunt: sit back and howl
-  if (a.tauntT >= 0) {
-    const w = Math.sin(clamp01(a.tauntT / 1.6) * PI);
+  // taunt: sit back and howl (the alpha's rallying howl uses the same pose)
+  const howlW = kind === 'howl' ? (st === 'windup' ? smooth(ap.antic * 1.4) : st === 'strike' ? 1 - smooth(e.stateT / 0.35) : 0) : 0;
+  if (a.tauntT >= 0 || howlW > 0) {
+    const w = Math.max(a.tauntT >= 0 ? Math.sin(clamp01(a.tauntT / 1.6) * PI) : 0, howlW);
     A(e, 'leg_bl', -0.9 * w);
     A(e, 'leg_br', -0.9 * w);
     A(e, 'shin_bl', -1.1 * w);
@@ -1002,7 +1007,8 @@ function worm(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   const kind = e.atk?.kind ?? '';
   const n = M.nSeg;
   const sp = a.spd;
-  a.wave += dt * (1.1 + sp * 0.55 + (a.dying ? 2.5 : 0));
+  const low = a.low;
+  a.wave += dt * (1.1 + sp * 0.55 + (a.dying ? 2.5 : 0)) * (1 - low * 0.3);
   // rear (cobra) weight: up when erupting / attacking
   let rear = 0;
   if (st === 'windup' || st === 'strike') rear = Math.max(ap.antic, ap.strike * 0.8) * (kind === 'melee' ? 1 : 0.85);
@@ -1010,7 +1016,9 @@ function worm(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
     const k = clamp01(e.stateT / 0.9);
     rear = Math.sin(Math.min(1, k * 1.4) * PI * 0.5) * (1 - smooth((k - 0.7) / 0.3) * 0.5);
     a.sink = (1 - easeOutCubic(k * 1.6)) * e.height * 1.6;
-  } else if (st === 'move' && !a.dying) rear = Math.max(rear, 0.35 + Math.sin(t * 1.3 + a.seed) * 0.08);
+  } else if (st === 'move' && !a.dying) rear = Math.max(rear, (0.35 + Math.sin(t * 1.3 + a.seed) * 0.08) * (1 - low * 0.45));
+  // the hunter fell: rear tall and sway over the body
+  if (a.dance > 0.01 && !a.dying && st === 'move') rear = Math.max(rear, 0.8 * a.dance);
   if (st === 'burrow') {
     const k = clamp01(e.stateT / 0.6);
     rear = 0;
@@ -1019,7 +1027,7 @@ function worm(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   }
   if (st === 'spawn') a.hidden = e.stateT < 0.05;
   // travelling wave along the body (lateral S-curve + small vertical ripple)
-  const waveAmp = (0.09 + 0.07 * clamp01(sp / 6)) * (a.dying ? 2.2 * Math.max(0, 1 - a.dT / a.dDur) + 0.3 : 1);
+  const waveAmp = (0.09 + 0.07 * clamp01(sp / 6)) * (a.dying ? 2.2 * Math.max(0, 1 - a.dT / a.dDur) + 0.3 : 1) * (1 - low * 0.3) + (a.dance > 0.01 ? 0.05 * a.dance : 0);
   for (let i = 1; i <= n; i++) {
     const k = i / Math.max(1, n);
     const lat = waveAmp * (0.55 + k * 0.6) * Math.sin(a.wave * TAU - i * 0.72);
@@ -1040,7 +1048,10 @@ function worm(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
     lunge = 0.9 * ap.strike;
   }
   if (kind === 'lob' && (st === 'windup' || st === 'strike')) pitch += pose(0, -0.45, 0.25, ap);
-  RR(e, pitch, a.headY.x, Math.sin(a.wave * TAU - 0.3) * 0.08);
+  // hit flinch (recoil + twist), a hurt worm's head sags and trembles
+  pitch += a.flP.x * 0.3 + low * 0.18;
+  const trem = low > 0.2 ? Math.sin(t * 23 + a.seed) * 0.03 * low : 0;
+  RR(e, pitch, a.headY.x + a.flY.x * 0.3 + (a.dance > 0.01 ? Math.sin(t * 2.2) * 0.35 * a.dance : 0), Math.sin(a.wave * TAU - 0.3) * 0.08 + a.flR.x * 0.35 + trem);
   RO(e, 0, rear * M.rearH - a.sink * 0, lunge);
   // maw: open when rearing, snap on bite, flutter when spitting
   let open = 0.15 + rear * 0.35;
@@ -1251,24 +1262,27 @@ function snake(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   const n = M.nSeg;
   const sp = a.spd;
   const L = Math.max(0.05, M.segLen);
+  const low = a.low;
   // serpenoid curve: sinusoidal curvature travelling back along the body at body speed
   const lambda = 6 * L;
   const rate = sp > 0.1 ? sp / lambda : 0.12;
-  a.wave += rate * dt * (a.dying ? 3 : 1);
-  const coil = st === 'windup' ? ap.antic : 0;
+  a.wave += rate * dt * (a.dying ? 3 : 1) * (1 - low * 0.3);
+  const leapK = e.atk?.kind === 'leap';
+  const coil = st === 'windup' && leapK ? ap.antic : st === 'windup' ? ap.antic * 0.55 : 0;
   const striking = st === 'leap';
   const wrap = st === 'wrap';
-  let amp = (0.24 + coil * 0.26) * (striking ? 0.15 : 1);
+  let amp = (0.24 + coil * 0.26) * (striking ? 0.15 : 1) * (1 - low * 0.3);
   if (a.dying) amp = 0.5 * Math.max(0.1, 1 - a.dT / a.dDur) + 0.1;
   const kSeg = (TAU / 6) * (1 + coil * 0.5);
-  let rearLift = 0.1 * clamp01(sp / 1.5) + 0.06;
-  let rearPitch = -0.12;
+  // hurt: the head hangs low and the neck barely lifts
+  let rearLift = (0.1 * clamp01(sp / 1.5) + 0.06) * (1 - low * 0.6);
+  let rearPitch = -0.12 + low * 0.1;
   if (coil > 0) {
     rearLift = lerp(rearLift, M.rearH * 0.55, coil);
     rearPitch = lerp(rearPitch, -0.65, coil);
   }
   if (striking) {
-    const k = clamp01(e.stateT / 0.75);
+    const k = clamp01(e.stateT / e.leapDur);
     rearLift = 0.4 * Math.sin(k * PI);
     rearPitch = lerp(-0.3, 0.25, k);
   }
@@ -1318,14 +1332,27 @@ function snake(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   // rattle: warning shake before strikes, nervous buzz now and then
   const buzz = coil > 0 ? 1 : wrap ? 0.6 : vnoise(t * 0.4, a.seed) > 0.55 ? 0.7 : 0;
   S(e, 'rattle', Math.sin(t * 47) * 0.12 * buzz, Math.sin(t * 61) * 0.55 * buzz, 0);
-  // fangs out at full coil, wide on the strike, hissing while wrapped
-  let jaw = 0.05;
+  // fangs out at full coil, a full gape on the strike (meta jawMax ≈ 1.9), hissing while wrapped
+  let jaw = 0.05 + low * 0.08;
   if (coil > 0.6) jaw = (coil - 0.6) * 1.6;
-  if (striking || (st === 'strike' && e.atk?.kind === 'melee')) jaw = 0.75;
-  if (st === 'windup' && e.atk?.kind === 'melee') jaw = ap.antic * 0.6;
+  if (striking) jaw = 1.15 + 0.45 * Math.sin(clamp01(e.stateT / e.leapDur) * PI);
+  if (st === 'strike' && e.atk?.kind === 'melee') jaw = e.stateT < 0.08 ? 1.3 : Math.max(0.1, 1.3 - (e.stateT - 0.08) * 6);
+  if (st === 'windup' && e.atk?.kind === 'melee') jaw = ap.antic * 0.7;
+  if (e.atk?.kind === 'lob' && (st === 'windup' || st === 'strike')) jaw = st === 'strike' ? 0.95 : ap.antic * 0.5;
   if (wrap) jaw = 0.25 + Math.abs(Math.sin(t * 3)) * 0.2;
   if (a.dying) jaw = 0.6;
   S(e, 'jaw', jaw);
+  // folding fangs swing forward as the mouth opens wide
+  const fang = clamp01((jaw - 0.5) / 0.9);
+  S(e, 'fang_l', -0.55 * fang, 0, 0);
+  S(e, 'fang_r', -0.55 * fang, 0, 0);
+  // forked tongue: quick flicks through the lingual notch, tasting for the hunter (lazier when hurt)
+  const flickPhase = (t * (0.55 + (st === 'windup' ? 0.5 : 0)) + a.seed) % 1;
+  const flick = !a.dying && jaw < 0.5 && flickPhase < 0.16 ? Math.sin((flickPhase / 0.16) * PI) * (1 - low * 0.5) : 0;
+  if (flick > 0) {
+    O(e, 'tongue', 0, 0, flick * 0.19);
+    S(e, 'tongue', Math.sin(t * 46) * 0.22 * flick - 0.05 * flick, Math.sin(t * 31) * 0.1 * flick, 0);
+  }
   if (a.dying) {
     a.roll = smooth(a.dT / 0.9) * PI * 0.85 * a.dSide;
     if (a.dT > 0.5 && !a.impactDone) {
@@ -1343,14 +1370,20 @@ function lizard(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   const sp = a.spd;
   const moving = clamp01(sp / 0.4);
   const dead = a.dying;
-  const rate = sp > 0.15 ? clamp(cycleRate(sp, 0.12, 0.5), 2, 7.5) : 0;
+  const low = a.low;
+  const rate = sp > 0.15 ? clamp(cycleRate(sp, 0.12, 0.5), 2, 7.5) * (1 - low * 0.35) : 0;
   a.gait += rate * dt;
-  // territorial push-ups: the squirt wind-up and the taunt
-  const display = (st === 'windup' && kind === 'stream' ? ap.antic : 0) + (a.tauntT >= 0 ? Math.sin(clamp01(a.tauntT / 1.6) * PI) : 0);
+  // territorial push-ups: the squirt wind-up, the taunt, and gloating over a fallen hunter
+  const display = Math.min(1.2, (st === 'windup' && kind === 'stream' ? ap.antic : 0) + (a.tauntT >= 0 ? Math.sin(clamp01(a.tauntT / 1.6) * PI) : 0) + a.dance);
   const push = display > 0 ? (0.5 + 0.5 * Math.sin(t * 8.5)) * Math.min(1, display) : 0;
-  // inflate while displaying; deflate with the squirt
+  // inflate while displaying, deflate with the squirt; any hit makes it puff up defensively for a moment
+  const hitPuff = e.hitT < 0.7 && !dead ? (1 - e.hitT / 0.7) * 0.75 : 0;
   const puffT = st === 'windup' && kind === 'stream' ? ap.antic : st === 'strike' && kind === 'stream' ? 0.2 : display * 0.5;
-  a.puff = damp(a.puff, dead ? 0 : puffT, 8, dt);
+  a.puff = damp(a.puff, dead ? 0 : Math.max(puffT, hitPuff), 8, dt);
+  // the spiked frill fans out with the puff
+  const flare = (a.puff * 0.8 + display * 0.3) * ((e.batch.meta.frillFlare as number) ?? 0.5);
+  S(e, 'frill_l', 0, 0, -flare);
+  S(e, 'frill_r', 0, 0, flare);
   const G = GAITS.trot;
   const legs: [string, string, number, number, boolean][] = [
     ['fl', 'l1', G.fl, 1, true],
@@ -1374,6 +1407,11 @@ function lizard(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
     let yaw = -sgn * l.sweep * 0.55 * moving;
     let lift = sgn * l.lift * 0.45 * moving;
     if (front) lift += sgn * push * 0.55; // straighten the front legs: body rises
+    if (k === 'br' && low > 0.05 && !dead) {
+      // hurt: the right hind leg drags behind, splayed and limp
+      yaw = yaw * (1 - low * 0.8) + sgn * low * 0.45;
+      lift = lift * (1 - low * 0.85) - sgn * low * 0.12;
+    }
     if (dead) {
       yaw += Math.sin(t * 22 + off * 9) * 0.5 * Math.exp(-a.dT * 2);
       lift += sgn * (0.4 + smooth((a.dT - 0.4) / 0.6) * 0.6);
@@ -1391,8 +1429,10 @@ function lizard(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   if (!a.tail) a.tail = new ChainFollower(3, 4.5, 0.4);
   a.tail.step(-a.turn * 0.2 - spine * 0.8, dt, a.tailOut);
   for (let i = 1; i <= 3; i++) S(e, 'tail' + i, display > 0 ? -0.2 * display : 0.02, a.tailOut[i - 1] - Math.sin(a.gait * TAU - i * 0.9) * 0.25 * moving, 0);
-  RR(e, -push * 0.28 - ap.strike * 0.15 + a.flP.x * 0.3, spine, a.flR.x * 0.3);
-  RO(e, 0, push * 0.07, 0);
+  // a limping devil lists toward the dragged leg and its belly scrapes lower
+  const hitch = low > 0.05 && moving > 0.3 ? Math.max(0, Math.sin(a.gait * TAU + G.br * TAU)) * low : 0;
+  RR(e, -push * 0.28 - ap.strike * 0.15 + a.flP.x * 0.3 + low * 0.04, spine, a.flR.x * 0.3 - low * 0.08 - hitch * 0.07);
+  RO(e, 0, push * 0.07 - low * 0.02 - hitch * 0.015, 0);
   // jerky head: snaps to new look targets, bobs when displaying, jerks up to squirt
   a.snapIn -= dt;
   if (a.snapIn <= 0) {
@@ -1406,6 +1446,6 @@ function lizard(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   a.headY.zeta = 0.75;
   a.headY.step(a.snapYaw, dt);
   const bobH = display > 0 ? Math.sin(t * 17) * 0.12 * display : 0;
-  S(e, 'head', bobH - ap.strike * 0.45 + a.flP.x * 0.3, a.headY.x, 0);
+  S(e, 'head', bobH - ap.strike * 0.45 + a.flP.x * 0.3 + low * 0.1, a.headY.x, 0);
   S(e, 'jaw', kind === 'stream' && st === 'strike' ? 0.35 : kind === 'melee' && st === 'strike' ? 0.6 : 0.03);
 }

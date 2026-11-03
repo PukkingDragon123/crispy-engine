@@ -1,14 +1,22 @@
-// Skeletal Gunslinger (STYLE v2, 1/30): "Quickest Draw in the Afterlife".
-// Toon bone skeleton in villain black: cowboy hat, neckerchief, open leather
-// vest over the ribs, gun belt with bullet loops, boots with spurs and a
-// revolver (`gun` part on fore_r, barrel down at rest so it aims forward when
-// the arm raises). v1 wide grey hat + black bandana, v2 bowler + blue bandana.
-// Alpha: tall black hat with a silver star, bandolier, long gold revolver.
+// Skeletal Gunslinger: "Quickest Draw in the Afterlife". Built on Sundown's own
+// skeleton figure (characters/skeleton.ts, 1/36) with weathered outlaw bones and
+// ember eyes deep in the sockets, dressed in villain black: felt cowboy hat with a
+// bullet hole, knotted neckerchief, open stitched leather vest, gun belt with
+// brass cartridge loops and an empty holster, stitched boots with spurs, and a
+// single-action revolver (`gun` on fore_r, barrel down at rest so it aims forward
+// when the arm raises; `muzzle` socket). v1 wide grey hat + black bandana + a
+// cracked skull, v2 bowler + blue bandana + open left hand. Alpha: tall black hat
+// with a silver star and red feather, fangs, Set-red bandana, bandolier, long gold
+// revolver.
+// (vest / bootShins below are the legacy toon helpers still used by sethos.ts.)
 import type { RigSpec } from '../../../engine/voxel/Rig';
 import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
 import { TOON, Ramp } from '../style';
 import { skeletonParts, buildHumanoid, defaultExpressions, boneShin, cowboyBoot, JOINT, mirrorV3 } from '../toon/humanoid';
 import { EnemyOpts, roundBox, autoShade, mirrored, hatModel, HatStyle, bandana, gunBelt, revolverDown, pickV } from './human';
+import { Fig, finish, figMeta } from './figure/fig';
+import { ageBones, emberEyes, skullCrack, fangs, hatG, addHat, HatKind, neckerchief, vestG, bandolierG, gunBeltG, bootG, revolverG, METAL } from './figure/gear';
+
 
 /** open leather vest on a toon torso (leaves the sternum + inner ribs visible) */
 export function vest(T: VoxelModel, R: Ramp, buttons: Ramp) {
@@ -31,39 +39,45 @@ export function bootShins(B: Ramp, boot: Ramp, spur: Ramp | null = TOON.silver) 
 
 export function gunslingerRig(o: EnemyOpts = {}): RigSpec {
   const alpha = !!o.alpha;
-  const v = o.variant ?? 0;
-  const B = TOON.bone;
-  const P = skeletonParts({ ramp: B, skull: { mouth: alpha ? 'fangs' : 'grin', crack: v === 1 || alpha }, handR: { pose: 'fist' }, handL: { pose: v === 2 ? 'open' : 'fist' } });
-  const looks: [HatStyle, Ramp, Ramp, Ramp][] = [
-    ['cowboy', TOON.black, TOON.red, TOON.red],
-    ['wide', { base: 0x7a7470, shade: 0x5e5854, hi: 0x948e88, dark: 0x3e3a36 }, TOON.black, TOON.black],
-    ['bowler', TOON.hat, TOON.black, TOON.denim],
+  const v = (((o.variant ?? 0) % 3) + 3) % 3;
+  const F = new Fig();
+  if (alpha || v !== 2) F.boneMirror('fore_r', 'fore_l'); // left fist (v2 keeps the open hand)
+  ageBones(F, { seed: v + (alpha ? 7 : 0), tint: alpha ? 0x7a6a58 : 0xb89a6a, amt: alpha ? 0.34 : 0.22 });
+  if (v === 1 || alpha) skullCrack(F);
+  if (alpha) fangs(F);
+  emberEyes(F, alpha ? 0xff2a10 : 0xff6a20);
+  const looks: { hat: HatKind; felt: number; band: number; neck: number; vest: number }[] = [
+    { hat: 'cowboy', felt: 0x2a2422, band: 0x8a2a20, neck: 0x9a3424, vest: 0x4a2c18 },
+    { hat: 'wide', felt: 0x6a6460, band: 0x1e1a18, neck: 0x2a2624, vest: 0x5a3a22 },
+    { hat: 'bowler', felt: 0x6a4428, band: 0x1e1a18, neck: 0x3a5a8a, vest: 0x3e2a1a },
   ];
-  const [hs, hatR, bandR, neckR] = alpha ? (['tall', TOON.black, TOON.setRed, TOON.setRed] as [HatStyle, Ramp, Ramp, Ramp]) : pickV(looks, v);
-  P.hat = hatModel(hs, hatR, bandR, { bullet: v === 0, star: alpha ? TOON.silver : undefined, feather: alpha ? TOON.setRed : undefined });
-  bandana(P.torso, neckR);
-  vest(P.torso, alpha ? TOON.black : TOON.leatherDark, TOON.brass);
-  if (alpha) {
-    // bandolier across the chest
-    for (let y = 25; y <= 33; y++) {
-      const x = Math.round(-6 + (y - 25) * 1.5);
-      for (const dx of [0, 1]) P.torso.set(x + dx, y, 5, TOON.leather.base);
-      if (y % 2 === 0) P.torso.set(x, y, 6, TOON.brass.hi, VF.METAL);
-    }
-  }
-  gunBelt(P.pelvis, TOON.leather, TOON.brass, { loops: true, holster: true });
-  Object.assign(P, bootShins(B, alpha ? TOON.black : TOON.leather));
-  autoShade(P.torso, [TOON.leatherDark, TOON.black]);
-
-  const gun = new VoxelModel('gun');
-  revolverDown(gun, alpha ? TOON.gold : TOON.iron, alpha ? TOON.bone : TOON.wood, { long: alpha });
-  return buildHumanoid({
-    name: `gunslinger${alpha ? '_alpha' : ''}_v${v}`,
-    parts: P,
-    extra: [{ name: 'gun', model: gun, parent: 'fore_r', joint: mirrorV3(JOINT.hand) }],
-    topY: hs === 'tall' ? 62 : 57,
+  const L = alpha ? { hat: 'tall' as HatKind, felt: 0x1e1a1a, band: 0x8a1e16, neck: 0x8a1e16, vest: 0x221c1a } : looks[v];
+  const top = addHat(F, hatG(L.hat, L.felt, L.band, { bullet: v === 0 && !alpha, star: alpha ? METAL.silver : undefined, feather: alpha ? [0x8a1e16, 0x5a1410] : undefined, seed: v + 1 }));
+  neckerchief(F, L.neck, v);
+  vestG(F, L.vest, { seed: v, buttons: alpha ? METAL.silver : METAL.brass });
+  if (alpha) bandolierG(F, 0x3a2414);
+  gunBeltG(F, 0x6a4226, alpha ? METAL.gold : METAL.brass, { loops: true, holster: true, seed: v });
+  for (const s1 of [1, -1]) bootG(F, s1, alpha ? 0x221c1a : [0x5a3820, 0x3a2a20, 0x6a4226][v], { seed: v, spur: alpha ? METAL.gold : METAL.silver });
+  revolverG(F, { long: alpha, metal: alpha ? METAL.gold : METAL.iron, grip: alpha ? 0xe8dcc0 : 0x6a4226 });
+  finish(F);
+  return F.build(`gunslinger${alpha ? '_alpha' : ''}_v${v}`, figMeta(F, 'gunslinger', {
+    alpha,
+    variant: v,
+    height: top * F.vs,
     radius: 0.3,
+    weaponRest: '-Y',
     expressions: defaultExpressions(['neutral', 'angry', 'hurt', 'surprised', 'laugh', 'smug', 'dead', 'stunned']),
-    meta: { kind: 'gunslinger', alpha, headY: 44 / 30, weaponRest: '-Y' },
-  });
+  }));
 }
+void hatModel;
+void bandana;
+void gunBelt;
+void revolverDown;
+void pickV;
+void skeletonParts;
+void buildHumanoid;
+void JOINT;
+void mirrorV3;
+void VoxelModel;
+void VF;
+void TOON;

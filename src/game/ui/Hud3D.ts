@@ -14,22 +14,9 @@ import { buildRigGeo, RigGeo, RigInstance, RigSpec } from '../../engine/voxel/Ri
 import { modelEntry } from '../models/lookup';
 import { TOON } from '../models/style';
 import { FaceQuads, RigEyes, EyeStyle } from '../fx/FaceFx';
-import { paintNotice } from './Choice';
-import { TAROT, buildTarotFaces } from './TarotCards';
+import { TarotBar } from './TarotBar';
 import { hudCylinder, hudRound, hudHeartRig } from '../models/props/hud';
-
-interface Card {
-  key: string;
-  group: THREE.Group;
-  face: THREE.Mesh;
-  shade: THREE.Mesh;
-  frame: THREE.Mesh;
-  pop: number;
-  lastCd: number;
-  lastCharges: number;
-  burst: number[];
-  ready: number;
-}
+import { PausePoster } from './PausePoster';
 
 export interface CutInOpts {
   /** rig to show as the bust (default: the player) */
@@ -223,15 +210,13 @@ export class Hud3D {
   /** the player's revolver (for card art that shows Sundown armed) */
   gunSpec: RigSpec | null = null;
   // pause poster
-  private poster: THREE.Mesh | null = null;
-  private posterK = 0;
   private posterOpen = false;
   private posterUi: HTMLDivElement | null = null;
-  private posterMat: THREE.ShaderMaterial | null = null;
+  private pp: PausePoster | null = null;
+  private ppPending = false;
   private keyLight: THREE.DirectionalLight;
-  private cards: Card[] = [];
-  private cardsBuilt = false;
-  private lastUlt = 0;
+  /** the tarot ability cards (built lazily once the renderer and the player rig are known) */
+  private tarot: TarotBar;
 
   constructor(private hud: Hud) {
     this.tex = this.makeTex();
@@ -288,6 +273,8 @@ export class Hud3D {
       this.scene.add(this.pinch.root);
     }
 
+    this.tarot = new TarotBar(this.scene, hud);
+
     this.bandMat = new THREE.ShaderMaterial({
       uniforms: { uT: { value: 0 }, uCol: { value: new THREE.Color(0x9dff3a) }, uAspect: { value: 1 } },
       vertexShader: /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
@@ -335,25 +322,19 @@ export class Hud3D {
   /** the pause screen: a wanted poster blows in and flutters; DOM buttons ride on it */
   showPause(open: boolean, actions?: { label: string; fn: () => void }[]) {
     this.posterOpen = open;
-    if (open && !this.poster) {
-      const tex = paintNotice({ title: 'Paused', body: 'The outlaws hold their breath. The sand does not.\n\nWASD ride · SPACE jump · SHIFT drift · MOUSE aim & shoot · R reload · F kick · Q grapple · E scorpions · C swarm · G dung bomb · Z ultimate · 1/2 items · T interact', footer: 'Reward: a breather', stamp: 'ON HOLD' }, 300, 430);
-      this.posterMat = new THREE.ShaderMaterial({
-        uniforms: { map: { value: tex }, uT: { value: 0 }, uAmp: { value: 1 } },
-        vertexShader: `uniform float uT, uAmp; varying vec2 vUv; void main(){ vUv = uv; vec3 p = position;
-          float w = sin(p.y * 0.012 + uT * 7.0) * (1.0 - uv.y) * 6.0 * uAmp + sin(p.x * 0.02 + uT * 5.0) * (1.0 - uv.y) * 4.0 * uAmp;
-          p.x += w; p.y += sin(p.x * 0.015 + uT * 6.0) * 3.0 * uAmp * (1.0 - uv.y);
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0); }`,
-        fragmentShader: `uniform sampler2D map; varying vec2 vUv; void main(){ vec4 t = texture2D(map, vUv); if (t.a < 0.5) discard; gl_FragColor = vec4(t.rgb, 1.0);
-          #include <colorspace_fragment>
-        }`,
-        depthTest: false,
-        depthWrite: false,
-      });
-      this.poster = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 12, 16), this.posterMat);
-      this.poster.renderOrder = 20;
-      this.poster.frustumCulled = false;
-      this.scene.add(this.poster);
+    if (!this.pp) {
+      this.pp = new PausePoster(this.scene);
+      this.pp.onShot = (n) => {
+        const eng = (window as any).__engine;
+        eng?.audio?.play('rev_shot', { volume: 0.9, pitch: n ? 1.06 : 1 });
+        eng?.audio?.play('paper_flutter', { volume: 0.6 });
+        eng?.flash?.(0xfff2d0, 0.18, 0.12);
+      };
     }
+    if (open) {
+      this.ppPending = true;
+      (window as any).__engine?.audio?.play('paper_flutter', { volume: 0.8 });
+    } else this.pp.close();
     if (open && actions) {
       this.posterUi?.remove();
       const ui = document.createElement('div');
@@ -380,120 +361,20 @@ export class Hud3D {
   }
 
   private updatePoster(dt: number, W: number, H: number) {
-    this.posterK = Math.max(0, Math.min(1, this.posterK + (this.posterOpen ? dt * 3 : -dt * 4)));
-    if (!this.poster) return;
-    const k = this.posterK;
-    this.poster.visible = k > 0.001;
-    if (!this.poster.visible) return;
-    const e = 1 - Math.pow(1 - k, 3);
-    const ph = Math.min(H * 0.86, 640), pw = ph * (300 / 430);
-    this.poster.scale.set(pw, ph, 1);
-    this.poster.position.set(W / 2 + (1 - e) * W * 0.8, -H / 2 + (1 - e) * 120, 400);
-    this.poster.rotation.z = (1 - e) * -0.9 + Math.sin(this.t * 1.3) * 0.015;
-    this.posterMat!.uniforms.uT.value = this.t;
-    this.posterMat!.uniforms.uAmp.value = 0.35 + (1 - e) * 3;
+    const pp = this.pp;
+    if (!pp) return;
+    if (this.ppPending) {
+      this.ppPending = false;
+      pp.open(W, H);
+    }
+    pp.update(dt, W, H, this.t);
     if (this.posterUi) {
-      this.posterUi.style.left = `${W / 2 + (1 - e) * W * 0.8}px`;
-      this.posterUi.style.top = `${H / 2 + ph * 0.06}px`;
-      this.posterUi.style.opacity = String(e);
+      const v = pp.centre.visible;
+      this.posterUi.style.left = `${pp.centre.x}px`;
+      this.posterUi.style.top = `${pp.centre.y + pp.height * 0.13}px`;
+      this.posterUi.style.opacity = String(v);
+      this.posterUi.style.pointerEvents = v > 0.5 ? 'auto' : 'none';
     }
-  }
-
-  /** the tarot ability bar: faces photographed from the posed 3D skeleton (needs the renderer) */
-  private buildCards(renderer: THREE.WebGLRenderer) {
-    this.cardsBuilt = true;
-    const geo = this.bustSpec ? buildRigGeo(this.bustSpec, this.bustKey) : null;
-    let faces: Record<string, HTMLCanvasElement> = {};
-    try {
-      faces = buildTarotFaces(renderer, geo);
-    } catch (e) {
-      console.warn('[hud] tarot faces failed', e);
-      return;
-    }
-    for (const d of TAROT) {
-      const cv = faces[d.key];
-      if (!cv) continue;
-      const tex = new THREE.CanvasTexture(cv);
-      tex.magFilter = THREE.NearestFilter;
-      tex.minFilter = THREE.NearestFilter;
-      tex.generateMipmaps = false;
-      tex.colorSpace = THREE.SRGBColorSpace;
-      const group = new THREE.Group();
-      const face = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, depthTest: false, depthWrite: false, transparent: true }));
-      const back = new THREE.Mesh(new THREE.PlaneGeometry(1.06, 1.04), new THREE.MeshBasicMaterial({ color: 0x1a0e08, toneMapped: false, depthTest: false, depthWrite: false, transparent: true, opacity: 0.55 }));
-      back.position.set(0.03, -0.03, -1);
-      const frame = new THREE.Mesh(new THREE.PlaneGeometry(1.08, 1.05), new THREE.MeshBasicMaterial({ color: 0xffd36b, toneMapped: false, depthTest: false, depthWrite: false, transparent: true, opacity: 0 }));
-      frame.position.z = -0.5;
-      const shade = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ color: 0x120a06, toneMapped: false, depthTest: false, depthWrite: false, transparent: true, opacity: 0.62 }));
-      shade.position.z = 1;
-      for (const m of [back, frame, face, shade]) {
-        m.frustumCulled = false;
-        group.add(m);
-      }
-      back.renderOrder = 30;
-      frame.renderOrder = 31;
-      face.renderOrder = 32;
-      shade.renderOrder = 33;
-      this.scene.add(group);
-      this.cards.push({ key: d.key, group, face, shade, frame, pop: 0, lastCd: 0, lastCharges: -1, burst: d.burst, ready: 0 });
-    }
-  }
-
-  private updateCards(dt: number, W: number, H: number) {
-    const hud = this.hud;
-    const st = hud.last;
-    if (!st || !this.cards.length) return;
-    const s = hud.scale;
-    const visible = hud.visible && hud.anchors.slide < 0.98;
-    const cw = 40 * s, ch = 65 * s;
-    const n = this.cards.length;
-    hud.cardAnchors.length = 0;
-    this.cards.forEach((c, i) => {
-      const ult = c.key === 'Z';
-      const sk = st.skills.find((k) => k.key === c.key);
-      const frac = ult ? 1 - Math.min(1, st.ult) : sk && sk.max > 0 ? Math.min(1, sk.cd / sk.max) : 0;
-      const cdNow = ult ? (st.ult >= 1 ? 0 : 99) : sk?.cd ?? 0;
-      // used? cooldown jumped up, a charge was spent, or the ultimate fired
-      const charges = sk?.charges ?? -1;
-      const used = ult ? this.lastUlt >= 1 && st.ult < 0.5 : cdNow > c.lastCd + 0.4 || (charges >= 0 && c.lastCharges >= 0 && charges < c.lastCharges);
-      c.lastCd = cdNow;
-      c.lastCharges = charges;
-      if (used) {
-        c.pop = 1;
-        this.engineBurst(c, s);
-      }
-      c.pop = Math.max(0, c.pop - dt * 1.6);
-      const readyNow = frac <= 0.001;
-      c.ready = readyNow ? Math.min(1, c.ready + dt * 4) : 0;
-      // fan along the bottom-right, the ultimate largest at the end
-      const big = ult ? 1.22 : 1;
-      const slot = n - 1 - i;
-      const x = W - (16 + 22) * s - slot * cw * 0.98 - (ult ? 0 : cw * 0.2);
-      const fan = (slot - (n - 1) / 2) * 0.045;
-      const bob = Math.sin(this.t * 1.4 + i * 1.3) * 2.2 * s;
-      const k = c.pop;
-      const lift = Math.sin(Math.min(1, (1 - k) * 1.0) * Math.PI) * (k > 0 ? 1 : 0);
-      const y = H - 14 * s - (ch * big) / 2 - bob - lift * 50 * s;
-      c.group.visible = visible;
-      c.group.position.set(x, -y, 600 + i);
-      c.group.scale.set(cw * big * (1 + k * 0.35), ch * big * (1 + k * 0.35), 1);
-      c.group.rotation.set(0, k > 0 ? (1 - k) * Math.PI * 2 : 0, fan + Math.sin(this.t * 0.9 + i) * 0.02);
-      // sand fills the card back up as the cooldown recovers (the shade covers the unrecovered top part)
-      c.shade.visible = frac > 0.001;
-      c.shade.scale.y = frac;
-      c.shade.position.y = 0.5 - frac / 2;
-      // ready: a brass frame breathes around the card
-      (c.frame.material as THREE.MeshBasicMaterial).opacity = c.ready * (ult ? 0.55 + Math.sin(this.t * 6) * 0.3 : 0.25 + Math.sin(this.t * 3 + i) * 0.12);
-      (c.face.material as THREE.MeshBasicMaterial).color.setScalar(readyNow ? 1 : 0.72);
-      hud.cardAnchors.push({ key: c.key, x: x / s, y: y / s, h: (ch * big) / s, cd: ult ? 0 : cdNow });
-    });
-    this.lastUlt = st.ult;
-  }
-
-  private engineBurst(c: Card, s: number) {
-    const x = c.group.position.x / s, y = -c.group.position.y / s;
-    const cols = c.burst.map((h) => '#' + h.toString(16).padStart(6, '0'));
-    this.hud.burst(x, y, cols, 34, 110);
   }
 
   /** player rig spec (and its geometry cache key) used for the cut-in bust */
@@ -884,12 +765,13 @@ export class Hud3D {
 
     if (this.cut) this.updateCut(dt, W, H);
     this.updatePoster(dt, W, H);
-    this.updateCards(dt, W, H);
+    this.tarot.update(dt, W, H);
     this.faces.end(null);
   }
 
   render(renderer: THREE.WebGLRenderer) {
-    if (!this.cardsBuilt && this.bustSpec) this.buildCards(renderer);
+    if (this.pp?.active && this.pp.needsArt) this.pp.buildArt(renderer, this.bustSpec);
+    this.tarot.build(renderer, this.bustSpec, this.bustKey, this.gunSpec);
     const ac = renderer.autoClear;
     const lc = renderer.localClippingEnabled;
     const rim = globalUniforms.uRim.value;
@@ -908,6 +790,7 @@ export class Hud3D {
 
   dispose() {
     this.endCut();
+    this.tarot.dispose();
     this.posterUi?.remove();
     this.hud.canvas.style.display = '';
     this.hud.use3D = false;

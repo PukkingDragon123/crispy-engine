@@ -3237,3 +3237,7 @@ export function fireplaceCraft(seed = 0): StaticModel & { meta: { fire: V3; cran
   const P = (x: number, y: number, z: number): V3 => [(x - px) * CVS, (y - py) * CVS, (z - pz) * CVS];
   return { model: m, voxelSize: CVS, meta: { fire: P(0, 12, 12), crane: P(-14, 7, 15), panHook: P(X0 - 2, 52, 12), clock: P(0, 66, 19), mantel: (45 - py) * CVS } };
 }
+
+// the organic sculpting kit, shared with the workshop furniture (props/workshop.ts)
+export { smin, dEll, dCap, dRBox, sculpt, lump, exposedV, logAlong, lathe, mul, wear, IP, HONEY, pineAt, clamp01, stoneAt, stoneCol, chainLinks, CVS, SMV };
+export type { SDF, LatheOpts };

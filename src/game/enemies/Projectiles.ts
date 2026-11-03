@@ -23,6 +23,8 @@ export interface Proj {
   spin: number;
   homing?: number;
   sourceId?: number;
+  /** alpha thorny-lizard blood: bursts into an acid splash wherever it lands */
+  acid?: boolean;
 }
 
 const LOOK: Record<ProjKind, { sprite: string; size: number; color: number; stretch: number; grav: number; trail?: number }> = {
@@ -37,6 +39,9 @@ const LOOK: Record<ProjKind, { sprite: string; size: number; color: number; stre
   bone: { sprite: 'bone', size: 0.4, color: 0xffffff, stretch: 0, grav: 4 },
   blood: { sprite: 'dot4', size: 0.24, color: 0xa81414, stretch: 0.03, grav: 15, trail: 0x6e0a0a },
 };
+/** red pixel trail of a blood squirt (bright arterial + dark clot), acid blood adds sickly green */
+const BLOOD_TRAIL = [0xc81e1e, 0x9a1010, 0x6e0a0a, 0xe03a2a];
+const ACID_TRAIL = [0xb8f05c, 0x9dff3a, 0x9a1010, 0x6ec02a];
 
 const _v = new THREE.Vector3();
 
@@ -44,6 +49,8 @@ export class Projectiles {
   list: Proj[] = [];
   batch = new SpriteBatch(2400);
   onDeflect?: (p: Proj) => void;
+  /** an acid splash landed (the enemy manager may leave a small fizzing pool) */
+  onAcid?: (x: number, y: number, z: number, dmg: number, sourceId: number) => void;
 
   constructor(private ctx: Ctx, private getPlayer: () => { center(out: THREE.Vector3): THREE.Vector3; takeHit: (h: any, from?: THREE.Vector3) => number; status: any; alive: boolean; pos: THREE.Vector3 }) {
     ctx.scene.add(this.batch.mesh);
@@ -56,7 +63,7 @@ export class Projectiles {
   }
 
   /** helper: fire pattern from a point toward a target */
-  pattern(kind: 'burst' | 'fan' | 'ring' | 'spiral' | 'volley' | 'lob' | 'snipe' | 'stream', from: THREE.Vector3, target: THREE.Vector3, o: { count?: number; spread?: number; speed?: number; dmg: number; proj?: ProjKind; status?: StatusApply[]; phase?: number; delay?: number; sourceId?: number }) {
+  pattern(kind: 'burst' | 'fan' | 'ring' | 'spiral' | 'volley' | 'lob' | 'snipe' | 'stream', from: THREE.Vector3, target: THREE.Vector3, o: { count?: number; spread?: number; speed?: number; dmg: number; proj?: ProjKind; status?: StatusApply[]; phase?: number; delay?: number; sourceId?: number; acid?: boolean }) {
     const proj = o.proj ?? 'bullet';
     const speed = o.speed ?? 18;
     const dx = target.x - from.x, dz = target.z - from.z;
@@ -65,7 +72,7 @@ export class Projectiles {
     const dy = target.y - from.y;
     const n = o.count ?? 1;
     const mk = (ang: number, sp: number, vy: number, delay = 0) => {
-      const fire = () => this.spawn({ kind: proj, x: from.x, y: from.y, z: from.z, vx: Math.sin(ang) * sp, vy, vz: Math.cos(ang) * sp, dmg: o.dmg, status: o.status, sourceId: o.sourceId });
+      const fire = () => this.spawn({ kind: proj, x: from.x, y: from.y, z: from.z, vx: Math.sin(ang) * sp, vy, vz: Math.cos(ang) * sp, dmg: o.dmg, status: o.status, sourceId: o.sourceId, acid: o.acid });
       if (delay > 0) this.ctx.engine.tweens.after(delay, fire);
       else fire();
     };
@@ -95,18 +102,21 @@ export class Projectiles {
         const T = Math.max(0.6, d / speed) * lead + 0.3;
         const g = LOOK[proj].grav;
         this.ctx.engine.tweens.after(i * 0.15, () =>
-          this.spawn({ kind: proj, x: from.x, y: from.y, z: from.z, vx: ddx / T, vy: (target.y - from.y) / T + 0.5 * g * T, vz: ddz / T, dmg: o.dmg, status: o.status, life: T + 2, sourceId: o.sourceId })
+          this.spawn({ kind: proj, x: from.x, y: from.y, z: from.z, vx: ddx / T, vy: (target.y - from.y) / T + 0.5 * g * T, vz: ddz / T, dmg: o.dmg, status: o.status, life: T + 2, sourceId: o.sourceId, acid: o.acid })
         );
       }
     } else if (kind === 'stream') {
-      // a continuous arcing squirt: drops in quick succession, slightly jittered, leading the target
+      // a continuous arcing squirt: drops in quick succession, slightly jittered, leading the target.
+      // `spread` sweeps the squirt across the target (the head turning while it cries)
       const T = Math.max(0.35, flat / speed);
       const g = LOOK[proj].grav;
+      const sweep = o.spread ?? 0;
+      const d0 = o.delay ?? 0;
       for (let i = 0; i < n; i++) {
-        const j = (rnd.next() - 0.5) * 0.08;
+        const j = (rnd.next() - 0.5) * 0.08 + (n > 1 ? (i / (n - 1) - 0.5) * sweep : 0);
         const sp = speed * (0.94 + rnd.next() * 0.12);
-        this.ctx.engine.tweens.after(i * 0.045, () =>
-          this.spawn({ kind: proj, x: from.x, y: from.y, z: from.z, vx: Math.sin(base + j) * sp, vy: dy / T + 0.5 * g * T * (0.92 + rnd.next() * 0.16), vz: Math.cos(base + j) * sp, dmg: o.dmg, status: o.status, sourceId: o.sourceId, life: T + 2 })
+        this.ctx.engine.tweens.after(d0 + i * 0.045, () =>
+          this.spawn({ kind: proj, x: from.x, y: from.y, z: from.z, vx: Math.sin(base + j) * sp, vy: dy / T + 0.5 * g * T * (0.92 + rnd.next() * 0.16), vz: Math.cos(base + j) * sp, dmg: o.dmg, status: o.status, sourceId: o.sourceId, life: T + 2, acid: o.acid })
         );
       }
     } else if (kind === 'snipe') {
@@ -205,7 +215,11 @@ export class Projectiles {
       const L = LOOK[q.kind];
       const col = q.owner === 'player' ? 0x9dff3a : L.color;
       this.batch.push(q.x, q.y, q.z, L.sprite, L.size, L.size, q.kind === 'dynamite' || q.kind === 'dung' || q.kind === 'bone' ? q.spin : 0, col, 1, { x: q.vx, y: q.vy, z: q.vz }, L.stretch);
-      if (L.trail && rnd.chance(0.5)) ctx.particles.emit({ pos: { x: q.x, y: q.y, z: q.z }, count: 1, life: [0.2, 0.4], size: [0.12, 0.04], sprite: q.kind === 'dynamite' ? 'spark' : 'dot3', color: L.trail, additive: q.kind === 'dynamite', drag: 2 });
+      if (q.kind === 'blood') {
+        // a red pixel trail that drips: every drop sheds droplets, some fall away as they cool
+        if (rnd.chance(0.85)) ctx.particles.emit({ pos: { x: q.x, y: q.y, z: q.z }, count: 1, vel: { x: q.vx * 0.12, y: q.vy * 0.1, z: q.vz * 0.12 }, life: [0.25, 0.55], size: [0.1, 0.035], sprite: ['dot3', 'dot4', 'blood0'], color: q.acid ? ACID_TRAIL : BLOOD_TRAIL, gravity: 7, drag: 1.6, jitter: 0.03 });
+        if (rnd.chance(0.12)) ctx.particles.emit({ pos: { x: q.x, y: q.y, z: q.z }, count: 1, vel: { x: q.vx * 0.3, y: 0, z: q.vz * 0.3 }, life: [0.5, 0.8], size: [0.05, 0.05], sprite: 'dot3', color: q.acid ? 0x9dff3a : 0x7e1410, gravity: 16, ground: true });
+      } else if (L.trail && rnd.chance(0.5)) ctx.particles.emit({ pos: { x: q.x, y: q.y, z: q.z }, count: 1, life: [0.2, 0.4], size: [0.12, 0.04], sprite: q.kind === 'dynamite' ? 'spark' : 'dot3', color: L.trail, additive: q.kind === 'dynamite', drag: 2 });
     }
     this.batch.end(ctx.world.env.fog);
   }
@@ -245,7 +259,23 @@ export class Projectiles {
       default:
         ctx.fx.hit(pos, { x: 0, y: 1, z: 0 }, 'sand', 0.5);
     }
+    if (q.acid) this.acidSplash(x, y, z, q.dmg, onPlayer, q.sourceId ?? 0);
     void P;
+  }
+
+  /** acid: a fizzing green splash that scalds whoever stands close (alpha thorny devils / bell snakes) */
+  acidSplash(x: number, y: number, z: number, dmg: number, onPlayer = false, sourceId = 0) {
+    const ctx = this.ctx;
+    const pos = { x, y: y + 0.05, z };
+    ctx.particles.emit({ pos, count: 9, spread: 2.2, up: 2.4, life: [0.35, 0.7], size: [0.09, 0.04], sprite: ['ichor', 'dot3', 'bubble'], color: [0xffffff, 0xc8ff5a, 0x9dff3a], gravity: 13, ground: true });
+    ctx.particles.emit({ pos, count: 1, life: [0.16, 0.2], size: [0.5, 0.8], sprite: 'venomSplat', color: 0xffffff, additive: true, rot: 6.28 });
+    ctx.particles.emit({ pos, count: 2, spread: 0.3, up: 0.6, life: [0.6, 1.1], size: [0.2, 0.5], sprite: ['puff0', 'puff1'], color: [0x9dcf4a, 0x7fae3a], alpha: 0.45, drag: 2, rot: 6, rotSpeed: 0.6 });
+    ctx.events.emit('groundMark', x, z, 0.75, 3);
+    if (rnd.chance(0.35)) ctx.sfx('poison_hit', pos, 0.35, 1.2);
+    const pl = this.getPlayer();
+    if (!onPlayer && pl.alive && Math.hypot(pl.pos.x - x, pl.pos.z - z) < 1.3 && Math.abs(pl.pos.y - y) < 1.5)
+      pl.takeHit({ base: dmg * 0.6, kind: 'magic', source: 'projectile', status: [{ id: 'poison', stacks: 1, dur: 3 }] }, new THREE.Vector3(x, y, z));
+    this.onAcid?.(x, y, z, dmg, sourceId);
   }
 
   clear() {

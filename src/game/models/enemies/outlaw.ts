@@ -1,111 +1,90 @@
-// Dune Outlaw (STYLE v2, 1/30): Set's posse. A toon skeleton bandit standing
-// on a battered sandboard (`board`, a root-level part so the stance can yaw
-// while the board tracks travel): bandana mask over the jaw, cowboy hat, stiff
-// duster shoulders over an open shirt, gun belt, boots and a revolver (`gun`).
-// v1 blue mask + black hat, v2 black mask + grey hat + poncho. Alpha: skull-
-// painted black mask, tall hat, Set-red duster, gold-trimmed board.
+// Dune Outlaw: Set's posse, riding a battered sandboard. Built on Sundown's own
+// skeleton figure (characters/skeleton.ts, 1/36) with weathered bones and ember
+// eyes: a bandana mask over the nose and jaw, felt hat, an open linen shirt under
+// a stiff duster (shoulders, lapels, stand-up collar, long tails as the swaying
+// `coat` part), sleeves, gun belt with an empty holster, stitched boots with spurs
+// and a revolver (`gun` on fore_r, `muzzle` socket). The rider stands on the
+// `board`, a root-level part so the stance can yaw while the board tracks travel.
+// v1 blue mask + black hat, v2 black mask + wide grey hat + striped poncho.
+// Alpha: skull-painted black mask, tall hat, Set-red duster, gold-trimmed board.
 import type { RigSpec } from '../../../engine/voxel/Rig';
-import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
-import { TOON, Ramp } from '../style';
-import { skeletonParts, buildHumanoid, defaultExpressions, JOINT, mirrorV3 } from '../toon/humanoid';
-import { EnemyOpts, roundBox, autoShade, mirrored, hatModel, HatStyle, gunBelt, revolverDown, liftSpec, pickV } from './human';
-import { bootShins } from './gunslinger';
+import { defaultExpressions } from '../toon/humanoid';
+import { EnemyOpts, liftSpec } from './human';
+import { Fig, finish, figMeta, mix, mulRGB, clothC, frayStrip, Sc } from './figure/fig';
+import { ageBones, emberEyes, hatG, addHat, HatKind, maskBandana, shirtG, dusterG, sleeveG, gunBeltG, bootG, revolverG, boardG, METAL, resolveC } from './figure/gear';
 
-const BH = 3; // board top in voxels: the rider stands on it
+const BH = 2; // board top in voxels: the rider stands on it
 
-/** a sandboard plank along Z with kicked nose/tail, iron bands, painted stripe */
-export function riderBoard(W: Ramp, trim: Ramp, stripe: Ramp) {
-  const m = new VoxelModel('board');
-  for (let z = -21; z <= 21; z++) {
-    const az = Math.abs(z);
-    const w = az > 18 ? 5 - (az - 18) : 5;
-    const lift = az > 16 ? Math.min(3, az - 16) : 0;
-    for (let x = -w; x <= w; x++) {
-      const c = Math.abs(x) <= 1 && az < 15 ? stripe.base : W.base;
-      m.set(x, lift, z, Math.abs(x) === w ? W.shade : c);
-      m.set(x, lift + 1, z, (az === 21 || Math.abs(x) === w) ? trim.base : c, (az === 21 || Math.abs(x) === w) && trim !== W ? VF.METAL : VF.SOLID);
-    }
+/** woven poncho: a stepped tent over the shoulders, banded stripes, a fringed hem */
+function ponchoG(F: Fig, base: number, seed: number) {
+  const s: Sc = F.s('torso');
+  const band = (y: number) => (y === 36 || y === 41 ? 0xe8d8b0 : y === 37 || y === 40 ? 0x9a2a1e : y === 38 || y === 39 ? 0x2e7a70 : base);
+  for (let y = 32; y <= 45; y++) {
+    const hw = y >= 45 ? 3.6 : y >= 44 ? 5.6 : y >= 42 ? 8.2 : y >= 38 ? 10.2 : 11.2;
+    const zb = y >= 45 ? -4.2 : y >= 43 ? -6.4 : -7.6, zf = y >= 45 ? 2.2 : y >= 43 ? 4.4 : 5.6;
+    for (let x = -12; x < 12; x++)
+      for (let z = -9; z <= 7; z++) {
+        const gx = x + 0.5, gz = z + 0.5;
+        const zc = (zf + zb) / 2, zr = (zf - zb) / 2;
+        const out = (Math.abs(gx) / hw) ** 3 + (Math.abs(gz - zc) / zr) ** 3 <= 1;
+        const inn = (Math.abs(gx) / (hw - 1)) ** 3 + (Math.abs(gz - zc) / (zr - 1)) ** 3 <= 1;
+        if (!out || (inn && y < 45)) continue;
+        if (y === 45 && Math.abs(gx) < 2.2 && gz > -2.5 && gz < 1.5) continue; // neck hole
+        const c = band(y);
+        s.m.set(x, y, z, c === base ? mulRGB(base, ((x + y) & 3) === 0 ? 0.92 : 1) : c);
+      }
   }
-  for (const zb of [-12, 12]) for (let x = -5; x <= 5; x++) m.set(x, 2, zb, TOON.iron.base, VF.METAL);
-  // foot straps
-  for (const zf of [-7, 7]) for (let x = -4; x <= 4; x++) if (Math.abs(x) >= 3) m.set(x, 2, zf, TOON.leatherDark.base).set(x, 2, zf + 1, TOON.leatherDark.base);
-  autoShade(m, [W]);
-  return m;
+  for (let x = -11; x < 11; x += 2) {
+    s.m.set(x, 31, 5, 0xd8c8a0).set(x, 31, -8, 0xd8c8a0);
+    if ((x & 3) === 1) s.m.set(x, 30, 5, 0xc8b890);
+  }
+  void seed;
 }
 
 export function outlawRiderRig(o: EnemyOpts = {}): RigSpec {
   const alpha = !!o.alpha;
-  const v = o.variant ?? 0;
-  const B = TOON.bone;
-  const P = skeletonParts({ ramp: B, skull: { mouth: 'grin', crack: v === 2 }, handR: { pose: 'fist' }, handL: { pose: 'fist' } });
-  const looks: [HatStyle, Ramp, Ramp, Ramp][] = [
-    ['cowboy', TOON.hat, TOON.red, TOON.red],
-    ['cowboy', TOON.black, TOON.denim, TOON.denim],
-    ['wide', TOON.woodGrey, TOON.black, TOON.black],
+  const v = (((o.variant ?? 0) % 3) + 3) % 3;
+  const F = new Fig();
+  F.boneMirror('fore_r', 'fore_l'); // both fists: one on the gun, one balancing
+  ageBones(F, { seed: 11 + v, tint: alpha ? 0x7a6a58 : 0xb89a6a, amt: alpha ? 0.32 : 0.22 });
+  emberEyes(F, alpha ? 0xff2a10 : 0xff6a20);
+  const looks: { hat: HatKind; felt: number; band: number; mask: number; coat: number }[] = [
+    { hat: 'cowboy', felt: 0x7a5236, band: 0x8a2a20, mask: 0xa83424, coat: 0x7a5a3c },
+    { hat: 'cowboy', felt: 0x2a2422, band: 0x3a5a8a, mask: 0x3a5a8a, coat: 0x5e4a3a },
+    { hat: 'wide', felt: 0x7a746c, band: 0x1e1a18, mask: 0x2a2624, coat: 0xb0703a },
   ];
-  const [hs, hatR, bandR, maskR] = alpha ? (['tall', TOON.black, TOON.setRed, TOON.black] as [HatStyle, Ramp, Ramp, Ramp]) : pickV(looks, v);
-  P.hat = hatModel(hs, hatR, bandR, { bullet: v === 1 });
-  // bandana mask over the jaw + nose (the jaw keeps the mask so it moves with it)
-  const H = P.head, J = P.jaw!;
-  for (let x = -7; x <= 7; x++)
-    for (let z = -7; z <= 7; z++) {
-      for (const y of [39, 40, 41]) if (H.has(x, y, z) || H.has(x, y, z - 1) || (y === 41 && Math.abs(x) <= 2 && z === 6)) if (Math.abs(x) >= 6 || z >= 5) H.set(x, y, z === 5 ? 6 : z, maskR.base);
-    }
-  for (let x = -5; x <= 5; x++) for (let z = -1; z <= 7; z++) for (let y = 35; y <= 38; y++) if (J.has(x, y, z) || (y >= 36 && z === 7 && Math.abs(x) <= 5)) J.set(x, y, z, y === 35 ? maskR.shade : maskR.base);
-  for (let i = 0; i < 3; i++) for (let x = -2 + i; x <= 2 - i; x++) J.set(x, 34 - i, 7, maskR.shade);
-  if (alpha) for (const [x, y] of [[-3, 37], [-1, 37], [1, 37], [3, 37], [-2, 36], [2, 36]] as [number, number][]) J.set(x, y, 8, TOON.bone.base); // painted teeth
-  // stiff duster shoulders + back over an open shirt
-  const T = P.torso;
-  const coat = alpha ? TOON.setRed : v === 2 ? TOON.poncho : TOON.duster;
-  if (v === 2 && !alpha) {
-    // poncho: a stepped tent over the shoulders
-    for (let y = 26; y <= 34; y++) {
-      const hw = 3 + Math.round((34 - y) * 0.6);
-      for (let x = -hw - 1; x <= hw + 1; x++) for (let z = -5; z <= 4; z++) if (Math.abs(x) >= hw - 1 || z === -5 || z === 4) if (!(z === 4 && Math.abs(x) <= 1 && y >= 31)) T.set(x, y, z, (y - 26) % 3 === 0 ? coat.shade : coat.base);
-    }
-  } else {
-    roundBox(T, -7, 24, -5, 7, 34, -5, coat.base, 1);
-    for (const s of [1, -1]) {
-      roundBox(T, s > 0 ? 5 : -8, 24, -4, s > 0 ? 8 : -5, 34, 3, coat.base, 1);
-      roundBox(T, s > 0 ? 3 : -8, 25, 4, s > 0 ? 8 : -3, 33, 4, coat.base, 0);
-      for (let y = 30; y <= 33; y++) T.set(s * 3, y, 5, coat.hi); // lapels
-    }
-    roundBox(T, -5, 34, -4, 5, 35, 0, coat.shade, 1); // collar
+  const L = alpha ? { hat: 'tall' as HatKind, felt: 0x1e1a1a, band: 0x8a1e16, mask: 0x1e1a1a, coat: 0x8a2018 } : looks[v];
+  const top = addHat(F, hatG(L.hat, L.felt, L.band, { bullet: v === 1, seed: v + 4 }));
+  maskBandana(F, L.mask, { teeth: alpha, seed: v });
+  const poncho = v === 2 && !alpha;
+  shirtG(F, 0xd8c8a4, v);
+  if (poncho) ponchoG(F, L.coat, v);
+  else {
+    const cp = dusterG(F, L.coat, alpha ? 0x1e1a1a : mulRGB(L.coat, 0.7), { seed: v, len: 13 });
+    frayStrip(cp, -9, 8, -10, 16, 1, 2, clothC(L.coat, v + 9, { fold: 4 }), v + 3); // worn hem
+    for (const s1 of [1, -1]) sleeveG(F, s1, clothC(L.coat, v + 2, { fold: 3, crease: mulRGB(L.coat, 0.8) }), { cuff: mulRGB(L.coat, 0.72) });
   }
-  gunBelt(P.pelvis, TOON.leather, TOON.silver, { loops: !alpha, holster: true });
-  Object.assign(P, bootShins(B, alpha ? TOON.black : TOON.leatherDark));
-  autoShade(T, [coat]);
-  const gun = new VoxelModel('gun');
-  revolverDown(gun, TOON.iron, TOON.wood);
-  const board = riderBoard(alpha ? TOON.black : TOON.wood, alpha ? TOON.gold : TOON.wood, alpha ? TOON.setRed : pickV([TOON.red, TOON.denim, TOON.poncho], v));
-
-  const spec = buildHumanoid({
-    name: `outlaw_rider${alpha ? '_alpha' : ''}_v${v}`,
-    parts: P,
-    extra: [
-      { name: 'gun', model: gun, parent: 'fore_r', joint: mirrorV3(JOINT.hand) },
-      { name: 'board', model: board, parent: undefined as unknown as string, joint: [0.5, 1, 0.5] },
-    ],
-    sockets: {
-      coat_anchor_back: { part: 'torso', at: [0.5, 25, -6] },
-      bandana_anchor: { part: 'head', at: [0.5, 40, -8] },
-    },
-    topY: (hs === 'tall' ? 62 : 57) + BH,
+  gunBeltG(F, 0x5a3a22, alpha ? METAL.gold : METAL.silver, { loops: !alpha, holster: true, seed: v + 2 });
+  for (const s1 of [1, -1]) bootG(F, s1, alpha ? 0x221c1a : 0x3e2a1c, { seed: v + 3, spur: alpha ? METAL.gold : METAL.silver });
+  revolverG(F, { metal: alpha ? METAL.steel : METAL.iron });
+  const stripe = alpha ? 0x8a1e16 : [0xa83424, 0x3a5a8a, 0xb0703a][v];
+  boardG(F, alpha ? 0x2a2220 : 0x8a6440, alpha ? METAL.gold[0] : 0x6a4a30, stripe, { gold: alpha, seed: v });
+  finish(F);
+  const spec = F.build(`outlaw_rider${alpha ? '_alpha' : ''}_v${v}`, figMeta(F, 'outlaw_rider', {
+    alpha,
+    variant: v,
+    height: (top + BH) * F.vs,
     radius: 0.32,
+    boardTop: BH * F.vs,
+    headY: (F.J.eye[1] + BH) * F.vs,
     expressions: defaultExpressions(['neutral', 'angry', 'hurt', 'surprised', 'laugh', 'dead']),
-    meta: {
-      kind: 'outlaw_rider',
-      alpha,
-      headY: (44 + BH) / 30,
-      boardTop: BH / 30,
-      cloth: { duster: [coat.base, coat.shade, TOON.leather.dark], bandana: [maskR.base, maskR.shade, 0xf0e6d6] },
-    },
-  });
-  // stand the rider on the board
+    cloth: { duster: [L.coat, mulRGB(L.coat, 0.8), 0x3a2414], bandana: [L.mask, mulRGB(L.mask, 0.8), 0xf0e6d6] },
+  }));
+  // stand the rider on the board; the board stays a root-level part
   liftSpec(spec, BH, ['board']);
-  // root-level board: no parent
   const bp = spec.parts.find((p) => p.name === 'board');
   if (bp) delete bp.parent;
   return spec;
 }
-void mirrored;
+void mix;
+void resolveC;

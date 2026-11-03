@@ -1,305 +1,606 @@
-// The ability bar as floating tarot cards (Rider–Waite style: cream border,
-// Roman numeral, flat colour scene, title in caps). Each card's figure is the
-// real 3D Sundown skeleton posed for that card and photographed through the
-// IconFactory (pixel finish + ink outline), then painted into the card.
-//   Q hook     XII  THE HANGED MAN — upside down on the rope
-//   E scorpions I   THE MAGICIAN   — revolver raised, Pinch below
-//   C swarm    XVI  THE TOWER      — arms flung wide, the sky splits
-//   G dung     XIX  THE SUN        — the dung-sun held overhead
-//   F kick     VIII STRENGTH       — mid-kick
-//   Z ult      XIII DEATH          — still, with the scorpion banner
+// The six tarot ability cards (Rider–Waite compositions) as real 3D dioramas:
+// the player's own Sundown rig posed for each card, the game's models as set
+// dressing, sculpted set pieces from props/tarot.ts, then photographed by the
+// CardStudio (painted sky, cel light, ink, bloom, grade).
+//   Q hook      XII  THE HANGED MAN — hung by one ankle from the living tau tree
+//   E scorpions I    THE MAGICIAN   — revolver to the sky, the four suits on the table
+//   C swarm     XVI  THE TOWER      — the struck watchtower, falling headfirst
+//   G dung      XIX  THE SUN        — the dung-sun held overhead like Khepri
+//   F kick      VIII STRENGTH       — a roundhouse kick before Sekhmet
+//   Z ult       XIII DEATH          — riding the pale camel with the black banner
 import * as THREE from 'three';
-import { buildRigGeo, RigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
-import { makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
+import { buildRigGeo, clearRigCache, RigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
+import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
+import type { VoxelModel } from '../../engine/voxel/VoxelModel';
 import { modelEntry } from '../models/lookup';
-import { IconFactory } from './IconFactory';
+import * as TP from '../models/props/tarot';
+import { deadBush } from '../models/props/flora';
+import type { Shot } from './CardStudio';
+
+type V3 = [number, number, number];
+
+/** particle theme played when the card is used / glints while it is ready */
+export type TarotFx = 'rope' | 'venom' | 'storm' | 'sun' | 'kick' | 'death';
 
 export interface TarotDef {
   key: string;
   num: string;
   title: string;
-  sky: string;
-  ground: string;
-  motif: 'tree' | 'infinity' | 'tower' | 'sun' | 'mountain' | 'banner';
-  pose: string;
-  burst: number[]; // particle colours on use
+  fx: TarotFx;
+  /** particle colours on use */
+  burst: number[];
+  scene: (k: Kit) => Generator<void, Shot, void>;
+}
+
+// ------------------------------------------------------------------ kit
+
+type Src = string | { model: VoxelModel; voxelSize: number; pivot?: V3 | 'bottom' | 'center' };
+
+/** builds diorama pieces from the game's registries and set pieces; owns everything it builds */
+export class Kit {
+  mat: VoxelMaterial;
+  glow: VoxelMaterial;
+  private geos: THREE.BufferGeometry[] = [];
+  private rigs = new Map<string, RigGeo>();
+  private mats: THREE.Material[] = [];
+  constructor(public heroSpec: RigSpec | null, public heroKey: string, public gunSpec: RigSpec | null) {
+    this.mat = makeVoxelMaterial({ fog: true });
+    this.glow = makeVoxelMaterial({ fog: true, emissiveStrength: 2.2 });
+    (this.glow.userData as any).noShadow = true;
+  }
+
+  /** a static mesh from a registry key or a set piece (scale baked into the voxel size) */
+  mesh(src: Src, scale = 1, mat?: THREE.Material): THREE.Mesh | null {
+    let m: { model: VoxelModel; voxelSize: number; pivot?: V3 | 'bottom' | 'center' } | null = null;
+    try {
+      if (typeof src === 'string') {
+        const r = modelEntry(src)?.() as any;
+        if (r?.model) m = r;
+        else if (r?.base) m = { model: r.base, voxelSize: r.voxelSize };
+      } else m = src;
+    } catch (e) {
+      console.warn('[tarot] model failed', src, e);
+    }
+    if (!m) return null;
+    const geo = buildVoxelGeometry(m.model, { voxelSize: m.voxelSize * scale, pivot: m.pivot ?? 'bottom' });
+    this.geos.push(geo);
+    return new THREE.Mesh(geo, mat ?? this.mat);
+  }
+
+  /** a rig from the registries (geometry cached under a card key, freed in dispose) */
+  rig(key: string, scale = 1, mat?: VoxelMaterial): RigInstance | null {
+    try {
+      const spec = modelEntry(key)?.() as RigSpec | undefined;
+      if (!spec?.parts) return null;
+      const ck = key + ':tarot';
+      const geo = buildRigGeo(spec, ck);
+      this.rigs.set(ck, geo);
+      const r = new RigInstance(geo, { material: mat ?? this.mat });
+      r.root.scale.setScalar(scale);
+      return r;
+    } catch (e) {
+      console.warn('[tarot] rig failed', key, e);
+      return null;
+    }
+  }
+
+  /** the player's Sundown (their outfit) with their revolver in hand */
+  hero(gun = true): { rig: RigInstance; pose: Poser } | null {
+    if (!this.heroSpec) return null;
+    const rig = new RigInstance(buildRigGeo(this.heroSpec, this.heroKey), { material: this.mat });
+    if (gun && this.gunSpec) {
+      const g = new RigInstance(buildRigGeo(this.gunSpec, this.gunSpec.name + ':player'), { material: this.mat });
+      const holder = new THREE.Group();
+      holder.rotation.x = Math.PI / 2; // barrel along the forearm, out of the fist
+      holder.add(g.root);
+      if (!rig.attach('hand_r', holder)) rig.nodes['fore_r']?.add(holder);
+    }
+    return { rig, pose: new Poser(rig) };
+  }
+
+  /** an emissive material of a given strength, no shadows (owned, freed with the diorama) */
+  glowMat(strength: number) {
+    const m = makeVoxelMaterial({ fog: true, emissiveStrength: strength });
+    (m.userData as any).noShadow = true;
+    this.mats.push(m);
+    return m;
+  }
+
+  /** an extra lit material owned by the kit (freed with the diorama) */
+  material(tint?: V3) {
+    const m = makeVoxelMaterial({ fog: true });
+    if (tint) m.userData.tint.value.setRGB(...tint);
+    this.mats.push(m);
+    return m;
+  }
+
+  /** free one diorama's geometry (the shared materials and their shader programs stay) */
+  flush() {
+    for (const g of this.geos) g.dispose();
+    this.geos = [];
+    for (const [k, rg] of this.rigs) {
+      for (const p of rg.parts) p.geo.dispose();
+      for (const set of Object.values(rg.exprGeos)) for (const g of Object.values(set)) g.dispose();
+      clearRigCache(k);
+    }
+    this.rigs.clear();
+    for (const m of this.mats) m.dispose();
+    this.mats = [];
+  }
+
+  dispose() {
+    this.flush();
+    this.mat.dispose();
+    this.glow.dispose();
+  }
+}
+
+// ------------------------------------------------------------------ posing
+
+/** bone directions at rest (part space = rig space at rest), from the joint layout */
+const REST: Record<string, V3> = {
+  arm_l: [0, -1, 0],
+  fore_l: [1, -11.5, 0],
+  arm_r: [0, -1, 0],
+  fore_r: [-1, -11.5, 0],
+  thigh_l: [-0.5, -8.5, 0],
+  shin_l: [0, -1, 0],
+  thigh_r: [0.5, -8.5, 0],
+  shin_r: [0, -1, 0],
+};
+
+const _q = new THREE.Quaternion();
+const _q1 = new THREE.Quaternion();
+const _q2 = new THREE.Quaternion();
+const _v = new THREE.Vector3();
+const _r = new THREE.Vector3();
+const _h = new THREE.Vector3();
+
+/**
+ * Poses a rig by pointing bones at directions given in the rig's own frame
+ * (+Z the way it faces, +X its left, +Y up) — parents first.
+ */
+export class Poser {
+  constructor(public r: RigInstance) {}
+  private chain(node: THREE.Object3D, out: THREE.Quaternion) {
+    out.identity();
+    const list: THREE.Object3D[] = [];
+    for (let n = node.parent; n && n !== this.r.root; n = n.parent) list.push(n);
+    for (let i = list.length - 1; i >= 0; i--) out.multiply(list[i].quaternion);
+    return out;
+  }
+  /** point a limb along dir; bones more than ~100° from rest swing through `via` (default: the front) */
+  aim(part: string, dir: V3, twist = 0, via: V3 = [0, 0, 1], rest = REST[part]) {
+    const n = this.r.nodes[part];
+    if (!n || !rest) return this;
+    const inv = this.chain(n, _q).invert();
+    const d = _v.set(...dir).normalize().applyQuaternion(inv);
+    const r = _r.set(...rest).normalize();
+    if (r.dot(d) < -0.2) {
+      const h = _h.set(...via).normalize().applyQuaternion(inv);
+      _q1.setFromUnitVectors(r, h);
+      _q2.setFromUnitVectors(h, d);
+      n.quaternion.copy(_q2.multiply(_q1));
+    } else n.quaternion.setFromUnitVectors(r, d);
+    if (twist) n.quaternion.multiply(_q1.setFromAxisAngle(r, twist));
+    return this;
+  }
+  rot(part: string, x: number, y = 0, z = 0) {
+    this.r.nodes[part]?.rotation.set(x, y, z);
+    return this;
+  }
+  /** world position of a point given in a part's local frame (metres) */
+  at(part: string, local: V3 = [0, 0, 0]) {
+    const n = this.r.nodes[part];
+    this.r.root.updateMatrixWorld(true);
+    return n ? n.localToWorld(new THREE.Vector3(...local)) : this.r.root.getWorldPosition(new THREE.Vector3());
+  }
+  socket(name: string) {
+    this.r.root.updateMatrixWorld(true);
+    return this.r.sockets[name]?.getWorldPosition(new THREE.Vector3()) ?? this.at('pelvis');
+  }
+}
+
+/** lowest point of the visible meshes, in world space */
+function lowestY(o: THREE.Object3D) {
+  o.updateMatrixWorld(true);
+  const b = new THREE.Box3();
+  o.traverseVisible((c) => {
+    if ((c as THREE.Mesh).isMesh) b.expandByObject(c);
+  });
+  return b.isEmpty() ? 0 : b.min.y;
+}
+
+const place = (o: THREE.Object3D | null | undefined, parent: THREE.Object3D, p: V3, ry = 0, rx = 0, rz = 0) => {
+  if (!o) return o;
+  o.position.set(...p);
+  o.rotation.set(rx, ry, rz);
+  parent.add(o);
+  return o;
+};
+
+/** the camera for a 66×88 art window: look at a point from yaw/pitch/distance */
+function cam(look: V3, yaw: number, pitch: number, dist: number, fov: number, roll = 0): Shot['cam'] {
+  return {
+    pos: [look[0] + Math.sin(yaw) * Math.cos(pitch) * dist, look[1] + Math.sin(pitch) * dist, look[2] + Math.cos(yaw) * Math.cos(pitch) * dist],
+    look,
+    fov,
+    roll,
+  };
+}
+
+/** a sand bed with a few dead bushes and pebbles at its rim */
+function* ground(k: Kit, root: THREE.Object3D, w: number, d: number, seed: number, tint = 0, bushes = 2, crest = 0): Generator<void, ReturnType<typeof TP.duneBed>, void> {
+  const bed = TP.duneBed(w, d, seed, tint, crest);
+  place(k.mesh(bed), root, [0, 0, 0]);
+  yield;
+  for (let i = 0; i < bushes; i++) {
+    const b = deadBush(seed * 7 + i);
+    const x = (i % 2 ? 1 : -1) * (w * 0.28 + i * 0.4), z = -d * 0.18 - i * 0.6;
+    place(k.mesh(b, 1.2), root, [x, bed.heightAt(x, z) - 0.04, z], i * 1.7);
+  }
+  return bed;
+}
+
+// ------------------------------------------------------------------ the six dioramas
+
+function* hangedMan(k: Kit): Generator<void, Shot, void> {
+  const root = new THREE.Group();
+  const bed = yield* ground(k, root, 10, 16, 3, 0xc6b0d0, 2, 0.35);
+  const g0 = bed.heightAt(0, 0.3);
+  // the living tau tree, trunk standing behind the beam
+  const tree = TP.tauTree(3, 18);
+  const ts = 0.74;
+  place(k.mesh(tree, ts), root, [0, g0 - 0.05, 0]);
+  const beamY = g0 - 0.05 + tree.meta.beamY * ts;
+  yield;
+  const h = k.hero(false);
+  if (h) {
+    const { rig, pose } = h;
+    root.add(rig.root);
+    // figure-four legs, hands bound behind the back, calm face toward us
+    pose.rot('torso', 0.04, 0, 0).rot('head', -0.1, 0, 0.05);
+    pose.aim('thigh_r', [0.03, -1, 0.02]).aim('shin_r', [0.02, -1, 0]);
+    pose.aim('thigh_l', [0.8, -0.52, -0.22]).aim('shin_l', [-0.9, -0.1, -0.42]);
+    pose.aim('arm_r', [-0.5, -0.68, -0.52]).aim('fore_r', [0.86, 0.26, -0.44]);
+    pose.aim('arm_l', [0.5, -0.68, -0.52]).aim('fore_l', [-0.86, 0.26, -0.44]);
+    rig.setPartVisible('hat', false);
+    // hang upside down by the right ankle under the middle of the beam
+    rig.root.rotation.set(0, 0.1, Math.PI);
+    const ankle = pose.at('shin_r', [0, -0.35, 0.02]);
+    const rope = TP.hangingRope(0.22);
+    const hitch = beamY - 0.07 - Math.abs(rope.meta.hitchY) + 0.03;
+    rig.root.position.set(-ankle.x, hitch - ankle.y, 0.12 - ankle.z);
+    place(k.mesh(rope), root, [0, beamY - 0.07, 0.12]);
+    // the corona around the skull, soft enough to keep the face
+    const skull = pose.at('head', [0, 0.22, 0.02]);
+    place(k.mesh(TP.coronaHalo(2), 1.3, k.glowMat(0.75)), root, [skull.x, skull.y, skull.z - 0.16]);
+    // his hat fallen in the sand below
+    const hi = rig.geo.index['hat'];
+    if (hi !== undefined) {
+      const hat = new THREE.Mesh(rig.geo.parts[hi].geo, k.mat);
+      place(hat, root, [0.5, bed.heightAt(0.5, 0.75) - 0.04, 0.75], 0.6, 0.12, 2.75);
+    }
+  }
+  yield;
+  place(k.mesh('skull_cow', 0.3), root, [-0.7, bed.heightAt(-0.7, 0.9) - 0.03, 0.9], 0.7);
+  return {
+    root,
+    cam: cam([0, 1.27, 0.1], 0.17, 0.05, 4.7, 30),
+    sky: { zenith: 0x4f74b0, mid: 0x98b4d8, horizon: 0xf6c49a, ground: 0xd8b48a, sunDir: [-0.45, 0.2, -1], sunColor: 0xffcc96, sunSize: 0.05, sunGlow: 0.4, sunGain: 1.2, clouds: 0.34, cloudLit: 0xfff0e0, cloudShade: 0x8e9cc4, cloudScale: 1.1, seed: 4, gain: 0.8 },
+    key: { dir: [-0.55, 0.75, 0.75], color: 0xfff0dc, intensity: 3.0, center: [0, 1.2, 0], radius: 3.5 },
+    hemi: { sky: 0xb8c8e8, ground: 0x9a7a5a, intensity: 0.7 },
+    rim: { dir: [0.6, 0.4, -1], color: 0xffc890, intensity: 2.2 },
+    lamps: [{ pos: [0, 0.5, 0.7], color: 0xffd36b, intensity: 2.2, distance: 2 }],
+    fog: { color: 0xe2c8b4, near: 10, far: 36 },
+    grade: { sat: 1.2, contrast: 1.08, shadowTint: 0xdfe6ff, highTint: 0xfff0e0, vignette: 0.55 },
+  };
+}
+
+function* magician(k: Kit): Generator<void, Shot, void> {
+  const root = new THREE.Group();
+  const bed = yield* ground(k, root, 10, 16, 5, 0xd08a40, 0, 0.35);
+  const g0 = bed.heightAt(0, 0);
+  const h = k.hero(true);
+  if (h) {
+    const { rig, pose } = h;
+    root.add(rig.root);
+    pose.rot('torso', -0.05, 0.1, 0.03).rot('head', 0.06, 0.08, -0.03);
+    // as above: the revolver raised to the sky
+    pose.aim('arm_r', [-0.22, 0.97, 0.1], 0.4).aim('fore_r', [-0.08, 1, 0.16]);
+    // so below: the other hand points to the earth
+    pose.aim('arm_l', [0.36, -0.88, 0.3]).aim('fore_l', [0.42, -0.8, 0.44]);
+    pose.aim('thigh_l', [0.12, -1, 0.02]).aim('shin_l', [0.06, -1, 0]);
+    pose.aim('thigh_r', [-0.1, -1, 0]).aim('shin_r', [-0.05, -1, 0]);
+    rig.root.position.set(0, g0 - lowestY(rig.root), -0.1);
+    // Pinch rides the left shoulder
+    const p = k.rig('pinch', 0.86);
+    if (p) {
+      p.root.rotation.set(0.05, 0.55, 0);
+      p.root.position.set(0.02, 0.02, 0);
+      if (!rig.attach('shoulder_l', p.root)) root.add(p.root);
+    }
+    // the lemniscate floats over the hat
+    const top = pose.at('head', [0, 0.62, 0]);
+    place(k.mesh(TP.lemniscate('venom'), 1.3, k.glowMat(1.6)), root, [top.x + 0.06, top.y + 0.36, top.z + 0.05]);
+  }
+  yield;
+  // the table of the four suits: cups, wands, swords, pentacles — as the west knows them
+  const tz = 0.82;
+  place(k.mesh('table', 1), root, [0, g0 - 0.02, tz]);
+  const ty = g0 - 0.02 + 0.92;
+  place(k.mesh('bottle', 0.55), root, [-0.48, ty, tz + 0.18], 0.4);
+  place(k.mesh('dynamite', 0.52), root, [-0.18, ty, tz + 0.24], -0.3, 0, 0.14);
+  place(k.mesh('dagger', 0.55), root, [0.15, ty + 0.3, tz + 0.2], 0.2, 0, Math.PI - 0.08);
+  place(k.mesh('gold_coin', 0.52), root, [0.47, ty - 0.005, tz + 0.26], -0.35, 0.08);
+  yield;
+  // prickly-pear blossoms in the foreground (the Magician's garden)
+  place(k.mesh('cactus_prickly_1', 0.52), root, [-1.05, bed.heightAt(-1.05, 1.75) - 0.04, 1.75], 0.5);
+  place(k.mesh('cactus_prickly_2', 0.56), root, [1.02, bed.heightAt(1.02, 1.6) - 0.04, 1.6], -0.6);
+  return {
+    root,
+    cam: cam([0, 1.48, 0.35], -0.08, 0.0, 5.0, 31),
+    sky: { zenith: 0xe28a0c, mid: 0xf2b21a, horizon: 0xfcd65a, ground: 0xe8b060, sunDir: [0.05, 0.42, -1], sunColor: 0xfff0a8, sunSize: 0, sunGlow: 0.34, sunGain: 1.3, clouds: 0.16, cloudLit: 0xfff2c8, cloudShade: 0xe89a30, cloudScale: 1.3, seed: 2, gain: 0.82 },
+    key: { dir: [-0.6, 0.7, 0.85], color: 0xfff0d6, intensity: 3.1, center: [0, 1, 0.4], radius: 3.2 },
+    hemi: { sky: 0xffe0a0, ground: 0x9a6a3a, intensity: 0.8 },
+    rim: { dir: [0.4, 0.6, -1], color: 0xffd27a, intensity: 2.6 },
+    fog: { color: 0xf2c870, near: 10, far: 34 },
+    grade: { sat: 1.22, contrast: 1.08, shadowTint: 0xe6d8ff, highTint: 0xfff2d8, vignette: 0.5 },
+  };
+}
+
+function* tower(k: Kit): Generator<void, Shot, void> {
+  const root = new THREE.Group();
+  // a rocky crag carrying the tower
+  place(k.mesh(TP.mesa(5, 10, 1.9, 1 / 10)), root, [1.4, -0.3, -11.8], 0.3);
+  yield;
+  place(k.mesh('rock_large_2', 1.3), root, [-1.2, 0.9, -9.8], 2.1);
+  place(k.mesh('rock_large_3', 1.1), root, [3.6, 0.8, -9.6], 4.0);
+  yield;
+  // the watchtower: its roof blown off by the bolt, burning
+  const wt = modelEntry('watchtower')?.() as { model: VoxelModel; voxelSize: number } | undefined;
+  const towerY = 1.6;
+  if (wt?.model) {
+    const b = wt.model.bounds();
+    const cut = b.maxY - Math.round(1.7 / wt.voxelSize);
+    wt.model.carveWhere((x, y, z) => y > cut + Math.sin(x * 0.7 + z * 0.4) * 3 + Math.cos(z * 1.3) * 2);
+    place(k.mesh(wt), root, [1.6, towerY, -12], -0.35);
+    const topY = towerY + (cut - b.minY) * wt.voxelSize;
+    place(k.mesh(TP.flames(4, 1.7), 1.9, k.glow), root, [1.6, topY - 0.5, -12]);
+    place(k.mesh(TP.flames(9, 1.2), 1.4, k.glow), root, [2.5, topY - 0.9, -11.4]);
+    place(k.mesh(TP.lightningBolt(3, 4.2), 2.3, k.glow), root, [3.0, topY + 9.4, -12.4], 0, 0, 0.08);
+    place(k.mesh(TP.embers(5, 28, 6, 8), 1, k.glow), root, [0.6, topY - 3.8, -8.5]);
+    yield;
+  }
+  // Sundown, thrown from the tower: falling headfirst toward us, arms flung wide
+  const h = k.hero(true);
+  if (h) {
+    const { rig, pose } = h;
+    root.add(rig.root);
+    pose.rot('torso', -0.22, 0.1, 0.05).rot('head', -0.5, 0.2, 0);
+    pose.aim('arm_r', [-0.92, 0.34, 0.18]).aim('fore_r', [-0.9, 0.36, 0.25]);
+    pose.aim('arm_l', [0.92, 0.36, 0.14]).aim('fore_l', [0.86, 0.46, 0.22]);
+    pose.aim('thigh_r', [-0.35, -0.82, -0.45]).aim('shin_r', [-0.16, -0.45, -0.88]);
+    pose.aim('thigh_l', [0.28, -0.95, 0.12]).aim('shin_l', [0.24, -0.96, -0.12]);
+    rig.setPartVisible('hat', false);
+    rig.root.rotation.set(0.2, 0.3, Math.PI - 0.32);
+    rig.root.position.set(-0.2, 6.05, 2.6);
+    const hi = rig.geo.index['hat'];
+    if (hi !== undefined) place(new THREE.Mesh(rig.geo.parts[hi].geo, k.mat), root, [0.9, 6.6, 1.9], 0.8, 0.7, 2.4);
+  }
+  yield;
+  // the scarab swarm pours out of the burning tower around him
+  const sc = k.rig('scarab', 0.3);
+  if (sc) {
+    const geo = sc.geo;
+    for (let i = 0; i < 18; i++) {
+      const r = new RigInstance(geo, { material: k.mat });
+      const a = i * 2.39996;
+      const rr = 0.9 + (i % 6) * 0.42;
+      r.root.scale.setScalar(0.3 + (i % 3) * 0.08);
+      r.nodes['wing_l']?.rotation.set(-0.35, 0, 1.05);
+      r.nodes['wing_r']?.rotation.set(-0.35, 0, -1.05);
+      place(r.root, root, [0.4 + Math.cos(a) * rr * 1.25, 6.2 + Math.sin(a) * rr * 0.85 + (i % 4) * 0.3, -1.2 - (i % 4) * 1.4], a + 1.2, -0.5 + (i % 2) * 0.3, Math.sin(a) * 0.4);
+    }
+  }
+  return {
+    root,
+    cam: cam([0.5, 5.7, -1.8], 0.04, -0.06, 9.6, 40),
+    sky: { zenith: 0x04060e, mid: 0x10142c, horizon: 0x2a1e34, ground: 0x140e16, sunDir: [0.3, 0.55, -1], sunColor: 0x9ab8ff, sunSize: 0, sunGlow: 0.25, sunGain: 0.6, clouds: 0.7, cloudLit: 0x5a5a84, cloudShade: 0x121322, cloudScale: 0.9, stars: 0.5, seed: 9, gain: 0.9 },
+    key: { dir: [0.45, 0.85, 0.35], color: 0xcfe0ff, intensity: 2.2, center: [0.8, 5, -5], radius: 11 },
+    hemi: { sky: 0x2c3356, ground: 0x1a1014, intensity: 0.55 },
+    rim: { dir: [0.25, 0.4, -1], color: 0xff8a3a, intensity: 2.8 },
+    lamps: [
+      { pos: [1.6, 11.6, -11.2], color: 0xff7a2a, intensity: 90, distance: 26 },
+      { pos: [0.2, 6.6, 3.6], color: 0xffa050, intensity: 7, distance: 6 },
+    ],
+    fog: { color: 0x151628, near: 16, far: 70 },
+    grade: { sat: 1.16, contrast: 1.12, shadowTint: 0xc8d2ff, highTint: 0xffe2c0, vignette: 0.62, bloom: [0.5, 0.4, 1.2] },
+    env: 0.3,
+  };
+}
+
+function* sun(k: Kit): Generator<void, Shot, void> {
+  const root = new THREE.Group();
+  const bed = yield* ground(k, root, 12, 12, 8, 0, 1, 0);
+  const g0 = bed.heightAt(0, 0.3);
+  // the great sun with its face, rays alternating straight and wavy
+  const sunMat = k.glowMat(0.5);
+  sunMat.userData.tint.value.setRGB(0.74, 0.7, 0.62);
+  place(k.mesh(TP.sunFace(), 0.78, sunMat), root, [0, 4.25, -6.5]);
+  yield;
+  // sunflowers looking over the mudbrick wall
+  place(k.mesh(TP.mudWall(6.2, 1.15, 2)), root, [0, bed.heightAt(0, -1.9) - 0.06, -1.9]);
+  yield;
+  for (let i = 0; i < 6; i++) {
+    const x = -2.3 + i * 0.92 + (i % 2) * 0.12;
+    place(k.mesh(TP.sunflower(i + 2, 1.55 + (i % 3) * 0.22)), root, [x, bed.heightAt(x, -2.35) - 0.05, -2.35], (i - 2.5) * 0.12);
+  }
+  yield;
+  const h = k.hero(false);
+  if (h) {
+    const { rig, pose } = h;
+    root.add(rig.root);
+    // Khepri's labour: the sun held up over the bare skull (the hat lies by his boots)
+    rig.setPartVisible('hat', false);
+    pose.rot('torso', -0.08, 0, 0).rot('head', -0.32, 0, 0);
+    pose.aim('arm_r', [-0.2, 0.98, 0.06]).aim('fore_r', [0.26, 0.96, 0.08]);
+    pose.aim('arm_l', [0.2, 0.98, 0.06]).aim('fore_l', [-0.26, 0.96, 0.08]);
+    pose.aim('thigh_l', [0.26, -0.96, 0.04]).aim('shin_l', [0.12, -1, 0]);
+    pose.aim('thigh_r', [-0.26, -0.96, 0.04]).aim('shin_r', [-0.12, -1, 0]);
+    rig.root.position.set(0.1, 0, 0.3);
+    rig.root.position.y = g0 - lowestY(rig.root);
+    const hr = pose.socket('hand_r'), hl = pose.socket('hand_l');
+    place(k.mesh('dung_ball', 0.74), root, [(hr.x + hl.x) / 2, Math.max(hr.y, hl.y) - 0.06, (hr.z + hl.z) / 2 - 0.02], 0.4);
+    const hi = rig.geo.index['hat'];
+    if (hi !== undefined) place(new THREE.Mesh(rig.geo.parts[hi].geo, k.mat), root, [0.72, bed.heightAt(0.72, 0.7) - 0.04, 0.7], -0.5, 0.1, 2.9);
+  }
+  yield;
+  // a little dumb scarab rolling its own sun across the sand
+  const ds = k.rig('dumb_scarab', 0.6);
+  if (ds) {
+    place(ds.root, root, [-0.78, bed.heightAt(-0.78, 1.0) - 0.02, 1.0], 1.35);
+    place(k.mesh('dung_ball', 0.38), root, [-0.3, bed.heightAt(-0.3, 1.1) - 0.03, 1.1], 0.8);
+  }
+  return {
+    root,
+    cam: cam([0.05, 2.12, -0.8], 0.06, -0.1, 8.0, 36),
+    sky: { zenith: 0x1764c8, mid: 0x4f9ce6, horizon: 0xbfe0f2, ground: 0xe8c890, sunDir: [0, 0.5, -1], sunColor: 0xfff0b0, sunSize: 0, sunGlow: 0.5, sunGain: 1.0, clouds: 0.18, cloudLit: 0xffffff, cloudShade: 0xb8cce8, cloudScale: 1.4, seed: 6, gain: 0.85 },
+    key: { dir: [-0.45, 0.9, 0.8], color: 0xfff6e2, intensity: 3.2, center: [0, 1.2, -0.6], radius: 4.5 },
+    hemi: { sky: 0xa8d0ff, ground: 0xc09060, intensity: 0.85 },
+    rim: { dir: [0, 0.6, -1], color: 0xffd060, intensity: 2.6 },
+    fog: { color: 0xd8e6ee, near: 12, far: 42 },
+    grade: { sat: 1.2, contrast: 1.07, shadowTint: 0xe0e8ff, highTint: 0xfff4dc, vignette: 0.45 },
+  };
+}
+
+function* strength(k: Kit): Generator<void, Shot, void> {
+  const root = new THREE.Group();
+  const bed = yield* ground(k, root, 12, 18, 11, 0xd8a050, 2, 0.45);
+  // the lion goddess watches
+  place(k.mesh('statue_sekhmet', 1), root, [1.35, bed.heightAt(1.35, -7.2) - 0.1, -7.2], -0.3);
+  yield;
+  const yaw = 1.12;
+  const h = k.hero(true);
+  if (h) {
+    const { rig, pose } = h;
+    root.add(rig.root);
+    // a roundhouse: lean away, the kicking leg straight out at chest height
+    pose.rot('torso', -0.3, -0.35, -0.12).rot('head', 0.12, 0.25, 0.05);
+    pose.aim('thigh_r', [-0.12, 0.24, 0.96]).aim('shin_r', [-0.08, 0.3, 0.95]);
+    pose.aim('thigh_l', [0.06, -0.96, -0.26]).aim('shin_l', [0.0, -0.97, 0.24]);
+    pose.aim('arm_l', [0.62, 0.22, 0.75]).aim('fore_l', [0.42, 0.42, 0.8]);
+    pose.aim('arm_r', [-0.62, -0.25, -0.74], 0.6).aim('fore_r', [-0.5, 0.15, -0.85]);
+    rig.root.rotation.set(0, yaw, 0);
+    rig.root.position.set(-0.85, 0, 0.35);
+    rig.root.position.y = bed.heightAt(-0.85, 0.35) - lowestY(rig.root);
+    // the husk takes the boot in the chest and is launched
+    const foot = pose.at('shin_r', [0, -0.36, 0.06]);
+    const hk = k.rig('husk', 0.78);
+    if (hk) {
+      const hp = new Poser(hk);
+      hp.rot('torso', 0.4, 0, 0).rot('head', -0.6, 0.25, 0);
+      hp.aim('arm_l', [0.55, 0.45, 0.7]).aim('fore_l', [0.3, 0.72, 0.62]);
+      hp.aim('arm_r', [-0.55, 0.5, 0.68]).aim('fore_r', [-0.35, 0.72, 0.6]);
+      hp.aim('thigh_l', [0.2, -0.5, 0.84]).aim('shin_l', [0.1, -0.88, 0.45]);
+      hp.aim('thigh_r', [-0.15, -0.65, 0.74]).aim('shin_r', [-0.05, -0.94, 0.34]);
+      hk.root.rotation.set(-0.85, yaw + Math.PI, 0.15, 'YXZ');
+      root.add(hk.root);
+      hk.root.position.set(0, 0, 0);
+      const chest = hp.at('torso', [0, 0.28, 0.1]);
+      const fx = Math.sin(yaw), fz = Math.cos(yaw);
+      hk.root.position.set(foot.x + fx * 0.22 - chest.x, foot.y + 0.05 - chest.y, foot.z + fz * 0.22 - chest.z);
+    }
+    const top = pose.at('head', [0, 0.66, 0]);
+    place(k.mesh(TP.lemniscate('gold'), 1.3, k.glowMat(2.6)), root, [top.x + 0.05, top.y + 0.24, top.z + 0.1], -0.3);
+  }
+  return {
+    root,
+    cam: cam([-0.12, 1.95, -1.2], 0.1, -0.06, 7.6, 36),
+    sky: { zenith: 0xd8801a, mid: 0xeeb024, horizon: 0xf8d46a, ground: 0xe6b070, sunDir: [0.42, 0.32, -1], sunColor: 0xfff2c0, sunSize: 0.045, sunGlow: 0.38, sunGain: 1.2, clouds: 0.24, cloudLit: 0xfff2d0, cloudShade: 0xe0a040, cloudScale: 1.2, seed: 12, gain: 0.82 },
+    key: { dir: [-0.6, 0.7, 0.75], color: 0xfff0d0, intensity: 3.1, center: [0, 1.2, -1], radius: 5.5 },
+    hemi: { sky: 0xffe0a0, ground: 0x9a6a3a, intensity: 0.8 },
+    rim: { dir: [0.5, 0.5, -1], color: 0xffc060, intensity: 2.4 },
+    fog: { color: 0xf0c880, near: 11, far: 48 },
+    grade: { sat: 1.2, contrast: 1.08, shadowTint: 0xe6dcff, highTint: 0xfff0d6, vignette: 0.5 },
+  };
+}
+
+function* death(k: Kit): Generator<void, Shot, void> {
+  const root = new THREE.Group();
+  const bed = yield* ground(k, root, 14, 14, 13, 0x8a5a7a, 2, 0);
+  // two obelisks on the horizon, the sun going down between them
+  place(k.mesh('obelisk', 1), root, [2.0, -0.2, -19], 0.2);
+  place(k.mesh('obelisk', 0.92), root, [5.5, -0.2, -20], -0.1);
+  yield;
+  // the pale camel
+  const camel = k.rig('camel', 1, k.material([1.28, 1.24, 1.22]));
+  const cy = -1.05;
+  if (camel) {
+    camel.nodes['leg_fl']?.rotation.set(-0.38, 0, 0);
+    camel.nodes['leg_fr']?.rotation.set(0.16, 0, 0);
+    camel.nodes['leg_bl']?.rotation.set(0.22, 0, 0);
+    camel.nodes['leg_br']?.rotation.set(-0.2, 0, 0);
+    camel.nodes['neck']?.rotation.set(-0.08, 0.1, 0);
+    camel.nodes['head']?.rotation.set(0.12, 0.15, 0);
+    camel.root.rotation.set(0, cy, 0);
+    root.add(camel.root);
+    camel.root.position.set(-0.55, 0, 0);
+    camel.root.position.y = bed.heightAt(-0.55, 0) - lowestY(camel.root) - 0.03;
+  }
+  yield;
+  const h = k.hero(true);
+  if (h && camel) {
+    const { rig, pose } = h;
+    // in the saddle, turned toward us, the banner in the left fist
+    pose.rot('torso', 0.02, 0.72, 0).rot('head', 0.1, 0.32, -0.04);
+    pose.aim('thigh_l', [0.5, -0.22, 0.84]).aim('shin_l', [0.24, -0.97, -0.06]);
+    pose.aim('thigh_r', [-0.5, -0.22, 0.84]).aim('shin_r', [-0.24, -0.97, -0.06]);
+    pose.aim('arm_l', [0.62, -0.5, 0.6]).aim('fore_l', [0.25, 0.25, 0.93]);
+    pose.aim('arm_r', [-0.35, -0.85, 0.4], 0.3).aim('fore_r', [-0.2, -0.45, 0.87]);
+    const seat = camel.sockets['saddle'];
+    const holder = new THREE.Group();
+    (seat ?? camel.root).add(holder);
+    holder.add(rig.root);
+    rig.root.position.set(0, -((h.rig.geo.spec.meta?.hipY as number) ?? 0.67) + 0.02, 0);
+    root.updateMatrixWorld(true);
+    // the black banner, pole upright through the fist, cloth streaming back
+    const fist = pose.socket('hand_l');
+    place(k.mesh(TP.deathBanner()), root, [fist.x, fist.y - 1.05, fist.z], cy + Math.PI / 2, 0, 0.04);
+  }
+  yield;
+  // the fallen king before the hooves, his crown rolled away
+  const mum = k.rig('mummy', 0.95);
+  if (mum) {
+    const mp = new Poser(mum);
+    mp.aim('arm_l', [0.95, -0.25, 0.15]).aim('fore_l', [0.9, 0.1, 0.4]);
+    mp.aim('arm_r', [-0.9, -0.4, 0.1]).aim('fore_r', [-0.6, -0.75, 0.2]);
+    mp.aim('thigh_l', [0.2, -1, 0]).aim('shin_l', [0.1, -1, 0]);
+    mp.aim('thigh_r', [-0.15, -1, 0.1]).aim('shin_r', [-0.1, -1, -0.1]);
+    mp.rot('head', 0, 0.7, 0);
+    mum.root.rotation.set(-Math.PI / 2, -1.35, 0, 'YXZ');
+    root.add(mum.root);
+    mum.root.position.set(-0.55, bed.heightAt(-0.55, 2.5) + 0.2, 2.5);
+    place(k.mesh('att_bone_crown', 1.5), root, [1.25, bed.heightAt(1.25, 2.7) + 0.01, 2.7], 0.6, 0.35, 0.3);
+  }
+  return {
+    root,
+    cam: cam([0.15, 1.85, 0.3], 0.04, -0.02, 11.0, 33),
+    sky: { zenith: 0x1c1230, mid: 0x6a2c50, horizon: 0xf38a3c, ground: 0x6a3a4a, sunDir: [0.135, 0.045, -1], sunColor: 0xffb060, sunSize: 0.07, sunGlow: 0.3, sunGain: 1.35, clouds: 0.3, cloudLit: 0xff9a5a, cloudShade: 0x40203a, cloudScale: 1.0, seed: 13, gain: 0.8 },
+    key: { dir: [-0.6, 0.55, 0.7], color: 0xffc4a0, intensity: 2.2, center: [0, 1.5, 0.8], radius: 5 },
+    hemi: { sky: 0x6a4a8a, ground: 0x3a2028, intensity: 0.7 },
+    rim: { dir: [0.15, 0.25, -1], color: 0xff8a40, intensity: 3.6 },
+    fog: { color: 0x8a4a5a, near: 12, far: 55 },
+    grade: { sat: 1.16, contrast: 1.1, shadowTint: 0xd6c8ff, highTint: 0xffe2c8, vignette: 0.58 },
+  };
 }
 
 export const TAROT: TarotDef[] = [
-  { key: 'Q', num: 'XII', title: 'THE HANGED MAN', sky: '#9fd0df', ground: '#7a9a4a', motif: 'tree', pose: 'hanged', burst: [0xc8a050, 0xfff3d6, 0x7a5a3a] },
-  { key: 'E', num: 'I', title: 'THE MAGICIAN', sky: '#f2c84b', ground: '#b0504a', motif: 'infinity', pose: 'magician', burst: [0x9dff3a, 0xfff3d6, 0xe0402c] },
-  { key: 'C', num: 'XVI', title: 'THE TOWER', sky: '#56607a', ground: '#4a3a30', motif: 'tower', pose: 'tower', burst: [0xffd36b, 0xffffff, 0x9a8a72] },
-  { key: 'G', num: 'XIX', title: 'THE SUN', sky: '#f2c84b', ground: '#8aa04a', motif: 'sun', pose: 'sun', burst: [0xffe08a, 0xf2a43a, 0x7a5530] },
-  { key: 'F', num: 'VIII', title: 'STRENGTH', sky: '#f2c84b', ground: '#7a9a4a', motif: 'mountain', pose: 'kick', burst: [0xfff3d6, 0xe0b373, 0xffd36b] },
-  { key: 'Z', num: 'XIII', title: 'DEATH', sky: '#3a2c3a', ground: '#2a2024', motif: 'banner', pose: 'death', burst: [0x9dff3a, 0xfff3d6, 0x2a2024] },
+  { key: 'Q', num: 'XII', title: 'THE HANGED MAN', fx: 'rope', burst: [0xffd36b, 0xfff3d6, 0xc9a66b, 0x8a6a3a], scene: hangedMan },
+  { key: 'E', num: 'I', title: 'THE MAGICIAN', fx: 'venom', burst: [0x9dff3a, 0xd8ff9a, 0xfff3d6, 0x3a8a1a], scene: magician },
+  { key: 'C', num: 'XVI', title: 'THE TOWER', fx: 'storm', burst: [0xffffff, 0xbfe0ff, 0xffb040, 0x2a2030], scene: tower },
+  { key: 'G', num: 'XIX', title: 'THE SUN', fx: 'sun', burst: [0xffe08a, 0xffc63c, 0xfff6d0, 0x7a5530], scene: sun },
+  { key: 'F', num: 'VIII', title: 'STRENGTH', fx: 'kick', burst: [0xf6dcac, 0xe9c48c, 0xffd36b, 0xfff3d6], scene: strength },
+  { key: 'Z', num: 'XIII', title: 'DEATH', fx: 'death', burst: [0x9dff3a, 0xfff3d6, 0x1a1418, 0xd8ccb0], scene: death },
 ];
-
-const W = 128, H = 208; // card art pixels
-const ART = { x: 9, y: 24, w: 110, h: 156 };
-const INK = '#1a0e08';
-
-function poseRig(r: RigInstance, pose: string) {
-  r.resetPose();
-  const n = r.nodes;
-  const set = (k: string, x: number, y = 0, z = 0) => n[k]?.rotation.set(x, y, z);
-  switch (pose) {
-    case 'hanged': // the classic figure-four, hands behind the back
-      set('thigh_r', 0.2, 0, -0.1);
-      set('thigh_l', -1.2, 0, 0.5);
-      set('shin_l', 2.0);
-      set('arm_l', 0.5, 0, 0.35);
-      set('arm_r', 0.5, 0, -0.35);
-      set('fore_l', -1.6);
-      set('fore_r', -1.6);
-      set('head', -0.25);
-      r.root.rotation.set(0, 0, Math.PI);
-      break;
-    case 'magician': // one hand to the sky, one to the ground
-      set('arm_r', -2.9, 0, -0.15);
-      set('fore_r', -0.2);
-      set('arm_l', -0.3, 0, 0.55);
-      set('fore_l', -0.3);
-      set('head', 0.18, 0.2);
-      set('torso', 0.05, -0.15);
-      break;
-    case 'tower': // flung wide, falling back
-      set('arm_r', -2.2, 0, -1.0);
-      set('arm_l', -2.2, 0, 1.0);
-      set('head', -0.45);
-      set('torso', -0.25);
-      set('thigh_l', -0.5);
-      set('shin_l', 0.9);
-      set('thigh_r', 0.25);
-      break;
-    case 'sun': // holding the sun overhead
-      set('arm_r', -2.8, 0, -0.25);
-      set('arm_l', -2.8, 0, 0.25);
-      set('fore_r', -0.5);
-      set('fore_l', -0.5);
-      set('head', -0.3);
-      set('thigh_l', -0.25);
-      set('thigh_r', 0.15);
-      break;
-    case 'kick': // STRENGTH: a roundhouse kick
-      set('thigh_r', -1.75, 0.2, 0);
-      set('shin_r', 0.15);
-      set('thigh_l', 0.15);
-      set('shin_l', 0.3);
-      set('arm_l', -1.2, 0, 1.0);
-      set('arm_r', 0.6, 0, -0.6);
-      set('torso', 0.25, 0.3);
-      set('head', -0.1, -0.3);
-      break;
-    case 'death': // standing still, gun lowered, hat tipped
-      set('arm_r', -0.15, 0, -0.12);
-      set('fore_r', -0.3);
-      set('arm_l', -0.6, 0, 0.3);
-      set('fore_l', -1.8);
-      set('head', 0.25, 0.15);
-      break;
-  }
-  r.root.updateMatrixWorld(true);
-}
-
-function px(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, col: string) {
-  c.fillStyle = col;
-  c.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
-}
-
-function paintMotif(c: CanvasRenderingContext2D, d: TarotDef) {
-  const { x, y, w, h } = ART;
-  const cx = x + w / 2;
-  switch (d.motif) {
-    case 'sun': {
-      // rays: alternating straight and wavy, the deck's sun
-      for (let i = 0; i < 16; i++) {
-        const a = (i / 16) * Math.PI * 2;
-        const r0 = 15, r1 = i % 2 ? 30 : 38;
-        for (let t = r0; t < r1; t++) px(c, cx + Math.cos(a) * t - 1, y + 30 + Math.sin(a) * t - 1, 2, 2, i % 2 ? '#f6a93a' : '#ffe48a');
-      }
-      for (let yy = -14; yy <= 14; yy++)
-        for (let xx = -14; xx <= 14; xx++) if (xx * xx + yy * yy <= 196) px(c, cx + xx, y + 30 + yy, 1, 1, xx * xx + yy * yy > 160 ? INK : '#ffd03a');
-      // sunflowers along the wall
-      for (let i = 0; i < 5; i++) {
-        const fx = x + 8 + i * 24;
-        px(c, fx, y + h - 40, 2, 16, '#4a7a2a');
-        px(c, fx - 4, y + h - 46, 10, 8, '#f6c02a');
-        px(c, fx - 1, y + h - 43, 4, 3, '#6a3a1a');
-      }
-      px(c, x, y + h - 26, w, 4, '#c0703a');
-      break;
-    }
-    case 'tower': {
-      // storm sky, the tower struck, its crown blown off, lightning
-      px(c, cx + 14, y + 40, 24, 100, '#9a8a7a');
-      for (let yy = 0; yy < 100; yy += 8) px(c, cx + 14, y + 40 + yy, 24, 1, INK);
-      px(c, cx + 10, y + 30, 32, 10, '#c9a050');
-      for (let i = 0; i < 4; i++) px(c, cx + 18 + i * 5, y + 60 + i * 18, 4, 6, '#ffd36b');
-      let lx = cx - 30, ly = y + 2;
-      for (let i = 0; i < 9; i++) {
-        const nx = lx + (i % 2 ? 6 : 3), ny = ly + 4;
-        px(c, lx, ly, 3, 5, '#ffffff');
-        lx = nx;
-        ly = ny;
-      }
-      for (let i = 0; i < 14; i++) px(c, x + ((i * 37) % w), y + 10 + ((i * 53) % 60), 2, 2, '#ffd36b');
-      break;
-    }
-    case 'infinity': {
-      // the lemniscate above the head, a table with the four suits
-      for (let t = 0; t < 120; t++) {
-        const a = (t / 120) * Math.PI * 2;
-        const s = 1 + Math.sin(a) ** 2;
-        px(c, cx + (14 * Math.cos(a)) / s - 1, y + 14 + (14 * Math.sin(a) * Math.cos(a)) / s - 1, 2, 2, INK);
-      }
-      px(c, x + 6, y + h - 52, w - 12, 6, '#b0703a');
-      px(c, x + 6, y + h - 52, w - 12, 1, INK);
-      px(c, x + 14, y + h - 46, 3, 20, '#8a5a2a');
-      px(c, x + w - 18, y + h - 46, 3, 20, '#8a5a2a');
-      px(c, x + 22, y + h - 60, 6, 8, '#e2c050');
-      px(c, x + 36, y + h - 58, 9, 6, '#c9cdd4');
-      // roses and lilies
-      for (let i = 0; i < 6; i++) px(c, x + 6 + i * 19, y + 8, 6, 6, i % 2 ? '#e0402c' : '#fff3d6');
-      break;
-    }
-    case 'tree': {
-      // the T-beam he hangs from, leaves sprouting
-      px(c, x + 10, y + 6, w - 20, 8, '#8a5a2a');
-      px(c, x + 14, y + 14, 7, h - 30, '#8a5a2a');
-      px(c, x + w - 21, y + 14, 7, h - 30, '#8a5a2a');
-      for (let i = 0; i < 8; i++) px(c, x + 12 + i * 13, y + 2 + (i % 2) * 2, 5, 4, '#5a8a3a');
-      // the halo
-      for (let t = 0; t < 60; t++) {
-        const a = (t / 60) * Math.PI * 2;
-        px(c, cx + Math.cos(a) * 12 - 1, y + h - 46 + Math.sin(a) * 12 - 1, 2, 2, '#ffd36b');
-      }
-      break;
-    }
-    case 'mountain': {
-      for (let i = 0; i < 3; i++) {
-        const mx = x + 10 + i * 38, mh = 30 + (i % 2) * 14;
-        for (let yy = 0; yy < mh; yy++) px(c, mx + yy * 0.5, y + h - 40 - yy, Math.max(1, 30 - yy), 1, i % 2 ? '#7a8ab0' : '#9aa8c8');
-      }
-      for (let t = 0; t < 60; t++) {
-        const a = (t / 60) * Math.PI * 2;
-        const s = 1 + Math.sin(a) ** 2;
-        px(c, cx + (12 * Math.cos(a)) / s - 1, y + 10 + (12 * Math.sin(a) * Math.cos(a)) / s - 1, 2, 2, INK);
-      }
-      break;
-    }
-    case 'banner': {
-      // the black banner with a pale scorpion, a low sun between two towers
-      px(c, x + 12, y + 8, 3, 90, '#c9a050');
-      px(c, x + 15, y + 10, 34, 26, '#141014');
-      px(c, x + 26, y + 16, 12, 4, '#e8e0d0');
-      px(c, x + 22, y + 20, 20, 3, '#e8e0d0');
-      px(c, x + 38, y + 12, 3, 8, '#e8e0d0');
-      for (let i = 0; i < 2; i++) px(c, x + 70 + i * 26, y + 80, 12, 60, '#5a4a5a');
-      for (let yy = -9; yy <= 0; yy++) for (let xx = -9; xx <= 9; xx++) if (xx * xx + yy * yy <= 81) px(c, x + 88 + xx, y + 94 + yy, 1, 1, '#f2a43a');
-      break;
-    }
-  }
-}
-
-/** the full card face (128×208 art pixels) */
-export function paintTarot(d: TarotDef, figure: HTMLCanvasElement | null) {
-  const cv = document.createElement('canvas');
-  cv.width = W;
-  cv.height = H;
-  const c = cv.getContext('2d')!;
-  c.imageSmoothingEnabled = false;
-  // card stock: aged cream with a thin ink frame
-  px(c, 0, 0, W, H, '#efe3c4');
-  for (let i = 0; i < 260; i++) px(c, (i * 47) % W, (i * 89) % H, 1, 1, i % 3 ? '#e4d5b2' : '#f7edd5');
-  px(c, 4, 4, W - 8, H - 8, INK);
-  px(c, 5, 5, W - 10, H - 10, '#efe3c4');
-  // numeral
-  c.fillStyle = INK;
-  c.font = '16px Alagard';
-  c.textAlign = 'center';
-  c.textBaseline = 'top';
-  c.fillText(d.num, W / 2, 6);
-  // the scene window
-  const { x, y, w, h } = ART;
-  px(c, x - 1, y - 1, w + 2, h + 2, INK);
-  px(c, x, y, w, h, d.sky);
-  paintMotif(c, d);
-  px(c, x, y + h - 22, w, 22, d.ground);
-  px(c, x, y + h - 22, w, 1, INK);
-  for (let i = 0; i < 9; i++) px(c, x + 4 + i * 12, y + h - 16 + (i % 2) * 5, 4, 3, i % 3 ? '#f2e2a0' : '#e0402c');
-  // the figure: the posed 3D skeleton, photographed
-  if (figure) {
-    const fw = figure.width, fh = figure.height;
-    const fx = Math.round(x + (w - fw) / 2), fy = Math.round(y + h - 8 - fh);
-    c.drawImage(figure, fx, fy);
-    if (d.motif === 'tree') {
-      // the rope from the beam to his ankle
-      px(c, x + w / 2, y + 14, 1, Math.max(2, fy - y - 10), '#c9a050');
-    }
-  }
-  // title band
-  px(c, 9, H - 24, W - 18, 1, INK);
-  c.fillStyle = INK;
-  c.font = '16px Alagard';
-  c.textBaseline = 'top';
-  const title = d.title + '.';
-  const tw = c.measureText(title).width;
-  const sc = Math.min(1, (W - 20) / tw);
-  c.save();
-  c.translate(W / 2, H - 21);
-  c.scale(sc, 1);
-  c.fillText(title, 0, 0);
-  c.restore();
-  return cv;
-}
-
-/** render every card (figures captured from the 3D rig); returns canvases keyed by skill key */
-export function buildTarotFaces(renderer: THREE.WebGLRenderer, heroGeo: RigGeo | null): Record<string, HTMLCanvasElement> {
-  const out: Record<string, HTMLCanvasElement> = {};
-  const factory = new IconFactory(renderer);
-  let rig: RigInstance | null = null;
-  const holder = new THREE.Group();
-  if (heroGeo) {
-    rig = new RigInstance(heroGeo, { material: makeVoxelMaterial({ fog: false }), castShadow: false });
-    holder.add(rig.root);
-    // props held in some poses
-    const ball = modelEntry('dung_ball')?.() as any;
-    if (ball?.model) {
-      const m = new THREE.Mesh(buildVoxelGeometry(ball.model, { voxelSize: ball.voxelSize * 2.6, pivot: 'center' }), makeVoxelMaterial({ fog: false }));
-      m.name = 'sunball';
-      m.visible = false;
-      holder.add(m);
-    }
-    const ps = modelEntry('pinch')?.() as RigSpec | undefined;
-    if (ps?.parts) {
-      const p = new RigInstance(buildRigGeo(ps, ps.name + ':card'), { material: makeVoxelMaterial({ fog: false }), castShadow: false });
-      p.root.name = 'pinch';
-      p.root.visible = false;
-      if (!rig.attach('shoulder_l', p.root)) holder.add(p.root);
-    }
-  }
-  for (const d of TAROT) {
-    let fig: HTMLCanvasElement | null = null;
-    if (rig) {
-      poseRig(rig, d.pose);
-      const sun = holder.getObjectByName('sunball');
-      if (sun) {
-        sun.visible = d.pose === 'sun';
-        const hh = (rig.geo.spec.meta?.height as number) ?? 1.8;
-        sun.position.set(0, hh * 1.18, 0.05);
-      }
-      const pinch = holder.getObjectByName('pinch');
-      if (pinch) pinch.visible = d.pose === 'magician' || d.pose === 'death';
-      try {
-        fig = factory.capture(holder, { w: 96, h: d.pose === 'hanged' ? 120 : 136, yaw: d.pose === 'kick' ? 1.2 : d.pose === 'hanged' ? 0.2 : 0.45, pitch: d.pose === 'death' ? -0.08 : 0.1, fill: 0.9, light: d.pose === 'death' ? 'moon' : d.pose === 'tower' ? 'moon' : 'studio' });
-      } catch (e) {
-        console.warn('[tarot] capture failed', e);
-      }
-    }
-    out[d.key] = paintTarot(d, fig);
-  }
-  rig?.resetPose();
-  factory.dispose();
-  return out;
-}

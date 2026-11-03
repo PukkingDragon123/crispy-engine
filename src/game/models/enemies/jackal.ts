@@ -1,9 +1,14 @@
-// Jackal Warrior (STYLE v2, 1/30): Anubis's temple guard. Big cartoon jackal
-// head (long snout, black nose, tall gold-trimmed ears, square eye sockets
-// under heavy brows), furry chest with a gold usekh collar, white linen kilt
-// with a lapis apron, bushy tail, a bronze khopesh (`weapon`, fore_r, hanging
-// down with the hook forward) and a painted shield (`shield`, fore_l, facing +X).
+// Jackal Warrior: Anubis's temple guard, built on Sundown's skeleton figure
+// (characters/skeleton.ts, 1/36: same joints, so the shared animation fits) with
+// a jackal head on the figure's skull (long snout with a wet black nose, fangs, a
+// canine lower jaw on the `jaw` part, tall ears with gold trim, real amber eyes
+// lined with kohl), a muscular furred body, gold usekh collar and armbands, a
+// pleated linen kilt (front panels ride the thighs, the back is the swaying
+// `coat`), digitigrade legs on padded clawed feet, a bushy `tail`, a bronze
+// khopesh (`weapon`, fore_r, hook forward, `blade_tip` socket) and a painted
+// shield with the eye of Horus (`shield`, fore_l, facing +X).
 // v1 golden-sand fur, v2 grey fur. Alpha: black fur, gold chest plate + ear caps.
+// (jackalHead / furArms below are the legacy toon helpers still used by sethos.ts.)
 import type { RigSpec, V3 } from '../../../engine/voxel/Rig';
 import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
 import { TOON, Ramp } from '../style';
@@ -11,6 +16,9 @@ import { toonPelvis, buildHumanoid, defaultExpressions, sleeve, toonHand, pantLe
 import type { HumanoidParts } from '../toon/humanoid';
 import { EnemyOpts, roundBox, roundBoxX, autoShade, mirrored, pickV } from './human';
 import { seg, chain } from './tk';
+import { Fig, finish, figMeta, sections, limbG, cutG, coatG, wrapShell, ell, tube, isSurf, furC, mix, noise, CSpec, G } from './figure/fig';
+import { METAL, frontZ } from './figure/gear';
+
 
 const FUR: Ramp[] = [
   TOON.jackal,
@@ -89,108 +97,232 @@ export function furArms(F: Ramp, G: Ramp, pose: 'fist' | 'open' = 'fist') {
   return { arm, fore };
 }
 
+const FURS = [
+  { base: 0x3a3446, light: 0x585068, dark: 0x221e2a, belly: 0x6a6070 },
+  { base: 0xb07c46, light: 0xd4a066, dark: 0x6e4a26, belly: 0xe0c08a },
+  { base: 0x7a7480, light: 0x9a94a0, dark: 0x4a4650, belly: 0xb8b0b8 },
+];
+const JT: Record<number, [number, number, number]> = {
+  28: [5.2, 2.0, -5.5], 29: [5.3, 2.2, -5.6], 30: [5.5, 2.4, -5.6], 31: [5.8, 2.7, -5.7], 32: [6.2, 3.0, -5.7], 33: [6.6, 3.4, -5.8],
+  34: [6.9, 3.8, -5.8], 35: [7.2, 4.1, -5.8], 36: [7.4, 4.4, -5.9], 37: [7.6, 4.6, -5.9], 38: [7.8, 4.8, -5.9], 39: [7.9, 4.9, -5.9],
+  40: [8.0, 4.9, -5.9], 41: [8.0, 4.8, -5.8], 42: [7.8, 4.4, -5.7], 43: [7.3, 3.4, -5.5], 44: [5.8, 1.9, -5.0], 45: [3.9, 1.1, -4.6],
+  46: [3.2, 0.9, -4.4], 47: [3.0, 0.8, -4.3],
+};
+
 export function jackalRig(o: EnemyOpts = {}): RigSpec {
   const alpha = !!o.alpha;
-  const v = o.variant ?? 0;
-  const F = alpha ? TOON.black : pickV(FUR, v);
-  const G = TOON.gold;
-  const hd = jackalHead(F, { gold: G, alpha });
-
-  // ---------------------------------------------------------------- torso: furry chest + usekh collar (+ alpha chest plate)
-  const torso = new VoxelModel('torso');
-  roundBox(torso, -6, 24, -4, 6, 34, 4, F.base, 2);
-  roundBox(torso, -4, 25, 5, 4, 30, 5, F.hi, 1); // chest fluff
-  roundBox(torso, -2, 35, -3, 2, 38, 1, F.shade, 1); // neck
-  for (let y = 31; y <= 35; y++)
-    for (let x = -7; x <= 7; x++) {
-      const r = 35 - y;
-      if (Math.abs(x) > 3 + r * 1.2) continue;
-      torso.set(x, y, 5, r % 2 === 0 ? G.base : TOON.lapis.base, r % 2 === 0 ? VF.METAL : VF.SOLID);
+  const v = (((o.variant ?? 0) % 3) + 3) % 3;
+  const seed = 9 + v * 5 + (alpha ? 2 : 0);
+  const Fu = alpha ? { base: 0x1e1c22, light: 0x34303a, dark: 0x0e0c10, belly: 0x3a3640 } : FURS[v];
+  const fur = furC(Fu.base, Fu.light, Fu.dark, seed);
+  const G = METAL.gold, BR = METAL.bronze, LAP = 0x2a4a9a, TURQ = 0x2e9a8a;
+  const F = new Fig();
+  F.boneMirror('fore_r', 'fore_l'); // fists: one on the khopesh, one on the shield grip
+  // ---------------------------------------------------------------- the jackal head on the figure's skull
+  const hd = F.s('head');
+  // fur over the dome; the human sockets, nose notch and grin are filled
+  hd.m.forEach((x, y, z) => hd.m.set(x, y, z, res(fur, x, y, z)));
+  for (let x = -6; x <= 5; x++) for (let y = 47; y <= 57; y++) for (let z = -2; z <= 5; z++) if (!hd.m.has(x, y, z) && (z < 5 || Math.abs(x + 0.5) < 5.5)) hd.m.set(x, y, z, res(fur, x, y, z));
+  // the long muzzle, tapering to a wet black nose
+  for (let z = 4; z <= 15; z++) {
+    const t = (z - 4) / 11;
+    const hw = 3.4 - t * 1.4, y0 = 47.5 + t * 0.5, y1 = 52.6 - t * 2.4;
+    for (let x = -4; x < 4; x++) for (let y = 46; y <= 53; y++) {
+      const gx = x + 0.5, gy = y + 0.5;
+      const u = Math.abs(gx) / hw, w = (gy - (y0 + y1) / 2) / ((y1 - y0) / 2);
+      if (u ** 2.2 + Math.abs(w) ** 2.2 > 1) continue;
+      const top = gy > y1 - 1.0;
+      hd.m.set(x, y, z, top && Math.abs(gx) < 1.4 ? mix(Fu.base, Fu.light, 0.5) : res(fur, x, y, z));
     }
-  if (alpha) roundBox(torso, -5, 25, 5, 5, 30, 6, G.base, 1, VF.METAL);
-  autoShade(torso, [F]);
-
-  // ---------------------------------------------------------------- pelvis: linen kilt, gold belt, lapis apron
-  const pelvis = toonPelvis({ ramp: F });
-  roundBox(pelvis, -6, 16, -4, 6, 23, 3, TOON.linen.base, 2);
-  for (let x = -6; x <= 6; x++) for (let z = -4; z <= 3; z++) if (pelvis.has(x, 23, z)) pelvis.set(x, 23, z, G.base, VF.METAL);
-  for (let y = 16; y <= 22; y++) for (let x = -2 + ((22 - y) >> 2); x <= 2 - ((22 - y) >> 2); x++) pelvis.set(x, y, 4, TOON.lapis.base);
-  for (let x = -6; x <= 6; x += 2) for (let z = -4; z <= 3; z++) if (pelvis.has(x, 16, z) && (Math.abs(x) === 6 || z === 3 || z === -4)) pelvis.set(x, 16, z, TOON.linen.shade); // pleats
-  autoShade(pelvis, [TOON.linen]);
-
+  }
+  for (let x = -2; x <= 1; x++) for (let y = 48; y <= 50; y++) hd.m.set(x, y, 15, y === 50 && (x === -2 || x === 1) ? 0x2a2224 : 0x141012);
+  hd.m.set(-1, 49, 16, 0x141012).set(0, 49, 16, 0x141012).set(-1, 50, 16, 0x3a3236).set(0, 50, 16, 0x141012);
+  hd.m.set(-2, 48, 16, 0x0a0808).set(1, 48, 16, 0x0a0808); // nostrils
+  // lip line, upper fangs, cheek ruffs
+  for (let z = 6; z <= 14; z++) for (const x of [-3, 2]) if (hd.m.has(x, 47, z)) hd.m.set(x, 47, z, Fu.dark);
+  hd.m.set(-2, 46, 13, 0xf0e6d0).set(1, 46, 13, 0xf0e6d0).set(-2, 46, 12, 0xe0d4b8).set(1, 46, 12, 0xe0d4b8);
+  for (const sx of [1, -1]) {
+    const X = (x: number) => sx * x;
+    ell(hd, [X(6.2), 49.5, 1.0], [1.4, 2.4, 2.4], furC(Fu.light, Fu.belly, Fu.base, seed + 3));
+    // almond eye sockets above the muzzle, kohl lines sweeping back
+    for (let i = 1; i <= 4; i++) for (const y of [53, 54]) for (const z of [4, 5]) hd.m.del(sx > 0 ? i : -1 - i, y, z);
+    for (let i = 1; i <= 4; i++) for (const y of [53, 54]) hd.m.set(sx > 0 ? i : -1 - i, y, 3, 0x1a1214);
+    for (const [x, y, z] of [[1, 52, 5], [2, 52, 5], [3, 52, 5], [4, 52, 5], [5, 53, 4], [5, 54, 4], [1, 55, 5], [2, 55, 5], [3, 55, 5], [4, 55, 5], [6, 53, 2], [6, 53, 1]] as G[]) hd.m.set(sx > 0 ? x : -1 - x, y, z, 0x0e0a0c);
+    // tall ears with gold trim (and gold caps for the alpha)
+    for (let y = 60; y <= 74; y++) {
+      const t = (y - 60) / 14;
+      const x0 = 2 + Math.round(t * 1.4), x1 = 6 - Math.round(t * 2.6);
+      for (let x = x0; x <= x1; x++)
+        for (let z = -3; z <= -1; z++) {
+          const X0 = sx > 0 ? x : -1 - x;
+          const inner = z === -1 && x > x0 && x < x1 && y < 72;
+          const rim = x === x1 || x === x0 || y >= 73;
+          const capd = alpha && y >= 69;
+          hd.m.set(X0, y, z, capd ? G[0] : inner ? 0x4a2a2e : rim && z === -2 && y > 63 ? G[1] : res(fur, X0, y, z), capd || (rim && z === -2 && y > 63) ? VF.METAL : VF.SOLID);
+        }
+    }
+  }
+  // gold headband across the brow
+  hd.m.forEach((x, y, z) => {
+    if (y === 57 && isSurf(hd.m, x, y, z)) hd.m.set(x, y, z, (x & 3) === 0 ? LAP : G[0], (x & 3) === 0 ? VF.SOLID : VF.METAL);
+  });
+  // canine lower jaw (the figure's chin is replaced)
+  const jw = F.s('jaw');
+  jw.m.map.clear();
+  for (let z = -2; z <= 14; z++) {
+    const t = Math.max(0, (z - 2) / 12);
+    const hw = 3.2 - t * 1.4;
+    for (let x = -4; x < 4; x++) for (let y = 43; y <= 46; y++) {
+      const gx = x + 0.5;
+      if (Math.abs(gx) > hw || (y === 43 && (z > 10 || Math.abs(gx) > hw - 1))) continue;
+      jw.m.set(x, y, z, y === 46 && Math.abs(gx) < hw - 0.9 && z > 2 ? 0x5a1e22 : y <= 44 ? res(furC(Fu.light, Fu.belly, Fu.base, seed + 4), x, y, z) : res(fur, x, y, z));
+    }
+  }
+  jw.m.set(-2, 47, 12, 0xf0e6d0).set(1, 47, 12, 0xf0e6d0);
+  for (let z = 4; z <= 9; z++) jw.m.set(-1, 46, z, 0x8a3438).set(0, 46, z, 0x8a3438); // tongue
+  // real eyes: amber iris, black pupil, a catch-light
+  for (const sx of [1, -1]) {
+    const name = sx > 0 ? 'eye_l' : 'eye_r';
+    const m = new VoxelModel(name);
+    const X = (i: number) => (sx > 0 ? i : -1 - i);
+    m.set(X(1), 53, 4, 0x6a3a10).set(X(1), 54, 4, 0x8a5418);
+    m.set(X(2), 53, 4, 0x0a0606).set(X(2), 54, 4, 0xd88a20);
+    m.set(X(3), 53, 4, 0xc07818).set(X(3), 54, 4, 0xfff0c8);
+    m.set(X(4), 53, 4, 0x8a5418).set(X(4), 54, 4, 0x6a3a10);
+    F.setModel(name, m);
+  }
+  for (const n of ['brow_l', 'brow_r']) {
+    const b = F.s(n);
+    const pts: G[] = [];
+    b.m.forEach((x, y, z) => pts.push([x, y, z]));
+    for (const [x, y, z] of pts) b.m.set(x, y, z, Fu.dark).set(x, y, z + 1, Fu.base);
+  }
+  // ---------------------------------------------------------------- muscular furred body
+  const tr = F.s('torso');
+  tr.m.map.clear();
+  sections(tr, 28, 47, (y) => {
+    const r = JT[Math.floor(y)];
+    return r ? { a: r[0], f: r[1], b: r[2], p: 2.3 } : null;
+  }, fur);
+  coatG(tr, (x, y, z) => z > 1.5 && Math.abs(x) < 4.2 && y > 29 && y < 43, furC(Fu.belly, mix(Fu.belly, 0xffffff, 0.15), Fu.light, seed + 5));
+  for (const sx of [1, -1]) ell(tr, [sx * 3.6, 39.4, 3.6], [3.0, 2.2, 1.4], fur); // pectorals
+  // usekh collar
+  const ringC = [G[0], LAP, G[2], TURQ, G[0]];
+  const collar: [number, number, number, number][] = [];
+  tr.m.forEach((x, y, z) => {
+    if (y < 40 || y > 45) return;
+    const r = Math.hypot((x + 0.5) * 0.9, (z + 0.5 + 0.8) * 1.1) + (45 - y) * 0.85;
+    if (r > 10.5) return;
+    for (const [dx, dy, dz] of [[0, 1, 0], [0, 0, 1], [0, 0, -1], [1, 0, 0], [-1, 0, 0]] as G[]) if (!tr.m.has(x + dx, y + dy, z + dz)) collar.push([x + dx, y + dy, z + dz, ringC[Math.floor(r / 1.7) % ringC.length]]);
+  });
+  for (const [x, y, z, c] of collar) tr.m.set(x, y, z, c, c === G[0] || c === G[2] ? VF.METAL : VF.SOLID);
+  if (alpha) for (let y = 31; y <= 38; y++) for (let x = -5; x <= 4; x++) if (Math.abs(x + 0.5) < 5.2 - Math.max(0, 33 - y)) tr.m.set(x, y, frontZ(tr.m, x, y) + 1, (x + y) % 4 === 0 ? G[2] : G[0], VF.METAL);
+  const pv = F.s('pelvis');
+  pv.m.map.clear();
+  sections(pv, 20, 29, (y) => ({ a: 5.6 + Math.min(1, (y - 20) / 4) * 1.0, f: 2.4, b: -5.6, p: 2.4 }), fur);
+  // pleated linen kilt + gold belt; front panels ride the thighs, the back is the swaying `coat`
+  const lin = (x: number, y: number, z: number) => ((x + z) & 1 ? 0xf0e6cc : 0xd8ccb0);
+  wrapShell(pv, 21, 27, lin);
+  pv.m.forEach((x, y, z) => {
+    if (y === 27 && isSurf(pv.m, x, y, z)) pv.m.set(x, y, z, (x & 3) === 1 ? LAP : G[0], (x & 3) === 1 ? VF.SOLID : VF.METAL);
+  });
+  const cp = F.part('coat', 'pelvis', [0, 27, -6.5]);
+  for (let y = 15; y <= 26; y++) for (let x = -7; x < 7; x++) cp.m.set(x, y, -8 + (y < 20 ? 1 : 0), lin(x, y, 0));
   // ---------------------------------------------------------------- limbs
-  const { arm, fore } = furArms(F, G);
-  const thigh = pantLeg('thigh', F);
-  const shin = pantLeg('shin', F);
-  roundBox(shin, 2, 0, -2, 5, 2, 4, F.shade, 1); // paw
-  for (const x of [2, 4]) shin.set(x, 0, 5, TOON.black.base);
-  const foreR = mirrored(fore, 'fore_r');
-
-  // ---------------------------------------------------------------- tail
-  const tail = new VoxelModel('tail');
-  chain(tail, [[0, 20, -5], [0, 17, -8], [0, 12, -9], [0, 8, -8]], [1.6, 2.2, 2.2, 1.4], F.base);
-  seg(tail, [0, 9, -8.5], [0, 7, -8], 1.3, F.hi);
-  autoShade(tail, [F]);
-
-  // ---------------------------------------------------------------- khopesh (right hand, hanging down, hook forward)
-  const hr = mirrorV3(JOINT.hand);
-  const hx = Math.round(hr[0] - 0.5), hz = Math.round(hr[2] - 0.5);
-  const weapon = new VoxelModel('weapon');
-  roundBox(weapon, hx - 1, 11, hz - 1, hx, 15, hz, TOON.wood.dark, 0); // grip
-  weapon.set(hx - 1, 10, hz, BRONZE.dark, VF.METAL).set(hx, 10, hz, BRONZE.dark, VF.METAL);
-  for (let y = 3; y <= 9; y++) for (let z = hz - 1; z <= hz + 1; z++) weapon.set(hx - 1, y, z, z === hz + 1 ? BRONZE.hi : BRONZE.base, VF.METAL);
-  // the sickle hook curling forward at the bottom
-  const hook: [number, number][] = [[2, 0], [1, 1], [1, 2], [1, 3], [2, 4], [3, 5], [4, 5]];
-  for (const [y, dz] of hook) for (let w = 0; w < 2; w++) weapon.set(hx - 1, y - w, hz + dz, dz >= 4 ? BRONZE.hi : BRONZE.base, VF.METAL);
-
+  for (const s1 of [1, -1]) {
+    const X = (x: number) => s1 * x;
+    if (s1 < 0) {
+      F.boneMirror('arm_l', 'arm_r');
+      F.boneMirror('thigh_l', 'thigh_r');
+      F.boneMirror('shin_l', 'shin_r');
+    }
+    const a = F.s(s1 > 0 ? 'arm_l' : 'arm_r');
+    ell(a, [X(8.6), 41.3, 0.0], [2.45, 2.6, 2.45], fur);
+    limbG(a, [X(8.6), 40.0, 0.0], [X(8.5), 34.6, 0.1], (t) => 2.1 - 0.3 * t, fur);
+    ell(a, [X(8.5), 37.6, 1.0], [1.4, 2.1, 1.0], fur); // biceps
+    ell(a, [X(8.5), 33.9, -0.1], [2.0, 1.25, 1.7], fur);
+    wrapShell(a, 37, 38, (x, y) => (y === 38 ? G[0] : G[1]), () => true, VF.METAL);
+    const f = F.s(s1 > 0 ? 'fore_l' : 'fore_r');
+    // the figure's fist stays: fur over the forearm and the back of the hand, claws on the knuckles
+    f.m.forEach((x, y, z) => {
+      if (y >= 25) f.m.set(x, y, z, res(fur, x, y, z));
+    });
+    ell(f, [X(8.5), 31.9, -0.3], [1.95, 1.25, 1.7], fur);
+    limbG(f, [X(8.6), 31.4, -0.1], [X(8.9), 25.6, 0.0], (t) => 1.9 - 0.45 * t, fur);
+    for (let y = 26; y <= 28; y++) wrapShell(f, y, y, (x, yy) => (yy === 27 ? LAP : G[0]), () => true, VF.METAL);
+    f.m.forEach((x, y, z, c) => {
+      if (y < 25) f.m.set(x, y, z, z === 2 && y <= 21 ? 0x1e1618 : mix(c & 0xffffff, Fu.base, 0.75));
+    });
+    const th = F.s(s1 > 0 ? 'thigh_l' : 'thigh_r');
+    limbG(th, [X(3.8), 23.4, 0.1], [X(3.6), 17.2, 0.2], (t) => 2.6 - 0.55 * t, fur);
+    ell(th, [X(3.6), 20.8, -1.3], [1.8, 2.6, 1.3], fur); // heavy hamstrings
+    ell(th, [X(3.6), 16.7, 0.4], [1.9, 1.3, 1.8], fur);
+    // digitigrade shank: knee -> raised hock -> long metatarsal -> padded paw on its toes
+    const sh = F.s(s1 > 0 ? 'shin_l' : 'shin_r');
+    sh.m.map.clear();
+    ell(sh, [X(3.6), 14.6, 0.3], [1.95, 1.3, 1.8], fur);
+    limbG(sh, [X(3.6), 14.0, -0.2], [X(3.6), 6.6, -2.0], (t) => 1.85 - 0.5 * t, fur);
+    ell(sh, [X(3.6), 6.0, -2.4], [1.15, 1.2, 1.15], furC(Fu.dark, Fu.base, Fu.dark, seed)); // hock
+    limbG(sh, [X(3.7), 6.0, -1.9], [X(3.9), 1.8, 2.0], (t) => 1.3 - 0.25 * t, fur);
+    ell(sh, [X(3.9), 1.1, 3.0], [2.0, 1.15, 2.1], fur); // paw
+    for (let k = 0; k < 4; k++) {
+      const x = X(2.5 + k);
+      sh.m.set(Math.floor(x), 0, 5, 0x2a2224).set(Math.floor(x), 0, 6, 0x0e0a0c).set(Math.floor(x), 1, 5, Fu.dark);
+    }
+    cutG(sh, (x, y) => y < 0);
+    // kilt panel on the front of the thigh
+    const zf = Math.max(...[-1, 0, 1, 2, 3, 4].map((dx) => frontZ(th.m, s1 > 0 ? dx : -1 - dx, 20))) + 1;
+    for (let y = 15; y <= 23; y++) for (let x = 0; x <= 5; x++) th.m.set(s1 > 0 ? x : -1 - x, y, zf, x <= 1 ? (y & 1 ? LAP : G[0]) : lin(x, y, zf), x <= 1 && !(y & 1) ? VF.METAL : VF.SOLID);
+  }
+  // ---------------------------------------------------------------- bushy tail
+  const tl = F.part('tail', 'pelvis', [0, 25.5, -5.5]);
+  tube(tl, [[0, 25.5, -6.0], [0, 23.0, -8.6], [0, 18.5, -10.6], [0, 13.0, -11.0], [0, 9.5, -10.2]], (t) => 1.2 + Math.sin(Math.min(1, t * 1.4) * Math.PI) * 1.2 - t * 0.5, (x, y, z) => (y < 12 ? Fu.light : res(fur, x, y, z)));
+  // ---------------------------------------------------------------- bronze khopesh in the right fist (hook forward)
+  const wp = F.part('weapon', 'fore_r', F.J.hand_r);
+  for (let y = 19; y <= 25; y++) for (const x of [-10, -9]) wp.m.set(x, y, 0, y === 19 || y === 25 ? G[0] : 0x3a2414, y === 19 || y === 25 ? VF.METAL : VF.SOLID);
+  const blade: [number, number][] = [[18, 0], [17, 0], [16, 0], [15, 0], [14, 0], [13, 0], [12, 1], [11, 1], [10, 2], [9, 3], [9, 4], [10, 5], [11, 6]];
+  for (const [y, dz] of blade) for (const x of [-10, -9]) {
+    wp.m.set(x, y, dz, x === -10 ? BR[0] : BR[1], VF.METAL);
+    wp.m.set(x, y, dz + 1, x === -10 ? BR[2] : BR[0], VF.METAL); // bright edge
+  }
+  F.sock('blade_tip', 'weapon', [-9, 11.5, 7]);
   // ---------------------------------------------------------------- shield on the left forearm (outer side, faces +X)
-  const shield = new VoxelModel('shield');
-  const sx = 11;
-  for (let y = 13; y <= 26; y++)
-    for (let z = -5; z <= 5; z++) {
-      const top = y >= 24 ? Math.abs(z) <= 4 - (y - 24) * 1.5 : true;
-      if (!top) continue;
-      const rim = Math.abs(z) === 5 || y === 13 || (y >= 24 && Math.abs(z) >= 3 - (y - 24));
-      shield.set(sx, y, z, rim ? G.base : TOON.wood.base, rim ? VF.METAL : VF.SOLID);
-      shield.set(sx - 1, y, z, TOON.wood.shade);
+  const sd = F.part('shield', 'fore_l', [11, 27, 0]);
+  const hide = (y: number, z: number) => (noise.n2(y * 0.3, z * 0.3 + seed) > 0.3 ? 0xd8ccb0 : 0xc0b08a);
+  for (let y = 13; y <= 33; y++)
+    for (let z = -6; z <= 5; z++) {
+      const gz = z + 0.5;
+      const topR = y >= 28 ? Math.sqrt(Math.max(0, 1 - ((y - 28) / 6) ** 2)) * 6 : 6;
+      if (Math.abs(gz) > topR) continue;
+      const rim = Math.abs(gz) > topR - 1 || y === 13;
+      sd.m.set(12, y, z, rim ? BR[0] : hide(y, z), rim ? VF.METAL : VF.SOLID);
+      sd.m.set(11, y, z, rim ? BR[1] : 0x6a4a2c, rim ? VF.METAL : VF.SOLID);
     }
   // painted eye of Horus
-  for (const [y, z, c] of [[20, -2, 0], [20, -1, 0], [20, 0, 0], [20, 1, 0], [21, -1, 1], [21, 0, 1], [19, 0, 0], [18, 1, 0], [17, 2, 0]] as [number, number, number][]) shield.set(sx + 1, y, z, c ? TOON.lapis.hi : TOON.lapis.base);
-  autoShade(shield, [TOON.wood]);
-
-  const P: HumanoidParts = {
-    pelvis,
-    torso,
-    head: hd.head,
-    jaw: hd.jaw,
-    eye_l: hd.eye_l,
-    eye_r: hd.eye_r,
-    brow_l: hd.brow_l,
-    brow_r: hd.brow_r,
-    arm_l: arm,
-    fore_l: fore,
-    arm_r: mirrored(arm, 'arm_r'),
-    fore_r: foreR,
-    thigh_l: thigh,
-    shin_l: shin,
-    thigh_r: mirrored(thigh, 'thigh_r'),
-    shin_r: mirrored(shin, 'shin_r'),
-  };
-  return buildHumanoid({
-    name: `jackal${alpha ? '_alpha' : ''}_v${v}`,
-    parts: P,
-    joints: { eye: JACKAL_EYE, brow: JACKAL_BROW },
-    extra: [
-      { name: 'tail', model: tail, parent: 'pelvis', joint: [0.5, 20.5, -4.5] },
-      { name: 'weapon', model: weapon, parent: 'fore_r', joint: hr },
-      { name: 'shield', model: shield, parent: 'fore_l', joint: [10.5, 20, 0.5] },
-    ],
-    sockets: { blade_tip: { part: 'weapon', at: [hx - 0.5, 0.5, hz + 5.5] }, head_top: { part: 'head', at: [0.5, 62, -2] } },
-    topY: 62,
+  for (const [y, z, c] of [[24, -3, 0], [24, -2, 0], [24, -1, 0], [24, 0, 0], [24, 1, 0], [24, 2, 0], [25, -2, 1], [25, -1, 1], [25, 0, 1], [25, 1, 1], [23, -1, 2], [23, 0, 2], [22, 0, 0], [21, 1, 0], [20, 1, 0], [20, 2, 0], [22, -2, 0], [21, -3, 0], [26, -2, 0], [26, -1, 0], [26, 0, 0], [26, 1, 0]] as number[][])
+    sd.m.set(13, y, z, c === 1 ? 0xf6efe0 : c === 2 ? 0x101018 : LAP);
+  finish(F);
+  let top = 63;
+  hd.m.forEach((_x, y) => (top = Math.max(top, y + 1)));
+  F.sock('head_top', 'head', [0, top, -2]);
+  return F.build(`jackal${alpha ? '_alpha' : ''}_v${v}`, figMeta(F, 'jackal', {
+    alpha,
+    variant: v,
+    height: top * F.vs,
     radius: 0.34,
+    blocksFront: true,
+    weaponRest: '-Y, hook toward +Z',
+    shieldFacing: '+X',
     expressions: defaultExpressions(['neutral', 'angry', 'snarl', 'hurt', 'surprised', 'dead', 'stunned']),
-    meta: { kind: 'jackal', alpha, headY: 46 / 30, blocksFront: true, weaponRest: '-Y, hook toward +Z', shieldFacing: '+X' },
-  });
+  }));
 }
+const res = (c: CSpec, x: number, y: number, z: number) => (typeof c === 'number' ? c : (c(x, y, z) as number));
+void buildHumanoid;
+void toonPelvis;
+void pantLeg;
+void JOINT;
+void mirrorV3;
 void roundBoxX;
-
+void pickV;
+void seg;
+void chain;

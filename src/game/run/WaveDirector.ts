@@ -29,6 +29,7 @@ const THEMES = [
   { name: 'WOLF PACK', types: ['sandWolf'], mult: 1.25, from: 6 },
   { name: 'THE SANDS MOVE', types: ['duneWorm', 'scarab', 'thornyLizard'], mult: 1.0, from: 11 },
   { name: 'SNAKE PIT', types: ['bellSnake', 'thornyLizard', 'sandWolf'], mult: 0.9, from: 13 },
+  { name: 'BLOOD & THORNS', types: ['thornyLizard', 'cactusHusk', 'duneWorm'], mult: 1.1, from: 9 },
 ];
 
 export class WaveDirector {

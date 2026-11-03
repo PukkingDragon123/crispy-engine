@@ -32,6 +32,132 @@ export interface ExternalTarget extends EnemyLike {
   takeDamage(hit: Hit, point?: THREE.Vector3, dir?: THREE.Vector3): number;
 }
 
+/**
+ * Something an enemy hunts instead of the hunter (escort NPCs). The enemy steers
+ * and aims at `pos`; its melee / pounce strikes call `hurt`. Enemy projectiles
+ * only collide with the hunter, so the owner checks `enemies.proj.list` itself.
+ */
+export interface FocusTarget {
+  pos: THREE.Vector3;
+  alive: boolean;
+  radius: number;
+  height: number;
+  hurt(dmg: number, from: THREE.Vector3, kind: 'melee' | 'leap' | 'contact'): void;
+}
+
+/** a lingering ground hazard (acid pools from alpha bell snakes / alpha thorny devils) */
+interface Hazard {
+  x: number;
+  z: number;
+  r: number;
+  t: number;
+  dur: number;
+  dps: number;
+  tick: number;
+  owner: number;
+  hurtsEnemies: boolean;
+}
+
+/**
+ * Song-title skill callouts: small Alagard pixel text that pops above an enemy
+ * when it uses a move (typography only; screen-constant size at 2x pixel scale).
+ */
+class SkillCallouts {
+  private pool: { sp: THREE.Sprite; mat: THREE.SpriteMaterial; t: number; life: number; x: number; y: number; z: number; w: number; h: number; on: boolean }[] = [];
+  private tex = new Map<string, { tex: THREE.CanvasTexture; w: number; h: number; fontOk: boolean }>();
+  constructor(scene: THREE.Scene, n = 7) {
+    for (let i = 0; i < n; i++) {
+      const mat = new THREE.SpriteMaterial({ transparent: true, depthTest: false, depthWrite: false, sizeAttenuation: false, toneMapped: false, fog: false });
+      const sp = new THREE.Sprite(mat);
+      sp.visible = false;
+      sp.renderOrder = 30;
+      sp.frustumCulled = false;
+      scene.add(sp);
+      this.pool.push({ sp, mat, t: 0, life: 1, x: 0, y: 0, z: 0, w: 1, h: 1, on: false });
+    }
+  }
+  get active() {
+    let n = 0;
+    for (const c of this.pool) if (c.on) n++;
+    return n;
+  }
+  private texture(text: string, color: string) {
+    const key = text + '|' + color;
+    const fontOk = typeof document !== 'undefined' && !!document.fonts?.check?.("16px 'Alagard'");
+    const hit = this.tex.get(key);
+    if (hit && (hit.fontOk || !fontOk)) return hit;
+    hit?.tex.dispose();
+    const cv = document.createElement('canvas');
+    const c = cv.getContext('2d')!;
+    c.font = "16px 'Alagard'";
+    const w = Math.min(256, Math.ceil(c.measureText(text).width) + 8);
+    const h = 22;
+    cv.width = w;
+    cv.height = h;
+    c.font = "16px 'Alagard'";
+    c.textBaseline = 'top';
+    c.fillStyle = '#1a0e06';
+    for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1], [2, 2], [1, 2]]) c.fillText(text, 4 + ox, 2 + oy);
+    c.fillStyle = color;
+    c.fillText(text, 4, 2);
+    // crisp pixel edges: snap the anti-aliased type to hard alpha like the HUD's 2x pixel art
+    const img = c.getImageData(0, 0, w, h);
+    const d = img.data;
+    for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= 110 ? 255 : 0;
+    c.putImageData(img, 0, 0);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    tex.generateMipmaps = false;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const out = { tex, w, h, fontOk };
+    this.tex.set(key, out);
+    return out;
+  }
+  show(text: string, color: string, x: number, y: number, z: number) {
+    let c = this.pool.find((q) => !q.on);
+    if (!c) c = this.pool.reduce((a, b) => (a.t / a.life > b.t / b.life ? a : b));
+    const tx = this.texture(text, color);
+    c.mat.map = tx.tex;
+    c.mat.needsUpdate = true;
+    c.w = tx.w;
+    c.h = tx.h;
+    c.t = 0;
+    c.life = 1.5 + Math.min(0.6, text.length * 0.02);
+    c.x = x;
+    c.y = y;
+    c.z = z;
+    c.on = true;
+    c.sp.visible = true;
+  }
+  update(dt: number, cam: THREE.PerspectiveCamera, viewH: number) {
+    const p11 = cam.projectionMatrix.elements[5] || 1.4;
+    // one texture pixel = 2 screen pixels (the HUD's pixel scale)
+    const k = (2 * 2) / (Math.max(240, viewH) * p11);
+    for (const c of this.pool) {
+      if (!c.on) continue;
+      c.t += dt;
+      if (c.t >= c.life) {
+        c.on = false;
+        c.sp.visible = false;
+        continue;
+      }
+      const u = c.t / c.life;
+      const pop = c.t < 0.12 ? 1.35 - (c.t / 0.12) * 0.35 : 1;
+      const rise = (1 - Math.pow(1 - Math.min(1, c.t / 0.9), 3)) * 0.75;
+      c.sp.position.set(c.x, c.y + rise, c.z);
+      c.sp.scale.set(c.w * k * pop, c.h * k * pop, 1);
+      c.mat.opacity = u > 0.78 ? 1 - (u - 0.78) / 0.22 : 1;
+    }
+  }
+  clear() {
+    for (const c of this.pool) {
+      c.on = false;
+      c.sp.visible = false;
+    }
+  }
+}
+
 let NEXT_ID = 1;
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -47,6 +173,7 @@ const _loc = new THREE.Matrix4();
 const _eul = new THREE.Euler();
 const _lv = new THREE.Vector3();
 const _one = new THREE.Vector3(1, 1, 1);
+const ZERO = new THREE.Vector3();
 
 export class Enemy implements EnemyLike {
   id = NEXT_ID++;
@@ -104,6 +231,20 @@ export class Enemy implements EnemyLike {
   lassoT = 0;
   telegraph: THREE.Line | null = null;
   quirk = rnd.next();
+  /** dune worm: seconds of ground tremor left before it erupts */
+  tremor = 0;
+  /** escort harassers hunt this instead of the hunter (see FocusTarget) */
+  focus: FocusTarget | null = null;
+  /** pack wolves: flank slot (0..1 across the rear arc) and permission to commit to a bite / pounce */
+  slot = 0.5;
+  biteToken = false;
+  /** duration of the current leap (bell snakes strike faster than wolves pounce) */
+  leapDur = 0.75;
+  /** snakes / worms: world-space body spheres (x, y, z, r) sampled each frame, for hits along the whole length */
+  body: Float32Array | null = null;
+  bodyN = 0;
+  /** the rig key this one was built from (colour morphs) */
+  rigKey: string;
   constructor(public def: EnemyDef, public alpha: boolean, wave: number, render: EnemyRender) {
     const sc = waveScale(wave);
     this.scale = alpha ? 1.32 : 1;
@@ -116,7 +257,8 @@ export class Enemy implements EnemyLike {
     this.name = (alpha ? 'Alpha ' : '') + def.name;
     this.flying = def.flying;
     this.cds = def.attacks.map((a) => a.cooldown * (0.4 + rnd.next() * 0.6));
-    this.batch = render.get(alpha ? def.rigAlpha : def.rig, def.id === 'husk' || def.id === 'scarab' ? 200 : 96);
+    this.rigKey = alpha ? def.rigAlpha : def.variants?.length ? def.variants[Math.floor(rnd.next() * def.variants.length)] : def.rig;
+    this.batch = render.get(this.rigKey, def.id === 'husk' || def.id === 'scarab' ? 200 : 96);
     const n = this.batch.nParts;
     this.rot = new Float32Array(n * 3);
     this.posOff = new Float32Array(n * 3);
@@ -176,8 +318,19 @@ export class Enemies implements EnemyApi {
   dying: Enemy[] = [];
   /** the bell snake currently coiled around the hunter */
   wrapping: Enemy | null = null;
+  /** longest a wrap holds before the snake lets go on its own (s). A mash QTE should resolve inside it. */
+  wrapMaxT = 4.2;
   private wrapTick = 0;
+  private wrapStruggle = 0;
   private lastTitleT = -99;
+  /** song-title callouts above enemies using a move */
+  callouts: SkillCallouts;
+  /** also ribbon-toast alpha moves (the world callout always shows) */
+  skillToasts = true;
+  private recentTitles = new Map<string, { t: number; x: number; z: number }>();
+  private now = 0;
+  /** lingering acid pools */
+  hazards: Hazard[] = [];
   wave = 1;
   private grid = new Map<number, Enemy[]>();
   private laserMat = new THREE.LineBasicMaterial({ color: 0xff3020, transparent: true, opacity: 0.85 });
@@ -185,11 +338,22 @@ export class Enemies implements EnemyApi {
   constructor(private ctx: Ctx, private player: PlayerLink) {
     this.render = new EnemyRender(ctx.scene);
     this.proj = new Projectiles(ctx, () => player as any);
+    this.callouts = new SkillCallouts(ctx.scene);
+    // alpha thorny-devil acid drops sometimes leave a small fizzing puddle
+    this.proj.onAcid = (x, _y, z, dmg, src) => {
+      if (rnd.chance(0.3)) this.addHazard(x, z, 0.85, 2.6, Math.max(4, dmg * 1.2), src, false);
+    };
     ctx.events.on('melee', () => this.playerMelee());
-    // the coordinator's mash QTE: emit 'snakeWrapBreak' (enemy) on success
-    ctx.events.on('snakeWrapBreak', (en?: Enemy) => {
+    // bell-snake wrap, driven by the coordinator's mash QTE:
+    //   'snakeWrapBreak' (snake?, mult?) → the hunter tears free; the snake takes 12% max hp × mult and is dazed
+    //   'snakeWrapCrush' (snake?, mult?) → the QTE failed: one brutal squeeze, then the snake lets go
+    ctx.events.on('snakeWrapBreak', (en?: Enemy, mult?: number) => {
       const w = en ?? this.wrapping;
-      if (w) this.releaseWrap(w, true);
+      if (w) this.releaseWrap(w, true, mult ?? 1);
+    });
+    ctx.events.on('snakeWrapCrush', (en?: Enemy, mult?: number) => {
+      const w = en ?? this.wrapping;
+      if (w) this.wrapCrush(w, mult ?? 1);
     });
     ctx.events.on('grappleKick', (e: Enemy) => this.grappleKick(e));
     ctx.events.on('explosion', (pos: { x: number; y: number; z: number }, r: number, dmg: number, owner: string) => this.explosion(pos, r, dmg, owner));
@@ -200,14 +364,15 @@ export class Enemies implements EnemyApi {
   }
 
   // ------------------------------------------------------------- spawning
-  spawn(defId: string, x: number, z: number, opts: { alpha?: boolean; emerge?: Enemy['emerge'] } = {}) {
+  spawn(defId: string, x: number, z: number, opts: { alpha?: boolean; emerge?: Enemy['emerge']; focus?: FocusTarget | null } = {}) {
     const def = ENEMIES[defId];
     if (!def) return null;
     const e = new Enemy(def, !!opts.alpha, this.wave, this.render);
+    e.focus = opts.focus ?? null;
     const g = this.ctx.world.groundAt(x, z);
     e.pos.set(x, g, z);
     e.yaw = Math.atan2(this.player.pos.x - x, this.player.pos.z - z);
-    e.emerge = opts.emerge ?? (def.flying ? 'fly' : def.id.includes('husk') || def.id === 'mummy' || def.id === 'dungSkeleton' ? 'sand' : 'run');
+    e.emerge = opts.emerge ?? (def.flying ? 'fly' : def.id.includes('husk') || def.id === 'mummy' || def.id === 'dungSkeleton' || def.id === 'bellSnake' ? 'sand' : 'run');
     e.state = 'spawn';
     e.spawnT = 0;
     if (e.emerge === 'fly') e.pos.y = g + 18;
@@ -274,6 +439,24 @@ export class Enemies implements EnemyApi {
       const normal = new THREE.Vector3(point.x - cx, 0, point.z - cz).normalize();
       best = { enemy: e, t, point, normal, headshot: head, part, surface: 'enemy' };
     }
+    // long bodies (bell snakes, dune worms): spheres along the spine, so the whole length can be shot
+    for (const e of this.list) {
+      if (!e.alive || !e.bodyN || !e.body || (skip && skip.has(e.id)) || e.state === 'hidden' || e.state === 'burrow' || e.anim.hidden) continue;
+      const b = e.body;
+      for (let k = 0; k < e.bodyN; k++) {
+        const cx = b[k * 4], cy = b[k * 4 + 1], cz = b[k * 4 + 2], r = b[k * 4 + 3];
+        const ox = o.x - cx, oy = o.y - cy, oz = o.z - cz;
+        const bb = ox * d.x + oy * d.y + oz * d.z;
+        const disc = bb * bb - (ox * ox + oy * oy + oz * oz - r * r);
+        if (disc < 0) continue;
+        let t = -bb - Math.sqrt(disc);
+        if (t < 0) t = -bb + Math.sqrt(disc);
+        if (t < 0 || t > bestT) continue;
+        bestT = t;
+        const point = new THREE.Vector3(o.x + d.x * t, o.y + d.y * t, o.z + d.z * t);
+        best = { enemy: e, t, point, normal: new THREE.Vector3(point.x - cx, point.y - cy, point.z - cz).normalize(), headshot: false, part: 'body', surface: 'enemy' };
+      }
+    }
     for (const x of this.externals) {
       if (!x.alive || (skip && skip.has(x.id))) continue;
       const h = x.hitTest(o, d, bestT);
@@ -302,7 +485,7 @@ export class Enemies implements EnemyApi {
   inRadius(p: THREE.Vector3, r: number, fn: (e: EnemyLike, d: number) => void) {
     for (const e of this.list) {
       if (!e.alive || e.state === 'hidden' || e.state === 'burrow') continue;
-      const d = Math.hypot(e.pos.x - p.x, e.pos.y + e.height * 0.5 - p.y, e.pos.z - p.z);
+      const d = this.reach(e, p);
       if (d < r + e.radius) fn(e, d);
     }
     for (const x of this.externals) {
@@ -310,6 +493,57 @@ export class Enemies implements EnemyApi {
       const d = Math.hypot(x.pos.x - p.x, x.pos.y + x.height * 0.5 - p.y, x.pos.z - p.z);
       if (d < r + x.radius) fn(x, d);
     }
+  }
+
+  /** distance from p to an enemy's body, offset so `d < r + e.radius` tests keep working for long bodies */
+  private reach(e: Enemy, p: { x: number; y: number; z: number }) {
+    let d = Math.hypot(e.pos.x - p.x, e.pos.y + e.height * 0.5 - p.y, e.pos.z - p.z);
+    const b = e.body;
+    if (b && e.bodyN) {
+      for (let k = 0; k < e.bodyN; k++) {
+        const dd = Math.hypot(b[k * 4] - p.x, b[k * 4 + 1] - p.y, b[k * 4 + 2] - p.z) - b[k * 4 + 3] + e.radius;
+        if (dd < d) d = dd;
+      }
+    }
+    return d;
+  }
+  /** nearest point of a long body to p on the ground plane (writes out, returns the flat distance) */
+  private bodyPoint(e: Enemy, p: { x: number; z: number }, out: THREE.Vector3) {
+    out.set(e.pos.x, e.pos.y, e.pos.z);
+    let best = Math.hypot(e.pos.x - p.x, e.pos.z - p.z);
+    const b = e.body;
+    if (b && e.bodyN) {
+      for (let k = 0; k < e.bodyN; k++) {
+        const dd = Math.hypot(b[k * 4] - p.x, b[k * 4 + 2] - p.z) - b[k * 4 + 3] + e.radius;
+        if (dd < best) {
+          best = dd;
+          out.set(b[k * 4], b[k * 4 + 1] - b[k * 4 + 3], b[k * 4 + 2]);
+        }
+      }
+    }
+    return best;
+  }
+
+  /** sample the spine of a snake / worm from the pose just pushed to its batch */
+  private sampleBody(e: Enemy) {
+    const idx = e.batch.partIndex;
+    const meta = e.batch.meta;
+    const segR = meta.segRadius as number[] | undefined;
+    const baseR = (meta.radius as number) ?? e.def.radius * 0.5;
+    let nSeg = 0;
+    while (idx['seg' + (nSeg + 1)] !== undefined) nSeg++;
+    if (!e.body) e.body = new Float32Array(4 * 12);
+    let n = 0;
+    for (let k = 2; k <= nSeg && n < 12; k += 2) {
+      const W = e.batch.partWorld(idx['seg' + k]).elements;
+      const r = (segR?.[k - 1] ?? baseR * (1 - (k / nSeg) * 0.7)) * e.scale * 1.3 + 0.08;
+      e.body[n * 4] = W[12];
+      e.body[n * 4 + 1] = W[13];
+      e.body[n * 4 + 2] = W[14];
+      e.body[n * 4 + 3] = r;
+      n++;
+    }
+    e.bodyN = n;
   }
 
   // ------------------------------------------------------------- damage
@@ -388,6 +622,8 @@ export class Enemies implements EnemyApi {
       ctx.fx.explosion(pp, 2, 'curse');
     }
     ctx.events.emit('enemyHit', e, hit, amt, res);
+    // harassers chasing an escort turn on the hunter who shoots them
+    if (e.focus && hit.source !== 'poison' && hit.source !== 'bleed' && hit.source !== 'burn' && rnd.chance(0.45)) e.focus = null;
     // limb loss
     const part = hit.tags?.[0];
     const limbs = ['arm_l', 'arm_r', 'head', 'thigh_l', 'thigh_r', 'fore_l', 'fore_r'];
@@ -468,7 +704,7 @@ export class Enemies implements EnemyApi {
     } else {
       // fall away from the shot (local push direction), sideways at random
       const lz = dx * Math.sin(e.yaw) + dz * Math.cos(e.yaw);
-      const dur = e.skel === 'humanoid' ? 1.35 : e.skel === 'quad' ? 1.4 : e.skel === 'worm' ? 1.6 : e.skel === 'bird' ? 1.3 : e.skel === 'beetle' ? 1.1 : e.skel === 'scorpion' ? 1.2 : 0.6;
+      const dur = e.skel === 'humanoid' ? 1.35 : e.skel === 'quad' ? 1.4 : e.skel === 'worm' ? 1.6 : e.skel === 'snake' ? 1.7 : e.skel === 'lizard' ? 1.15 : e.skel === 'bird' ? 1.3 : e.skel === 'beetle' ? 1.1 : e.skel === 'scorpion' ? 1.2 : 0.6;
       e.anim.die(lz >= 0 ? -1 : 1, rnd.chance(0.5) ? 1 : -1, dur);
       e.vel.x += dx * 2;
       e.vel.z += dz * 2;
@@ -476,7 +712,7 @@ export class Enemies implements EnemyApi {
     }
     ctx.fx.hit(c, { x: dx, y: 0.5, z: dz }, e.def.hitKind, 1.8);
     ctx.fx.dust({ x: e.pos.x, y: e.pos.y + 0.2, z: e.pos.z }, 0.8 * e.scale, P.sand0, 3);
-    const deathSfx: Record<string, string> = { husk: 'husk_death', mummy: 'mummy_death', jackal: 'jackal_growl', giantScorpion: 'giant_scorpion_death', vulture: 'vulture_screech', gunslinger: 'skeleton_rattle' };
+    const deathSfx: Record<string, string> = { husk: 'husk_death', mummy: 'mummy_death', jackal: 'jackal_growl', giantScorpion: 'giant_scorpion_death', vulture: 'vulture_screech', gunslinger: 'skeleton_rattle', sandWolf: 'jackal_growl', bellSnake: 'giant_scorpion_hiss', duneWorm: 'sand_burst' };
     ctx.sfx(deathSfx[e.def.id] ?? (e.def.hitKind === 'bone' ? 'skeleton_rattle' : 'gore_splat'), c, 0.8);
     // specials
     switch (e.def.special) {
@@ -518,6 +754,10 @@ export class Enemies implements EnemyApi {
             ctx.events.emit('explosion', c, 4.2, 26 * e.dmgMul, 'acid');
             const pd = this.player.center(_v2).distanceTo(_v.set(c.x, c.y, c.z));
             if (pd < 4.6) this.player.status.apply('poison', 6, 5, 2, 30, {});
+            // what is left boils on the sand: a lingering acid pool that burns hunter and horde alike
+            this.addHazard(c.x, c.z, 3.4, 7, 15 * e.dmgMul, e.id, true);
+            const t = e.def.moveTitles?.burst;
+            if (t) this.callout(t, { x: c.x, y: c.y + 1.4, z: c.z }, 'alpha');
           });
         }
         break;
@@ -562,9 +802,22 @@ export class Enemies implements EnemyApi {
       ctx.engine.hitStop(0.06);
     }
     const targets = [...this.list, ...this.externals] as EnemyLike[];
+    // a wrapped hunter kicks and claws at the coils: enough struggling breaks the hold
+    if (this.wrapping && this.wrapping.state === 'wrap') {
+      this.wrapStruggle++;
+      this.wrapping.squash.kick(-3);
+      ctx.sfx('punch', this.wrapping.pos, 0.6, 1.2);
+      if (this.wrapStruggle >= 4) this.releaseWrap(this.wrapping, true, 0.6);
+    }
     for (const e of targets) {
       if (!e.alive) continue;
-      const dx = e.pos.x - origin.x, dz = e.pos.z - origin.z;
+      let ex = e.pos.x, ez = e.pos.z;
+      if (e instanceof Enemy && e.bodyN) {
+        this.bodyPoint(e, origin, _v2);
+        ex = _v2.x;
+        ez = _v2.z;
+      }
+      const dx = ex - origin.x, dz = ez - origin.z;
       const d = Math.hypot(dx, dz);
       if (d > 2.9 + e.radius || Math.abs(e.pos.y + e.height * 0.5 - origin.y) > 2.2) continue;
       if ((dx * f.x + dz * f.z) / (d || 1) < 0.2 && d > 1.2) continue;
@@ -634,6 +887,8 @@ export class Enemies implements EnemyApi {
     const ctx = this.ctx;
     const pl = this.player;
     const ppos = pl.pos;
+    this.now = time;
+    this.organisePacks(ppos);
     // spatial grid for separation
     this.grid.clear();
     for (const e of this.list) {
@@ -703,9 +958,9 @@ export class Enemies implements EnemyApi {
         e.pos.z += r.z;
       }
       // ram / contact with player
-      if (pl.alive && e.state !== 'hidden' && e.state !== 'spawn' && e.state !== 'burrow') {
+      if (pl.alive && e.state !== 'hidden' && e.state !== 'spawn' && e.state !== 'burrow' && e.state !== 'wrap') {
         const dx = e.pos.x - ppos.x, dz = e.pos.z - ppos.z;
-        const d = Math.hypot(dx, dz);
+        const d = e.bodyN ? this.bodyPoint(e, ppos, _v2) : Math.hypot(dx, dz);
         const dy = Math.abs(e.pos.y - ppos.y);
         if (d < e.radius + 0.55 && dy < e.height) {
           const ps = pl.speed;
@@ -731,8 +986,10 @@ export class Enemies implements EnemyApi {
       this.animate(e, dt, time);
     }
     this.proj.update(dt);
+    this.updateHazards(dt);
     this.updateDying(dt, time);
     this.updateRag(dt);
+    this.callouts.update(dt, ctx.camera, ctx.engine.height);
     // render
     this.render.begin();
     const cam = ctx.camera.position;
@@ -743,6 +1000,7 @@ export class Enemies implements EnemyApi {
       this.rootMatrix(e, _m);
       const fx: [number, number, number, number] = [e.flash * 0.85, 0, e.glow, 0];
       e.batch.push(_m, e.rot, e.hidden, lod, fx, e.tint, e.posOff);
+      if (e.alive && (e.skel === 'snake' || e.skel === 'worm')) this.sampleBody(e);
     };
     for (const e of this.list) if (e.alive) drawE(e);
     for (const e of this.dying) drawE(e);
@@ -791,42 +1049,72 @@ export class Enemies implements EnemyApi {
   }
 
   // ------------------------------------------------------------- snake wrap
-  private startWrap(e: Enemy) {
+  /**
+   * WRAP CONTRACT (bell snakes)
+   *  - on wrap: `enemies.wrapping = snake`, event `snakeWrap` (snake). The coil squeezes every 0.55 s
+   *    and pins the board; it lets go by itself after `wrapMaxT` seconds (event `snakeWrapEnd` (snake, false)).
+   *  - QTE success: emit `snakeWrapBreak` (snake?, mult = 1) or call `releaseWrap(snake, true, mult)`:
+   *    the snake is flung off, takes 12% of its max hp × mult and is stunned 1.2 s × mult (clamped 0.5–2).
+   *  - QTE fail: emit `snakeWrapCrush` (snake?, mult = 1) or call `wrapCrush(snake, mult)`: one heavy squeeze
+   *    (≈ 2.6 bites × mult), then it lets go.
+   *  - always ends with `snakeWrapEnd` (snake, broke) — also when the snake dies mid-wrap (broke = true).
+   *  - fallback without a QTE: each melee press while wrapped is a struggle; 4 of them break free (mult 0.6).
+   */
+  private startWrap(e: Enemy, time = this.now) {
     const ctx = this.ctx;
     e.state = 'wrap';
     e.stateT = 0;
     this.wrapping = e;
     this.wrapTick = 0.25;
+    this.wrapStruggle = 0;
     e.anim.tauntT = -1;
     ctx.sfx('giant_scorpion_hiss', e.pos, 1, 0.8);
     ctx.sfx('skeleton_rattle', e.pos, 0.9, 1.5);
     ctx.shake(0.35);
-    ctx.toast('I WANT TO HOLD YOUR HAND', '#c84a2a', 'Wrapped! Mash to break free');
+    const title = e.def.moveTitles?.wrap ?? 'I Want to Hold Your Hand';
+    this.skill(e, title, time, true);
+    ctx.toast(title.toUpperCase(), '#c84a2a', 'Wrapped! Mash to break free');
     ctx.events.emit('snakeWrap', e);
   }
 
-  /** end a wrap. broke = the hunter fought free (snake is flung off, hurt and dazed) */
-  releaseWrap(e: Enemy, broke: boolean) {
+  /** end a wrap. broke = the hunter fought free (the snake is flung off, hurt by 12% max hp × mult and dazed) */
+  releaseWrap(e: Enemy, broke: boolean, mult = 1) {
     if (this.wrapping === e) this.wrapping = null;
     if (e.state !== 'wrap') return;
     const ctx = this.ctx;
     const pp = this.player.pos;
     const dx = e.pos.x - pp.x, dz = e.pos.z - pp.z;
     const dl = Math.hypot(dx, dz) || 1;
+    const m = clamp(mult, 0, 3);
     e.state = broke ? 'stagger' : 'recover';
     e.stateT = broke ? -0.5 : 0;
     e.vel.set((dx / dl) * (broke ? 9 : 4), broke ? 5 : 2, (dz / dl) * (broke ? 9 : 4));
     if (broke && e.alive) {
-      ctx.toast('BROKE FREE', '#ffd36b');
+      ctx.toast(m >= 1.5 ? 'TORE FREE!' : 'BROKE FREE', '#ffd36b');
       ctx.sfx('punch', e.pos, 0.9);
-      this.damage(e, { base: e.maxHp * 0.12, kind: 'phys', source: 'melee', knock: 10, dirX: dx / dl, dirZ: dz / dl, canCrit: false, status: [{ id: 'stun', stacks: 1, dur: 1.2 }] });
+      ctx.shake(0.25 + m * 0.1);
+      if (m >= 1.5) ctx.engine.hitStop(0.08);
+      this.damage(e, { base: e.maxHp * 0.12 * m, kind: 'phys', source: 'melee', knock: 10, dirX: dx / dl, dirZ: dz / dl, canCrit: false, status: m > 0 ? [{ id: 'stun', stacks: 1, dur: 1.2 * clamp(m, 0.5, 2) }] : undefined });
     }
     ctx.events.emit('snakeWrapEnd', e, broke);
   }
 
+  /** QTE failed: the coil crushes once, hard, then the snake lets go */
+  wrapCrush(e: Enemy, mult = 1) {
+    if (e.state !== 'wrap') return;
+    const ctx = this.ctx;
+    const bite = e.def.attacks[1]?.dmg ?? 12;
+    this.player.takeHit({ base: bite * 2.6 * e.dmgMul * clamp(mult, 0, 3), kind: 'phys', source: 'contact', knock: 7, status: [{ id: 'poison', stacks: 2, dur: 4 }] }, e.pos);
+    ctx.sfx('hit_bone', e.pos, 1, 0.7);
+    ctx.sfx('skeleton_rattle', e.pos, 1, 0.8);
+    ctx.shake(0.55);
+    e.squash.kick(-7);
+    this.releaseWrap(e, false);
+  }
+
   private updateWrap(e: Enemy, dt: number, ppos: THREE.Vector3) {
     const pl = this.player;
-    if (!pl.alive || e.stateT > 4.2 || e.status.stunned()) {
+    if (!pl.alive || e.stateT > this.wrapMaxT || e.status.stunned()) {
       this.releaseWrap(e, false);
       return;
     }
@@ -849,10 +1137,153 @@ export class Enemies implements EnemyApi {
     }
   }
 
+  // ------------------------------------------------------------- skills, sockets, hazards
+  /**
+   * A move was used: song-title callout above the enemy + event `enemySkill` ({ title, enemy, pos, tier }).
+   * Busy packs are de-duplicated (same title nearby within 2.2 s); alphas always call it and ribbon-toast it.
+   */
+  skill(e: Enemy, title: string, time = this.now, force = false) {
+    const ctx = this.ctx;
+    const camD = ctx.camera.position.distanceTo(e.pos);
+    const tier: 'normal' | 'elite' | 'alpha' = e.alpha ? 'alpha' : e.def.hp >= 120 ? 'elite' : 'normal';
+    const pos = { x: e.pos.x, y: e.pos.y + e.height * e.scale * 0.5 + 0.35 + (e.skel === 'snake' ? 0.6 : 0), z: e.pos.z };
+    ctx.events.emit('enemySkill', { title, enemy: e, pos, tier });
+    if (camD > 38 && !force) return;
+    const prev = this.recentTitles.get(title);
+    if (!force && tier === 'normal' && prev && time - prev.t < 2.2 && Math.hypot(prev.x - e.pos.x, prev.z - e.pos.z) < 12) return;
+    if (!force && tier === 'normal' && this.callouts.active >= 5) return;
+    this.recentTitles.set(title, { t: time, x: e.pos.x, z: e.pos.z });
+    this.callout(title, pos, tier);
+    if (this.skillToasts && e.alpha && time - this.lastTitleT > 2.6) {
+      this.lastTitleT = time;
+      ctx.toast(title.toUpperCase(), '#ff8a4a', e.name);
+    }
+  }
+
+  /** show a song-title callout at a world point (bosses use this too: tier 'boss') */
+  callout(title: string, pos: { x: number; y: number; z: number }, tier: 'normal' | 'elite' | 'alpha' | 'boss' = 'normal') {
+    const col = tier === 'boss' ? '#ff5a3a' : tier === 'alpha' ? '#ff8a4a' : tier === 'elite' ? '#ffb070' : '#ffd36b';
+    this.callouts.show(title.toUpperCase(), col, pos.x, pos.y, pos.z);
+  }
+
+  /** world position of a rig socket in the enemy's current pose */
+  socketWorld(e: Enemy, name: string, out: THREE.Vector3): THREE.Vector3 | null {
+    const s = e.batch.geo.sockets[name];
+    if (!s) return null;
+    const W = this.poseWorld(e);
+    return out.copy(s.offset).applyMatrix4(W[s.part]);
+  }
+
+  /** thorny devil: twin squirts of blood from the corners of both eyes (acid blood for alphas) */
+  private squirt(e: Enemy, a: AttackDef, dmg: number, target: THREE.Vector3) {
+    const ctx = this.ctx;
+    const n = a.count ?? 10;
+    const per = Math.max(1, Math.ceil(n / 2));
+    const fx = Math.sin(e.yaw), fz = Math.cos(e.yaw);
+    const W = this.poseWorld(e);
+    const socks = e.batch.geo.sockets;
+    let i = 0;
+    for (const side of [1, -1]) {
+      const s = socks[side > 0 ? 'eye_tip_l' : 'eye_tip_r'];
+      const from = new THREE.Vector3();
+      if (s) from.copy(s.offset).applyMatrix4(W[s.part]);
+      else from.set(e.pos.x + fx * e.radius + fz * 0.12 * side, e.pos.y + e.height * 0.85, e.pos.z + fz * e.radius - fx * 0.12 * side);
+      this.proj.pattern('stream', from, target, { count: per, speed: a.speed, spread: 0.1 * side, dmg, proj: 'blood', status: a.status as any, sourceId: e.id, acid: e.alpha, delay: i * 0.03 });
+      // the eye spurts: a fine red mist and fat droplets right at the socket
+      ctx.particles.emit({ pos: from, count: 6, vel: { x: fx * 2.4, y: 1.3, z: fz * 2.4 }, spread: 1.2, life: [0.15, 0.45], size: [0.07, 0.03], sprite: ['dot3', 'blood0', 'blood1'], color: e.alpha ? [0xc81e1e, 0x9dff3a, 0xb8f05c] : [0xc81e1e, 0x9a1010, 0xe03a2a], gravity: 9, drag: 2 });
+      i++;
+    }
+    ctx.sfx('gore_splat', e.pos, 0.55, 1.45);
+    if (e.alpha) ctx.sfx('poison_burst', e.pos, 0.35, 1.4);
+  }
+
+  /** the rattle: dust shivers off the tail tip while a bell snake coils */
+  private rattleDust(e: Enemy) {
+    const p = this.socketWorld(e, 'rattle_tip', _v);
+    if (!p) return;
+    this.ctx.particles.emit({ pos: { x: p.x, y: p.y, z: p.z }, count: 2, spread: 1.4, up: 0.8, life: [0.2, 0.45], size: [0.05, 0.025], sprite: ['dot3', 'grain0'], color: [0xe0c08a, 0xc9a06a, 0xf0d6a2], gravity: 8, drag: 1.5, jitter: 0.12 });
+  }
+
+  /** a lingering pool of acid: damages the hunter standing in it (and enemies, if hurtsEnemies) */
+  addHazard(x: number, z: number, r: number, dur: number, dps: number, owner = 0, hurtsEnemies = false) {
+    if (this.hazards.length >= 24) this.hazards.shift();
+    this.hazards.push({ x, z, r, t: 0, dur, dps, tick: 0.2, owner, hurtsEnemies });
+    this.ctx.events.emit('groundMark', x, z, r, 3);
+  }
+
+  private updateHazards(dt: number) {
+    const ctx = this.ctx;
+    const pl = this.player;
+    for (let i = this.hazards.length - 1; i >= 0; i--) {
+      const h = this.hazards[i];
+      h.t += dt;
+      if (h.t >= h.dur) {
+        this.hazards.splice(i, 1);
+        continue;
+      }
+      const fade = Math.min(1, (h.dur - h.t) / 0.8);
+      // fizz: bubbles pop all over the surface, droplets spit, sickly fumes curl up
+      if (rnd.chance(Math.min(1, dt * (5 + h.r * h.r * 3) * fade))) {
+        const a = rnd.next() * Math.PI * 2, rr = Math.sqrt(rnd.next()) * h.r * 0.9;
+        const x = h.x + Math.cos(a) * rr, z = h.z + Math.sin(a) * rr;
+        const p = { x, y: ctx.world.groundAt(x, z) + 0.06, z };
+        ctx.particles.emit({ pos: p, count: 1, spread: 0.15, up: 0.5, life: [0.3, 0.6], size: [0.07, 0.02], sprite: 'bubble', color: 0xffffff, gravity: -0.6 });
+        if (rnd.chance(0.3)) ctx.particles.emit({ pos: p, count: 1, vel: { x: 0, y: 0.45, z: 0 }, spread: 0.2, life: [0.8, 1.5], size: [0.16, 0.6], sprite: ['puff0', 'puff1'], color: [0x9dcf4a, 0x7fae3a, 0xb8e070], alpha: 0.35, drag: 1.5, rot: 6, rotSpeed: 0.4 });
+        if (rnd.chance(0.25)) ctx.particles.emit({ pos: p, count: 2, spread: 0.7, up: 1.3, life: [0.25, 0.5], size: [0.05, 0.02], sprite: 'dot3', color: [0xc8ff5a, 0x9dff3a, 0x6ec02a], gravity: 12, ground: true });
+      }
+      h.tick -= dt;
+      if (h.tick > 0) continue;
+      h.tick = 0.4;
+      const gy = ctx.world.groundAt(h.x, h.z);
+      if (pl.alive && Math.hypot(pl.pos.x - h.x, pl.pos.z - h.z) < h.r && pl.pos.y < gy + 1.3) {
+        const dealt = pl.takeHit({ base: h.dps * 0.4, kind: 'magic', source: 'poison' }, new THREE.Vector3(h.x, gy, h.z));
+        if (dealt > 0) pl.status.apply('poison', 1, 3, 2, 30, {});
+        if (rnd.chance(0.5)) ctx.sfx('poison_tick', pl.pos, 0.5);
+      }
+      if (h.hurtsEnemies)
+        for (const o of this.list) {
+          if (!o.alive || o.id === h.owner || o.flying || o.state === 'burrow' || o.state === 'hidden') continue;
+          if (Math.hypot(o.pos.x - h.x, o.pos.z - h.z) < h.r + o.radius * 0.5) this.damage(o, { base: h.dps * 0.24, kind: 'magic', source: 'poison', canCrit: false });
+        }
+    }
+  }
+
+  /** pack bookkeeping: evenly spaced flank slots + a couple of bite tokens for the closest ready wolves */
+  private organisePacks(ppos: THREE.Vector3) {
+    const wolves: Enemy[] = [];
+    for (const e of this.list) if (e.alive && e.def.ai === 'pack' && e.state !== 'spawn' && !e.focus) wolves.push(e);
+    if (!wolves.length) return;
+    wolves.sort((a, b) => a.id - b.id);
+    const n = wolves.length;
+    wolves.forEach((w, i) => (w.slot = n === 1 ? 0.5 : i / (n - 1)));
+    const tokens = n >= 5 ? 3 : 2;
+    const ready = wolves.filter((w) => Math.min(w.cds[0] ?? 9, w.cds[1] ?? 9) <= 0.15 || w.state !== 'move');
+    ready.sort((a, b) => a.pos.distanceToSquared(ppos) - b.pos.distanceToSquared(ppos));
+    for (const w of wolves) w.biteToken = false;
+    // wolves already mid-attack keep theirs; the rest go to the nearest ready ones
+    let used = 0;
+    for (const w of wolves) if (w.state !== 'move') {
+      w.biteToken = true;
+      used++;
+    }
+    for (const w of ready) {
+      if (used >= tokens) break;
+      if (w.biteToken) continue;
+      w.biteToken = true;
+      used++;
+    }
+    for (const e of this.list) if (e.def.ai === 'pack' && e.focus) e.biteToken = true;
+  }
+
   // ------------------------------------------------------------- AI
-  private think(e: Enemy, dt: number, time: number, ppos: THREE.Vector3) {
+  private think(e: Enemy, dt: number, time: number, hunter: THREE.Vector3) {
     const ctx = this.ctx;
     const d = e.def;
+    // escort harassers go for their focus (an NPC) instead of the hunter
+    if (e.focus && !e.focus.alive) e.focus = null;
+    const foc = e.focus;
+    const ppos = foc ? foc.pos : hunter;
+    const pvel = foc ? ZERO : this.player.board.vel;
     const toX = ppos.x - e.pos.x, toZ = ppos.z - e.pos.z;
     const dist = Math.hypot(toX, toZ) || 1e-3;
     const buff = e.buffT > 0 ? 1.3 : 1;
@@ -919,17 +1350,40 @@ export class Enemies implements EnemyApi {
     }
     // ---- dune worms: tunnel under the sand, erupt beneath the prey
     if (e.state === 'burrow') {
+      if (e.tremor > 0) {
+        // the sand boils in a ring right before it bursts: last chance to swerve away
+        e.tremor -= dt;
+        e.vel.multiplyScalar(Math.exp(-10 * dt));
+        e.pos.x += e.vel.x * dt;
+        e.pos.z += e.vel.z * dt;
+        const R = 1.2 + (0.55 - Math.max(0, e.tremor)) * 2.2;
+        if (rnd.chance(dt * 30)) {
+          const a = rnd.next() * Math.PI * 2;
+          ctx.fx.sandSpray({ x: e.pos.x + Math.cos(a) * R, y: ground + 0.05, z: e.pos.z + Math.sin(a) * R }, { x: Math.cos(a) * 0.8, y: 1.6, z: Math.sin(a) * 0.8 }, 1.3);
+        }
+        if (rnd.chance(dt * 6)) ctx.events.emit('groundMark', e.pos.x, e.pos.z, R * 0.6, 1);
+        if (e.tremor <= 0) {
+          e.tremor = 0;
+          e.state = 'erupt';
+          e.stateT = 0;
+          ctx.fx.sandBurst({ x: e.pos.x, y: ground, z: e.pos.z }, 1.6);
+          ctx.sfx('sand_burst', e.pos, 0.9);
+          if (dist < 9) ctx.shake(0.22);
+          const t = d.moveTitles?.erupt;
+          if (t) this.skill(e, t, time);
+        }
+        e.pos.y = ground;
+        return;
+      }
       if (e.stateT > 0.6) {
         const s = d.speed * 1.5 * e.spdMul;
         this.move(e, (toX / dist) * s, (toZ / dist) * s, dt, ground, face);
         if (rnd.chance(dt * 16)) ctx.fx.sandSpray({ x: e.pos.x, y: ground + 0.05, z: e.pos.z }, { x: -e.vel.x * 0.06, y: 0.9, z: -e.vel.z * 0.06 }, 1.1);
         if (rnd.chance(dt * 5)) ctx.events.emit('groundMark', e.pos.x, e.pos.z, 0.55, 1);
         if ((dist < 3.6 && e.stateT > 1.4) || e.stateT > 7) {
-          e.state = 'erupt';
-          e.stateT = 0;
-          ctx.fx.sandBurst({ x: e.pos.x, y: ground, z: e.pos.z }, 1.6);
-          ctx.sfx('sand_burst', e.pos, 0.9);
-          if (dist < 9) ctx.shake(0.22);
+          e.tremor = 0.55;
+          ctx.sfx('quake_rumble', e.pos, 0.55, 1.4);
+          if (dist < 12) ctx.shake(0.1);
         }
       } else {
         e.vel.multiplyScalar(Math.exp(-5 * dt));
@@ -944,7 +1398,13 @@ export class Enemies implements EnemyApi {
       e.pos.y = ground;
       if (e.stateT >= 0.3 && e.stateT - dt < 0.3) {
         ctx.fx.sandBurst({ x: e.pos.x, y: ground, z: e.pos.z }, 1.2);
-        if (dist < 2.8 + e.radius && Math.abs(ppos.y - e.pos.y) < 2.5) this.player.takeHit({ base: (d.attacks[0]?.dmg ?? 14) * e.dmgMul * 1.25, kind: 'phys', source: 'contact', knock: 9, status: [{ id: 'bleed', stacks: 2, dur: 3 }] }, e.pos);
+        const hd = Math.hypot(hunter.x - e.pos.x, hunter.z - e.pos.z);
+        if (hd < 2.8 + e.radius && Math.abs(hunter.y - e.pos.y) < 2.5) {
+          const dealt = this.player.takeHit({ base: (d.attacks[0]?.dmg ?? 14) * e.dmgMul * 1.25, kind: 'phys', source: 'contact', knock: 9, status: [{ id: 'bleed', stacks: 2, dur: 3 }] }, e.pos);
+          if (dealt > 0) this.player.board.impulse.y += 6;
+        }
+        if (foc && Math.hypot(foc.pos.x - e.pos.x, foc.pos.z - e.pos.z) < 2.8 + e.radius + foc.radius) foc.hurt((d.attacks[0]?.dmg ?? 14) * e.dmgMul * 1.25, e.pos, 'contact');
+        if (e.alpha) this.proj.pattern('ring', _v.set(e.pos.x, ground + 0.8, e.pos.z), hunter, { count: 14, speed: 10, dmg: 6 * e.dmgMul, proj: 'sand', sourceId: e.id });
       }
       if (e.stateT > 0.9) {
         e.state = 'move';
@@ -967,6 +1427,7 @@ export class Enemies implements EnemyApi {
       e.vel.multiplyScalar(Math.exp(-8 * dt));
       if (a.kind === 'snipe') this.drawLaser(e, ppos, e.stateT / a.windup);
       if (a.kind === 'explode') e.flash = Math.sin(e.stateT * 40) > 0 ? 0.8 : 0;
+      if (d.ai === 'constrictor' && rnd.chance(dt * 18)) this.rattleDust(e);
       if (e.stateT >= a.windup * (a.kind === 'melee' ? 1 / buff : 1)) this.strike(e, a, ppos, dist);
       if (!e.flying) e.pos.y = ground;
       return;
@@ -1001,10 +1462,10 @@ export class Enemies implements EnemyApi {
       return;
     }
     if (e.state === 'leap' || e.state === 'dive') {
-      const T = e.state === 'leap' ? 0.75 : 1.1;
+      const T = e.state === 'leap' ? e.leapDur : 1.1;
       const k = clamp(e.stateT / T, 0, 1);
       e.pos.lerpVectors(e.leapFrom, e.leapTo, k);
-      const arcH = d.ai === 'leaper' ? 4.5 : d.ai === 'constrictor' ? 1.1 : 1.8;
+      const arcH = d.ai === 'leaper' ? 4.5 : d.ai === 'constrictor' ? 1.5 : 1.8;
       e.pos.y = (e.state === 'leap' ? Math.max(ground, e.leapFrom.y + (e.leapTo.y - e.leapFrom.y) * k) + Math.sin(k * Math.PI) * arcH : e.leapFrom.y + (e.leapTo.y - e.leapFrom.y) * k + Math.sin(k * Math.PI) * -1.5);
       if (k >= 1) {
         e.state = 'recover';
@@ -1017,11 +1478,13 @@ export class Enemies implements EnemyApi {
           if (this.player.pos.distanceTo(e.pos) < 3.2) this.player.takeHit({ base: (e.atk?.dmg ?? 15) * e.dmgMul, kind: 'phys', source: 'contact', knock: 8, status: [{ id: 'bleed', stacks: 2, dur: 3 }] }, e.pos);
         }
         if (e.state === 'recover' && d.ai === 'constrictor') {
-          ctx.fx.sandBurst(p, 0.8);
+          ctx.fx.sandBurst(p, 1.1);
+          ctx.shake(Math.max(0, 0.3 - this.player.pos.distanceTo(e.pos) * 0.02));
           const pd = this.player.pos.distanceTo(e.pos);
-          if (pd < 2.6 && this.player.alive && !this.wrapping) this.startWrap(e);
+          if (pd < 2.6 && this.player.alive && !this.wrapping && !foc) this.startWrap(e, time);
           else if (pd < 3.2) this.player.takeHit({ base: (e.atk?.dmg ?? 15) * e.dmgMul, kind: 'phys', source: 'contact', knock: 6, status: [{ id: 'poison', stacks: 3, dur: 4 }] }, e.pos);
         }
+        if (e.state === 'recover' && foc && foc.pos.distanceTo(e.pos) < 2.4 + foc.radius) foc.hurt((e.atk?.dmg ?? 15) * e.dmgMul, e.pos, 'leap');
       }
       return;
     }
@@ -1037,8 +1500,8 @@ export class Enemies implements EnemyApi {
       case 'leaper': {
         // lead target a bit; swarm orbits a little
         const lead = 0.35;
-        const tx = ppos.x + this.player.board.vel.x * lead + (d.ai === 'swarm' ? Math.cos(time * 2 + e.targetOff) * 2 : 0);
-        const tz = ppos.z + this.player.board.vel.z * lead + (d.ai === 'swarm' ? Math.sin(time * 2 + e.targetOff) * 2 : 0);
+        const tx = ppos.x + pvel.x * lead + (d.ai === 'swarm' ? Math.cos(time * 2 + e.targetOff) * 2 : 0);
+        const tz = ppos.z + pvel.z * lead + (d.ai === 'swarm' ? Math.sin(time * 2 + e.targetOff) * 2 : 0);
         const dx = tx - e.pos.x, dz = tz - e.pos.z;
         const l = Math.hypot(dx, dz) || 1;
         wantX = (dx / l) * spd;
@@ -1112,13 +1575,14 @@ export class Enemies implements EnemyApi {
         break;
       }
       case 'pack': {
-        // flank: circle toward the side/back of where the prey is heading, then dart in to bite
-        const pv = this.player.board.vel;
+        // flank: the pack spreads over the rear arc of where the prey is heading (evenly spaced
+        // slots), circles at a distance, and only the wolves holding a bite token dart in
+        const pv = pvel;
         const pvl = Math.hypot(pv.x, pv.z);
         const heading = pvl > 2 ? Math.atan2(pv.x, pv.z) : Math.atan2(-toX, -toZ);
-        const slot = (e.targetOff / Math.PI - 1) * 1.25;
-        const ang = heading + Math.PI + slot + Math.sin(time * 0.6 + e.quirk * 7) * 0.4;
-        const biteReady = e.cds[0] <= 0;
+        const slot = (e.slot - 0.5) * 2.6;
+        const ang = heading + Math.PI + slot + Math.sin(time * 0.6 + e.quirk * 7) * 0.25;
+        const biteReady = e.cds[0] <= 0 && e.biteToken;
         const R = biteReady ? 1.5 : 7 + Math.sin(time * 0.9 + e.quirk * 5) * 1.5;
         const tx = ppos.x + Math.sin(ang) * R + pv.x * 0.35, tz = ppos.z + Math.cos(ang) * R + pv.z * 0.35;
         const dx = tx - e.pos.x, dz = tz - e.pos.z;
@@ -1193,17 +1657,20 @@ export class Enemies implements EnemyApi {
         if (e.cds[k] > 0) continue;
         if (a.alphaOnly && !e.alpha) continue;
         if (dist > range(a) || dist < (a.minRange ?? 0)) continue;
-        if (a.kind !== 'melee' && a.kind !== 'explode' && a.kind !== 'aura' && a.kind !== 'music' && !this.lineOfSight(e, ppos)) continue;
+        // the pack takes turns: only token holders commit to a bite or a pounce
+        if (d.ai === 'pack' && a.kind !== 'howl' && !e.biteToken) continue;
+        if (foc && a.kind === 'leap' && d.ai === 'constrictor') continue; // snakes only coil around the hunter
+        if (a.kind !== 'melee' && a.kind !== 'explode' && a.kind !== 'aura' && a.kind !== 'music' && a.kind !== 'howl' && !this.lineOfSight(e, ppos)) continue;
         e.cds[k] = a.cooldown * (0.85 + rnd.next() * 0.3);
         e.atk = a;
         e.state = 'windup';
         e.stateT = 0;
-        if (a.title) {
-          const elite = e.alpha || d.hp >= 120;
-          if (time - this.lastTitleT > 2.6 && rnd.chance(e.alpha ? 0.85 : elite ? 0.4 : 0.04) && dist < 40) {
-            this.lastTitleT = time;
-            ctx.toast(a.title.toUpperCase(), e.alpha ? '#ff8a4a' : elite ? '#ffb070' : '#ffd36b', e.name);
-          }
+        if (a.title) this.skill(e, a.title, time);
+        if (d.ai === 'constrictor' && a.kind === 'leap') {
+          // the rattle: a red warning ring where it means to land, dust shaking off the tail
+          const gy = ctx.world.groundAt(ppos.x, ppos.z);
+          ctx.fx.ring({ x: ppos.x + pvel.x * 0.4, y: gy + 0.15, z: ppos.z + pvel.z * 0.4 }, 0xff4a2a, 5.5, a.windup);
+          ctx.sfx('giant_scorpion_hiss', e.pos, 0.55, 1.5);
         }
         e.squash.kick(a.kind === 'melee' ? 5 : 3);
         if (a.kind === 'melee' || a.kind === 'explode' || a.kind === 'charge' || a.kind === 'leap') {
@@ -1271,23 +1738,37 @@ export class Enemies implements EnemyApi {
 
   private strike(e: Enemy, a: AttackDef, ppos: THREE.Vector3, dist: number) {
     const ctx = this.ctx;
+    const foc = e.focus;
     e.state = 'strike';
     e.stateT = 0;
     e.glow = 0;
     this.clearTelegraph(e);
     const dmg = a.dmg * e.dmgMul * (e.buffT > 0 ? 1.2 : 1);
     const from = new THREE.Vector3(e.pos.x + Math.sin(e.yaw) * e.radius, e.pos.y + e.height * 0.7, e.pos.z + Math.cos(e.yaw) * e.radius);
-    const target = this.player.center(new THREE.Vector3());
+    // snakes and worms spit from the mouth
+    if ((e.skel === 'snake' || e.skel === 'worm') && e.batch.geo.sockets['mouth']) this.socketWorld(e, 'mouth', from);
+    const target = foc ? new THREE.Vector3(foc.pos.x, foc.pos.y + foc.height * 0.6, foc.pos.z) : this.player.center(new THREE.Vector3());
+    const pvel = foc ? ZERO : this.player.board.vel;
+    // alpha thorny devils and alpha bell snakes carry acid in everything they throw
+    const acid = e.alpha && (e.def.id === 'thornyLizard' || e.def.id === 'bellSnake');
     e.squash.kick(-6);
     switch (a.kind) {
       case 'melee':
         ctx.sfx('melee_whoosh', e.pos, 0.6);
-        if (dist < a.range + 0.7 && Math.abs(ppos.y - e.pos.y) < 2) {
+        if (foc) {
+          if (dist < a.range + 0.7 + foc.radius) foc.hurt(dmg, e.pos, 'melee');
+        } else if (dist < a.range + 0.7 && Math.abs(ppos.y - e.pos.y) < 2) {
           const dealt = this.player.takeHit({ base: dmg, kind: 'phys', source: 'contact', knock: 5, status: a.status as any }, e.pos);
           if (dealt > 0 && rnd.chance(0.3)) {
             e.anim.tauntT = 0;
             e.anim.tauntKind = rnd.chance(0.5) ? 2 : 0;
           }
+        }
+        if (acid) {
+          // the bite sprays acid in a short fan in front of the jaws
+          const fx = Math.sin(e.yaw), fz = Math.cos(e.yaw);
+          const bx = e.pos.x + fx * (e.radius + 0.7), bz = e.pos.z + fz * (e.radius + 0.7);
+          this.proj.acidSplash(bx, ctx.world.groundAt(bx, bz) + 0.1, bz, dmg * 0.8, false, e.id);
         }
         break;
       case 'burst':
@@ -1298,22 +1779,40 @@ export class Enemies implements EnemyApi {
       case 'lob':
       case 'snipe':
       case 'stream':
-        if (a.kind === 'stream') {
-          // squirted from the eyes
-          from.set(e.pos.x + Math.sin(e.yaw) * e.radius * 1.1, e.pos.y + e.height * 0.85, e.pos.z + Math.cos(e.yaw) * e.radius * 1.1);
-          ctx.sfx('gore_splat', from, 0.5, 1.4);
+        if (a.kind === 'stream' && e.skel === 'lizard') {
+          this.squirt(e, a, dmg, target);
+          break;
         }
-        this.proj.pattern(a.kind, from, target, { count: a.count, spread: a.spread, speed: a.speed, dmg, proj: a.proj, status: a.status as any, sourceId: e.id });
+        if (a.kind === 'stream') ctx.sfx('gore_splat', from, 0.5, 1.4);
+        this.proj.pattern(a.kind, from, target, { count: a.count, spread: a.spread, speed: a.speed, dmg, proj: a.proj, status: a.status as any, sourceId: e.id, acid });
+        if (e.skel === 'snake' && a.kind === 'lob') ctx.sfx('giant_scorpion_hiss', from, 0.7, 1.35);
         if (a.kind !== 'stream') ctx.fx.muzzle(from, { x: Math.sin(e.yaw), y: 0, z: Math.cos(e.yaw) }, 0xffd090);
         if (a.kind !== 'stream') ctx.sfx(a.proj === 'bullet' ? (a.kind === 'fan' && (a.count ?? 1) > 6 ? 'shotgun_shot' : a.kind === 'snipe' ? 'rifle_shot' : 'enemy_shot') : a.proj === 'arrow' ? 'whoosh' : 'whoosh', from, 0.7);
         break;
       case 'leap':
         e.state = 'leap';
+        e.leapDur = e.def.ai === 'constrictor' ? 0.6 : 0.75;
         e.leapFrom.copy(e.pos);
-        e.leapTo.set(ppos.x + this.player.board.vel.x * 0.4, 0, ppos.z + this.player.board.vel.z * 0.4);
+        e.leapTo.set(ppos.x + pvel.x * 0.4, 0, ppos.z + pvel.z * 0.4);
         e.leapTo.y = ctx.world.groundAt(e.leapTo.x, e.leapTo.z);
         ctx.sfx(e.def.ai === 'constrictor' ? 'giant_scorpion_hiss' : 'jackal_attack', e.pos, 0.8, e.def.ai === 'constrictor' ? 1.3 : 1);
+        if (e.def.ai === 'constrictor') ctx.sfx('whoosh_big', e.pos, 0.7, 1.2);
         break;
+      case 'howl': {
+        // the alpha throws its head back: the pack answers, faster and hungrier, and pounces at once
+        ctx.sfx('jackal_howl', e.pos, 1, 0.82);
+        ctx.fx.dust({ x: e.pos.x, y: e.pos.y + 0.3, z: e.pos.z }, 1.2, P.sand0, 4);
+        ctx.shake(0.1);
+        e.buffT = Math.max(e.buffT, 5);
+        let answered = 0;
+        for (const o of this.list) {
+          if (o === e || !o.alive || o.def.ai !== 'pack' || o.pos.distanceTo(e.pos) > (a.radius ?? 20)) continue;
+          o.buffT = Math.max(o.buffT, 5);
+          for (let k = 0; k < o.cds.length; k++) o.cds[k] = Math.min(o.cds[k], 0.4 + rnd.next() * 0.8);
+          if (answered++ < 3) ctx.engine.tweens.after(0.25 + rnd.next() * 0.6, () => o.alive && ctx.sfx('jackal_howl', o.pos, 0.5, 1.05 + rnd.next() * 0.2));
+        }
+        break;
+      }
       case 'charge':
         e.state = 'charge';
         e.yaw = Math.atan2(ppos.x - e.pos.x, ppos.z - e.pos.z);
@@ -1497,6 +1996,8 @@ export class Enemies implements EnemyApi {
     this.dying.length = 0;
     this.wrapping = null;
     this.rag.length = 0;
+    this.hazards.length = 0;
+    this.callouts.clear();
     this.proj.clear();
   }
 }
