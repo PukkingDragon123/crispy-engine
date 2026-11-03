@@ -142,6 +142,20 @@ export class Input {
     }
   }
 
+  /** virtual key/button injection (touch controls) */
+  press(code: string) {
+    if (!this.down.has(code)) this.pressed.add(code);
+    this.down.add(code);
+    this.anyKeyPressed = true;
+  }
+  release(code: string) {
+    if (!this.down.has(code)) return;
+    this.down.delete(code);
+    this.released.add(code);
+  }
+  /** touch devices: no pointer lock, look comes from the touch layer */
+  touchMode = false;
+
   isDown(code: string) {
     return this.down.has(code);
   }

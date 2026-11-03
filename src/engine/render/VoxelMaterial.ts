@@ -24,6 +24,24 @@ export type VoxelMaterial = THREE.MeshStandardMaterial & {
   userData: { fx: { value: THREE.Vector4 }; tint: { value: THREE.Color }; emissiveStrength: { value: number } };
 };
 
+/**
+ * Anime cel shading for any MeshStandard-based shader: a two-tone sun ramp with
+ * a soft terminator and crisp shadow edges. Ambient (IBL + hemisphere) is left
+ * smooth so the shade tone keeps the sky's colour.
+ */
+const CEL_FUNCS = /* glsl */ `
+float celRamp(float x){ return smoothstep(0.0, 0.09, x) * 0.84 + smoothstep(0.5, 0.64, x) * 0.16; }
+float celShadow(float s){ return smoothstep(0.4, 0.6, s); }
+`;
+const SHADOW_LINE = 'directLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;';
+export const CEL = { enabled: true };
+export function celify(shader: { fragmentShader: string }) {
+  if (!CEL.enabled) return;
+  const lp = THREE.ShaderChunk.lights_physical_pars_fragment.replace('vec3 irradiance = dotNL * directLight.color;', 'vec3 irradiance = celRamp( dotNL ) * directLight.color;');
+  const lb = THREE.ShaderChunk.lights_fragment_begin.replace(SHADOW_LINE, SHADOW_LINE.replace('? getShadow(', '? celShadow( getShadow(').replace(' : 1.0;', ' ) : 1.0;'));
+  shader.fragmentShader = shader.fragmentShader.replace('#include <lights_physical_pars_fragment>', CEL_FUNCS + lp).replace('#include <lights_fragment_begin>', lb);
+}
+
 export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
   const m = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -150,8 +168,9 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
           totalEmissiveRadiance += diffuseColor.rgb * vec3(1.0, 0.82, 0.58) * rim * uRim;
         }`
       );
+    celify(shader);
   };
-  m.customProgramCacheKey = () => 'voxel-mat-v2-' + sway.toFixed(3);
+  m.customProgramCacheKey = () => 'voxel-mat-v3cel-' + sway.toFixed(3);
   m.envMapIntensity = 1.0;
   return m;
 }

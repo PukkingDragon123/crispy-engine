@@ -5,6 +5,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { Pass, FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 
 const GradeShader = {
   uniforms: {
@@ -97,19 +98,92 @@ const GradeShader = {
     }`,
 };
 
+/**
+ * Anime ink outlines from depth discontinuities: silhouettes against the world
+ * get a dark line, tiny voxel steps don't (threshold is relative to depth).
+ * Lines thin out and fade with distance so far terrain stays clean.
+ */
+export class OutlinePass extends Pass {
+  material: THREE.ShaderMaterial;
+  private quad: FullScreenQuad;
+  camera: THREE.PerspectiveCamera | null = null;
+  constructor() {
+    super();
+    this.material = new THREE.ShaderMaterial({
+      uniforms: {
+        tDiffuse: { value: null },
+        tDepth: { value: null },
+        uNear: { value: 0.1 },
+        uFar: { value: 1000 },
+        uRes: { value: new THREE.Vector2(1, 1) },
+        uColor: { value: new THREE.Color(0x150a05) },
+        uStrength: { value: 0.92 },
+        uThick: { value: 1.4 },
+      },
+      vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+      fragmentShader: /* glsl */ `
+        #include <packing>
+        uniform sampler2D tDiffuse, tDepth;
+        uniform float uNear, uFar, uStrength, uThick;
+        uniform vec2 uRes;
+        uniform vec3 uColor;
+        varying vec2 vUv;
+        float ld(vec2 uv){ return -perspectiveDepthToViewZ(texture2D(tDepth, uv).x, uNear, uFar); }
+        void main(){
+          vec4 c = texture2D(tDiffuse, vUv);
+          float d0 = ld(vUv);
+          float px = uThick / uRes.x, py = uThick / uRes.y;
+          float dm = 0.0;
+          float dl = ld(vUv + vec2(-px, 0.0)), dr = ld(vUv + vec2(px, 0.0));
+          float du = ld(vUv + vec2(0.0, py)), dd = ld(vUv + vec2(0.0, -py));
+          // only the nearer side of a depth jump gets ink (lines hug the foreground)
+          dm = max(max(dl - d0, dr - d0), max(du - d0, dd - d0));
+          // silhouettes jump metres; sand steps at grazing angles only jump a little
+          float thr = 0.45 + d0 * 0.1;
+          float e = smoothstep(thr, thr * 1.6, dm);
+          e *= 1.0 - smoothstep(90.0, 220.0, d0);
+          gl_FragColor = vec4(mix(c.rgb, uColor * c.rgb * 0.25 + uColor, e * uStrength), c.a);
+        }`,
+      depthTest: false,
+      depthWrite: false,
+    });
+    this.quad = new FullScreenQuad(this.material);
+  }
+  render(renderer: THREE.WebGLRenderer, writeBuffer: THREE.WebGLRenderTarget, readBuffer: THREE.WebGLRenderTarget) {
+    const u = this.material.uniforms;
+    u.tDiffuse.value = readBuffer.texture;
+    u.tDepth.value = readBuffer.depthTexture;
+    if (this.camera) {
+      u.uNear.value = this.camera.near;
+      u.uFar.value = this.camera.far;
+    }
+    u.uRes.value.set(readBuffer.width, readBuffer.height);
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    this.quad.render(renderer);
+  }
+  dispose() {
+    this.material.dispose();
+    this.quad.dispose();
+  }
+}
+
 export class PostStack {
   composer: EffectComposer;
   renderPass: RenderPass;
   bloom: UnrealBloomPass;
+  outline: OutlinePass;
   output: OutputPass;
   grade: ShaderPass;
   enabled = true;
 
   constructor(private renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, w: number, h: number) {
-    const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: 4 });
+    const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: 4, depthTexture: new THREE.DepthTexture(w, h) });
     this.composer = new EffectComposer(renderer, rt);
     this.renderPass = new RenderPass(scene, camera);
     this.composer.addPass(this.renderPass);
+    this.outline = new OutlinePass();
+    this.outline.camera = camera as THREE.PerspectiveCamera;
+    this.composer.addPass(this.outline);
     // bloom only catches the sun disk and true highlights (no glow haze)
     this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.07, 0.25, 1.8);
     this.composer.addPass(this.bloom);
@@ -126,6 +200,7 @@ export class PostStack {
   setSceneCamera(scene: THREE.Scene, camera: THREE.Camera) {
     this.renderPass.scene = scene;
     this.renderPass.camera = camera;
+    this.outline.camera = camera as THREE.PerspectiveCamera;
   }
 
   setSize(w: number, h: number, pixelRatio: number) {

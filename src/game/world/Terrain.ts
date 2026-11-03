@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { Heightfield, MAT } from './Heightfield';
 import { noise, hash2, clamp } from '../../engine/math/rand';
-import { globalUniforms } from '../../engine/render/VoxelMaterial';
+import { globalUniforms, celify } from '../../engine/render/VoxelMaterial';
 
 const CHUNK = 32;
 // near field: 12.5 cm sand columns (much higher voxel count), coarser rings outward
@@ -152,8 +152,9 @@ export function makeTerrainMaterial(wind: { x: number; z: number }) {
         `#include <emissivemap_fragment>
         totalEmissiveRadiance += vec3(1.0, 0.92, 0.75) * sparkle * 0.45;`
       );
+    celify(sh);
   };
-  m.customProgramCacheKey = () => 'terrain-v3';
+  m.customProgramCacheKey = () => 'terrain-v4cel';
   (m as any).userData = { uWind, uMarks, uMarkArea, uMarkClock };
   return m;
 }

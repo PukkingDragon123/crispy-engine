@@ -42,6 +42,7 @@ import type { ZoneDef } from '../world/RegionGen';
 import { SUBAREAS } from '../world/RegionGen';
 import { AnubisTrial } from './AnubisTrial';
 import { Ledger } from '../ui/Ledger';
+import { TouchControls, isTouchDevice } from '../ui/TouchControls';
 import { TrailEvents } from '../run/TrailEvents';
 import { ResultsScene } from './ResultsScene';
 import { playIntro } from './IntroCine';
@@ -119,6 +120,7 @@ export class RunScene implements GameScene {
   shop!: Shop;
   missions!: Missions;
   ledger!: Ledger;
+  touch: TouchControls | null = null;
   trailEvents!: TrailEvents;
   chests: Chest[] = [];
   scarabs: DumbScarab[] = [];
@@ -245,6 +247,11 @@ export class RunScene implements GameScene {
     this.populateZone(this.world.sa.zones[0]);
     if (this.world.sa.zones[1]) this.populateZone(this.world.sa.zones[1]);
     this.ledger = new Ledger(e.overlay, this.player.stats);
+    if (isTouchDevice()) {
+      this.touch = new TouchControls(e.overlay, e.input, this.qte);
+      e.input.lockFailed = true; // phones: no pointer lock, the touch layer drives the camera
+      e.input.setWantLock(true);
+    }
     // arriving from another sub-area: restore the run
     const cy = this.opts.carry;
     if (cy) {
@@ -311,6 +318,7 @@ export class RunScene implements GameScene {
     this.hud.dispose();
     this.choice?.dispose();
     this.ledger?.dispose();
+    this.touch?.dispose();
     this.shop?.dispose();
     this.picker?.dispose();
     this.engine.paused = false;
@@ -726,6 +734,7 @@ export class RunScene implements GameScene {
     const e = this.engine;
     this.run.time += dt;
     // pause toggle (simple until poster scene)
+    this.touch?.update(!!this.trial || this.picker.active || this.choice.active || this.shop.active || this.ledger.open || this.pausedByUser);
     if (this.trial) {
       this.qte.update(rdt);
       this.trial.update(rdt);
@@ -809,6 +818,7 @@ export class RunScene implements GameScene {
       this.lastTrack.copy(pp);
       this.hasTrack = true;
     } else this.hasTrack = false;
+    this.emitSand(dt, sp);
     // fx
     this.particles.update(dt, this.world.env.fog);
     this.debris.update(dt);
@@ -831,6 +841,40 @@ export class RunScene implements GameScene {
     this.killMarker = Math.max(0, this.killMarker - rdt);
     this.faces.end(this.world.env.fog);
     this.updateHud(rdt);
+  }
+
+  /** pixel-art sand everywhere: the board's rooster tail, grains skittering on the wind, dust motes */
+  private emitSand(dt: number, sp: number) {
+    const b = this.player.board;
+    const p = this.player.pos;
+    const pa = this.particles;
+    const SAND = [0xf0d29a, 0xe3bd80, 0xd6a968, 0xfbe6b8];
+    if (b.grounded && sp > 2.5 && b.lastSurface.kind !== 'water') {
+      const f = b.forward;
+      const side = Math.sign(b.lean || 1);
+      const carve = Math.min(1, Math.abs(b.lean) * 1.6) + (b.drifting ? 1 : 0) + (b.boosting ? 0.6 : 0);
+      const rate = Math.min(90, sp * 2.2 + carve * 40);
+      const n = Math.floor(rate * dt) + (Math.random() < (rate * dt) % 1 ? 1 : 0);
+      if (n > 0) {
+        const back = { x: p.x - f.x * 0.55, y: p.y + 0.05, z: p.z - f.z * 0.55 };
+        pa.emit({ pos: back, count: n, spread: 0.25, vel: { x: -f.x * sp * 0.22 + f.z * side * carve * 2.5, y: 1.6 + carve * 1.6 + sp * 0.04, z: -f.z * sp * 0.22 - f.x * side * carve * 2.5 }, jitter: 1.2 + carve, gravity: 9, drag: 1.2, life: [0.35, 0.8], size: [0.05, 0.11], sprite: ['dot3', 'dot3', 'puff0'], color: SAND, ground: true });
+        if (carve > 0.8 && Math.random() < dt * 14) pa.emit({ pos: back, count: 2, spread: 0.3, up: 0.8, life: [0.5, 0.9], size: [0.35, 0.6], sprite: ['puff0', 'puff1'], color: 0xe6cf9f, alpha: 0.55, drag: 2 });
+      }
+    }
+    // grains skittering along the ground with the wind
+    const w = this.world.sa.wind;
+    const wl = Math.hypot(w.x, w.z) || 1;
+    if (Math.random() < dt * 22) {
+      const a = Math.random() * Math.PI * 2, r = 3 + Math.random() * 16;
+      const x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+      pa.emit({ pos: { x, y: this.world.groundAt(x, z) + 0.06, z }, count: 3, spread: 0.6, vel: { x: (w.x / wl) * 4.5, y: 0.2, z: (w.z / wl) * 4.5 }, jitter: 0.6, gravity: 1.5, drag: 0.3, life: [0.6, 1.3], size: [0.04, 0.07], sprite: 'dot3', color: SAND, ground: true });
+    }
+    // dust motes hanging in the sun
+    if (Math.random() < dt * 5) {
+      const a = Math.random() * Math.PI * 2, r = 2 + Math.random() * 9;
+      const x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+      pa.emit({ pos: { x, y: this.world.groundAt(x, z) + 0.6 + Math.random() * 2.4, z }, count: 1, vel: { x: (w.x / wl) * 0.5, y: 0.08, z: (w.z / wl) * 0.5 }, jitter: 0.15, gravity: -0.02, drag: 0.1, life: [2.5, 4], size: [0.03, 0.05], sprite: 'dot3', color: 0xfff2d0, alpha: 0.8 });
+    }
   }
 
   postRender(renderer: THREE.WebGLRenderer) {
