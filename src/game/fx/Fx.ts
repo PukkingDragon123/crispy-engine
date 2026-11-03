@@ -9,6 +9,8 @@ type V = { x: number; y: number; z: number };
 export type HitKind = 'flesh' | 'bone' | 'armor' | 'sand' | 'rock' | 'wood' | 'poison' | 'linen' | 'chitin' | 'spirit' | 'crystal';
 
 const COMIC_WORDS = false;
+const P_BONE0 = P.bone0;
+const P_BONE1 = P.bone1;
 
 export class Fx {
   lights: { l: THREE.PointLight; t: number; dur: number; i0: number }[] = [];
@@ -87,14 +89,80 @@ export class Fx {
     this.light(pos, 0xffb860, big ? 4 : 2.2, 0.06, 7);
   }
 
+  /**
+   * The hunter's revolver: an animated pixel flash, a flame tongue thrown down
+   * the barrel, the cylinder-gap side jets every real revolver spits, sparks,
+   * hot powder embers, a smoke slug pushed out of the muzzle and a warm flash
+   * light. `inherit` = shooter velocity (smoke is dragged along a moving board).
+   */
+  revolverMuzzle(pos: V, dir: V, color = 0xfff2a0, fanned = false, inherit: V = { x: 0, y: 0, z: 0 }) {
+    const s = fanned ? 0.85 : 1;
+    const P = this.p;
+    const fp = { x: pos.x + dir.x * 0.3, y: pos.y + dir.y * 0.3, z: pos.z + dir.z * 0.3 };
+    P.emit({ pos, count: 1, life: [0.05, 0.06], size: [0.8 * s, 1.05 * s], sprite: ['flash0', 'flash1', 'flash2'], animate: true, additive: true, color, rot: 6.28, sizeJitter: 0.1 });
+    P.emit({ pos: fp, count: 1, vel: { x: dir.x * 0.5, y: dir.y * 0.5, z: dir.z * 0.5 }, life: [0.045, 0.055], size: [0.17 * s, 0.1], sprite: 'glow16', additive: true, color: 0xffd27a, stretch: 1.1, sizeJitter: 0 });
+    // cylinder gap: two little sideways jets just behind the muzzle
+    let sx = dir.z, sz = -dir.x;
+    const sl = Math.hypot(sx, sz) || 1;
+    sx /= sl;
+    sz /= sl;
+    const cyl = { x: pos.x - dir.x * 0.2, y: pos.y - dir.y * 0.2, z: pos.z - dir.z * 0.2 };
+    for (const k of [1, -1]) P.emit({ pos: cyl, count: 3, vel: { x: sx * 5 * k + inherit.x, y: 0.6 + inherit.y, z: sz * 5 * k + inherit.z }, spread: 1.2, life: [0.04, 0.09], size: [0.028, 0.01], sprite: 'spark', additive: true, color: [0xffe0a0, 0xffb860], stretch: 0.02 });
+    P.emit({ pos, count: 7, vel: { x: dir.x * 15, y: dir.y * 15, z: dir.z * 15 }, spread: 4, life: [0.06, 0.18], size: [0.032, 0.01], sprite: 'spark', additive: true, color: [0xffd070, 0xfff2a0, 0xff9a40], stretch: 0.025, drag: 5, gravity: 4 });
+    P.emit({ pos: fp, count: 4, vel: { x: dir.x * 6, y: dir.y * 6, z: dir.z * 6 }, spread: 2, life: [0.2, 0.45], size: [0.026, 0.012], sprite: 'dot3', additive: true, color: [0xffa040, 0xff7020, 0xffd070], drag: 3, gravity: 3 });
+    P.emit({ pos: fp, count: fanned ? 2 : 4, vel: { x: dir.x * 3.2 + inherit.x * 0.8, y: dir.y * 3.2 + 0.3, z: dir.z * 3.2 + inherit.z * 0.8 }, spread: 0.9, life: [0.45, 1.0], size: [0.12, 0.62], sprite: ['puff0', 'puff1', 'puff2'], color: [0xddd6ca, 0xc4bcae, 0xb0a898], alpha: 0.5, drag: 4.5, rot: 6, rotSpeed: 1.2, gravity: -0.4 });
+    this.light(pos, 0xffb050, fanned ? 4.5 : 6.5, 0.075, 10);
+  }
+
+  /**
+   * A readable bullet: a hot slug streaking at bullet speed, followed by a thin
+   * lingering wake line (short stretched segments, so it reads at any angle)
+   * that fades from the muzzle out, and a pin-prick flash where it lands.
+   */
+  bulletTracer(from: V, to: V, color = 0xfff0b0, hit = false, speed = 300) {
+    const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+    const d = Math.hypot(dx, dy, dz);
+    if (d < 0.8) return;
+    const ux = dx / d, uy = dy / d, uz = dz / d;
+    const P = this.p;
+    const s0 = 0.7;
+    P.emit({ pos: { x: from.x + ux * s0, y: from.y + uy * s0, z: from.z + uz * s0 }, count: 1, vel: { x: ux * speed, y: uy * speed, z: uz * speed }, life: [(d - s0) / speed, (d - s0) / speed], size: [0.055, 0.045], sprite: 'streak', additive: true, color: 0xfffbe8, stretch: 0.012, sizeJitter: 0 });
+    const seg = Math.min(4, Math.max(1.4, d / 14));
+    const n = Math.min(18, Math.floor((d - 1.2) / seg));
+    const v = 0.01;
+    for (let i = 0; i < n; i++) {
+      const c = 1.2 + i * seg + seg * 0.5;
+      const fade = 1 - (i / Math.max(1, n)) * 0.45;
+      P.emit({ pos: { x: from.x + ux * c, y: from.y + uy * c, z: from.z + uz * c }, count: 1, vel: { x: ux * v, y: uy * v, z: uz * v }, life: [0.15 + fade * 0.06, 0.15 + fade * 0.06], size: [0.02, 0.006], sprite: 'glow8', additive: true, color, alpha: 0.5 * fade, stretch: (seg * 1.08) / v, sizeJitter: 0, delay: c / speed });
+    }
+    if (hit) P.emit({ pos: to, count: 1, life: [0.05, 0.06], size: [0.3, 0.05], sprite: 'glow16', additive: true, color: 0xfff2c0, sizeJitter: 0, delay: d / speed });
+  }
+
+  /** barrel smoke: thin wisps curling off a hot muzzle (rate = wisps/s) */
+  barrelSmoke(pos: V, inherit: V, heat: number) {
+    this.p.emit({ pos, count: 1, vel: { x: inherit.x * 0.85, y: inherit.y * 0.5 + 0.25, z: inherit.z * 0.85 }, spread: 0.18, life: [0.6, 1.2], size: [0.035, 0.22 + heat * 0.08], sprite: ['puff0', 'puff1', 'puff2', 'puff3'], color: [0xe8e2d8, 0xcfc8bc, 0xbdb4a6], alpha: Math.min(0.42, 0.16 + heat * 0.14), drag: 2.4, gravity: -0.9, rot: 6, rotSpeed: 1.6, fadeIn: 0.08 });
+  }
+
+  /** headshot pop: a white-hot crack of sparks and bone chips at the skull */
+  headPop(pos: V, dir: V) {
+    const P = this.p;
+    P.emit({ pos, count: 1, life: [0.06, 0.07], size: [0.5, 0.1], sprite: 'glow16', additive: true, color: 0xfff6dc, sizeJitter: 0 });
+    P.emit({ pos, count: 6, vel: { x: dir.x * 4, y: 1.5, z: dir.z * 4 }, spread: 4.5, life: [0.12, 0.3], size: [0.11, 0.02], sprite: ['star4', 'spark'], additive: true, color: [0xffffff, 0xffe8a8], drag: 3 });
+    P.emit({ pos, count: 6, vel: { x: dir.x * 3, y: 2.5, z: dir.z * 3 }, spread: 3.5, life: [0.5, 1], size: [0.05, 0.04], sprite: ['bone', 'pebble'], color: [P_BONE1, P_BONE0], gravity: 15, ground: true, bounce: 0.3, rot: 6, rotSpeed: 10 });
+  }
+
   tracer(from: V, to: V, color = 0xfff0b0, speed = 420) {
     const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
     const d = Math.hypot(dx, dy, dz) || 1;
     this.p.emit({ pos: from, count: 1, vel: { x: (dx / d) * speed, y: (dy / d) * speed, z: (dz / d) * speed }, life: [d / speed, d / speed], size: [0.035, 0.6], sprite: 'streak', additive: true, color, stretch: 0.012, sizeJitter: 0 });
   }
 
-  shells(pos: V, side: V, n = 6) {
-    this.p.emit({ pos, count: n, vel: { x: side.x * 1.5, y: 2, z: side.z * 1.5 }, spread: 1.4, life: [1.2, 1.8], size: [0.05, 0.05], sprite: 'bullet', color: 0xffffff, gravity: 14, ground: true, bounce: 0.4, rot: 6, rotSpeed: 12 });
+  /** spent brass tumbling out of an opened cylinder (+ the last of the powder smoke) */
+  shells(pos: V, side: V, n = 6, inherit: V = { x: 0, y: 0, z: 0 }) {
+    if (n <= 0) return;
+    this.p.emit({ pos, count: n, vel: { x: side.x * 1.6 + inherit.x * 0.85, y: 2.2 + inherit.y * 0.5, z: side.z * 1.6 + inherit.z * 0.85 }, spread: 1.4, life: [1.4, 2.0], size: [0.065, 0.06], sprite: 'bullet', color: 0xffffff, gravity: 14, ground: true, bounce: 0.45, rot: 6, rotSpeed: 14, sizeJitter: 0.1 });
+    this.p.emit({ pos, count: n, vel: { x: side.x * 1.2 + inherit.x * 0.85, y: 1.6, z: side.z * 1.2 + inherit.z * 0.85 }, spread: 1.6, life: [0.12, 0.3], size: [0.07, 0.01], sprite: 'star4', additive: true, color: 0xffe08a });
+    this.p.emit({ pos, count: 2, vel: { x: inherit.x * 0.85, y: 0.4, z: inherit.z * 0.85 }, spread: 0.4, life: [0.5, 0.9], size: [0.08, 0.32], sprite: ['puff1', 'puff2'], color: [0xd8d0c4, 0xbab0a4], alpha: 0.35, drag: 2.5, gravity: -0.6 });
   }
 
   hit(pos: V, normal: V, kind: HitKind, power = 1) {

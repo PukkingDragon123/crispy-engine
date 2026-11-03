@@ -110,12 +110,15 @@ export class Board {
   grapple: { x: number; y: number; z: number; len: number; active: boolean; target?: any } = { x: 0, y: 0, z: 0, len: 0, active: false };
   /** extra external acceleration this frame (knockback, explosions) */
   impulse = new THREE.Vector3();
+  // Gun-range riding: cruise and caps sit ~25% under the old racing tune so
+  // fights happen at revolver distance. Jumps, flips and tuck are untouched
+  // (vertical tuning is the same), so tricks keep their air time.
   static readonly BASE: BoardTuning = {
     gravity: 22,
-    slopeG: 15,
-    pushSpeed: 7.5,
-    pushAccel: 5.5,
-    boostAccel: 12,
+    slopeG: 12, // was 15
+    pushSpeed: 6, // was 7.5
+    pushAccel: 4.8, // was 5.5
+    boostAccel: 9.5, // was 12
     boostDrain: 0.42,
     turnRate: 3.0,
     driftTurnRate: 4.2,
@@ -123,12 +126,12 @@ export class Board {
     driftGrip: 1.4,
     jump: 7.4,
     jumpCharge: 5.2,
-    airControl: 4.5,
+    airControl: 4,
     dragLin: 0.05,
-    dragQuad: 0.0026,
+    dragQuad: 0.0034, // was 0.0026: dunes top out lower
     rolling: 0.55,
-    cap: 30,
-    boostCap: 36,
+    cap: 22, // was 30
+    boostCap: 27, // was 36
   };
   t: BoardTuning = { ...Board.BASE };
   mobilityMul = 1;
@@ -208,7 +211,7 @@ export class Board {
           // release drift charge as mini boost
           if (this.driftCharge > 0.25) {
             const p = Math.min(1, this.driftCharge / 2.2);
-            const add = 3 + p * 8;
+            const add = 2.4 + p * 6.4;
             this.vel.x += fwd.x * add;
             this.vel.z += fwd.z * add;
             this.boostMeter = Math.min(1, this.boostMeter + p * 0.12);
@@ -217,7 +220,7 @@ export class Board {
           this.driftCharge = 0;
         }
         this.drifting = drifting;
-        const spdK = clamp(spd / 30, 0, 1);
+        const spdK = clamp(spd / t.cap, 0, 1);
         const rate = (drifting ? t.driftTurnRate : t.turnRate * (1 - spdK * 0.4)) * (0.8 + 0.2 * mob) * (this.tucked ? 0.55 : 1);
         const h0 = this.heading;
         if (hasDir) this.heading = dampAngle(this.heading, desired, rate, dt * 1.0);
@@ -328,7 +331,7 @@ export class Board {
       const hn = env.surface(nx, nz, this.surf).h;
       const vyFollow = (hn - oy) / dt;
       const vyNat = this.vel.y - t.gravity * dt;
-      if (vyFollow < vyNat - 0.45 && this.speed > 8) {
+      if (vyFollow < vyNat - 0.45 && this.speed > 6.5) {
         // launch off crest
         this.grounded = false;
         this.airTime = 0;
@@ -526,8 +529,8 @@ export class Board {
       }
       if (quality === 'perfect') {
         // stomped it: a kick of speed and boost
-        this.vel.x += f.x * 2.6;
-        this.vel.z += f.z * 2.6;
+        this.vel.x += f.x * 2.1;
+        this.vel.z += f.z * 2.1;
       } else if (quality === 'sketchy') {
         this.vel.x *= 0.8;
         this.vel.z *= 0.8;

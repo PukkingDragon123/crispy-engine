@@ -33,6 +33,62 @@ const _q2 = new THREE.Quaternion();
 
 export type ReloadPhase = 'none' | 'open' | 'eject' | 'insert' | 'close';
 
+/**
+ * Aim assist. `strength` scales everything (0 = off). Mouse uses 1x, touch
+ * gets `touchMul`. It helps without driving: shots that would just miss bend
+ * onto the nearest body inside a small screen cone, the look slows over a
+ * target, the view keeps a target it is already on while riding, and entering
+ * ADS eases most of the way onto the nearest target in a wider cone.
+ */
+export const AIM_ASSIST = {
+  strength: 1,
+  /** bullet magnetism half-angle (deg) up close / at range (screen cone: far more forgiving in metres at range) */
+  coneNear: 1.0,
+  coneFar: 2.4,
+  nearDist: 6,
+  farDist: 40,
+  maxRange: 95,
+  /** share of look sensitivity removed while the reticle is on a body */
+  friction: 0.38,
+  /** share of the target's angular drift the view follows while engaged (riding past, target running) */
+  tracking: 0.32,
+  /** soft snap when entering ADS: cone (deg), share of the angle closed, time (s) */
+  adsSnap: true,
+  snapCone: 9,
+  snapPull: 0.72,
+  snapTime: 0.15,
+  touchMul: 1.7,
+};
+
+/** revolver handling */
+export const GUN_FEEL = {
+  /** hold fire this long (hip) and the palm starts fanning the hammer */
+  fanHold: 0.16,
+  /** a click this early still fires the moment the hammer is ready */
+  buffer: 0.14,
+  /** held fire while aiming: thumb-cocked aimed shots */
+  adsRepeat: 0.26,
+  /** cones (deg): aimed hip shot, fanned shot; ADS multiplier; first shot after a rest */
+  hipSpread: 0.6,
+  fanSpread: 3.4,
+  adsSpreadMul: 0.28,
+  restedMul: 0.5,
+  restTime: 0.4,
+  bloomAimed: 0.5,
+  bloomFan: 0.75,
+  bloomMax: 3.5,
+  /** view punch (rad): aimed / fanned */
+  kickPitch: 0.034,
+  kickPitchFan: 0.019,
+  /** hit-stop on a kill (s): body / head or crit */
+  killStop: 0.045,
+  killStopHead: 0.075,
+};
+
+const DEG = Math.PI / 180;
+const _o = new THREE.Vector3();
+const _pt = new THREE.Vector3();
+
 export class Player {
   board = new Board();
   stats: StatSheet;
@@ -87,7 +143,29 @@ export class Player {
   // tunables
   baseGunDamage = 18;
   fireInterval = 0.17;
-  fanInterval = 0.085;
+  fanInterval = 0.075;
+  /** current shot cone (deg), for the crosshair bloom */
+  spreadDeg = 0;
+  /**
+   * crosshair feedback, all 0..1 and decaying: hit tick, kill confirm,
+   * headshot, reticle resting on a body (aim assist friction)
+   */
+  reticle = { hit: 0, kill: 0, head: 0, sticky: 0 };
+  // gun feel state
+  private holdT = 0;
+  private shotBuffer = 0;
+  private fanCount = 0;
+  private heat = 0;
+  private smokeAcc = 0;
+  private lastFireT = -9;
+  private killStopAt = -9;
+  private shotCrit = false;
+  private lookMag = 0;
+  // aim assist state
+  private stickE: EnemyLike | null = null;
+  private stickYaw = 0;
+  private stickPitch = 0;
+  private snap: { e: EnemyLike; t: number } | null = null;
   // pose layer (skill / item actions)
   action: { name: string; t: number; dur: number } | null = null;
   /** 2D pixel eyes in the skull sockets (Serket-green embers) */
@@ -123,6 +201,16 @@ export class Player {
     this.hp = this.maxHp;
     this.ammo = Math.round(this.stats.get('ammo'));
     this.wireBoardEvents();
+    // crits are rolled inside the enemy damage resolve: listen so the shot can feel them
+    ctx.events.on('enemyHit', (_e: EnemyLike, hit: Hit, _amt: number, res: { crit?: boolean }) => {
+      if (hit?.source === 'gun' && res?.crit) this.shotCrit = true;
+    });
+  }
+
+  /** the shot cone in HUD pixels for a view `viewH` pixels tall (crosshair bloom) */
+  spreadPx(viewH: number) {
+    const half = Math.tan((this.ctx.camera.fov * DEG) / 2);
+    return (Math.tan(this.spreadDeg * DEG) / Math.max(1e-3, half)) * viewH * 0.5;
   }
 
   get maxHp() {
@@ -154,7 +242,7 @@ export class Player {
       this.ctx.fx.sandBurst(this.pos, 0.5 + charge * 0.6);
     };
     b.onLaunch = () => {
-      if (this.speed > 22) this.express('surprised', 0.6);
+      if (this.speed > 17) this.express('surprised', 0.6);
     };
     b.onLand = (l: LandingInfo) => this.onLand(l);
     b.onWall = (spd) => {
@@ -232,7 +320,11 @@ export class Player {
     if (inp.locked && this.alive) {
       const m = inp.consumeMouse();
       this.cam.mouse(m.dx, m.dy);
-    } else inp.consumeMouse();
+      this.lookMag = Math.abs(m.dx) + Math.abs(m.dy);
+    } else {
+      inp.consumeMouse();
+      this.lookMag = 0;
+    }
 
     // stats → board tuning
     this.board.mobilityMul = this.stats.get('moveSpeed');
@@ -287,7 +379,11 @@ export class Player {
     this.meleeCd -= dt;
     this.grappleCd -= dt;
     this.counterWindow = Math.max(0, this.counterWindow - dt);
-    this.spreadBloom = Math.max(0, this.spreadBloom - dt * 3);
+    this.spreadBloom = Math.max(0, this.spreadBloom - dt * (3.2 + this.cam.aim * 2));
+    const rk = this.reticle;
+    rk.hit = Math.max(0, rk.hit - dt * 8);
+    rk.kill = Math.max(0, rk.kill - dt * 4);
+    rk.head = Math.max(0, rk.head - dt * 3.5);
     // regen
     if (this.alive) this.hp = Math.min(this.maxHp, this.hp + this.stats.get('regen') * dt);
     // statuses on the player
@@ -297,16 +393,20 @@ export class Player {
       if (d > 0) this.applyDamage(d, 'status', true);
     }
 
-    // aim
-    this.aiming = inp.held('aim');
-    this.cam.aim = damp(this.cam.aim, this.aiming ? 1 : 0, 10, dt);
+    // aim (ADS on right mouse): zoom in fast, settle out a touch slower
+    const wasAiming = this.aiming;
+    this.aiming = inp.held('aim') && this.alive;
+    this.cam.aim = damp(this.cam.aim, this.aiming ? 1 : 0, this.aiming ? 14 : 9, dt);
     this.updateAim();
+    this.updateAssist(dt, this.aiming && !wasAiming);
     if (this.alive) {
       this.updateGun(dt);
       this.updateMelee(dt);
       this.updateGrapple(dt);
     }
+    this.spreadDeg = this.coneDeg(this.fanning);
     this.animate(dt);
+    this.barrelSmoke(dt);
     if (this.ctx.faces) {
       this.eyes.lookAt(this.aimPoint);
       this.eyes.draw(this.ctx.faces, dt);
@@ -329,13 +429,13 @@ export class Player {
       const back = { x: -Math.sin(b.heading), z: -Math.cos(b.heading) };
       const tail = { x: b.pos.x + back.x * 0.7, y: b.pos.y + 0.05, z: b.pos.z + back.z * 0.7 };
       const kind = b.lastSurface.kind;
-      const amt = clamp(sp / 26, 0, 1.2) * (b.drifting ? 2.2 : 1) * (kind === 'hard' ? 0.25 : 1);
+      const amt = clamp(sp / 20, 0, 1.2) * (b.drifting ? 2.2 : 1) * (kind === 'hard' ? 0.25 : 1);
       if (kind === 'water') {
         this.ctx.particles.emit({ pos: tail, count: Math.ceil(amt * 3), vel: { x: back.x * 2, y: 2.5, z: back.z * 2 }, spread: 1.5, life: [0.3, 0.6], size: [0.08, 0.05], sprite: ['dot3', 'dot4'], color: [0xe8fbff, 0x9fe6f0], gravity: 10, drag: 1 });
       } else this.ctx.fx.sandSpray(tail, { x: back.x * sp * 0.15 - Math.cos(b.heading) * b.lean * 4, y: 0, z: back.z * sp * 0.15 + Math.sin(b.heading) * b.lean * 4 }, amt * dt * 60 * 0.35);
     }
-    // speed lines at very high speed
-    this.ctx.fx.speedLines(this.ctx.camera, clamp((sp - 26) / 18, 0, 1) + (b.boosting ? 0.4 : 0));
+    // speed lines near the top of the (gun-range) speed band
+    this.ctx.fx.speedLines(this.ctx.camera, clamp((sp - 19) / 12, 0, 1) * (1 - this.cam.aim * 0.7) + (b.boosting ? 0.4 : 0));
   }
 
   // -------------------------------------------------------------------- aim
@@ -354,6 +454,205 @@ export class Player {
     this.aimHit = best;
     if (best) this.aimPoint.copy(best.point);
     else this.aimPoint.copy(o).addScaledVector(d, 120);
+  }
+
+  /** can the assist consider this enemy at all (alive, above ground, not mid-burrow) */
+  private targetable(e: EnemyLike) {
+    if (!e.alive) return false;
+    const x = e as unknown as { state?: string; anim?: { hidden?: boolean } };
+    return x.state !== 'hidden' && x.state !== 'burrow' && !x.anim?.hidden;
+  }
+
+  /**
+   * The point of an enemy's body closest to the ray (o, d), written to `out`.
+   * Upright bodies use their axis (ankle to brow); long bodies their spine
+   * spheres. Returns the angle off the ray (rad), the body's angular radius
+   * there and its distance, or null if it is behind / out of range.
+   */
+  private bodyNear(e: EnemyLike, o: THREE.Vector3, d: THREE.Vector3, out: THREE.Vector3) {
+    const long = e as unknown as { body?: Float32Array | null; bodyN?: number };
+    let r = e.radius;
+    if (long.body && long.bodyN) {
+      let best = Infinity;
+      const b = long.body;
+      for (let k = 0; k < long.bodyN; k++) {
+        const cx = b[k * 4], cy = b[k * 4 + 1], cz = b[k * 4 + 2];
+        const t = (cx - o.x) * d.x + (cy - o.y) * d.y + (cz - o.z) * d.z;
+        if (t <= 0) continue;
+        const qx = o.x + d.x * t - cx, qy = o.y + d.y * t - cy, qz = o.z + d.z * t - cz;
+        const m = (qx * qx + qy * qy + qz * qz) / (t * t);
+        if (m < best) {
+          best = m;
+          out.set(cx, cy, cz);
+          r = b[k * 4 + 3];
+        }
+      }
+      if (best === Infinity) return null;
+    } else {
+      const hz = d.x * d.x + d.z * d.z;
+      const t = hz > 1e-6 ? ((e.pos.x - o.x) * d.x + (e.pos.z - o.z) * d.z) / hz : 1;
+      if (t <= 0) return null;
+      const y = clamp(o.y + d.y * t, e.pos.y + e.height * 0.18, e.pos.y + e.height * 0.88);
+      out.set(e.pos.x, y, e.pos.z);
+    }
+    const vx = out.x - o.x, vy = out.y - o.y, vz = out.z - o.z;
+    const dist = Math.hypot(vx, vy, vz);
+    if (dist < 1.2 || dist > AIM_ASSIST.maxRange) return null;
+    const cos = (vx * d.x + vy * d.y + vz * d.z) / dist;
+    if (cos <= 0.5) return null;
+    return { ang: Math.acos(Math.min(1, cos)), angR: Math.atan(r / dist), dist, r };
+  }
+
+  private assistMul() {
+    return AIM_ASSIST.strength * (this.input.touchMode ? AIM_ASSIST.touchMul : 1);
+  }
+
+  /** look friction over a body, keeping a target you are already on, and the ADS ease-in */
+  private updateAssist(dt: number, adsEnter: boolean) {
+    const A = AIM_ASSIST;
+    const S = this.assistMul();
+    const rk = this.reticle;
+    if (S <= 0 || !this.alive) {
+      this.cam.assistSens = 1;
+      rk.sticky = 0;
+      this.stickE = null;
+      this.snap = null;
+      return;
+    }
+    const o = _o.copy(this.ctx.camera.position);
+    const d = this.ray.d;
+    const list = this.ctx.enemies.list;
+    // the body the reticle is on (or brushing)
+    let on: EnemyLike | null = null;
+    let onEdge = 0.6 * DEG;
+    let onX = 0, onY = 0, onZ = 0;
+    for (const e of list) {
+      if (!this.targetable(e)) continue;
+      const q = this.bodyNear(e, o, d, _pt);
+      if (!q) continue;
+      const edge = q.ang - q.angR;
+      if (edge < onEdge) {
+        onEdge = edge;
+        on = e;
+        onX = _pt.x;
+        onY = _pt.y;
+        onZ = _pt.z;
+      }
+    }
+    rk.sticky = damp(rk.sticky, on ? 1 : 0, on ? 14 : 8, dt);
+    this.cam.assistSens = 1 - Math.min(0.6, A.friction * S) * rk.sticky;
+    // tracking: follow a fraction of the target's angular drift (riding past it, it running)
+    const engaged = this.aiming || this.firing || this.animT - this.lastFireT < 0.6;
+    if (on) {
+      const vx = onX - o.x, vy = onY - o.y, vz = onZ - o.z;
+      const yaw = Math.atan2(vx, vz), pitch = Math.atan2(vy, Math.hypot(vx, vz));
+      if (on === this.stickE && engaged && this.lookMag < 40) {
+        const dy = wrapAngle(yaw - this.stickYaw), dp = pitch - this.stickPitch;
+        const k = Math.min(0.6, A.tracking * S);
+        if (Math.abs(dy) < 0.05 && Math.abs(dp) < 0.05) this.cam.nudge(dy * k, dp * k);
+      }
+      this.stickYaw = yaw;
+      this.stickPitch = pitch;
+    }
+    this.stickE = on;
+    // soft snap entering ADS: nearest visible target inside a wider cone
+    if (adsEnter && A.adsSnap) {
+      let best: EnemyLike | null = null;
+      let bestEdge = A.snapCone * DEG * Math.min(1.4, S);
+      for (const e of list) {
+        if (!this.targetable(e)) continue;
+        const q = this.bodyNear(e, o, d, _pt);
+        if (!q) continue;
+        const edge = q.ang - q.angR;
+        if (edge < 0 || edge >= bestEdge) continue; // already on it: nothing to do
+        _v.set(e.pos.x, e.pos.y + e.height * 0.62, e.pos.z).sub(o);
+        const L = _v.length();
+        _v.divideScalar(L);
+        if (this.ctx.world.field.raycast(o.x, o.y, o.z, _v.x, _v.y, _v.z, L - e.radius) >= 0) continue;
+        bestEdge = edge;
+        best = e;
+      }
+      this.snap = best ? { e: best, t: 0 } : null;
+    }
+    const sn = this.snap;
+    if (sn) {
+      sn.t += dt;
+      if (!this.aiming || !sn.e.alive || sn.t > A.snapTime * 1.5 || this.lookMag > 14) this.snap = null;
+      else {
+        const e = sn.e;
+        const vx = e.pos.x - o.x, vy = e.pos.y + e.height * 0.62 - o.y, vz = e.pos.z - o.z;
+        const ey = wrapAngle(Math.atan2(vx, vz) - Math.atan2(d.x, d.z));
+        const ep = Math.atan2(vy, Math.hypot(vx, vz)) - Math.asin(clamp(d.y, -1, 1));
+        const rate = -Math.log(1 - A.snapPull) / A.snapTime;
+        const k = 1 - Math.exp(-rate * dt);
+        this.cam.nudge(ey * k, ep * k);
+      }
+    }
+  }
+
+  /**
+   * Bullet magnetism: a shot that would just miss bends onto the nearest body
+   * inside a small screen cone (wider at range, tighter up close), landing on
+   * the side of the body the reticle was on. Null = leave the shot alone.
+   */
+  private magnetize(o: THREE.Vector3, d: THREE.Vector3): THREE.Vector3 | null {
+    const A = AIM_ASSIST;
+    const S = this.assistMul();
+    if (S <= 0) return null;
+    let best: EnemyLike | null = null;
+    let bestEdge = Infinity;
+    let bx = 0, by = 0, bz = 0, br = 0;
+    for (const e of this.ctx.enemies.list) {
+      if (!this.targetable(e)) continue;
+      const q = this.bodyNear(e, o, d, _pt);
+      if (!q) continue;
+      const far = clamp((q.dist - A.nearDist) / (A.farDist - A.nearDist), 0, 1);
+      const cone = (A.coneNear + (A.coneFar - A.coneNear) * far * far * (3 - 2 * far)) * DEG * S;
+      const edge = q.ang - q.angR;
+      if (edge > cone || edge >= bestEdge) continue;
+      bestEdge = edge;
+      best = e;
+      bx = _pt.x;
+      by = _pt.y;
+      bz = _pt.z;
+      br = q.r;
+    }
+    if (!best) return null;
+    // land on the near side of the body, not dead centre
+    const t = Math.max(0, (bx - o.x) * d.x + (by - o.y) * d.y + (bz - o.z) * d.z);
+    let lx = o.x + d.x * t - bx, lz = o.z + d.z * t - bz;
+    const ll = Math.hypot(lx, lz);
+    if (ll > 1e-4) {
+      lx = (lx / ll) * Math.min(ll, br * 0.5);
+      lz = (lz / ll) * Math.min(ll, br * 0.5);
+    } else lx = lz = 0;
+    return new THREE.Vector3(bx + lx - o.x, by - o.y, bz + lz - o.z).normalize();
+  }
+
+  /** current shot cone (deg): base × rested-first-shot + movement + bloom, squeezed by ADS */
+  private coneDeg(fanned: boolean) {
+    const G = GUN_FEEL;
+    const ads = this.cam.aim;
+    const rested = !fanned && this.animT - this.lastFireT > G.restTime ? G.restedMul : 1;
+    const base = (fanned ? G.fanSpread : G.hipSpread) * this.stats.get('spread') * rested;
+    const move = (clamp(this.speed / this.board.t.cap, 0, 1) * 0.55 + (this.board.grounded ? 0 : 0.45)) * (1 - ads * 0.6);
+    return (base + move + this.spreadBloom) * (1 - ads * (1 - G.adsSpreadMul));
+  }
+
+  /** wisps curling off a hot barrel (heat builds per shot, fanning cooks it) */
+  private barrelSmoke(dt: number) {
+    this.heat = Math.max(0, this.heat - dt * 0.5);
+    if (this.heat < 0.06 || this.animT - this.lastFireT < 0.05 || this.reload.active) {
+      this.smokeAcc = 0;
+      return;
+    }
+    this.smokeAcc += dt * (5 + this.heat * 20);
+    let n = 0;
+    while (this.smokeAcc >= 1 && n < 3) {
+      this.smokeAcc -= 1;
+      n++;
+      this.ctx.fx.barrelSmoke(this.muzzleWorld, this.board.vel, this.heat);
+    }
   }
 
   // --------------------------------------------------------------- revolver
@@ -375,8 +674,12 @@ export class Player {
           if (phase === 'open') this.ctx.sfx('rev_open', this.pos, 0.8);
           if (phase === 'eject') {
             this.ctx.sfx('rev_eject', this.pos, 0.8);
-            this.ctx.fx.shells(this.muzzleWorld, { x: Math.cos(this.board.heading), y: 0, z: -Math.sin(this.board.heading) }, this.maxAmmo - this.ammo);
+            // spent brass drops out of the swung cylinder, off to the gun side
+            const spent = this.maxAmmo - this.ammo;
+            const cf = this.cam.forward();
+            this.ctx.fx.shells(this.muzzleWorld, { x: -cf.z * 0.8 - cf.x * 0.4, y: 0, z: cf.x * 0.8 - cf.z * 0.4 }, spent, this.board.vel);
             this.ctx.sfx('shell_casing', this.pos, 0.6);
+            if (spent > 2) this.ctx.engine.tweens.after(0.45, () => this.ctx.sfx('shell_casing', this.pos, 0.35, 1.12));
           }
           if (phase === 'close') this.ctx.sfx('rev_close', this.pos, 0.8);
         }
@@ -404,22 +707,50 @@ export class Player {
       }
     } else if (inp.hit('reload') && this.ammo < this.maxAmmo) this.startReload();
 
+    // trigger: a click fires an aimed shot (buffered if the hammer is still
+    // coming back); holding from the hip fans the hammer, holding in ADS
+    // thumb-cocks steady aimed shots
+    const G = GUN_FEEL;
     const want = inp.held('fire');
+    const pressed = inp.hit('fire');
     this.firing = want;
-    if (want && !R.active) {
-      const pressed = inp.hit('fire');
+    this.holdT = want ? this.holdT + dt : 0;
+    if (pressed) this.shotBuffer = G.buffer;
+    else this.shotBuffer -= dt;
+    const rate = this.stats.get('fireRate');
+    if (!R.active) {
       if (this.ammo <= 0) {
         if (pressed) {
           this.ctx.sfx('rev_dry', this.pos, 0.8);
+          if (this.fanning) this.ctx.sfx('rev_hammer', this.pos, 0.5, 1.1);
           this.startReload();
         }
+        this.fanning = false;
       } else if (this.fireCd <= 0) {
-        this.fanning = !pressed && this.fireCd < -0.0;
-        const interval = (pressed ? this.fireInterval : this.fanInterval * 1.6) / this.stats.get('fireRate');
-        this.fireCd = interval;
-        this.shoot(!pressed);
+        if (this.shotBuffer > 0) {
+          this.shotBuffer = 0;
+          this.fanning = false;
+          this.fanCount = 0;
+          this.fireCd = this.fireInterval / rate;
+          this.shoot(false);
+        } else if (want && this.holdT > G.fanHold) {
+          if (this.aiming) {
+            this.fanning = false;
+            this.fireCd = G.adsRepeat / rate;
+            this.shoot(false);
+          } else {
+            this.fanning = true;
+            this.fanCount++;
+            this.fireCd = this.fanInterval / rate;
+            this.shoot(true);
+          }
+        }
       }
-    } else this.fanning = false;
+    }
+    if (!want || R.active || this.aiming) {
+      this.fanning = false;
+      if (!want) this.fanCount = 0;
+    }
     if (this.ammo <= 0 && !R.active && this.fireCd < -0.25) this.startReload();
     // cylinder spin animation
     const cyl = this.gun.nodes['cylinder'];
@@ -468,40 +799,32 @@ export class Player {
 
   private shoot(fanned: boolean) {
     const ctx = this.ctx;
+    const G = GUN_FEEL;
     this.ammo--;
     const venom = this.venomRounds > 0;
     if (venom) this.venomRounds--;
-    // spread
-    const base = (fanned ? 2.6 : 0.55) * this.stats.get('spread');
-    const moveSpread = clamp(this.speed / 30, 0, 1) * 0.6 + (this.board.grounded ? 0 : 0.5);
-    const spreadDeg = (base + moveSpread + this.spreadBloom) * (1 - this.cam.aim * 0.65);
-    this.spreadBloom = Math.min(3, this.spreadBloom + (fanned ? 0.9 : 0.45));
+    const ads = this.cam.aim;
+    // spread: a rested first shot is near pin-point; fanning sprays a sideways sweep
+    const spreadDeg = this.coneDeg(fanned);
+    this.lastFireT = this.animT;
+    this.spreadBloom = Math.min(G.bloomMax, this.spreadBloom + (fanned ? G.bloomFan : G.bloomAimed * (1 - ads * 0.4)));
     const o = this.ray.o.clone();
     let d = this.ray.d.clone();
-    const sr = THREE.MathUtils.degToRad(spreadDeg) * Math.sqrt(rnd.next());
-    const sa = rnd.next() * Math.PI * 2;
+    const sr = spreadDeg * DEG * (fanned ? 0.45 + 0.55 * rnd.next() : Math.sqrt(rnd.next()));
+    const sa = fanned ? (this.fanCount % 2 ? 0 : Math.PI) + (rnd.next() - 0.5) * 1.1 : rnd.next() * Math.PI * 2;
     const perp1 = _v.set(0, 1, 0).cross(d).normalize();
     const perp2 = _v2.copy(d).cross(perp1).normalize();
     d.addScaledVector(perp1, Math.cos(sa) * Math.tan(sr)).addScaledVector(perp2, Math.sin(sa) * Math.tan(sr)).normalize();
-    // aim magnetism
+    // aim assist: a near miss bends onto the closest body in the cone
     let hit = ctx.enemies.raycast(o, d, 160);
     if (!hit) {
-      let bestE: EnemyLike | null = null, bestAng = THREE.MathUtils.degToRad(2.6 + this.cam.aim * 0.8);
-      for (const e of ctx.enemies.list) {
-        if (!e.alive) continue;
-        const c = _v.set(e.pos.x, e.pos.y + e.height * 0.55, e.pos.z).sub(o);
-        const dist = c.length();
-        if (dist > 120) continue;
-        const ang = c.angleTo(d);
-        const tol = bestAng * (1 + e.radius / Math.max(4, dist));
-        if (ang < tol) {
-          bestAng = ang;
-          bestE = e;
+      const md = this.magnetize(o, d);
+      if (md) {
+        const h2 = ctx.enemies.raycast(o, md, 160);
+        if (h2) {
+          d = md;
+          hit = h2;
         }
-      }
-      if (bestE) {
-        d = _v.set(bestE.pos.x, bestE.pos.y + bestE.height * 0.55, bestE.pos.z).sub(o).normalize().clone();
-        hit = ctx.enemies.raycast(o, d, 160);
       }
     }
     const tt = ctx.world.field.raycast(o.x, o.y, o.z, d.x, d.y, d.z, 160);
@@ -517,7 +840,6 @@ export class Player {
       endT = colHit.t;
       surface = 'prop';
     }
-    // muzzle
     const muzzle = this.muzzleWorld;
     // pierce through multiple enemies
     const pierce = Math.round(this.stats.get('pierce'));
@@ -525,6 +847,9 @@ export class Player {
     let lastPoint = o.clone().addScaledVector(d, endT);
     let hits = 0;
     let firstHit: RayHit | null = null;
+    let killed = false, head = false;
+    let headAt: THREE.Vector3 | null = null;
+    this.shotCrit = false;
     while (hit && hit.t < endT && hits <= pierce) {
       if (!firstHit) firstHit = hit;
       const e = hit.enemy!;
@@ -534,12 +859,18 @@ export class Player {
         source: 'gun',
         headshot: hit.headshot,
         status: [{ id: 'poison', stacks: venom ? 3 : 1, dur: 4, power: 2.2 }],
-        knock: 2.5 * this.stats.get('knockback'),
+        knock: 2.5 * this.stats.get('knockback') * (fanned ? 1.25 : 1),
         dirX: d.x,
         dirZ: d.z,
         tags: [hit.part],
       };
+      const was = e.alive;
       ctx.enemies.damage(e, h, hit.point, d);
+      if (was && !e.alive) killed = true;
+      if (hit.headshot && !headAt) {
+        head = true;
+        headAt = hit.point.clone();
+      }
       lastPoint = hit.point.clone();
       skip.add(e.id);
       hits++;
@@ -553,21 +884,52 @@ export class Player {
         const n = new THREE.Vector3();
         ctx.world.normal(p.x, p.z, n);
         const mat = ctx.world.field.matAt(p.x, p.z);
-        ctx.fx.hit(p, n, mat === 3 || mat === 4 || mat === 5 ? 'rock' : 'sand', 0.8);
-        ctx.sfx(mat === 3 || mat === 4 || mat === 5 ? 'bullet_impact_rock' : 'bullet_impact_sand', p, 0.7);
+        const rock = mat === 3 || mat === 4 || mat === 5;
+        ctx.fx.hit(p, n, rock ? 'rock' : 'sand', 0.9);
+        ctx.sfx(rock ? 'bullet_impact_rock' : 'bullet_impact_sand', p, 0.7);
+        if (rock && rnd.chance(0.22)) ctx.sfx('ricochet', p, 0.45);
       } else if (surface === 'prop') {
-        ctx.fx.hit(p, { x: colHit.nx, y: 0.3, z: colHit.nz }, colHit.c?.data?.material ?? 'rock', 0.8);
+        ctx.fx.hit(p, { x: colHit.nx, y: 0.3, z: colHit.nz }, colHit.c?.data?.material ?? 'rock', 0.9);
         ctx.sfx('bullet_impact_rock', p, 0.6);
         ctx.events.emit('propShot', colHit.c, p, d);
       }
     }
-    ctx.fx.tracer(muzzle, lastPoint, venom ? 0xc8ff5a : 0xfff0b0);
-    ctx.fx.muzzle(muzzle, d, venom ? 0xc8ff5a : 0xfff2a0);
-    ctx.sfx('rev_shot', muzzle, 1, fanned ? 1.06 : 1);
-    if (rnd.chance(0.5)) ctx.sfx('rev_hammer', muzzle, 0.25);
-    this.gunKick.kick(fanned ? 9 : 14);
-    this.cam.kick(fanned ? 0.012 : 0.022);
-    this.cam.addTrauma(0.09);
+    // the shot: flash, smoke, readable tracer, sound
+    const col = venom ? 0xc8ff5a : 0xfff2a0;
+    const bv = this.board.vel;
+    ctx.fx.revolverMuzzle(muzzle, d, col, fanned, bv);
+    ctx.fx.bulletTracer(muzzle, lastPoint, venom ? 0xc8ff5a : 0xffe2a0, !!firstHit);
+    ctx.sfx('rev_shot', muzzle, 1, fanned ? 1.03 + Math.min(6, this.fanCount) * 0.008 : 1);
+    if (fanned) ctx.sfx('rev_hammer', muzzle, 0.45, 1.05 + rnd.next() * 0.08); // the palm slapping the hammer
+    else if (rnd.chance(0.5)) ctx.sfx('rev_hammer', muzzle, 0.25);
+    this.heat = Math.min(1.6, this.heat + (fanned ? 0.2 : 0.14));
+    // recoil: gun snaps in the hand, the view punches up (fans alternate side to side) and recovers
+    this.gunKick.kick(fanned ? 13 : 19);
+    const side = fanned ? (this.fanCount % 2 ? 1 : -1) : rnd.next() - 0.5;
+    this.cam.punch((fanned ? G.kickPitchFan : G.kickPitch) * (1 - ads * 0.35), side * (fanned ? 0.013 : 0.008), fanned ? 0.8 : 1.5, fanned ? side * 0.012 : 0);
+    this.cam.addTrauma(fanned ? 0.05 : 0.08);
+    // feedback: hit tick, headshot ping, kill confirm with a short hit-stop
+    const rk = this.reticle;
+    if (firstHit) {
+      rk.hit = 1;
+      ctx.sfx('ui_click', null, 0.3, 1.8 + rnd.next() * 0.15);
+      if (head && headAt) {
+        rk.head = 1;
+        ctx.sfx('counter_clang', null, 0.2, 1.9);
+        ctx.fx.headPop(headAt, d);
+      }
+      if (killed) {
+        rk.kill = 1;
+        ctx.sfx('qte_good', null, 0.38, head ? 0.9 : 0.8);
+        const strong = head || this.shotCrit;
+        this.cam.punch(0, 0, strong ? -2.4 : -1.4);
+        const now = performance.now();
+        if (now - this.killStopAt > 180) {
+          this.killStopAt = now;
+          ctx.engine.hitStop(strong ? G.killStopHead : G.killStop, 0.05);
+        }
+      }
+    }
     this.onShot?.(firstHit);
     ctx.events.emit('shot', firstHit, venom);
   }
