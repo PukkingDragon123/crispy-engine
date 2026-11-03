@@ -60,8 +60,10 @@ export class Ironclad extends Boss {
   private plates: Plate[];
   private debris: Debris[] = [];
   private rest: Record<string, THREE.Euler> = {};
-  private furnace: THREE.PointLight;
-  private lamp: THREE.PointLight | null;
+  /** furnace glow (drives the rig's emissive boost: coals, grate, eyes, lamp) and the headlamp's on-switch */
+  private heat = 0.3;
+  private heatT = 0.3;
+  private lampOn = false;
   /** anim drives (0..1 unless noted) */
   private guard = 1;
   private aim = 0;
@@ -109,10 +111,6 @@ export class Ironclad extends Boss {
     this.gold = 110 * tier;
     this.phases = [0.66, 0.33];
     for (const p of this.rig.geo.parts) this.rest[p.name] = p.rest.clone();
-    this.furnace = new THREE.PointLight(0xff7a2a, 1.4, 7, 1.8);
-    (this.rig.sockets['heart'] ?? this.root).add(this.furnace);
-    this.lamp = new THREE.PointLight(0xfff0b0, 0, 12, 1.6);
-    (this.rig.sockets['lamp'] ?? this.root).add(this.lamp);
     // the dodge QTE needs the overlay even if the scene never handed it to the horde
     if (!d.enemies.qte) d.enemies.qte = d.qte;
   }
@@ -226,9 +224,11 @@ export class Ironclad extends Boss {
     this.setExpr('angry');
     ctx.events.emit('bossIntro', this);
     for (let i = 0; i < 12; i++) {
-      if (this.lamp) this.lamp.intensity = (i / 11) * 2.4 * (i % 3 === 1 ? 0.3 : 1);
+      this.heat = (i % 3 === 1 ? 0.2 : 1.6) * (i / 11);
+      if (i % 3 === 0) ctx.fx.light(this.sock('lamp', _v), 0xfff0b0, 3 * (i / 11), 0.25, 12);
       await this.wait(0.06);
     }
+    this.lampOn = true;
     this.aimT = 0.6;
     this.spinT = 1;
     ctx.sfx('rev_spin', this.pos, 1, 0.55);
@@ -544,7 +544,8 @@ export class Ironclad extends Boss {
     ctx.sfx('quake_rumble', this.pos, 1, 0.7);
     ctx.sfx('time_slow', this.pos, 0.5, 0.6);
     for (let t = 0; t < W; t += 0.1) {
-      this.furnace.intensity = 3 + t * 4 + Math.random() * 2;
+      this.heat = 1.5 + t * 2 + Math.random();
+      if (Math.floor(t * 10) % 4 === 0) ctx.fx.light(this.sock('heart', _v), 0xff9a4a, 2 + t * 3, 0.3, 9);
       this.steam(0.6 + t);
       if (t > W - 0.25 && t < W - 0.15) {
         // nothing: the QTE comes right before the blast
@@ -593,10 +594,7 @@ export class Ironclad extends Boss {
       this.debris.push({ mesh: m, vel, ang: new THREE.Vector3((rnd.next() - 0.5) * 9, (rnd.next() - 0.5) * 9, (rnd.next() - 0.5) * 9), life: 9, rest: false });
       this.rig.setPartVisible(p.name, false);
     }
-    if (p.name === 'helm' && this.lamp) {
-      this.lamp.removeFromParent();
-      this.lamp = null;
-    }
+    if (p.name === 'helm') this.lampOn = false;
     // sparks, rust flakes, bolts, soot
     ctx.particles.emit({ pos: at, count: 26, spread: 7, up: 3, life: [0.3, 0.7], size: [0.12, 0.03], sprite: ['dot3', 'star4'], additive: true, color: [0xffd070, 0xff8a2a, 0xffffff], gravity: 12, sizeJitter: 0.3 });
     ctx.particles.emit({ pos: at, count: 18, spread: 4.5, up: 3, life: [0.8, 1.6], size: [0.1, 0.07], sprite: ['dot4', 'twig'], color: [0x8a4a22, 0x5e2e14, 0x46484e], gravity: 14, ground: true, bounce: 0.3, rot: 6, rotSpeed: 6 });
@@ -611,8 +609,7 @@ export class Ironclad extends Boss {
       this.d.enemies.callout(`${p.label} BROKEN!`, { x: at.x, y: at.y + 1, z: at.z }, 'boss');
     }
     if (p.name === 'chest') {
-      this.furnace.intensity = 4;
-      this.furnace.distance = 11;
+      ctx.fx.light(at, 0xff8a3a, 5, 0.8, 12);
       ctx.toast('THE FURNACE HEART', '#ff9a4a', 'His boiler is bare — shoot the fire in his ribs!', true);
     }
     if (p.name === 'shield') ctx.toast('COW-CATCHER BROKEN', '#ffb070', 'Nothing between you and his ribs now');
@@ -641,7 +638,7 @@ export class Ironclad extends Boss {
     if (amt > 0 && point && this.ctx.camera.position.distanceTo(point) < 45) {
       if (tag === 'heart') {
         this.ctx.particles.emit({ pos: point, count: 8, spread: 4, up: 2.5, life: [0.4, 0.9], size: [0.1, 0.03], sprite: ['dot3', 'star4'], additive: true, color: [0xffb040, 0xff7a1e, 0xffe0a0], gravity: 6 });
-        this.furnace.intensity += 2;
+        this.heat += 0.8;
       } else if (tag === 'skull' || tag === 'bone' || tag === 'ribs') {
         this.ctx.events.emit('gibs', point.x, point.y, point.z, hit.headshot ? 4 : 2, 0.07, BONE_COLS, 4, 3);
         this.ctx.particles.emit({ pos: point, count: 4, spread: 1.2, up: 0.8, life: [0.5, 0.9], size: [0.25, 0.5], sprite: ['puff0', 'puff1'], color: [0xd8c49a, 0xbca47a], alpha: 0.6, drag: 2.5 });
@@ -771,8 +768,11 @@ export class Ironclad extends Boss {
       const s = this.sock('smoke', _v);
       this.ctx.particles.emit({ pos: s, count: 2, spread: 1.5, up: 4, life: [0.6, 1.2], size: [0.08, 0.03], sprite: 'dot3', additive: true, color: [0xffb040, 0xff7a1e], gravity: -1, drag: 1 });
     }
+    // the furnace breathes: emissive boost on the coals, grate, eyes and lamp
     const chestOff = this.plate('chest')!.broken;
-    this.furnace.intensity = damp(this.furnace.intensity, (chestOff ? 3.2 : 1.3) * (this.enraged ? 1.4 : 1) + Math.sin(this.t * 13) * 0.3 + Math.sin(this.t * 31) * 0.2, 4, dt);
+    this.heatT = (chestOff ? 1.1 : 0.35) * (this.enraged ? 1.5 : 1) + (this.lampOn ? 0.25 : 0) + Math.sin(this.t * 13) * 0.12 + Math.sin(this.t * 31) * 0.08;
+    this.heat = damp(this.heat, this.heatT, 3, dt);
+    this.rig.material.userData.fx.value.z = this.heat;
     if (this.exposedT > 0 && rnd.chance(dt * 10)) this.ctx.particles.emit({ pos: { x: this.pos.x + (rnd.next() - 0.5) * 2, y: this.pos.y + this.height * (0.3 + rnd.next() * 0.6), z: this.pos.z + (rnd.next() - 0.5) * 2 }, count: 1, vel: { x: 0, y: 0.7, z: 0 }, life: [0.3, 0.5], size: [0.45, 0.06], sprite: 'star4', additive: true, color: [0xffd36b, 0xffffff] });
   }
 
@@ -854,8 +854,6 @@ export class Ironclad extends Boss {
 
   dispose() {
     super.dispose();
-    this.furnace.removeFromParent();
-    this.lamp?.removeFromParent();
     // leave the torn plates in the sand for a while, then sink them
     const tw = this.ctx.engine.tweens;
     for (const db of this.debris) {

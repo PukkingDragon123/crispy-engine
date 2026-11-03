@@ -105,26 +105,29 @@ varying vec3 vWP;
 varying float vV;
 #include <fog_pars_fragment>
 float n3(vec3 p){ return texture(uNoise, p).r; }
-float fbm(vec3 p){ return (n3(p) * 0.5 + n3(p * 2.03 + 0.17) * 0.25 + n3(p * 4.07 + 0.41) * 0.125 + n3(p * 8.11 + 0.73) * 0.0625) / 0.9375; }
-float fbm3(vec3 p){ return (n3(p) * 0.5 + n3(p * 2.03 + 0.17) * 0.25 + n3(p * 4.07 + 0.41) * 0.125) / 0.875; }
+float fbm2(vec3 p){ return (n3(p) * 0.5 + n3(p * 2.03 + 0.17) * 0.25) / 0.75; }
 void main(){
   vec3 w = vWP;
   float t = uTime;
-  // billows roll up the wall and race along it with the wind
+  float crown = 0.8 + 0.2 * n3(vec3(w.x, 0.0, w.z) * uScale * 0.8 + vec3(uSeed, t * 0.006, 0.0));
+  if (vV > crown) discard;
+  // billows roll up the wall and race along it with the wind (domain-warped)
   vec3 q = w * uScale + vec3(uSeed);
   q.y -= t * uRise;
   q.xz -= uWind * t * uScale * 9.0;
-  vec3 warp = vec3(n3(q * 0.5 + vec3(0.0, t * 0.004, 0.0)), n3(q * 0.5 + 3.3), n3(q * 0.5 - 1.7)) - 0.5;
-  q += warp * 0.55;
-  float n = fbm(q);
+  vec2 wp = vec2(n3(q * 0.5 + vec3(0.0, t * 0.004, 0.0)), n3(q.zxy * 0.5 + 3.3)) - 0.5;
+  q += vec3(wp.x, wp.y, wp.x - wp.y) * 0.55;
+  float lo = n3(q) * 0.5 + n3(q * 2.03 + 0.17) * 0.25;
+  float n = (lo + n3(q * 4.07 + 0.41) * 0.125 + n3(q * 8.11 + 0.73) * 0.0625) / 0.9375;
   // thick and dark at the foot, breaking into towering crowns up high
   float body = mix(1.28, 0.46, pow(vV, 0.75)) * uDensity;
   float dens = smoothstep(0.34, 0.74, n * body + (1.0 - vV) * 0.18);
-  float crown = 0.8 + 0.2 * n3(vec3(w.x, 0.0, w.z) * uScale * 0.8 + vec3(uSeed, t * 0.006, 0.0));
   dens *= smoothstep(crown, crown - 0.2, vV);
+  float a = dens * uOpacity * smoothstep(2.0, 22.0, vFogDepth);
+  if (a < 0.004) discard;
   // one step toward the sun through the volume: lit crowns, shadowed bellies (cel ramp)
-  float n2 = fbm3(q + uSunDirW * 0.07);
-  float lit = clamp(0.55 + (n - n2) * 7.0, 0.0, 1.0);
+  float n2 = fbm2(q + uSunDirW * 0.07);
+  float lit = clamp(0.55 + (lo / 0.75 - n2) * 7.0, 0.0, 1.0);
   float band = lit < 0.36 ? 0.12 : lit < 0.68 ? 0.52 : 0.95;
   lit = mix(lit, band, 0.7);
   vec3 sky = vec3(0.30, 0.32, 0.38);
@@ -144,8 +147,6 @@ void main(){
     fl += uFlashCol * uFlash[i].w * exp(-dot(d, d) / 7200.0);
   }
   col += fl * (0.3 + 0.9 * n);
-  float a = dens * uOpacity * smoothstep(2.0, 22.0, vFogDepth);
-  if (a < 0.004) discard;
   gl_FragColor = vec4(col, a);
   #include <fog_fragment>
 }`;
@@ -889,7 +890,8 @@ export class Storm {
         const ex = this.focus.x - inw.x * Math.max(0, sd) + tx * off, ez = this.focus.z - inw.z * Math.max(0, sd) + tz * off;
         const y = this.heightAt(ex, ez);
         fx.p.emit({ pos: { x: ex, y: y + rnd.range(0.2, 5), z: ez }, count: 3, vel: { x: tx * ts * 9 + inw.x * 5, y: 1.2, z: tz * ts * 9 + inw.z * 5 }, spread: 2.2, jitter: 2.5, gravity: 2, drag: 0.4, life: [0.7, 1.5], size: [0.07, 0.15], sprite: ['dot3', 'dot3', 'puff0'], color: SANDC, ground: true });
-        if (rnd.chance(0.3)) fx.p.emit({ pos: { x: ex, y: y + rnd.range(1, 6), z: ez }, count: 1, vel: { x: tx * ts * 6 + inw.x * 3, y: 0.8, z: tz * ts * 6 + inw.z * 3 }, spread: 1, life: [1.0, 1.9], size: [1.6, 3.4], sprite: ['cloud0', 'cloud1', 'puff1'], color: [0xd8a86a, 0xc89058, 0xe6c08a], alpha: 0.55, drag: 0.6, rot: 6, rotSpeed: 1.2 });
+        // dust wisps only right at the front (they would veil the hunter further in)
+        if (sd < 14 && rnd.chance(0.25)) fx.p.emit({ pos: { x: ex, y: y + rnd.range(1, 6), z: ez }, count: 1, vel: { x: tx * ts * 7 + inw.x * 1.5, y: 0.8, z: tz * ts * 7 + inw.z * 1.5 }, spread: 1, life: [0.9, 1.6], size: [1.6, 3.4], sprite: ['cloud0', 'cloud1', 'puff1'], color: [0xd8a86a, 0xc89058, 0xe6c08a], alpha: 0.42, drag: 0.6, rot: 6, rotSpeed: 1.2 });
       }
     }
     // the howl: positional, from the nearest stretch of the storm, swelling as you close in

@@ -261,6 +261,7 @@ const KINDS: Record<string, KindDef> = {
   rimGate: { variants: 2, build: (v) => rimStone(6 + v), solid: 'circle', radius: 0.7 },
 };
 const RIM_KINDS = new Set(['rimStone', 'rimGate']);
+const SIGHT_KINDS = new Set(['rockArch', 'colossusLegs', 'colossusHead', 'shipwreck', 'shrine', 'cairn']);
 
 const LANDMARKS: Record<string, () => SM> = {
   // the trading post is a giant travelling tortoise now (Ozymandias, spawned by
@@ -420,9 +421,39 @@ export class Props {
     return vr;
   }
 
+  private variantIndex(a: Anchor) {
+    const def = KINDS[a.kind];
+    let v = hash2i(Math.round(a.x * 10), Math.round(a.z * 10)) % def.variants;
+    if (typeof a.data?.variant === 'number') v = a.data.variant % def.variants;
+    return v;
+  }
+  private prewarmed = false;
+  /**
+   * The sculpted sights (arches, colossi, wrecks, shrines, cairns) are the heaviest models to
+   * build; build every variant the sub-area uses during the first (loading) build, so opening a
+   * zone later does not stall on them.
+   */
+  private prewarmSights() {
+    this.prewarmed = true;
+    const t0 = performance.now();
+    let n = 0;
+    for (const z of this.world.sa.zones)
+      for (const a of z.anchors) {
+        if (!SIGHT_KINDS.has(a.kind)) continue;
+        const had = this.variants.size;
+        const vr = this.variant(a.kind, this.variantIndex(a), a);
+        if (vr && this.variants.size > had) {
+          if (KINDS[a.kind].unique) this.lod(vr);
+          n++;
+        }
+      }
+    console.log(`[props] ${n} sight models prewarmed in ${(performance.now() - t0).toFixed(0)}ms`);
+  }
+
   /** instantiate everything for a zone (call for zones the player may reach soon) */
   buildZone(z: ZoneDef) {
     if (this.built.has(z.index)) return;
+    if (!this.prewarmed) this.prewarmSights();
     this.built.add(z.index);
     const t0 = performance.now();
     // gather per variant counts first for instanced capacity
@@ -432,9 +463,7 @@ export class Props {
     const planOf = (a: Anchor) => {
       const def = KINDS[a.kind];
       if (!def) return null;
-      let v = hash2i(Math.round(a.x * 10), Math.round(a.z * 10)) % def.variants;
-      if (typeof a.data?.variant === 'number') v = a.data.variant % def.variants;
-      const vr = this.variant(a.kind, v, a);
+      const vr = this.variant(a.kind, this.variantIndex(a), a);
       return vr ? { a, kind: a.kind, v: vr } : null;
     };
     for (const a of [...z.anchors, ...this.rimAnchors(z)]) {

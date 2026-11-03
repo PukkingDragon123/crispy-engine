@@ -175,15 +175,32 @@ export function xMarker(seed = 2): PivotModel {
     }
   }
   // sand heaped round the crossing
-  s.region([-26, 0, -26], [26, 8, 26], (x, y, z) => y <= 6 * Math.max(0, 1 - Math.hypot(x, z) / 24) + Math.sin(x * 0.3 + seed) * 0.8, (x, y, z) => (noise.n3(x * 0.1, y * 0.1, z * 0.1) > 0.4 ? SAND.hi : SAND.base), { mode: 'under' });
+  s.region([-26, 0, -26], [26, 8, 26], (x, y, z) => {
+    const r = Math.hypot(x, z) / 24 + Math.sin(Math.atan2(z, x) * 4 + seed) * 0.07;
+    return r < 1 && y <= 5.5 * (1 - r * r);
+  }, (x, y, z) => (noise.n3(x * 0.1, y * 0.1, z * 0.1) > 0.4 ? SAND.hi : SAND.base), { mode: 'under' });
   // the stake and its red rag
   s.cap([24, 0, -20], [27, 92, -22], 2.4, 1.8, WOOD.base);
   s.cap([27, 92, -22], [27.4, 95, -22.2], 1.6, 1.2, WOOD.hi);
-  for (let i = 0; i < 3; i++) s.region([26, 66, -26], [60, 92, -18], (x, y, z) => {
-    const u = (x - 27) / 30;
-    const wave = Math.sin(u * 6 + i) * 2.2 * u;
-    return u >= 0 && u <= 1 && Math.abs(z + 22 - wave) < 0.9 && y > 72 + u * 4 - (u > 0.8 ? (u - 0.8) * 30 * ((Math.round(z) + i) & 1) : 0) && y < 90 - u * 3;
-  }, (x, y) => (y > 85 ? RAG.hi : y < 76 ? RAG.shade : RAG.base));
+  // the rag: tied at the top, drooping and rippling in the wind, the free end torn to tatters
+  s.region([26, 52, -30], [60, 92, -14], (x, y, z) => {
+    const u = (x - 27.5) / 30;
+    if (u < 0 || u > 1) return false;
+    const top = 90 - 5 * u - 9 * u * u, bot = 74 - 3 * u - 14 * u * u;
+    if (y > top || y < bot) return false;
+    const v = (y - bot) / (top - bot);
+    const wave = Math.sin(u * 7.5 - v * 1.4) * 2.6 * u + Math.sin(u * 15 + v * 3) * 0.6 * u;
+    if (Math.abs(z + 22 - wave) > 0.75) return false;
+    // tattered free end (ragged tongues) and a couple of moth holes
+    const tongue = 0.8 + 0.12 * Math.sin(v * 19) + 0.06 * Math.sin(v * 41);
+    if (u > tongue) return false;
+    if (Math.hypot((u - 0.42) * 30, (v - 0.55) * (top - bot)) < 1.6 || Math.hypot((u - 0.7) * 30, (v - 0.3) * (top - bot)) < 1.1) return false;
+    return true;
+  }, (x, y, z) => {
+    const u = (x - 27.5) / 30;
+    const shade = Math.sin(u * 7.5) * 0.5 + 0.5;
+    return u > 0.7 ? RAG.shade : shade > 0.7 ? RAG.hi : shade < 0.25 ? RAG.shade : RAG.base;
+  });
   s.region([22, 86, -25], [29, 90, -19], (x, y, z) => Math.hypot(x - 27, z + 22) <= 2.8 && Math.hypot(x - 27, z + 22) >= 2.0, 0x7a5a3a); // twine
   relief(s.m, 1.08, 0.86);
   return { model: s.m, voxelSize: 1 / 55, pivot: [0, 0, 0] };
@@ -193,7 +210,10 @@ export function xMarker(seed = 2): PivotModel {
 export function glintSpot(seed = 4): PivotModel {
   const s = new Sc('glint', 0.9);
   // the drift they sit in
-  s.region([-16, -2, -16], [16, 4, 16], (x, y, z) => y <= 2.4 * Math.max(0, 1 - Math.hypot(x, z) / 15) + Math.sin(x * 0.5 + seed) * 0.4, (x, y, z) => (noise.n3(x * 0.15, y * 0.15, z * 0.15) > 0.35 ? SAND.hi : SAND.base));
+  s.region([-16, 0, -16], [16, 4, 16], (x, y, z) => {
+    const r = Math.hypot(x, z * 1.2) / 15 + Math.sin(Math.atan2(z, x) * 3 + seed) * 0.08;
+    return r < 1 && y <= 2.6 * (1 - r * r) + 0.2;
+  }, (x, y, z) => (noise.n3(x * 0.15, y * 0.15, z * 0.15) > 0.35 ? SAND.hi : SAND.base));
   // compass lid tilted out of the sand
   s.region([-8, -1, -6], [2, 6, 4], (x, y, z) => {
     const u = x + 3, v = (y - 1.8) * 1.4 + (z + 1) * 0.6;
@@ -254,7 +274,10 @@ export function aloe(seed = 1, cut = false): PivotModel {
   const rng = new RNG(seed * 13 + 1);
   const G = { base: 0x5e8a4a, shade: 0x46703a, hi: 0x84ac64, spot: 0xc8d8a8, tooth: 0xd8c890, tip: 0xb87048 };
   // the dry earth ring it grows from
-  s.region([-26, -2, -26], [26, 3, 26], (x, y, z) => y <= 2.2 * Math.max(0, 1 - Math.hypot(x, z) / 24), (x, y, z) => (noise.n3(x * 0.2, 0, z * 0.2) > 0.3 ? 0xb89868 : 0xa88858));
+  s.region([-26, 0, -26], [26, 3, 26], (x, y, z) => {
+    const r = Math.hypot(x, z) / 22 + Math.sin(Math.atan2(z, x) * 5 + seed) * 0.08;
+    return r < 1 && y <= 2.4 * (1 - r * r);
+  }, (x, y, z) => (noise.n3(x * 0.2, 0, z * 0.2) > 0.3 ? 0xb89868 : 0xa88858));
   const n = 13 + Math.floor(rng.range(0, 4));
   for (let i = 0; i < n; i++) {
     const ring = i < 5 ? 0 : i < 10 ? 1 : 2;
@@ -313,7 +336,10 @@ export function canteen(): PivotModel {
   s.cap([0, -2, -2], [-1, 52, -2], 1.3, 1.0, WOOD.base);
   s.cap([-1, 50, -2], [-6, 62, -1], 0.9, 0.7, WOOD.shade);
   s.cap([-1, 50, -2], [5, 61, -3], 0.9, 0.7, WOOD.base);
-  s.region([-10, -2, -10], [10, 3, 10], (x, y, z) => y <= 2 * Math.max(0, 1 - Math.hypot(x, z + 2) / 9), SAND.base);
+  s.region([-10, 0, -12], [10, 3, 8], (x, y, z) => {
+    const r = Math.hypot(x, z + 2) / 8;
+    return r < 1 && y <= 2.2 * (1 - r * r);
+  }, SAND.base);
   // the canteen: a fat lens of tin in a felt jacket, a little dented
   const cy = 30;
   s.region([-12, cy - 12, -6], [12, cy + 12, 6], (x, y, z) => {

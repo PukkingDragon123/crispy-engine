@@ -95,11 +95,11 @@ const SAND = { base: 0xeac389, shade: 0xd6aa70, hi: 0xf8dcaa, lo: 0xc89a62 };
 const sandCol = (x: number, y: number, z: number, top: boolean) => jit(top ? (hash3(x, 3, z) > 0.7 ? SAND.hi : SAND.base) : SAND.shade, x, y, z, 0.05);
 
 // ---------------------------------------------------------------------------
-// Natural sandstone arch (1/5 m). Entrada-red with a pale cap band, 23-27 m span,
+// Natural sandstone arch (1/4 m: a 25 m landform). Entrada-red with a pale cap band, 23-27 m span,
 // 11-14 m of clearance under the crown. Faces +z/-z; the span runs along x.
 const ARCH = { base: 0xc77a4a, shade: 0xa8603c, deep: 0x84462c, hi: 0xe09c68, cream: 0xe2b88c, bleach: 0xf0d0a2, varnish: 0x5a3324 };
 export function rockArch(v = 0): StaticModel {
-  const vs = 1 / 5;
+  const vs = 1 / 4;
   const M = (m: number) => m / vs;
   const rng = new RNG(4041 + v * 977);
   const nz = new Noise(812 + v * 31);
@@ -382,12 +382,12 @@ export function colossusHead(upright = false): StaticModel {
 }
 
 // ---------------------------------------------------------------------------
-// The sand galleon (1/8 m): 22 m hull run aground bow-up and listing, a side stove in
+// The sand galleon (1/6 m): 22 m hull run aground bow-up and listing, a side stove in
 // showing the ribs, the waist deck fallen into a hold full of sand, masts snapped, the
 // mainmast's yard still holding a torn sail, a broken bowsprit, a stern with windows.
 const WOOD = { base: 0xa8937a, shade: 0x85725c, hi: 0xc6b498, dark: 0x5c4c3c, rib: 0x6e5844, rail: 0x907a62 };
 export function shipwreck(v = 0): StaticModel {
-  const vs = 1 / 8;
+  const vs = 1 / 6;
   const M = (m: number) => m / vs;
   const rng = new RNG(7301 + v * 53);
   const nz = new Noise(919 + v);
@@ -414,7 +414,7 @@ export function shipwreck(v = 0): StaticModel {
     return Math.max(xs, M(0.25));
   };
   const hole = { z0: -M(2.6), z1: M(3.8), y0: M(1.1), y1: M(3.7) };
-  const T = 1.6; // plank thickness (voxels)
+  const T = 1.4; // plank thickness (voxels)
   /** ship-local hull + rigging distance */
   const ship = (x: number, y: number, z: number) => {
     const ax = Math.abs(x);

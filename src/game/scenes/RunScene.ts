@@ -1003,7 +1003,7 @@ export class RunScene implements GameScene {
     this.props.update(dt, pp, this.world.sa.wind, this.fx);
     // storm damage & mood
     const sdf = this.world.storm.sdf(pp.x, pp.z);
-    const near = clamp(1 - sdf / 18, 0, 1);
+    const near = (this.world.storm as any).near ?? clamp(1 - sdf / 18, 0, 1);
     if (sdf < 0 && this.player.alive) {
       this.player.applyDamage(this.player.maxHp * 0.09 * dt, 'storm', true);
       const inw = this.world.storm.inward(pp.x, pp.z, { x: 0, z: 0 });

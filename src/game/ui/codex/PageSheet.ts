@@ -38,23 +38,27 @@ uniform vec3 uStampCol;
 uniform vec2 uPlateRes;
 varying vec2 vPageUv;
 ${PARCHMENT_GLSL}
+float pF3(vec2 p){ return pNoise(p) * 0.57 + pNoise(p * 2.07 + 1.3) * 0.29 + pNoise(p * 4.3 + 2.6) * 0.14; }
 vec3 bookPaper(vec2 cu, float sd, float gutter) {
   vec2 q = cu * vec2(uAspect, 1.0) + sd * 13.7;
-  vec3 col = mix(vec3(0.93, 0.85, 0.67), vec3(0.83, 0.71, 0.5), smoothstep(0.25, 0.92, pFbm(q * 3.2)));
-  col *= 0.94 + 0.06 * pFbm(q * vec2(160.0, 44.0));
-  float fox = smoothstep(0.66, 0.9, pFbm(q * 7.0 + 3.0));
+  float mot = pF3(q * 3.2);
+  vec3 col = mix(vec3(0.93, 0.85, 0.67), vec3(0.83, 0.71, 0.5), smoothstep(0.25, 0.92, mot));
+  col *= 0.95 + 0.05 * pNoise(q * vec2(150.0, 40.0));
+  float fox = smoothstep(0.66, 0.9, pF3(q * 7.0 + 3.0));
   col = mix(col, vec3(0.62, 0.43, 0.24), fox * 0.34);
   col *= 1.0 - 0.14 * step(0.994, pHash(floor(q * 260.0)));
   // a tide-line (a spilled cup, a rain-soaked night) on some pages
-  vec2 sc = vec2(0.2 + 0.6 * fract(sd * 3.7), 0.2 + 0.6 * fract(sd * 7.3));
-  float r = length((cu - sc) * vec2(uAspect, 1.0));
-  float rr = 0.07 + 0.06 * fract(sd * 11.0) + (pFbm(cu * 9.0 + sd) - 0.5) * 0.03;
   float on = step(0.58, fract(sd * 5.1));
-  col = mix(col, vec3(0.58, 0.4, 0.22), smoothstep(0.012, 0.0, abs(r - rr)) * 0.38 * on);
-  col = mix(col, col * vec3(0.95, 0.9, 0.82), smoothstep(rr, rr - 0.02, r) * on);
+  if (on > 0.5) {
+    vec2 sc = vec2(0.2 + 0.6 * fract(sd * 3.7), 0.2 + 0.6 * fract(sd * 7.3));
+    float r = length((cu - sc) * vec2(uAspect, 1.0));
+    float rr = 0.07 + 0.06 * fract(sd * 11.0) + (mot - 0.5) * 0.04;
+    col = mix(col, vec3(0.58, 0.4, 0.22), smoothstep(0.012, 0.0, abs(r - rr)) * 0.38);
+    col = mix(col, col * vec3(0.95, 0.9, 0.82), smoothstep(rr, rr - 0.02, r));
+  }
   // sun-browned, thumbed edges
   vec2 e = min(cu, 1.0 - cu);
-  float edge = min(e.x * uAspect, e.y) + (pFbm(cu * 14.0 + sd) - 0.5) * 0.025;
+  float edge = min(e.x * uAspect, e.y) + (pNoise(cu * 14.0 + sd) - 0.5) * 0.025;
   col = mix(col, vec3(0.6, 0.41, 0.22), smoothstep(0.075, 0.0, edge) * 0.6);
   // the gutter swallows the light
   col *= 1.0 - 0.42 * exp(-gutter * 22.0);
@@ -68,7 +72,7 @@ vec4 plateInk(sampler2D tex, sampler2D dep, vec4 rect, vec4 cam, vec2 cu, float 
   float ar = (rect.z - rect.x) * uAspect / max(1e-4, rect.w - rect.y);
   vec2 e2 = min(q, 1.0 - q);
   float ed = min(e2.x * ar, e2.y);
-  float n = pFbm(q * vec2(ar, 1.0) * 5.0 + sd * 5.0);
+  float n = pF3(q * vec2(ar, 1.0) * 5.0 + sd * 5.0);
   // a painted vignette: the image bleeds into the paper with a ragged, brushy edge
   float m = smoothstep(0.0, 0.08, ed - (n - 0.5) * 0.09 - 0.012);
   vec3 col = texture2D(tex, tq).rgb;

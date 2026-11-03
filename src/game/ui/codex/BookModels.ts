@@ -41,7 +41,8 @@ function geo(m: VoxelModel, ao = 0.85) {
 /** Alagard text rasterised to a voxel stencil (typography only: the letters are then embossed in gold) */
 function stencil(text: string, px: number): { w: number; h: number; on: (x: number, y: number) => boolean } {
   const cv = document.createElement('canvas');
-  const c = cv.getContext('2d')!;
+  // read back on the CPU: a GPU canvas would stall the frame on getImageData
+  const c = cv.getContext('2d', { willReadFrequently: true })!;
   c.font = `${px}px Alagard`;
   const w = Math.ceil(c.measureText(text).width) + 4;
   const h = Math.ceil(px * 1.25) + 4;
