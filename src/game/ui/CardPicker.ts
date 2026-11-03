@@ -760,7 +760,7 @@ export class CardPicker {
           const g = f.to.clone().add(new THREE.Vector3(0, 0.35, 0));
           const p = this.cine.p;
           p.emit({ pos: g, count: 28, spread: 3.5, up: 4.5, life: [0.5, 1.0], size: [0.07, 0.04], sprite: GRAIN, color: SAND, gravity: 11, drag: 1, ground: true, bounce: 0.15 });
-          p.emit({ pos: g, count: 6, spread: 1.6, up: 1, life: [0.8, 1.4], size: [0.4, 1.1], sprite: PUFF, color: SAND, alpha: 0.7, drag: 2.4, rot: 6, rotSpeed: 0.7, jitter: 0.3 });
+          p.emit({ pos: g, count: 3, spread: 1.2, up: 0.8, life: [0.6, 1.1], size: [0.25, 0.6], sprite: PUFF, color: SAND, alpha: 0.55, drag: 2.4, rot: 6, rotSpeed: 0.7, jitter: 0.25 });
           this.ctx.sfx('sand_burst', g, 0.9, 0.85);
           this.cine.kick(0.3);
           const key = c.offer.def.learn!;

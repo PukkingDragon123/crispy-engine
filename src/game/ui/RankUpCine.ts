@@ -1971,7 +1971,8 @@ export class SkillUnlock {
     if (side.dot(cine.dir) < 0) side.negate();
     const mid = H.clone().lerp(this.S, 0.5);
     this.R = makePose(cine.spot(_v.copy(cine.dir).lerp(side, 0.45).normalize(), 3.6, 0.75), mid.clone().addScaledVector(W_UP, 1.0), 44, 0.03);
-    this.Cc = makePose(cine.spot(_v.copy(side).addScaledVector(f, -0.25).normalize(), 2.25, 0.55), H.clone().lerp(this.S, 0.32).addScaledVector(W_UP, cine.heroTop * 0.55), 36, -0.06);
+    // the cast: side-on and low, the whole of him and the card in frame
+    this.Cc = makePose(cine.spot(_v.copy(side).addScaledVector(f, -0.2).normalize(), 3.3, 0.7), H.clone().lerp(this.S, 0.42).addScaledVector(W_UP, cine.heroTop * 0.5), 42, -0.05);
     this.W = makePose(cine.spot(_v.copy(cine.dir).lerp(side, 0.25).normalize(), 4.2, 1.05), mid.clone().addScaledVector(W_UP, 1.1), 48, 0);
     this.castDur = CAST_POSE[this.look.pose].dur * this.look.slow;
     this.tStamp = this.tCast + this.castDur + 0.1;
@@ -2058,7 +2059,7 @@ export class SkillUnlock {
       ctx.sfx('quake_rumble', S, 0.6);
       cine.kick(0.35);
       p.emit({ pos: S, count: 30, spread: 3.5, up: 5, life: [0.5, 1.1], size: [0.07, 0.04], sprite: GRAIN, color: SAND, gravity: 11, drag: 1, ground: true, bounce: 0.15 });
-      p.emit({ pos: S, count: 7, spread: 1.8, up: 1.2, life: [0.8, 1.6], size: [0.5, 1.3], sprite: PUFF, color: SAND, alpha: 0.75, drag: 2.4, rot: 6, rotSpeed: 0.7, jitter: 0.3 });
+      p.emit({ pos: S, count: 3, spread: 1.4, up: 0.9, life: [0.7, 1.2], size: [0.25, 0.6], sprite: PUFF, color: SAND, alpha: 0.55, drag: 2.4, rot: 6, rotSpeed: 0.7, jitter: 0.25 });
     }
     const g = this.card.group;
     if (t >= 0.35) {
@@ -2089,7 +2090,7 @@ export class SkillUnlock {
     // ---- the first cast: his signature pose under a cast camera
     if (this.once('castCam', this.tCast - 0.25)) cine.shoot(this.Cc, 0.4);
     // the cast camera creeps in during the pose
-    if (t > this.tCast - 0.25 && t < this.tStamp) this.Cc.fov = 36 - 4 * sat((t - this.tCast) / this.castDur);
+    if (t > this.tCast - 0.25 && t < this.tStamp) this.Cc.fov = 42 - 5 * sat((t - this.tCast) / this.castDur);
     const hero = cine.hero;
     if (hero && this.castOk && t >= this.tCast && t < this.tCast + this.castDur) {
       const k = (t - this.tCast) / this.castDur;
@@ -2364,7 +2365,8 @@ export class GambleShow {
     const t = this.t;
     const ctx = this.ctx;
     const cine = this.cine;
-    if (this.once('shot', 0.1)) cine.shoot(this.shot, this.o.prop === 'chamber' ? 0.45 : 0.75);
+    // (the coin keeps the wide shot while it is high in the air)
+    if (this.once('shot', this.o.prop === 'coin' ? 0.75 : 0.1)) cine.shoot(this.shot, this.o.prop === 'chamber' ? 0.45 : this.o.prop === 'coin' ? 0.5 : 0.75);
     if (this.o.prop === 'dice') this.updateDice(t);
     else if (this.o.prop === 'coin') this.updateCoin(t);
     else this.updateChamber(t);
@@ -2412,7 +2414,9 @@ export class GambleShow {
     if (this.coin) this.coin.mat.userData.fx.value.x = 0.6;
     const lines: StampLine[] = [{ text: o.title, px: 54, core: true }, { text: o.line, px: 24 }];
     this.stamp = new TextStamp(ctx.scene, lines, o.win ? 'gold' : 'blood', 0.95);
-    this.stamp.place(this.shot, ctx.engine.width / ctx.engine.height, 0, 0.5, 1.5, this.t, 0.15);
+    // a live round has cut to the hero: the verdict lands in that shot
+    const bang = o.prop === 'chamber' && !o.win;
+    this.stamp.place(bang ? cine.A : this.shot, ctx.engine.width / ctx.engine.height, bang ? 0.3 : 0, bang ? 0.45 : 0.5, 1.5, this.t, 0.15);
   }
 
   // ---- dice

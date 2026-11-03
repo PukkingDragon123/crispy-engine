@@ -340,15 +340,15 @@ function paintFront(o: Offer) {
       ops.push({ h: ls.length * lh, draw: (y) => ls.forEach((l, i) => ((c.font = font(px * s)), (c.textAlign = 'center'), engrave(c, l, W / 2, y + px * s * 0.84 + i * lh, color, lip))) });
     };
     if (split) {
-      para(kind, 24, kindCol, 0.35);
+      para(kind, 27, kindCol, 0.35);
       ops.push({ h: 4 * s, draw: () => {} });
-      for (const t of pc!.pros) para('+ ' + t, 33, GREEN);
-      for (const t of pc!.cons) para('− ' + t, 33, RED);
-    } else para(def.desc(lv), 34, INK);
-    if (withPer && per) para(`Per level: ${per}`, 24, INK_SOFT, 0.35);
+      for (const t of pc!.pros) para('+ ' + t, 40, GREEN);
+      for (const t of pc!.cons) para('− ' + t, 40, RED);
+    } else para(def.desc(lv), 42, INK);
+    if (withPer && per) para(`Per level: ${per}`, 28, INK_SOFT, 0.35);
     if (withFl && fl) {
       ops.push({ h: 5 * s, draw: () => {} });
-      para(`"${fl}"`, 23, INK_SOFT, 0.3);
+      para(`"${fl}"`, 26, INK_SOFT, 0.3);
     }
     return ops;
   };
@@ -358,8 +358,8 @@ function paintFront(o: Offer) {
   let ops = build(s, withPer, withFl);
   const total = () => ops.reduce((a, b) => a + b.h, 0);
   for (let i = 0; i < 24 && total() > room; i++) {
-    if (s < 0.74 && withFl) withFl = false;
-    else if (s < 0.66 && withPer) withPer = false;
+    if (s < 0.8 && withFl) withFl = false;
+    else if (s < 0.68 && withPer) withPer = false;
     else s *= 0.95;
     ops = build(s, withPer, withFl);
   }
@@ -862,7 +862,8 @@ function paintDetail(o: Offer, d: CardDetail) {
   const def = o.def;
   const rar = RARITY[def.rarity];
   let pipY = 0;
-  const build = (s: number) => {
+  // trim: what makes way when the parchment is full (1 synergy, 2 restated stats, 3 the next level when "per level" says it)
+  const build = (s: number, trim: number) => {
     const ops: Op[] = [];
     const gap = (h: number) => ops.push({ h: h * s, draw: () => {} });
     const centre = (text: string, px: number, color = INK, fitW = W * 0.92) => {
@@ -936,7 +937,8 @@ function paintDetail(o: Offer, d: CardDetail) {
       para(def.odds(Math.max(1, o.toLv)), 27, INK);
     }
     // the stat changes, current → new, coloured by whether it helps
-    if (d.rows.length) {
+    const split = !!(def.pros || def.cons);
+    if (d.rows.length && !(split && trim >= 2)) {
       gap(4);
       label('YOUR STATS');
       for (const r of d.rows) {
@@ -970,7 +972,7 @@ function paintDetail(o: Offer, d: CardDetail) {
           },
         });
       }
-    } else if (o.fromLv > 0 && !game) {
+    } else if (o.fromLv > 0 && !game && trim < 2) {
       label('NOW');
       para(def.desc(o.fromLv), 26, INK_SOFT);
     }
@@ -981,7 +983,7 @@ function paintDetail(o: Offer, d: CardDetail) {
       label('PER LEVEL');
       para(per, 26, INK);
     }
-    if (!game) {
+    if (!game && !(per && trim >= 3)) {
       label('NEXT LEVEL');
       if (o.toLv < def.maxLv) para(`Lv ${o.toLv + 1}: ${def.desc(o.toLv + 1)}`, 26, INK);
       else para(def.maxLv > 1 ? 'Fully honed: this takes it to the top.' : 'Nothing more to learn: it is whole.', 26, INK_SOFT);
@@ -994,7 +996,7 @@ function paintDetail(o: Offer, d: CardDetail) {
       para(evo, 27, def.evolveFrom ? RAR_INK.mythic : RAR_INK.epic);
     }
     // synergies
-    const tags = synergyTags(def, o.toLv);
+    const tags = trim >= 1 ? [] : synergyTags(def, o.toLv);
     if (tags.length) {
       gap(6);
       label('SYNERGY');
@@ -1009,12 +1011,13 @@ function paintDetail(o: Offer, d: CardDetail) {
     return ops;
   };
   // as large as the parchment allows
-  let s = 1.32;
-  let ops = build(s);
+  let s = 1.32, trim = 0;
+  let ops = build(s, trim);
   const room = H * 0.94;
-  for (let i = 0; i < 14 && ops.reduce((a, b) => a + b.h, 0) > room; i++) {
-    s *= 0.94;
-    ops = build(s);
+  for (let i = 0; i < 20 && ops.reduce((a, b) => a + b.h, 0) > room; i++) {
+    if (trim < 3 && s < 1.16) trim++;
+    else s *= 0.94;
+    ops = build(s, trim);
   }
   const total = ops.reduce((a, b) => a + b.h, 0);
   let y = (H - total) / 2;

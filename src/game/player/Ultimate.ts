@@ -20,12 +20,78 @@ export const ULT_INFO: Record<UltVariant, { name: string; desc: string }> = {
   plague: { name: 'Plague of Khepri', desc: 'A storm of locusts and scarabs devours everything near you for 8 s.' },
 };
 
+/**
+ * SOUL: the ultimate's charge (`run.ultCharge`, 0..1) is Serket's soul, shown in
+ * the HUD as a glass canopic jar filling with jade smoke (ui/SoulBar). It fills
+ * mostly from kill streaks: every kill in a streak pours in more than the last,
+ * kills landing together (multi-kills) surge it, streak milestones pour a slug
+ * in, and style (tricks, grazes) adds only a little. All gains scale with the
+ * `ultCharge` stat. Nothing charges while the ultimate itself is running.
+ */
+export const SOUL = {
+  /** every kill */
+  kill: 0.004,
+  /** + this per kill already in the streak (streak counted up to `streakCap`) */
+  streakStep: 0.0011,
+  streakCap: 50,
+  /** kills this close together (s, game time) chain into a multi-kill… */
+  multiWindow: 0.45,
+  /** …and each extra kill in the chain surges this much (chain counted up to `multiCap`) */
+  multiSurge: 0.012,
+  multiCap: 8,
+  /** streaks of 10, 25, 50, 100… pour this in at once */
+  milestone: 0.06,
+  /** alpha kills count this many times over */
+  alpha: 4,
+  /** a boss put down */
+  boss: 0.25,
+  /** style: trick score → soul (a 600-point trick ≈ 0.04) */
+  style: 1 / 15000,
+  graze: 0.0012,
+} as const;
+
 export class Ultimate {
   active = false;
   avatar: RigInstance | null = null;
   variant: UltVariant = 'wrath';
+  /** size of the last kill chain (2 = double, 3 = triple…), for HUD flair */
+  multiKill = 0;
+  private multiT = -99;
 
   constructor(private ctx: Ctx, private player: Player, private qte: Qte, private cam: CameraRig) {}
+
+  /** pour soul into the jar (scaled by the ultCharge stat); ignored while the ultimate runs */
+  addSoul(v: number) {
+    if (this.active || v <= 0) return;
+    const run = this.ctx.run;
+    run.ultCharge = Math.min(1, run.ultCharge + v * this.player.stats.get('ultCharge'));
+  }
+
+  /** a kill; `streak` is the kill streak including this kill (run.combo) */
+  chargeKill(streak: number, alpha = false) {
+    const now = this.ctx.run.time;
+    this.multiKill = now - this.multiT <= SOUL.multiWindow ? this.multiKill + 1 : 1;
+    this.multiT = now;
+    let g = SOUL.kill + SOUL.streakStep * Math.min(Math.max(0, streak - 1), SOUL.streakCap);
+    if (this.multiKill > 1) g += SOUL.multiSurge * Math.min(this.multiKill - 1, SOUL.multiCap);
+    if (streak === 10 || streak === 25 || (streak >= 50 && streak % 50 === 0)) g += SOUL.milestone;
+    this.addSoul(alpha ? g * SOUL.alpha : g);
+  }
+
+  /** a landed trick (its style score) */
+  chargeStyle(score: number) {
+    this.addSoul(Math.max(0, score) * SOUL.style);
+  }
+
+  /** a bullet grazed past */
+  chargeGraze() {
+    this.addSoul(SOUL.graze);
+  }
+
+  /** a boss went down */
+  chargeBoss() {
+    this.addSoul(SOUL.boss);
+  }
 
   private ensureAvatar() {
     if (this.avatar) return this.avatar;
