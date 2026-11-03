@@ -567,8 +567,9 @@ export class Cinema {
     let fxRate = 1;
     const s = this.seq;
     if (s) {
-      // the pause menu freezes the cutscene too
-      const step = eng.paused ? 0 : rdt;
+      // the pause menu freezes the cutscene too (and window.__cineHold, for screenshots)
+      const hold = !!(window as any).__cineHold;
+      const step = eng.paused || hold ? 0 : rdt;
       s.t += step;
       try {
         s.update(step);
@@ -577,7 +578,7 @@ export class Cinema {
         s.t = s.dur;
       }
       this.secure();
-      fxRate = s.fxRate;
+      fxRate = hold ? 0 : s.fxRate;
     }
     // a boss cut-in nobody claimed (no 'bossIntro' listener got it): a beat instead
     if (this.pendingGeo && performance.now() - this.pendingGeo.t > 200) {
@@ -602,7 +603,7 @@ export class Cinema {
     this.ccam.apply(rdt);
     for (const f of this.late) f(rdt);
     if (s) {
-      s.late(eng.paused ? 0 : rdt);
+      s.late(eng.paused || (window as any).__cineHold ? 0 : rdt);
       if (s.t >= s.dur) this.finish();
     }
   }

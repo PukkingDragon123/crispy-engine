@@ -390,6 +390,15 @@ export class CavePit {
     const p = en.pit;
     en.t += dt;
     const t = en.t;
+    // killed on the way in: the sand lets go
+    if (!player.alive && !en.built) {
+      this.entering = null;
+      ctx.engine.input.enabled = true;
+      ctx.engine.letterbox(false, 0.3);
+      this.h.hud.setVisible(true);
+      this.h.cam.setCine(null);
+      return;
+    }
     // round and round the throat, sinking
     const pp = player.pos;
     const dx = pp.x - p.x, dz = pp.z - p.z;

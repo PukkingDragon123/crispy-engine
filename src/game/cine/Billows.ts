@@ -13,8 +13,8 @@ import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { makeVoxelMaterial, ensureInstFx, VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { noise, hash3 } from '../../engine/math/rand';
 
-const MAX = 6500;
-const GRID = 3;
+const MAX = 12000;
+const GRID = 4;
 
 interface Tpl {
   x: Float32Array;
@@ -25,11 +25,13 @@ interface Tpl {
   /** per-voxel random 0..1 */
   n: Float32Array;
   count: number;
+  /** cells from the centre to the rim */
+  grid: number;
 }
 
-function makeTemplate(seed: number): Tpl {
+function makeTemplate(seed: number, N = GRID): Tpl {
   const xs: number[] = [], ys: number[] = [], zs: number[] = [], sh: number[] = [], ns: number[] = [];
-  const N = GRID;
+  const shell = N >= 4 ? 0.36 : 0.48;
   for (let gx = -N; gx <= N; gx++)
     for (let gy = -N; gy <= N; gy++)
       for (let gz = -N; gz <= N; gz++) {
@@ -38,18 +40,21 @@ function makeTemplate(seed: number): Tpl {
         // lumpy cauliflower surface: big lobes plus small knuckles, flatter underside
         const lump = 0.78 + 0.32 * noise.n3(px * 1.4 + seed * 7.13, py * 1.4 + seed * 3.31, pz * 1.4 - seed * 5.77) + 0.12 * noise.n3(px * 3.1 - seed, py * 3.1 + seed * 2, pz * 3.1);
         if (d > lump) continue;
-        if (d < lump - 0.48) continue; // hollow: only the visible shell
+        if (d < lump - shell) continue; // hollow: only the visible shell
         xs.push(px + (hash3(gx, gy, gz + seed * 31) - 0.5) * 0.12);
         ys.push(py + (hash3(gx + 11, gy, gz + seed * 17) - 0.5) * 0.12);
         zs.push(pz + (hash3(gx, gy + 5, gz + seed * 13) - 0.5) * 0.12);
         sh.push(Math.min(1, d / Math.max(0.2, lump)));
         ns.push(hash3(gx * 3 + seed, gy * 5 - seed, gz * 7));
       }
-  return { x: new Float32Array(xs), y: new Float32Array(ys), z: new Float32Array(zs), shell: new Float32Array(sh), n: new Float32Array(ns), count: xs.length };
+  return { x: new Float32Array(xs), y: new Float32Array(ys), z: new Float32Array(zs), shell: new Float32Array(sh), n: new Float32Array(ns), count: xs.length, grid: N };
 }
 
 let TPLS: Tpl[] | null = null;
+let TPLS_S: Tpl[] | null = null;
 const templates = () => (TPLS ??= Array.from({ length: 8 }, (_, i) => makeTemplate(i + 1)));
+/** coarser shells for small puffs (their voxels are tiny anyway) */
+const templatesSmall = () => (TPLS_S ??= Array.from({ length: 8 }, (_, i) => makeTemplate(i + 21, 3)));
 
 /** temperature ramp (sRGB), hot to cold */
 const RAMP: [number, number][] = [
@@ -147,7 +152,7 @@ export class Billows {
   }
 
   spawn(o: PuffOpts) {
-    const T = templates();
+    const T = o.r1 < 1.1 ? templatesSmall() : templates();
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28));
     const axis = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
     if (this.puffs.length > 90) this.puffs.shift();
@@ -171,10 +176,15 @@ export class Billows {
     const d0 = o.delay ?? 0;
     const g = at.y;
     const rnd = Math.random;
-    // core
-    this.spawn({ pos: { x: at.x, y: g + r * 0.35, z: at.z }, vel: { x: 0, y: r * 0.9, z: 0 }, r0: r * 0.3, r1: r * 0.95, grow: 3.4, life: 3.4, heat: 1, cool: 0.85, buoy: 2.2, drag: 1.6, soot: o.soot ?? 0.6, delay: d0 });
+    // the core: a cluster of lobes (one huge puff would read as a few giant blocks)
+    this.spawn({ pos: { x: at.x, y: g + r * 0.35, z: at.z }, vel: { x: 0, y: r * 0.9, z: 0 }, r0: r * 0.2, r1: r * 0.58, grow: 3.4, life: 3.4, heat: 1, cool: 0.85, buoy: 2.2, drag: 1.6, soot: o.soot ?? 0.6, delay: d0 });
+    for (let k = 0; k < 5; k++) {
+      const a = (k / 5) * Math.PI * 2 + rnd() * 0.6;
+      const cx = Math.cos(a), cz = Math.sin(a);
+      this.spawn({ pos: { x: at.x + cx * r * 0.38, y: g + r * (0.25 + rnd() * 0.35), z: at.z + cz * r * 0.38 }, vel: { x: cx * r * 0.7, y: r * (0.7 + rnd() * 0.5), z: cz * r * 0.7 }, r0: r * 0.15, r1: r * (0.4 + rnd() * 0.1), grow: 3.2, life: 3 + rnd() * 0.6, heat: 0.95, cool: 0.95, buoy: 2.2, drag: 1.8, soot: o.soot ?? 0.6, delay: d0 + rnd() * 0.04 });
+    }
     // flame tongues thrown outward and up
-    const n = 6 + Math.round(r);
+    const n = 5 + Math.round(r * 0.6);
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + rnd() * 0.5;
       const out = r * (1.6 + rnd() * 1.4);
@@ -185,16 +195,16 @@ export class Billows {
     for (let i = 0; i < stem; i++)
       this.spawn({ pos: { x: at.x + (rnd() - 0.5) * r * 0.3, y: g + r * 0.4, z: at.z + (rnd() - 0.5) * r * 0.3 }, vel: { x: (rnd() - 0.5) * r * 0.4, y: r * (1.8 + i * 0.5), z: (rnd() - 0.5) * r * 0.4 }, r0: r * 0.25, r1: r * (0.55 + i * 0.12), grow: 2, life: 3.6 + i * 0.4, heat: 0.8 - i * 0.12, cool: 0.9, buoy: 2.4, drag: 1.1, soot: o.soot ?? 0.6, delay: d0 + 0.04 + i * 0.07 });
     // dust skirt rolling over the ground
-    const ns = 7 + Math.round(r * 1.5);
+    const ns = 6 + Math.round(r);
     for (let i = 0; i < ns; i++) {
       const a = (i / ns) * Math.PI * 2 + rnd() * 0.4;
       const sp = r * (2.6 + rnd() * 1.6);
       const x = at.x + Math.cos(a) * r * 0.5, z = at.z + Math.sin(a) * r * 0.5;
       const gy = this.groundAt ? this.groundAt(x, z) : g;
-      this.spawn({ pos: { x, y: gy + r * 0.12, z }, vel: { x: Math.cos(a) * sp, y: 0.5, z: Math.sin(a) * sp }, r0: r * 0.14, r1: r * (0.42 + rnd() * 0.2), grow: 1.6, life: 2.6 + rnd() * 1.4, heat: 0.18, cool: 4, buoy: 0.4, drag: 1.5, dust: o.dust ?? true, delay: d0 + 0.05 + rnd() * 0.1 });
+      this.spawn({ pos: { x, y: gy + r * 0.12, z }, vel: { x: Math.cos(a) * sp, y: 0.5, z: Math.sin(a) * sp }, r0: r * 0.08, r1: r * (0.2 + rnd() * 0.12), grow: 1.6, life: 2.4 + rnd() * 1.2, heat: 0.18, cool: 4, buoy: 0.4, drag: 1.5, dust: o.dust ?? true, delay: d0 + 0.05 + rnd() * 0.1 });
     }
     // late soot, rolling up from the fire
-    for (let i = 0; i < 3; i++)
+    for (let i = 0; i < 2; i++)
       this.spawn({ pos: { x: at.x + (rnd() - 0.5) * r, y: g + r * (0.8 + i * 0.4), z: at.z + (rnd() - 0.5) * r }, vel: { x: (rnd() - 0.5) * 1.5, y: 2 + i, z: (rnd() - 0.5) * 1.5 }, r0: r * 0.4, r1: r * (0.9 + i * 0.15), grow: 1.1, life: 5 + i, heat: 0.3, cool: 2, buoy: 0.6, drag: 0.8, soot: 0.85, delay: d0 + 0.35 + i * 0.25 });
   }
 
@@ -216,7 +226,8 @@ export class Billows {
       p.age += dt;
       if (p.age >= p.life) P.splice(k, 1);
     }
-    for (const p of P) {
+    for (let pi = P.length - 1; pi >= 0; pi--) {
+      const p = P[pi];
       if (p.age < 0) continue;
       const lk = p.age / p.life;
       const heat = p.heat * Math.exp(-p.age * p.cool);
@@ -238,7 +249,7 @@ export class Billows {
       _q.setFromAxisAngle(p.axis, p.spin * dt);
       p.q.premultiply(_q);
       const R = p.r0 + (p.r1 - p.r0) * (1 - Math.exp(-p.age * p.grow));
-      const cell = (R / GRID) * 1.12;
+      const cell = (R / p.tpl.grid) * 1.12;
       const T = p.tpl;
       // the cold puff crumbles away voxel by voxel over the last part of its life
       const van = lk > 0.5 ? (lk - 0.5) / 0.5 : 0;
