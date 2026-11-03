@@ -63,6 +63,7 @@ import { RuinNests } from '../run/RuinNests';
 import { Wildlife } from '../run/Wildlife';
 import { TreasureHunt } from '../run/TreasureHunt';
 import { CavePit } from '../run/CavePit';
+import { OasisHeart } from '../run/OasisHeart';
 import { Barks } from '../audio/Barks';
 import { DeathCine, deathCineFromRun } from './DeathCine';
 import { CodexRun } from '../ui/codex/CodexRun';
@@ -195,6 +196,7 @@ export class RunScene implements GameScene {
   wildlife: Wildlife | null = null;
   treasure: TreasureHunt | null = null;
   cavePit: CavePit | null = null;
+  oasis: OasisHeart | null = null;
   private codexRun: CodexRun | null = null;
   equipment!: Equipment;
   gearLoot!: GearPickups;
@@ -321,6 +323,11 @@ export class RunScene implements GameScene {
       addBounty: (v) => this.addBounty(v),
     });
     this.ruins = new RuinNests({ ctx: this.ctx, player: this.player, enemies: this.enemies, props: this.props, inter: this.inter, chest: (x, z, t, r) => this.spawnChest(x, z, t, r) });
+    // the Heart of the Oasis (area B): the Oasis King owns the pond until he falls
+    this.oasis = OasisHeart.create({
+      ctx: this.ctx, player: this.player, enemies: this.enemies, qte: this.qte,
+      cam: this.camRig, cloth: this.cloth, props: this.props, adoptBoss: (b) => this.adoptBoss(b),
+    });
     this.cavePit = new CavePit({
       ctx: this.ctx, player: this.player, cam: this.camRig, hud: this.hud,
       look: this.opts.look, gun: this.opts.gun, seed: this.opts.seed,
@@ -437,6 +444,7 @@ export class RunScene implements GameScene {
     this.wildlife?.dispose();
     this.treasure?.dispose();
     this.cavePit?.dispose();
+    this.oasis?.dispose();
     this.codexRun?.dispose();
     this.engine.paused = false;
     this.engine.post.u.uDesat.value = 0;
@@ -553,6 +561,8 @@ export class RunScene implements GameScene {
     this.director.onWaveEnd = (s) => this.onWaveEnd(s);
     this.enemies.qte = this.qte;
     this.director.cam = this.camRig;
+    ev.on('oasisKingStart', () => (this.director.paused = true));
+    ev.on('oasisKingDefeated', () => (this.director.paused = false));
     this.director.bellBlocked = () => !!this.inter.current || this.shop.active || this.choice.active;
   }
 
@@ -560,6 +570,12 @@ export class RunScene implements GameScene {
     const b = makeBoss({ ctx: this.ctx, player: this.player, enemies: this.enemies, qte: this.qte, cam: this.camRig, cloth: this.cloth }, wave);
     const p = this.director.spawnPoint(18, 26) ?? { x: this.player.pos.x + 20, z: this.player.pos.z };
     b.place(p.x, p.z, Math.atan2(this.player.pos.x - p.x, this.player.pos.z - p.z));
+    this.adoptBoss(b);
+    return b;
+  }
+
+  /** a boss joins the run: targetable, music, rewards on defeat, then its fight starts */
+  adoptBoss(b: Boss) {
     this.enemies.registerExternal(b);
     this.bosses.push(b);
     (window as any).__music?.setMood('boss');
@@ -584,7 +600,6 @@ export class RunScene implements GameScene {
       }
     };
     void b.start();
-    return b;
   }
 
   /** chests and the dumb scarab live outside the prop batches */
@@ -662,6 +677,7 @@ export class RunScene implements GameScene {
     this.wildlife?.populateZone(z);
     this.treasure?.populateZone(z);
     this.cavePit?.populateZone(z);
+    this.oasis?.populateZone(z);
   }
 
   spawnChest(x: number, z: number, tier: 'wood' | 'silver' | 'gold' | 'divine', rot = rnd.next() * 6.28) {
@@ -1083,6 +1099,7 @@ export class RunScene implements GameScene {
     this.ruins?.update(dt);
     this.wildlife?.update(dt);
     this.cavePit?.update(dt);
+    this.oasis?.update(dt);
     for (const s of this.scarabs) s.update(dt, this.player);
     for (let i = this.bosses.length - 1; i >= 0; i--) {
       const b = this.bosses[i];

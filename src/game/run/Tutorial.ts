@@ -10,7 +10,8 @@
 //   5. kick (F)
 //   6. grapple (Q) the scorpion totem she raises
 // then "a hundred waves stand between you and your name", she leaves, and the
-// run begins. Hold BACKSPACE (or click SKIP) to skip.
+// run begins. Hold BACKSPACE (or click SKIP) to skip. On a touch screen every
+// goal and line names the gestures instead of the keys (ui/TouchControls).
 //
 // API: `new Tutorial({ ctx, player, cam })`, then every frame `update(dt)` until
 // `done`, then `dispose()`. It never touches the wave director: the caller starts
@@ -28,6 +29,11 @@ import { modelEntry } from '../models/lookup';
 import { FloatText3D } from '../fx/FloatText3D';
 import { Voice } from '../audio/Voice';
 import { GlyphRings, SandVortex, SerketSpirit, guideSpot, spiritMotes, type SpiritPose } from '../fx/SerketSpirit';
+import { isTouchDevice } from '../ui/TouchControls';
+
+/** on a touch screen the lesson names the gestures (ui/TouchControls) instead of the keys */
+const TOUCH = isTouchDevice();
+const say = (keys: string, touch: string) => (TOUCH ? touch : keys);
 
 export interface TutorialDeps {
   ctx: Ctx;
@@ -144,7 +150,7 @@ export class Tutorial {
     // skipping: hold BACKSPACE, or click
     this.skipEl = document.createElement('div');
     this.skipEl.style.cssText = "position:absolute;right:3vw;top:3vh;font-family:'Alagard';font-size:16px;color:#e8fff2;opacity:.7;z-index:9;pointer-events:auto;cursor:pointer;padding:8px 12px;text-shadow:0 2px 0 #0a2a1a";
-    this.skipEl.textContent = 'hold BACKSPACE to skip the lesson ▸';
+    this.skipEl.textContent = say('hold BACKSPACE to skip the lesson ▸', 'tap here to skip the lesson ▸');
     this.skipEl.onpointerdown = (e) => {
       e.stopPropagation();
       this.skip();
@@ -165,8 +171,19 @@ export class Tutorial {
     yield* this.line("Ride with me a while, bone-rider. Let's shake the rust off.", 'happy', 'present');
 
     // 1. ride, carve, tuck
-    this.setGoals(['PUSH   tap SHIFT  on the beat', 'CARVE   A / D  into the turns', 'TUCK   hold SPACE downhill']);
-    yield* this.line('The sand carries no lazy rider. Tap SHIFT to kick, and kick again as your foot lands back on the board. A and D to carve, hold SPACE to tuck.', 'neutral', 'point');
+    this.setGoals(
+      TOUCH
+        ? ['RIDE   hold your left thumb down', 'STEER   drag it into the turns', 'TUCK   flick up, keep it high']
+        : ['PUSH   tap SHIFT  on the beat', 'CARVE   A / D  into the turns', 'TUCK   hold SPACE downhill']
+    );
+    yield* this.line(
+      say(
+        'The sand carries no lazy rider. Tap SHIFT to kick, and kick again as your foot lands back on the board. A and D to carve, hold SPACE to tuck.',
+        'The sand carries no lazy rider. Hold your left thumb on the sand and the board kicks along. Drag it to steer, flick it up and keep it high to tuck.'
+      ),
+      'neutral',
+      'point'
+    );
     yield () => {
       this.check(0, this.rideDist > 26);
       this.check(1, this.carveT > 0.8);
@@ -180,8 +197,9 @@ export class Tutorial {
     // 2. charge a jump and land it
     this.jumpCharged = false;
     this.landed = null;
-    this.setGoals(['JUMP   hold SPACE ... release', 'LAND IT   stay level']);
-    yield* this.line('Now hold SPACE to coil those bones, let go to fly, and land it clean.', 'neutral', 'beckon');
+    const jumpGoal = say('JUMP   hold SPACE ... release', 'JUMP   flick up, hold ... ease back');
+    this.setGoals([jumpGoal, 'LAND IT   stay level']);
+    yield* this.line(say('Now hold SPACE to coil those bones, let go to fly, and land it clean.', 'Now flick your left thumb up and hold it to coil those bones, ease back to fly, and land it clean.'), 'neutral', 'beckon');
     yield () => {
       if (this.jumpCharged) this.check(0, true);
       if (this.landed) {
@@ -189,7 +207,7 @@ export class Tutorial {
           this.landed = null;
           this.jumpCharged = false;
           this.bailed++;
-          this.retext(0, 'JUMP   hold SPACE ... release', false);
+          this.retext(0, jumpGoal, false);
           if (this.bailed <= 2) this.quip(['Ouch. Knees soft, bones. Again.', 'Gravity: one. Skeleton: zero. Again!'][this.bailed - 1]);
         } else this.check(1, true);
       }
@@ -204,8 +222,12 @@ export class Tutorial {
     sp.flick();
     this.raiseTargets();
     yield 1.0;
-    this.setGoals(['AIM   hold RIGHT MOUSE', 'SHOOT   LEFT MOUSE', 'SKULLS   0 / 3']);
-    yield* this.line('Three old skulls with bad attitudes. Aim with the right mouse, shoot with the left.', 'stern', 'point');
+    this.setGoals(TOUCH ? ['AIM   drag right, then hold still', 'SHOOT   keep the sights on a skull', 'SKULLS   0 / 3'] : ['AIM   hold RIGHT MOUSE', 'SHOOT   LEFT MOUSE', 'SKULLS   0 / 3']);
+    yield* this.line(
+      say('Three old skulls with bad attitudes. Aim with the right mouse, shoot with the left.', 'Three old skulls with bad attitudes. Drag your right thumb to aim and hold it still. Keep the sights on one and the gun speaks for itself.'),
+      'stern',
+      'point'
+    );
     yield () => {
       if (this.player.aiming) this.check(0, true);
       const hit = 3 - this.targetsLeft;
@@ -222,15 +244,19 @@ export class Tutorial {
     this.perfect = false;
     this.reloads = 0;
     this.player.ammo = Math.min(this.player.ammo, 1);
-    this.setGoals(['RELOAD   R', 'VENOM ROUNDS   R again in the bright window']);
-    yield* this.line('Your cylinder is nearly dry. Press R, and when the ring flashes in the window, press R again.', 'neutral', 'present');
+    this.setGoals(TOUCH ? ['RELOAD   tap the cylinder', 'VENOM ROUNDS   tap again in the bright window'] : ['RELOAD   R', 'VENOM ROUNDS   R again in the bright window']);
+    yield* this.line(
+      say('Your cylinder is nearly dry. Press R, and when the ring flashes in the window, press R again.', 'Your cylinder is nearly dry. Tap it, and when the ring flashes in the window, tap it again.'),
+      'neutral',
+      'present'
+    );
     yield () => {
       const R = this.player.reload;
       if (R.active) this.check(0, true);
       if (this.wasReloading && !R.active && !this.perfect) {
         this.reloads++;
         if (this.reloads < 3) {
-          this.quip(this.reloads === 1 ? 'Too early or too late. Again, and watch the ring.' : 'Closer. Feel the click, then press.');
+          this.quip(this.reloads === 1 ? 'Too early or too late. Again, and watch the ring.' : say('Closer. Feel the click, then press.', 'Closer. Feel the click, then tap.'));
           this.player.ammo = Math.min(this.player.ammo, 1);
         }
       }
@@ -244,8 +270,8 @@ export class Tutorial {
 
     // 5. kick
     this.melee = 0;
-    this.setGoals(['KICK   F']);
-    yield* this.line('Something too close for lead? Kick it. F.', 'stern', 'beckon');
+    this.setGoals([say('KICK   F', 'KICK   swipe your right thumb down')]);
+    yield* this.line(say('Something too close for lead? Kick it. F.', 'Something too close for lead? Kick it. Swipe your right thumb down.'), 'stern', 'beckon');
     yield () => {
       this.check(0, this.melee > 0);
       return this.melee > 0;
@@ -258,8 +284,8 @@ export class Tutorial {
     sp.pose = 'raise';
     this.raiseTotem();
     yield 1.0;
-    this.setGoals(['GRAPPLE   aim at the totem, press Q']);
-    yield* this.line('Last trick. Aim at my totem and hook it with Q.', 'neutral', 'point');
+    this.setGoals([say('GRAPPLE   aim at the totem, press Q', 'GRAPPLE   aim at the totem, swipe up')]);
+    yield* this.line(say('Last trick. Aim at my totem and hook it with Q.', 'Last trick. Aim at my totem and swipe your right thumb up to hook it.'), 'neutral', 'point');
     yield () => {
       const hooked = this.player.board.grapple.active;
       this.check(0, hooked);
@@ -269,7 +295,7 @@ export class Tutorial {
     yield 1.2;
     this.clearGoals();
     this.sinkAll();
-    yield* this.line("There. You're ready, or close enough to fake it.", 'happy', 'open');
+    yield* this.line(say("There. You're ready, or close enough to fake it.", "There. You're ready, or close enough to fake it. When the cards wake, tap them."), 'happy', 'open');
 
     // farewell
     sp.pose = 'open';

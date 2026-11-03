@@ -2182,7 +2182,7 @@ export class Enemies implements EnemyApi {
         if (this.isBig(e, a) && this.dodge.ready() && this.threatens(e, a, ppos, pvel, dist)) {
           e.qteHold = true;
           this.warn.bang(e, { tier: 'grab', life: 1.2, y: e.height * e.scale + 0.55 });
-          void this.dodge.offer({ from: e.pos }).then((r) => {
+          void this.dodge.offer({ from: e.pos, at: () => ({ x: e.pos.x, y: e.pos.y + e.height * e.scale * 0.6, z: e.pos.z }) }).then((r) => {
             e.qteHold = false;
             e.dodged = r === 'good' || r === 'perfect';
           });
@@ -2658,7 +2658,7 @@ export class Enemies implements EnemyApi {
           e.qteTried = true;
           if (this.dodge.ready() && this.player.alive && (this.player.invuln ?? 0) <= 0 && Math.hypot(ppos.x - e.leapTo.x, ppos.z - e.leapTo.z) < 3.2 && Math.abs(ppos.y - e.leapTo.y) < 3) {
             e.qteHold = true;
-            void this.dodge.offer({ from: e.leapFrom }).then((r) => {
+            void this.dodge.offer({ from: e.leapFrom, at: () => ({ x: e.pos.x, y: e.pos.y + e.height * e.scale * 0.6, z: e.pos.z }) }).then((r) => {
               e.qteHold = false;
               e.dodged = r === 'good' || r === 'perfect';
             });
@@ -2794,7 +2794,7 @@ export class Enemies implements EnemyApi {
     ctx.events.emit('vultureSnatch', e);
     const q = this.qte;
     if (!q) return;
-    void q.run({ kind: 'mash', key: 'KeyF', label: 'SHAKE IT OFF', duration: 2.8, target: e.alpha ? 10 : 8 }).then((r) => {
+    void q.run({ kind: 'mash', key: 'KeyF', label: 'SHAKE IT OFF', duration: 2.8, target: e.alpha ? 10 : 8, at: () => (e.alive ? { x: e.pos.x, y: e.pos.y + e.height * e.scale * 0.5, z: e.pos.z } : null) }).then((r) => {
       if (this.snatching !== e) return;
       this.releaseSnatch(e, r !== 'fail', r === 'perfect' ? 1.6 : 1);
     });

@@ -427,8 +427,15 @@ export class Hud {
       const frame = Math.floor(this.t * 14) % 2 ? 'pinchA' : 'pinchB';
       this.spr(frame, pxp, pyp, 1, rel.jam > 0 ? 0.5 + 0.5 * Math.sin(this.t * 40) : 1, pa + Math.PI / 2);
       const inside = rel.t >= w0 && rel.t <= w1;
-      const kc = keycap('R');
-      if (inside || rel.jam > 0) this.blit(kc, ox - kc.width / 2, oy + R + 8 + (inside ? Math.sin(this.t * 20) : 0));
+      // on touch the cylinder itself is the switch: say so instead of showing a key
+      if (inside || rel.jam > 0) {
+        const bob = inside ? Math.sin(this.t * 20) : 0;
+        if (this.touch) text(c, 'TAP', ox, oy + R + 7 + bob, UI.brass.h, 16, 'center');
+        else {
+          const kc = keycap('R');
+          this.blit(kc, ox - kc.width / 2, oy + R + 8 + bob);
+        }
+      }
       if (rel.jam > 0) text(c, 'JAMMED', ox, oy - R - 22, UI.blood.h, 16, 'center');
       // casings eject at start of eject phase
       if (!this.use3D && rel.phase === 'eject' && Math.random() < dt * 30) this.parts.push({ kind: 'casing', x: ox + (Math.random() - 0.5) * 10, y: oy, vx: (Math.random() - 0.5) * 50, vy: -30 - Math.random() * 30, t: 0, life: 1.2, rot: Math.random() * 6 });
@@ -514,10 +521,14 @@ export class Hud {
         // beside the jar's shoulder, but always clear of the consumables' key caps below
         const tx = Math.round(jx + 22 * k), ty0 = Math.round(Math.min(jy - 68 * k, y - 74));
         if (ready) {
-          const kc = keycap('Z');
           const pulse = Math.round(Math.sin(this.t * 6) * 1.5);
-          this.blit(kc, tx, ty0 - 2 + pulse);
-          text(c, 'UNLEASH', tx + kc.width + 4, ty0 + pulse, Math.sin(this.t * 6) > 0 ? '#c8ffe0' : UI.venom.l, 16);
+          const col = Math.sin(this.t * 6) > 0 ? '#c8ffe0' : UI.venom.l;
+          if (this.touch) text(c, 'TAP THE JAR', tx, ty0 + pulse, col, 16);
+          else {
+            const kc = keycap('Z');
+            this.blit(kc, tx, ty0 - 2 + pulse);
+            text(c, 'UNLEASH', tx + kc.width + 4, ty0 + pulse, col, 16);
+          }
         }
         if (s.combo > 1) {
           const hot = Math.min(1, s.combo / 40);
@@ -556,7 +567,7 @@ export class Hud {
         this.blit(slot(22, 5), ix, y - 30);
         this.anchors.items.push({ x: ix + 11, y: y - 19, size: 22, model: it.count > 0 ? it.model ?? '' : '', count: it.count });
         if (it.icon && !(this.use3D && this.items3D[ii])) this.spr(it.icon, ix + 7, y - 24);
-        this.blit(keycap(it.key), ix + 3, y - 42);
+        if (!this.touch) this.blit(keycap(it.key), ix + 3, y - 42);
         if (it.count > 1) text(c, 'x' + it.count, ix + 14, y - 20, UI.text, 16);
         ix += 28;
       }
@@ -628,13 +639,14 @@ export class Hud {
       if (brk) {
         // beside the watch: how to cut the break short
         const wy = Math.round(py + 14 * k + WATCH_DROP * k) - drop;
-        const kc = keycap('T');
         const ringing = (s.bell ?? 0) > 0.02;
-        const l1 = ringing ? 'RINGING' : 'HOLD TO RING', l2 = 'THE BELL';
+        const l1 = ringing ? 'RINGING' : this.touch ? 'HOLD THE WATCH' : 'HOLD TO RING', l2 = this.touch && !ringing ? 'TO RING THE BELL' : 'THE BELL';
         const ex = Math.round(cx - 28 * k);
         const col = ringing ? UI.brass.h : 'rgba(240,220,180,0.92)';
-        const w1 = Math.ceil(measure(c, l1, 16));
-        this.blit(kc, ex - w1 - kc.width - 4, wy - 15);
+        if (!this.touch) {
+          const kc = keycap('T');
+          this.blit(kc, ex - Math.ceil(measure(c, l1, 16)) - kc.width - 4, wy - 15);
+        }
         text(c, l1, ex, wy - 13, col, 16, 'right');
         text(c, l2, ex, wy + 1, col, 16, 'right');
       } else text(c, s.zone, cx, Math.round(py + 15 * k + (tl < 900 ? 14 : 3) * k) + 4 - drop, 'rgba(240,220,180,0.85)', 16, 'center');
@@ -674,8 +686,10 @@ export class Hud {
     // ---------------------------------------------------------- skills + ultimate (bottom right)
     if (this.use3D) {
       for (const a of this.cardAnchors) {
-        const kc = keycap(a.key);
-        this.blit(kc, a.x - kc.width / 2, a.y + a.h / 2 + 2);
+        if (!this.touch) {
+          const kc = keycap(a.key);
+          this.blit(kc, a.x - kc.width / 2, a.y + a.h / 2 + 2);
+        }
         if (a.cd > 0.05 && a.cd < 99) text(c, a.cd < 1 ? a.cd.toFixed(1) : String(Math.ceil(a.cd)), a.x, a.y - 8, UI.text, 16, 'center');
       }
     } else {
@@ -692,7 +706,7 @@ export class Hud {
       }
       this.anchors.ult = { x: ux, y: uy, frac: s.ult, ready };
       if (!this.use3D) this.spr('scorp_x2', ux - 8, uy - 8, 1, ready ? 1 : 0.5);
-      this.blit(keycap('Z'), ux - 7, uy + 20);
+      if (!this.touch) this.blit(keycap('Z'), ux - 7, uy + 20);
       let kx = ux - 52;
       for (let i = s.skills.length - 1; i >= 0; i--) {
         const sk = s.skills[i];
@@ -714,7 +728,7 @@ export class Hud {
           if (sk.cd < 9.5) text(c, sk.cd < 1 ? sk.cd.toFixed(1) : String(Math.ceil(sk.cd)), x + sz / 2, y + 4, UI.text, 16, 'center');
         } else if (Math.sin(this.t * 3 + i) > 0.97) px(c, x + 4, y + 4, 2, 2, UI.brass.h);
         const kc = keycap(sk.key);
-        this.blit(kc, x + sz / 2 - kc.width / 2, y + sz + 1);
+        if (!this.touch) this.blit(kc, x + sz / 2 - kc.width / 2, y + sz + 1);
         if (sk.charges !== undefined && sk.charges > 1) text(c, String(sk.charges), x + sz - 4, y - 6, UI.text, 16);
         kx -= 30;
       }
@@ -767,12 +781,20 @@ export class Hud {
       const p = this.project(s.prompt.world);
       if (p.visible) {
         const x = Math.round(p.x / this.scale), y = Math.round(p.y / this.scale) + Math.round(Math.sin(this.t * 4) * 2);
-        const kc = keycap(s.prompt.key);
-        const tw = Math.ceil(measure(c, s.prompt.text, 16)) + 14;
-        const bw = tw + kc.width + 6;
-        this.blit(parchment(bw, 20, 3), x - bw / 2, y - 10);
-        this.blit(kc, x - bw / 2 + 4, y - 7);
-        text(c, s.prompt.text, x - bw / 2 + kc.width + 9, y - 7, UI.wood.o, 16, 'left', false);
+        if (this.touch) {
+          // touch: no key, just the verb (the thing itself is what you touch)
+          const label = s.prompt.text || 'TOUCH IT';
+          const bw = Math.ceil(measure(c, label, 16)) + 16;
+          this.blit(parchment(bw, 20, 3), x - bw / 2, y - 10);
+          text(c, label, x, y - 7, UI.wood.o, 16, 'center', false);
+        } else {
+          const kc = keycap(s.prompt.key);
+          const tw = Math.ceil(measure(c, s.prompt.text, 16)) + 14;
+          const bw = tw + kc.width + 6;
+          this.blit(parchment(bw, 20, 3), x - bw / 2, y - 10);
+          this.blit(kc, x - bw / 2 + 4, y - 7);
+          text(c, s.prompt.text, x - bw / 2 + kc.width + 9, y - 7, UI.wood.o, 16, 'left', false);
+        }
       }
     }
     // ---------------------------------------------------------- objective + marker
@@ -784,7 +806,7 @@ export class Hud {
         const sy = H - 60 + slide * 70;
         const slots = car.map((g, i) => ({ x: cx + 32 + i * SLOT, id: g.id, active: g.id === s.weapon!.id }));
         ar.strip = { x: cx + 32 + ((car.length - 1) * SLOT) / 2, y: sy, slots };
-        car.forEach((g, i) => {
+        if (!this.touch) car.forEach((g, i) => {
           const kc = keycap(g.key);
           this.blit(kc, slots[i].x - kc.width / 2, sy - 23 + (slots[i].active ? -2 : 0));
         });
@@ -819,8 +841,7 @@ export class Hud {
       }
       this.anchors.arsenal = ar;
     } else this.anchors.arsenal = null;
-    // (on touch screens the pause / tab buttons own the top-right corner: hang the note under them)
-    this.anchors.paper = { right: W - 8 + slide * 220, y: 10 * k + (this.touch ? 32 : 0), k, compact: H < 250 || W < 520, speed: s.speed };
+    this.anchors.paper = { right: W - 8 + slide * 220, y: 10 * k, k, compact: H < 250 || W < 520, speed: s.speed };
     if (s.objective && !this.use3D) {
       const ow = Math.max(150, Math.ceil(Math.max(measure(c, s.objective.text, 16), measure(c, s.objective.sub, 16))) + 20);
       const ox = W - ow - 8 + slide * 200, oy = 8;

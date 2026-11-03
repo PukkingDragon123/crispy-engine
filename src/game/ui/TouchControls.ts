@@ -728,6 +728,12 @@ export class TouchControls {
     }
     if (this.qteSay.textContent !== t) this.qteSay.textContent = t;
     this.qteSay.style.opacity = t ? '1' : '0';
+    // the prompt may float over the threat (Qte.anchor): keep the line right under it
+    const an = this.qte.anchor;
+    const left = an ? `${Math.max(130, Math.min(window.innerWidth - 130, an.x))}px` : '50%';
+    const top = an ? `${Math.min(window.innerHeight - 40, an.bottom)}px` : '71%';
+    if (this.qteSay.style.left !== left) this.qteSay.style.left = left;
+    if (this.qteSay.style.top !== top) this.qteSay.style.top = top;
   }
 
   // ================================================================ per frame

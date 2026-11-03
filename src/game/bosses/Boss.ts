@@ -212,7 +212,8 @@ export abstract class Boss implements ExternalTarget {
     this.check();
     const eng = this.ctx.engine;
     eng.slowMo(0.15, 30);
-    const r = await this.d.qte.run(spec);
+    // the prompt floats over the boss unless the caller anchored it elsewhere
+    const r = await this.d.qte.run({ ...spec, at: spec.at ?? (() => ({ x: this.pos.x, y: this.pos.y + this.height * 0.6, z: this.pos.z })) });
     eng.slowMo(1, 6);
     this.check();
     return r;

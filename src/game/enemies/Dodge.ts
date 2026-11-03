@@ -6,7 +6,7 @@
 // window). Rate-limited so it stays a highlight, never a chore.
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
-import type { Qte, QteResult } from '../ui/Qte';
+import type { Qte, QteResult, QteAt } from '../ui/Qte';
 
 /** what the dodge needs from the hunter (the real Player satisfies it) */
 export interface DodgeHunter {
@@ -58,9 +58,10 @@ export class Dodge {
    * Offer a QTE dodge against a blow coming from `from`. Resolves after the
    * key press (or the miss). On success the hunter is already out of the way
    * and invulnerable for a moment. `up` makes it a jump (sweeps along the
-   * ground) instead of a side-step.
+   * ground) instead of a side-step. The prompt floats over `at` (the attacker;
+   * default: chest height over `from`).
    */
-  async offer(o: { from: { x: number; z: number }; label?: string; up?: boolean; window?: number }): Promise<DodgeResult> {
+  async offer(o: { from: { x: number; z: number }; label?: string; up?: boolean; window?: number; at?: QteAt }): Promise<DodgeResult> {
     if (!this.ready()) return 'none';
     const ctx = this.ctx;
     const eng = ctx.engine;
@@ -70,7 +71,8 @@ export class Dodge {
     ctx.sfx('time_slow', null, 0.45, 1.6);
     let r: QteResult = 'fail';
     try {
-      r = await this.qte!.run({ kind: 'ring', key: 'Space', label: o.label ?? (o.up ? 'JUMP!' : 'DODGE!'), duration: o.window ?? DODGE_QTE.window });
+      const at = o.at ?? (() => ({ x: o.from.x, y: ctx.world.groundAt(o.from.x, o.from.z) + 1.4, z: o.from.z }));
+      r = await this.qte!.run({ kind: 'ring', key: 'Space', label: o.label ?? (o.up ? 'JUMP!' : 'DODGE!'), duration: o.window ?? DODGE_QTE.window, at });
     } finally {
       this.busy = false;
       this.cdUntil = this.now + DODGE_QTE.cooldown;

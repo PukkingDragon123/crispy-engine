@@ -1,16 +1,24 @@
 // Skill-based QTEs drawn as crisp pixel art on their own overlay canvas.
 // All QTEs run on real time (unaffected by slow motion) and resolve to
 // 'perfect' | 'good' | 'fail'.
+// A spec may carry `at` (a world point, or a getter for a moving threat): the
+// prompt then floats over that threat on screen (clamped inside the screen)
+// instead of sitting at the centre; `anchor` reports where it is drawn so the
+// touch layer can put its Alagard line under it.
 import type { Input } from '../../engine/Input';
 import type { AudioEngine } from '../../engine/audio/AudioEngine';
 
 export type QteResult = 'perfect' | 'good' | 'fail';
-export type QteSpec =
+type P3 = { x: number; y: number; z: number };
+/** where the threat is: a world point or a getter (null = fall back to the centre) */
+export type QteAt = P3 | (() => P3 | null | undefined);
+export type QteSpec = (
   | { kind: 'ring'; key?: string; label?: string; duration?: number }
   | { kind: 'mash'; key?: string; label?: string; duration?: number; target?: number }
   | { kind: 'sequence'; keys: string[]; label?: string; duration?: number }
   | { kind: 'balance'; label?: string; duration?: number; drift?: number }
-  | { kind: 'bar'; key?: string; label?: string; speed?: number; width?: number };
+  | { kind: 'bar'; key?: string; label?: string; speed?: number; width?: number }
+) & { at?: QteAt };
 
 interface Active {
   spec: QteSpec;
@@ -27,6 +35,13 @@ export class Qte {
   ctx: CanvasRenderingContext2D;
   active: Active | null = null;
   private scale = 2;
+  /** world -> screen (css px); defaults to the run HUD's projector */
+  project: ((p: P3) => { x: number; y: number; visible: boolean; behind?: boolean }) | null = null;
+  /** where the live prompt is drawn when it follows a threat (css px: centre and the bottom of the prompt) */
+  anchor: { x: number; y: number; bottom: number } | null = null;
+  private ax = 0;
+  private ay = 0;
+  private anchored = false;
 
   constructor(parent: HTMLElement, private input: Input, private audio: AudioEngine) {
     this.canvas = document.createElement('canvas');
@@ -56,6 +71,7 @@ export class Qte {
       }
       if (spec.kind === 'bar') st.x = 0;
       this.active = { spec, t: 0, resolve, state: st };
+      this.anchored = false;
       this.audio.play('qte_prompt', { volume: 0.6 });
     });
   }
@@ -77,9 +93,12 @@ export class Qte {
     const W = this.canvas.width, H = this.canvas.height;
     c.clearRect(0, 0, W, H);
     const a = this.active;
-    if (!a) return;
+    if (!a) {
+      this.anchor = null;
+      return;
+    }
     a.t += rdt;
-    const cx = Math.round(W / 2), cy = Math.round(H * 0.62);
+    const [cx, cy] = this.place(a, W, H, rdt);
     if (a.done) {
       a.done.t += rdt;
       const col = a.done.r === 'perfect' ? '#ffd36b' : a.done.r === 'good' ? '#c8ff5a' : '#ff6a4a';
@@ -189,6 +208,36 @@ export class Qte {
         break;
       }
     }
+  }
+
+  /** the prompt's centre (QTE px): over the threat when the spec has `at`, else lower-centre */
+  private place(a: Active, W: number, H: number, rdt: number): [number, number] {
+    const at = a.spec.at;
+    let tx = W / 2, ty = H * 0.62;
+    if (at) {
+      const w = typeof at === 'function' ? at() : at;
+      const proj = this.project ?? (window as any).__engine?.current?.hud?.project;
+      const p = w && proj ? proj(w) : null;
+      if (p && p.visible && !p.behind) {
+        const k = a.spec.kind;
+        const hw = k === 'balance' ? 74 : k === 'bar' ? 64 : k === 'sequence' ? (a.spec as { keys: string[] }).keys.length * 9 + 6 : 52;
+        tx = Math.max(hw + 4, Math.min(W - hw - 4, p.x / this.scale));
+        ty = Math.max(66, Math.min(H - 46, p.y / this.scale - 18));
+      }
+    }
+    // glide (a moving threat drags the prompt smoothly; the first frame snaps)
+    if (!this.anchored) {
+      this.ax = tx;
+      this.ay = ty;
+      this.anchored = true;
+    } else if (!a.done) {
+      const f = Math.min(1, rdt * 14);
+      this.ax += (tx - this.ax) * f;
+      this.ay += (ty - this.ay) * f;
+    }
+    const cx = Math.round(this.ax), cy = Math.round(this.ay);
+    this.anchor = at ? { x: cx * this.scale, y: cy * this.scale, bottom: (cy + 30) * this.scale } : null;
+    return [cx, cy];
   }
 
   private circle(x: number, y: number, r: number, col: string, w = 1) {

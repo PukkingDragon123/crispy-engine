@@ -208,7 +208,7 @@ export class TwentyOne implements Mode {
   view(): View | null {
     // a two-shot from the side: Sundown on the left, Mama on the right, the cards between them
     const c = this.local(0.0, 0.0);
-    return { pos: new THREE.Vector3(2.92, 1.36, -0.08), look: c.add(new THREE.Vector3(0, 0.16, -0.04)), fov: 50 };
+    return { pos: new THREE.Vector3(3.06, 1.56, 0.46), look: c.add(new THREE.Vector3(0.04, 0.24, -0.1)), fov: 52 };
   }
   hint() {
     if (this.phase === 'bet' || this.phase === 'done') return `${this.result ? this.result + '   ·   ' : ''}Click a chip stack to bet: red 10 · white 25 · blue 50   ·   Esc: leave the table`;

@@ -23,7 +23,7 @@ import { BuildKit, HubHost, HubStation, HeroBubble, SM, safe, geoOf, meshOf, eng
 const IN = HX.CABIN_IN;
 /** the trophy wall: the front wall between the two front windows */
 const WALL_Z = IN.front;
-const BILL_W = 0.3, BILL_H = 0.42;
+const BILL_W = 0.34, BILL_H = 0.47;
 
 /** what Sundown says about each one he has put on the wall */
 const TALES: Record<string, string> = {
@@ -250,8 +250,9 @@ export class HouseDecor {
     this.bosses.forEach((b, i) => {
       const row = i < 6 ? 0 : 1;
       const col = row === 0 ? i : i - 6;
-      const x = (row === 0 ? -0.45 : -0.24) + col * 0.43 + Math.sin(i * 2.7) * 0.03;
-      const y = (row === 0 ? 1.5 : 1.03) + Math.sin(i * 1.9) * 0.025;
+      // two rows centred on the wall between the windows (x 0.9), staggered like they went up one at a time
+      const x = 0.9 + (row === 0 ? col - 2.5 : col - 2) * 0.43 + Math.sin(i * 2.7) * 0.03;
+      const y = (row === 0 ? 1.52 : 0.99) + Math.sin(i * 1.9) * 0.025;
       const bill = new BountyBill(b, 0.3 + (i % 3) * 0.3);
       bill.mesh.position.set(x, y, WALL_Z - 0.006 - i * 0.0007);
       bill.mesh.rotation.set(0, Math.PI, Math.sin(i * 3.1) * 0.045);

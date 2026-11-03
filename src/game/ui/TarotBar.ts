@@ -288,6 +288,8 @@ export class TarotBar {
   private cards: CardObj[] = [];
   private vw = 1;
   private vh = 1;
+  /** the fan's size factor (1 on desktop, down to ~0.5 on a landscape phone) */
+  cardK = 1;
   private job: Generator<void, void, void> | null = null;
   private started = false;
   private frameGeo: THREE.BufferGeometry | null = null;
@@ -447,7 +449,11 @@ export class TarotBar {
     this.vh = Math.max(1, H);
     if (!st || !this.cards.length) return;
     const visible = hud.visible && hud.anchors.slide < 0.98;
-    const cw = 46 * s, ch = 74.75 * s;
+    // on small screens (a landscape phone) the whole fan shrinks so it stays out of the way;
+    // the cardAnchors below follow, so the touch layer's hit-tests stay in sync
+    const ck = Math.max(0.48, Math.min(1, W / s / 620, H / s / 340));
+    this.cardK = ck;
+    const cw = 46 * s * ck, ch = 74.75 * s * ck;
     const n = this.cards.length;
     hud.cardAnchors.length = 0;
     this.cards.forEach((c, i) => {
@@ -491,16 +497,16 @@ export class TarotBar {
       // fan along the bottom-right, the ultimate largest at the end
       const big = ult ? 1.22 : 1;
       const slot = n - 1 - i;
-      const x = W - (16 + 22) * s - slot * cw * 0.98 - (ult ? 0 : cw * 0.2);
+      const x = W - (16 + 22) * s * ck - slot * cw * 0.98 - (ult ? 0 : cw * 0.2);
       const fan = (slot - (n - 1) / 2) * 0.045;
-      const bob = Math.sin(this.t * 1.4 + i * 1.3) * 2.2 * s;
+      const bob = Math.sin(this.t * 1.4 + i * 1.3) * 2.2 * s * ck;
       // pop: a quick lift and swell, one full turn showing the sculpted back, settle with a bounce
       const k = c.pop;
       const u = 1 - k;
       const lift = k > 0 ? Math.sin(Math.min(1, u * 1.25) * Math.PI) : 0;
       const swell = k > 0 ? Math.sin(Math.min(1, u * 1.6) * Math.PI) * 0.55 + Math.max(0, Math.sin(u * Math.PI * 3)) * 0.04 * k : 0;
       const spin = k > 0 ? smooth(Math.min(1, Math.max(0, (u - 0.12) / 0.62))) * Math.PI * 2 : 0;
-      const y = H - 14 * s - (ch * big) / 2 - bob - lift * 46 * s - Math.sin(c.unlock * Math.PI) * 30 * s + (c.locked ? 6 * s : 0);
+      const y = H - 14 * s * ck - (ch * big) / 2 - bob - (lift * 46 + Math.sin(c.unlock * Math.PI) * 30 - (c.locked ? 6 : 0)) * s * ck;
       const sc = ((ch * big) / FH) * (1 + swell);
       c.group.visible = visible;
       c.group.position.set(x, -y, 700 + i * 40 + (k > 0 ? 500 : 0));

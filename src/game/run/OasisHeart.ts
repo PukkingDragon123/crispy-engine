@@ -876,6 +876,7 @@ export class OasisHeart implements KingArena {
         const mesh = new THREE.InstancedMesh(base.geometry, sharedVoxelMaterial, N);
         mesh.castShadow = false;
         mesh.receiveShadow = true;
+        mesh.frustumCulled = false;
         const pts: { x: number; z: number; rot: number; ph: number }[] = [];
         for (let i = 0; i < N; i++) {
           const a = rnd.next() * Math.PI * 2, r = this.pondR() * (0.2 + rnd.next() * 0.68);

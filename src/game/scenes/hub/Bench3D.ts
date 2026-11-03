@@ -95,7 +95,14 @@ function slotPieces(specs: RigSpec[]): THREE.Group[] {
         }
       }
     }
-    if (z.size) zone.set(n, z);
+    if (z.size) {
+      // a separate part that changes a lot (the shotgun's barrels, the Thompson's drum, a cylinder) is the piece
+      // whole; the root part (the frame) only ever gives up the voxels that differ
+      const counts = models.filter((m): m is VoxelModel => !!m).map((m) => m.count);
+      const isRoot = specs.some((s) => s.parts[0]?.name === n);
+      if (!isRoot && z.size > 0.25 * Math.min(...counts)) for (const m of models) m?.forEach((x, y, zz) => z.add(key3(x, y, zz)));
+      zone.set(n, z);
+    }
   }
   return specs.map((s) => {
     const g = new THREE.Group();

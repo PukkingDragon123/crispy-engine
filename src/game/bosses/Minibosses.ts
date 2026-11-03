@@ -359,7 +359,7 @@ export class DustMarshal extends Boss {
     const side = new THREE.Vector3(this.pos.z - pp.z, 0, pp.x - this.pos.x).normalize();
     this.d.cam.setCine({ pos: mid.clone().addScaledVector(side, 9).add(new THREE.Vector3(0, 1.6, 0)), look: mid.clone().add(new THREE.Vector3(0, 1.4, 0)), fov: 40 });
     await eng.tweens.wait(1.2, true);
-    const r = await this.d.qte.run({ kind: 'ring', key: 'KeyF', label: 'DRAW!', duration: 0.75 - this.tier * 0.08 });
+    const r = await this.d.qte.run({ kind: 'ring', key: 'KeyF', label: 'DRAW!', duration: 0.75 - this.tier * 0.08, at: () => ({ x: this.pos.x, y: this.pos.y + this.height * 0.6, z: this.pos.z }) });
     this.anim.aimR = 1;
     ctx.sfx('rev_shot', null, 1);
     eng.hitStop(0.12);
