@@ -547,7 +547,7 @@ const TAG_RULES: [RegExp, string][] = [
   [/board|drift|boost|airborne|trick|m\/s|mobility|big air/i, 'BOARD'],
   [/pinch|scorpion|brood/i, 'PINCH'],
   [/burn|fire|ignite|flame|searing|aflame/i, 'FIRE'],
-  [/locust|swarm|insect/i, 'SWARM'],
+  [/locust|scarab|swarm|insect/i, 'SWARM'],
   [/explo|blast|dynamite|bomb|nova|slug/i, 'BLAST'],
   [/lightning|bolt|stun|storm|jolt/i, 'SHOCK'],
   [/reload|ammo|cylinder|rounds|chamber|fire rate|bullet|pierce|bounce/i, 'GUN'],

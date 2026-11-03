@@ -288,7 +288,7 @@ export class RunScene implements GameScene {
     this.equipment = new Equipment(this.ctx, this.player);
     this.gearLoot = new GearPickups(this.ctx, this.player, this.equipment, e.input, this.hud);
     this.gearHud = new GearHud(this.hud3d.scene, this.hud, this.equipment);
-    this.picker = new CardPicker(this.ctx, this.upgrades, e.input, () => this.player.pos);
+    this.picker = new CardPicker(this.ctx, this.upgrades, e.input, () => this.player.pos, { cam: this.camRig, hero: () => this.player });
     this.inter = new Interactions(this.player);
     this.choice = new Choice(this.ctx, e.input);
     this.shop = new Shop(this.ctx, e.input, this.camRig);
@@ -925,10 +925,9 @@ export class RunScene implements GameScene {
     }
     // the upgrade cards own the screen: no hunter, buddy or HUD in front of them
     if (this.picker.active !== this.pickerShown) {
+      // the rank-up cinematic frames the hunter under an arch of cards: only Pinch and the HUD step aside
       this.pickerShown = this.picker.active;
-      this.player.root.visible = !this.pickerShown;
       this.skills.pinchRoot.visible = !this.pickerShown;
-      this.garments.setEnabled(!this.pickerShown);
       this.hud.setVisible(!this.pickerShown);
     }
     if (this.picker.active) {
@@ -1141,7 +1140,7 @@ export class RunScene implements GameScene {
         return [
           { key: 'Q', icon: 'twig', cd: Math.max(0, p.grappleCd), max: 2.2 },
           { key: 'E', icon: 'scorp', cd: cd.scorp, max: this.skills.constants.scorpCd },
-          { key: 'C', icon: 'locust', cd: cd.swarm, max: this.skills.constants.swarmCd },
+          { key: 'C', icon: 'scarab', cd: cd.swarm, max: this.skills.constants.swarmCd },
           { key: 'G', icon: 'dung', cd: cd.bomb, max: this.skills.constants.bombRecharge, charges: cd.bombCharges },
           { key: 'F', icon: 'bone', cd: Math.max(0, p.meleeCd), max: 0.55 },
         ];

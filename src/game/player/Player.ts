@@ -462,8 +462,12 @@ export class Player {
       this.updateGrapple(dt);
     }
     this.spreadDeg = this.coneDeg(this.fanning);
-    this.animate(dt);
-    this.dodgeVisuals(dt);
+    // a frozen frame (engine paused: the pause menu) keeps the last pose — the procedural
+    // anim's springs divide by dt and would go NaN (the whole body vanishes on resume)
+    if (dt > 1e-6) {
+      this.animate(dt);
+      this.dodgeVisuals(dt);
+    }
     this.barrelSmoke(dt);
     if (this.ctx.faces) {
       this.eyes.lookAt(this.aimPoint);

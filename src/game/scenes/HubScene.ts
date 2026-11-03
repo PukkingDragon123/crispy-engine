@@ -234,7 +234,7 @@ function bakeUILight(g: THREE.BufferGeometry) {
 /** the tarot bar's abilities (the moves — rope, kick, neck slicer — have their own page, from player/Techniques) */
 const SKILL_PAGES: [string, string, string][] = [
   ['E', 'I · The Magician', 'Scorpion toss — Serket\'s brood rides your bullets in.'],
-  ['C', 'XVI · The Tower', 'Locust swarm — a storm that eats.'],
+  ['C', 'XVI · The Tower', 'Scarab swarm — they eat what you whistle at.'],
   ['G', 'XIX · The Sun', 'Dung bomb — Khepri\'s gift, bouncing and rank.'],
   ['Z', 'XIII · Death', 'The pale ride — when the deck runs out, so do they.'],
 ];

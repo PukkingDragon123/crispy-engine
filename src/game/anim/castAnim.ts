@@ -34,6 +34,8 @@ const _inv = new THREE.Matrix4();
 const _qa = new THREE.Quaternion();
 const _qb = new THREE.Quaternion();
 const HINT = new THREE.Vector3(0, 0.4, 1);
+/** where the fingers go for the whistle: at the teeth, in the head's frame (m) */
+const MOUTH = new THREE.Vector3(0.03, 0.1, 0.27);
 
 export class CastAnim {
   private ok = false;
@@ -93,6 +95,8 @@ export class CastAnim {
     if (torso) {
       torso.rotateY(twist * w);
       torso.rotateX(lean * w);
+      // the whistle tips the chin up before the hand finds the mouth
+      if (head && nod) head.rotateX(nod * w);
       torso.updateMatrixWorld(true);
     }
     // the aim point in the torso frame (where the arm throws / points)
@@ -132,7 +136,8 @@ export class CastAnim {
       _pole.set(0.7, -0.8, -0.2);
     } else {
       // two fingers to the teeth (just in front of the jaw), a tremble while it shrills, then the point
-      const mouth = _a.set(this.neck.x + 0.03 * sc, this.neck.y + 0.1 * sc, this.neck.z + 0.21 * sc);
+      // the teeth, found in the head's own frame (it may be turned off the torso), into the torso frame
+      const mouth = head ? head.localToWorld(_a.copy(MOUTH)).applyMatrix4(_inv) : _a.set(this.neck.x + 0.03 * sc, this.neck.y + 0.1 * sc, this.neck.z + 0.21 * sc);
       const tremble = k > 0.2 && k < 0.66 ? Math.sin(t * 46) * 0.006 * sc : 0;
       mouth.y += tremble;
       const point = _b.copy(S).addScaledVector(dir, 0.55 * sc);
@@ -146,7 +151,6 @@ export class CastAnim {
     armIK(S, T, _pole, this.l1, this.l2, HINT, _qa, _qb);
     arm.quaternion.slerp(_qa, w);
     fore.quaternion.slerp(_qb, w);
-    if (head && nod) head.rotateX(nod * w);
     arm.updateMatrixWorld(true);
     return true;
   }
