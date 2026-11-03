@@ -276,6 +276,7 @@ export class AnubisTrial {
   private gw: Gest = { present: 0, point: 0, reach: 0, grant: 0, raise: 0 };
   private gwT: Gest = { present: 0, point: 0, reach: 0, grant: 0, raise: 0 };
   private grip = 0;
+  private scalesK = 0;
   private tilt = 0;
   private tiltTarget = 0;
   private glyphsDone = 0;
@@ -769,10 +770,10 @@ export class AnubisTrial {
       eng.audio.play('divine_power', { volume: 0.9 });
       eng.audio.play('divine_chime', { volume: 0.7 });
       this.fireTintTarget.set(0xffe2a0);
-      this.shafts[3].target = 0.16;
+      this.shafts[3].target = 0.1;
       this.shake = 0.4;
       eng.flash(0xbff8ff, 0.35, 0.8);
-      void this.say('"Your heart is light as the feather. Go back. Finish your hunt."', 'anubis', 0.6, false);
+      void this.say('"Your heart is light as the feather. Go back. Finish your hunt."', 'anubis', 1.6, false);
       await this.hold(1.3, false);
       this.soulMode = 'rise';
       eng.audio.play('resurrect', { volume: 0.9 });
@@ -852,7 +853,7 @@ export class AnubisTrial {
   };
   private shotGate: ShotFn = (t) => {
     const u = sstep(0, 1, t / 7);
-    return { p: V(4.4 - 0.9 * u, 0.85 + 0.25 * u, 43 - 2.2 * u), l: V(-0.4, 11 - 2 * u, GATE_Z), fov: mixN(44, 39, u) };
+    return { p: V(5.2 - 1.2 * u, 1.4 + 0.2 * u, 47 - 1.5 * u), l: V(-0.3, 8.6 - 0.6 * u, GATE_Z), fov: mixN(46, 43, u) };
   };
   private shotFollow: ShotFn = () => {
     const s = this.soulPos;
@@ -864,7 +865,7 @@ export class AnubisTrial {
   };
   private shotHero: ShotFn = (t) => {
     const u = sstep(0, 1, t / 4.2);
-    return { p: V(2.5, 0.45, -8.8).lerp(V(1.9, 0.7, -10.9), u), l: V(0, 9.6, -19.4), fov: mixN(42, 35, u) };
+    return { p: V(3.6, 0.5, -9.0).lerp(V(3.0, 0.7, -10.5), u), l: V(0, 9.4, -19.4), fov: mixN(42, 36, u) };
   };
   private shotSpeech: ShotFn = (t) => {
     const u = sstep(0, 1, t / 8);
@@ -962,7 +963,7 @@ export class AnubisTrial {
         this.fx.emit({ pos: { x: b.fire.x, y: b.fire.y + 0.2, z: b.fire.z }, count: 30, spread: 1.6 * b.scale, up: 2, life: [0.4, 0.9], size: [0.3 * b.scale, 0.04], sprite: ['dot6', 'glow16'], color: [0x6fd0ff, 0xd8f8ff], additive: true, drag: 2.4, gravity: -1.5 });
       const fl = 1 + Math.sin(t * 11 + b.pos.x * 3) * 0.08 + Math.sin(t * 23 + b.pos.z) * 0.05;
       b.light.color.copy(tint);
-      b.light.intensity = b.lit * (b.scale > 1 ? 34 : 18) * fl * fade * (1 + this.blaze * 1.2);
+      b.light.intensity = b.lit * (b.scale > 1 ? 34 : 18) * fl * fade * (1 + this.blaze * 0.4);
       if (b.lit < 0.02) continue;
       const s = b.scale;
       b.acc += dt * 34 * b.lit * s * fade;
@@ -1085,7 +1086,7 @@ export class AnubisTrial {
       set('shin_r', 0.4);
     }
     // spirit glow: brighter in the blaze, gone when taken
-    const gain = (1.05 + Math.sin(t * 3.1) * 0.08 + (this.soulMode === 'rise' ? this.blaze * 3 : 0)) * this.soulFade;
+    const gain = (1.05 + Math.sin(t * 3.1) * 0.08 + (this.soulMode === 'rise' ? this.blaze * 1.6 : 0)) * this.soulFade;
     this.soulShell.uniforms.uGain.value = gain;
     this.soulCore.opacity = 0.32 * this.soulFade;
     this.soul.root.visible = this.soulFade > 0.01;
@@ -1161,7 +1162,7 @@ export class AnubisTrial {
     set('lthumb', 0.3 * (g.point + this.grip), 0, -0.4 * (g.point + this.grip));
     // spirit shell, eyes, glow
     const gold = this.blaze, red = this.anger;
-    this.shell.uniforms.uGain.value = (0.25 + 0.75 * w) * (0.92 + 0.08 * Math.sin(t * 2.3)) * (1 + gold * 0.8);
+    this.shell.uniforms.uGain.value = (0.25 + 0.75 * w) * (0.92 + 0.08 * Math.sin(t * 2.3)) * (1 + gold * 0.45);
     (this.shell.uniforms.uA.value as THREE.Color).setRGB(0.04 + 0.5 * gold + 0.3 * red, 0.35 + 0.15 * gold - 0.3 * red, 0.54 - 0.4 * gold - 0.2 * red);
     (this.shell.uniforms.uB.value as THREE.Color).setRGB(0.66 + 0.34 * gold + 0.2 * red, 0.96 - 0.1 * gold - 0.6 * red, 1 - 0.45 * gold - 0.5 * red);
     const eyeK = sstep(0.15, 0.7, w);
@@ -1171,10 +1172,10 @@ export class AnubisTrial {
       const base = e.parent?.name.endsWith('eye_l') ? 0.32 : -0.32;
       e.rotation.set(Math.max(-0.2, Math.min(0.25, pitch * 0.4)), base + yaw * 0.3, 0);
     }
-    this.aura.intensity = (6 + 60 * w) * (1 + gold * 1.5) * (1 - red * 0.4);
+    this.aura.intensity = (6 + 60 * w) * (1 + gold * 0.6) * (1 - red * 0.4);
     this.aura.color.setRGB(0.5 + 0.5 * gold + 0.4 * red, 0.88 - 0.5 * red, 1 - 0.5 * gold - 0.6 * red);
     this.backLight.intensity = 20 + 90 * w;
-    this.wallMat.userData.emissiveStrength.value = 0.25 + 0.9 * w + this.wallPulse * 2.5 + gold * 2;
+    this.wallMat.userData.emissiveStrength.value = 0.25 + 0.9 * w + this.wallPulse * 2.5 + gold * 1.2;
     this.wallPulse = damp(this.wallPulse, 0, 2, dt);
     copyPose(this.anubis, this.anubisMirror);
     // spirit vapour streaming up off his shoulders, crown and the staff head
@@ -1212,7 +1213,9 @@ export class AnubisTrial {
     const beat = Math.pow(Math.max(0, Math.sin(t * 7.2)), 8) + Math.pow(Math.max(0, Math.sin(t * 7.2 - 0.6)), 8) * 0.6;
     n['heart'].scale.setScalar(1 + beat * 0.08);
     this.scales.material.userData.emissiveStrength.value = 0.6 + beat * 0.8 + (this.phase === 'take' ? 1.2 : 0);
-    this.scalesLight.intensity = (this.phase === 'build' || this.phase === 'descent' || this.phase === 'gate' ? 0 : 7) * (1 + this.blaze * 2);
+    const warm = this.phase === 'judge' || this.phase === 'grant' || this.phase === 'take' ? 1 : 0;
+    this.scalesK = damp(this.scalesK, warm, 1.5, dt);
+    this.scalesLight.intensity = 5 * this.scalesK * (1 + this.blaze * 0.5);
     copyPose(this.scales, this.scalesMirror);
   }
 

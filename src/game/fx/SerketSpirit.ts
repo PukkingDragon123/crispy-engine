@@ -83,8 +83,8 @@ float sgSand = uSpirit >= 0.999 ? 0.0 : smoothstep(uSpirit * 1.3 - 0.18, uSpirit
   float sgBand = pow(0.5 + 0.5 * sin(sgLp.y * 7.0 - uSgTime * 2.3 + sgLp.x * 2.5 + sgLp.z * 1.5), 8.0);
   vec3 sgV = normalize(vViewPosition);
   float sgFr = pow(1.0 - clamp(abs(dot(normal, sgV)), 0.0, 1.0), 2.2);
-  totalEmissiveRadiance += diffuseColor.rgb * sgLive * (0.3 + vMatx.x * 1.4);
-  totalEmissiveRadiance += sgJade * sgLive * (sgBand * 0.28 + sgFr * 0.85);
+  totalEmissiveRadiance += diffuseColor.rgb * sgLive * (0.16 + vMatx.x * 1.3);
+  totalEmissiveRadiance += sgJade * sgLive * (sgBand * 0.2 + sgFr * 0.5);
   totalEmissiveRadiance += vec3(1.0, 0.7, 0.3) * sgEdge * (1.2 + 1.6 * step(0.75, sgH));
 }`
       );
@@ -124,8 +124,8 @@ export function spiritShell() {
         if (uForm < 0.999 && sgField((vW - uOrigin) * uInvScale, h) > uForm * 1.15) discard;
         float fr = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.4);
         float flick = 0.82 + 0.18 * sin(uSgTime * 9.0 + vW.y * 5.0 + vW.x * 2.0);
-        vec3 col = mix(uA, uB, fr) * (0.25 + fr * 2.6) * flick;
-        float a = clamp(0.06 + fr * 0.9, 0.0, 1.0) * uFade;
+        vec3 col = mix(uA, uB, fr) * (0.12 + fr * 1.9) * flick;
+        float a = clamp(0.03 + fr * 0.62, 0.0, 1.0) * uFade;
         gl_FragColor = vec4(col * a, a);
       }`,
     transparent: true,
@@ -196,7 +196,7 @@ export class SerketSpirit {
     this.rig.setPartVisible('lid_l', false);
     this.rig.setPartVisible('lid_r', false);
     this.root.add(this.rig.root);
-    this.light = new THREE.PointLight(0x6affc4, 0, 9, 1.6);
+    this.light = new THREE.PointLight(0x6affc4, 0, 6, 2);
     this.root.add(this.light);
     parent.add(this.root);
     for (const [k, v] of Object.entries(IDLE)) this.cur[k] = new THREE.Vector3(...v);
@@ -317,9 +317,10 @@ export class SerketSpirit {
     sh.uInvScale.value = su.uInvScale.value;
     sh.uForm.value = this.form;
     sh.uFade.value = this.spirit * this.glow * Math.min(1, this.form * 1.3);
-    this.light.position.set(0, 1.5 * sc, 0.4 * sc);
-    this.light.intensity = 16 * this.spirit * this.glow * Math.min(1, this.form * 1.4) * sc * sc * (0.9 + 0.1 * Math.sin(t * 7));
-    this.light.distance = 9 * sc;
+    // a soft jade spill on the sand and on whoever she faces (held out in front so it doesn't burn her own face)
+    this.light.position.set(0, 0.8 * sc, 1.3 * sc);
+    this.light.intensity = 3.2 * this.spirit * this.glow * Math.min(1, this.form * 1.4) * sc * sc * (0.92 + 0.08 * Math.sin(t * 7));
+    this.light.distance = 6 * sc;
     this.root.visible = this.form > 0.005;
   }
 

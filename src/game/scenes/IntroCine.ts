@@ -903,7 +903,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
       const a = 0.4 - k * 0.9;
       const cp = soulAt.clone().addScaledVector(fwd, -6.5).addScaledVector(side, Math.sin(a) * 3.2).add(new THREE.Vector3(0, 0.6 + k * 0.5, 0));
       shot(cp, soulAt.clone().add(new THREE.Vector3(0, soulH * (0.45 + 0.2 * k), 0)), 46 - k * 6, true);
-      if (Math.random() < 0.5) d.fx.dust({ x: soulAt.x + (Math.random() - 0.5) * 2, y: soulAt.y + 0.1, z: soulAt.z + (Math.random() - 0.5) * 2 }, 0.6, 0xe6cf9f, 1);
+      if (Math.random() < 0.2) d.fx.dust({ x: soulAt.x + (Math.random() - 0.5) * 3, y: soulAt.y + 0.1, z: soulAt.z + (Math.random() - 0.5) * 3 }, 0.4, 0xe6cf9f, 1);
     });
     // ...and ignites
     spirit.form = 1;
@@ -911,7 +911,8 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     eng.audio.play('resurrect', { volume: 0.8 });
     eng.audio.play('spectral_scorpion', { volume: 1 });
     cam.addTrauma(0.3);
-    d.fx.sandBurst({ x: soulAt.x, y: soulAt.y + 0.2, z: soulAt.z }, 2.2);
+    d.fx.sandBurst({ x: soulAt.x, y: soulAt.y + 0.1, z: soulAt.z }, 1.1);
+    d.particles.emit({ pos: { x: soulAt.x, y: soulAt.y + soulH * 0.4, z: soulAt.z }, count: 90, spread: 9, up: 3, life: [0.6, 1.4], size: [0.07, 0.04], sprite: ['grain0', 'grain1', 'grain2', 'grain3'], color: [0xf6dfb0, 0xeccb8f, 0xe0b373], gravity: 9, drag: 0.6, ground: true });
     d.fx.ring({ x: soulAt.x, y: soulAt.y + 0.15, z: soulAt.z }, 0x9dffc8, 9, 0.8);
     spiritMotes(d.particles, { x: soulAt.x, y: soulAt.y + soulH * 0.5, z: soulAt.z }, 40, 1.6, 2.4);
     spirit.setExpression('happy');
@@ -939,9 +940,11 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     phase('talk');
     actor.setExpression('surprised');
     const shoulder = ap.clone().addScaledVector(fwd, -2.4).addScaledVector(side, 1.1).add(new THREE.Vector3(0, 1.75, 0));
-    const herShot = () => shot(shoulder, soulAt.clone().add(new THREE.Vector3(0, soulH * 0.66, 0)), 48, true);
+    // her close-up: from his side of the circle, a little below her eyes
+    const herClose = soulAt.clone().addScaledVector(fwd, -4.4).addScaledVector(side, 1.3).add(new THREE.Vector3(0, soulH * 0.5, 0));
+    const herShot = (wide = false) => (wide ? shot(shoulder, soulAt.clone().add(new THREE.Vector3(0, soulH * 0.62, 0)), 46, true) : shot(herClose, soulAt.clone().add(new THREE.Vector3(0, soulH * 0.66, 0)).addScaledVector(side, 0.25), 40, true));
     const hisShot = () => shot(ap.clone().addScaledVector(fwd, 3.0).addScaledVector(side, 1.5).add(new THREE.Vector3(0, 1.45, 0)), ap.clone().add(new THREE.Vector3(0, 1.45, 0)).addScaledVector(side, 0.8), 44, true);
-    herShot();
+    herShot(true);
     await say('serket', 'Easy, bone-rider. Holster that glare. I am the one who stitched you back together.', 1.0);
     spirit.pose = 'present';
     hisShot();
