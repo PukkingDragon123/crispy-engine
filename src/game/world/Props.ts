@@ -813,6 +813,24 @@ export class Props {
         pos.push(x, lvl, z);
         depth.push(lvl - this.world.sa.field.heightSmooth(x, z));
       }
+    // only the water connected to the pool's centre (low dunes outside the bank stay dry)
+    const wet = new Uint8Array(n * n);
+    const c0 = Math.floor(n / 2) * (n + 1);
+    const queue = [c0];
+    wet[c0] = 1;
+    for (let qi = 0; qi < queue.length; qi++) {
+      const k = queue[qi];
+      const i = k % n, j = (k / n) | 0;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const ni = i + di, nj = j + dj;
+        if (ni < 0 || nj < 0 || ni >= n || nj >= n) continue;
+        const nk = ni + nj * n;
+        if (wet[nk]) continue;
+        wet[nk] = 1;
+        if (depth[nk] > 0) queue.push(nk);
+      }
+    }
+    for (let k = 0; k < depth.length; k++) if (!wet[k]) depth[k] = -0.5;
     for (let j = 0; j < n - 1; j++)
       for (let i = 0; i < n - 1; i++) {
         const k = i + j * n;

@@ -1061,7 +1061,7 @@ function placeOutposts(ctx: ThemeCtx, zn: ZoneDef) {
       const x = zn.cx + Math.cos(a) * r, z = zn.cz + Math.sin(a) * r;
       if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < 28)) continue;
       if (mo.some((m) => Math.hypot(m.x - x, m.z - z) < 16)) continue;
-      if (zn.anchors.some((o) => !SMALL_SCATTER.has(o.kind) && o.kind !== 'deadBush' && o.kind !== 'dryGrass' && Math.hypot(o.x - x, o.z - z) < (o.kind === 'landmark' ? 26 : 8))) continue;
+      if (zn.anchors.some((o) => !SMALL_SCATTER.has(o.kind) && o.kind !== 'deadBush' && o.kind !== 'dryGrass' && Math.hypot(o.x - x, o.z - z) < (o.kind === 'landmark' ? 26 : o.kind === 'oasisMark' ? 22 : 12))) continue;
       zn.anchors = zn.anchors.filter((o) => Math.hypot(o.x - x, o.z - z) >= 5.5 || !SMALL_SCATTER.has(o.kind));
       flattenDisc(field, x, z, 4.5, 0.85, MAT.DIRT, noise);
       zn.anchors.push({ kind: 'outpost', x, z, rot: rng.range(0, Math.PI * 2), scale: 1, data: { variant: (first + i) % 2 } });

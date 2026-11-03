@@ -1715,7 +1715,7 @@ export class Shop {
       const pSign = ground(at(3.6, 5.9, 7.4), 1), lSign = at(-0.15, 4.4, 1.2);
       // low on the sand looking up at the porch; over the hunter's shoulder when he stands close
       const hx = (hp.x - H.x) * X.x + (hp.z - H.z) * X.z, hz = (hp.x - H.x) * Z.x + (hp.z - H.z) * Z.z;
-      const pNear = ground(hx < 9.5 ? at(hx + 2.6, 2.35, hz + 1.5) : at(6.4, 2.05, 2.5), 0.6), lNear = at(1.98, 4.25, 1.55);
+      const pNear = ground(hx < 9 ? at(hx + 3.2, 2.9, hz + 1.6) : at(9.4, 3.05, 3.5), 0.6), lNear = at(1.98, 4.2, 1.1);
       this.pivot.copy(H);
       this.fwdAng = Math.atan2(X.x, X.z);
       this.lightAt = at(3.0, 4.6, 1.0);
@@ -2088,7 +2088,7 @@ export class Shop {
     const halfH = 1.4 * Math.tan((this.shot.fov * Math.PI) / 360);
     v.plaques = TALK.map((c, i) => {
       const old = v.asked.has(i) && !c.go;
-      const ft = new FloatText3D(`${i + 1}.  ${c.q}`, { size: halfH * 0.072, px: 44, cps: 70, wrap: 60, align: 'left', hdr: old ? 0.8 : 1.2, color: old ? '#cdbb98' : '#fff3d6', glow: old ? '#6a4a28' : '#ffb070' });
+      const ft = new FloatText3D(`${i + 1}.  ${c.q}`, { size: halfH * 0.085, px: 44, cps: 70, wrap: 60, align: 'left', hdr: old ? 0.8 : 1.2, color: old ? '#cdbb98' : '#fff3d6', glow: old ? '#6a4a28' : '#ffb070' });
       ft.mesh.renderOrder = 991;
       this.ctx.scene.add(ft.mesh);
       return ft;
@@ -2118,8 +2118,10 @@ export class Shop {
     v.plaques.forEach((ft, i) => {
       ft.hover = damp(ft.hover, i === hov ? 1 : 0, 12, h);
       const w = ft.mesh.scale.x / Math.max(0.5, (1 + ft.hover * 0.12) * (0.92 + 0.08 * ft.visibleAmount));
-      ft.anchor.copy(pos).addScaledVector(fwd, D).addScaledVector(right, -0.9 * halfW + w * 0.5 + ft.hover * 0.025).addScaledVector(up, (-0.04 - i * 0.15) * halfH);
+      ft.anchor.copy(pos).addScaledVector(fwd, D).addScaledVector(right, -0.9 * halfW + w * 0.5 + ft.hover * 0.025).addScaledVector(up, (0.26 - i * 0.18) * halfH);
       ft.update(h, cam);
+      // pinned in their column (no float bob: the rows would touch), just a breath of drift
+      ft.mesh.position.copy(ft.anchor).addScaledVector(up, Math.sin(v.t * 1.3 + i) * 0.004);
     });
   }
 
@@ -2621,8 +2623,9 @@ export class Shop {
       const { obj, he } = itemObject(w.model, spot.m);
       obj.visible = false;
       g.add(obj);
-      const x = (i - (nW - 1) / 2) * (this.indoor ? 0.36 : 0.42) + (rnd.next() - 0.5) * 0.06;
-      const z = (i % 2 ? 0.12 : -0.1) + (rnd.next() - 0.5) * 0.06;
+      // indoors: two staggered rows a little toward his counter (they skid toward the door as they land)
+      const x = (i - (nW - 1) / 2) * (this.indoor ? Math.min(0.36, 2.0 / Math.max(1, nW - 1)) : 0.42) + (rnd.next() - 0.5) * 0.06;
+      const z = (this.indoor ? (i % 2 ? 0.34 : 0.08) : i % 2 ? 0.12 : -0.1) + (rnd.next() - 0.5) * 0.06;
       const slot = new THREE.Vector3(x, this.rugTop + he.y, z);
       const I = new THREE.Vector3((he.y * he.y + he.z * he.z) / 3, (he.x * he.x + he.z * he.z) / 3, (he.x * he.x + he.y * he.y) / 3);
       const key = w.model;
@@ -2714,15 +2717,16 @@ export class Shop {
     if (this.indoor && this.her instanceof Turtle) {
       // inside: from the doorway, him behind his counter, the rug of wares between
       const t = this.her, rm = t.meta.room ?? {};
+      t.root.updateMatrixWorld(true); // he may have just been put behind his counter
       t.toWorld(rm.cam ?? [1.3, 4.38, 0.1], this.camMain.pos);
       t.toWorld(rm.look ?? [-0.8, 3.75, -0.35], this.camMain.look);
       const g = this.group, wx = Math.min(this.rugHalf.x, 0.95);
       const subject = [
-        t.framingTop(new THREE.Vector3()),
-        g.localToWorld(new THREE.Vector3(-wx, this.rugTop, 0.2)),
-        g.localToWorld(new THREE.Vector3(wx, this.rugTop, 0.2)),
-        g.localToWorld(new THREE.Vector3(-wx, this.rugTop, -0.3)),
-        g.localToWorld(new THREE.Vector3(wx, this.rugTop, -0.3)),
+        t.framingTop(new THREE.Vector3()).add(_a.set(0, 0.18, 0)),
+        g.localToWorld(new THREE.Vector3(-wx, this.rugTop, 0.3)),
+        g.localToWorld(new THREE.Vector3(wx, this.rugTop, 0.3)),
+        g.localToWorld(new THREE.Vector3(-wx, this.rugTop, -0.12)),
+        g.localToWorld(new THREE.Vector3(wx, this.rugTop, -0.12)),
       ];
       this.camMain.fov = this.fitShot(this.camMain.pos, subject, this.camMain.look);
       this.focus.copy(this.camMain.look);
@@ -3354,7 +3358,7 @@ export class Shop {
           rn.crossVectors(r, vc);
           this.invI(b, rn, t1);
           const kt = 1 + vc.dot(t2.crossVectors(t1, r));
-          const jt = Math.min(vt / kt, FRICTION * jn);
+          const jt = Math.min(vt / kt, (this.indoor ? 0.95 : FRICTION) * jn); // a woven rug on floorboards grips
           b.v.addScaledVector(vc, -jt);
           b.w.addScaledVector(t1, -jt);
         }

@@ -146,28 +146,38 @@ export function ruinify(src: VoxelModel, o: RuinOpts): VoxelModel {
     if (removed.length < 4000 && hash3(x, y, z) < 0.5) removed.push(rgbv);
   };
 
-  // ---- 1. roof / upper storey collapse: jagged bowls bitten out of the top
+  // ---- 1. roof / upper storey collapse: jagged craters bitten into the roofline (measured
+  //         from each column's own top, so signs and chimneys don't shield the roof)
+  const colTop = new Map<number, number>();
+  for (const key of m.map.keys()) {
+    const ck = key & ~(1023 << 10);
+    const y = ((key >>> 10) & 1023) - 512;
+    const t = colTop.get(ck);
+    if (t === undefined || y > t) colTop.set(ck, y);
+  }
   const holes: { x: number; z: number; r: number }[] = [];
   if (collapse > 0) {
     const n = 1 + (W * D * vs * vs > 70 ? 1 : 0) + (rng.chance(0.45) ? 1 : 0);
     for (let i = 0; i < n; i++) {
-      const hx = cx + rng.range(-0.3, 0.3) * W, hz = cz + rng.range(-0.3, 0.3) * D;
-      const r = rng.range(0.24, 0.4) * Math.min(W, D) * (0.65 + 0.5 * collapse);
+      const sp = i === 0 ? 0.12 : 0.3;
+      const hx = cx + rng.range(-sp, sp) * W, hz = cz + rng.range(-sp, sp) * D;
+      const r = rng.range(0.22, 0.34) * Math.min(W, D) * (0.65 + 0.5 * collapse);
       holes.push({ x: hx, z: hz, r });
     }
-    const depthMax = H * 0.55 * collapse;
     const del: V3[] = [];
     m.forEach((x, y, z) => {
       if (y < keepY) return;
+      const top = colTop.get(K(x, 0, z) & ~(1023 << 10)) ?? b.maxY;
+      const hgt = top - y0;
       let cut = 1e9;
       for (const h of holes) {
         const dd = Math.hypot(x + 0.5 - h.x, z + 0.5 - h.z) / (h.r * (1 + 0.28 * nz.n2(x * 0.11, z * 0.11)));
         if (dd >= 1) continue;
-        cut = Math.min(cut, b.maxY - depthMax * (1 - dd * dd) + nz.n2(x * 0.3 + 4, z * 0.3) * 2.5);
+        cut = Math.min(cut, top - hgt * 0.55 * collapse * (1 - dd * dd) + nz.n2(x * 0.3 + 4, z * 0.3) * 2.5);
       }
       // the whole roofline is gnawed: jagged broken tops everywhere
-      const bite = Math.max(0, nz.n2(x * 0.06 + 9, z * 0.06 - 3) * 0.5 + 0.5 - 0.42) * H * 0.3 * collapse;
-      cut = Math.min(cut, b.maxY + 1 - bite);
+      const bite = Math.max(0, nz.n2(x * 0.06 + 9, z * 0.06 - 3) * 0.5 + 0.5 - 0.5) * hgt * 0.32 * collapse;
+      cut = Math.min(cut, top + 1 - bite);
       if (y > cut) del.push([x, y, z]);
     });
     for (const [x, y, z] of del) kill(x, y, z);
@@ -175,7 +185,7 @@ export function ruinify(src: VoxelModel, o: RuinOpts): VoxelModel {
 
   // ---- 2. wall breaches (low, wide enough to ride through)
   const per = 2 * (W + D) * vs;
-  const nb = Math.round((o.breach ?? 0.8) * per / 10 + rng.range(0, 0.6));
+  const nb = Math.round((o.breach ?? 0.8) * per / 8 + rng.range(0, 0.6));
   if (nb > 0) {
     const cand: V3[] = [];
     m.forEach((x, y, z, c) => {
@@ -304,7 +314,8 @@ export function ruinify(src: VoxelModel, o: RuinOpts): VoxelModel {
       else if (hash3(x, y, z) < 0.04) out = mix(out, BLEACH_DK, 0.6);
     } else if (s > 0.32 || (vv > 0.85 && s < 0.16)) {
       // paint: faded, peeling off in patches down to grey wood
-      out = n > 0.5 ? mix(BLEACH, BLEACH_DK, (n - 0.5) * 0.8) : mix(c, BLEACH, 0.45);
+      const peel = nz.n2((x + z) * 0.13 + 3, y * 0.13) * 0.65 + nz.n2((x - z) * 0.31 - 7, y * 0.31 + 2) * 0.35;
+      out = peel > 0.12 ? mix(BLEACH, BLEACH_DK, n * 0.6) : peel > 0.04 ? mix(c, BLEACH, 0.7) : mix(c, BLEACH, 0.38);
     } else if (vv > 0.2) out = mix(c, BLEACH, 0.22);
     if (!m.map.has(key + 1024)) out = mix(out, DUST, 0.22);
     if ((y - y0) * vs < 0.35) out = mix(out, 0x8a6a48, 0.2);
@@ -344,7 +355,7 @@ export function ruinify(src: VoxelModel, o: RuinOpts): VoxelModel {
   }
 
   // ---- 9. drifted sand: banked against the windward walls, a long lee tail, pooled inside
-  const M = Math.ceil(v(1.7));
+  const M = Math.min(22, Math.ceil(v(1.7)));
   const gx0 = b.minX - M, gz0 = b.minZ - M, GW = W + 2 * M, GD = D + 2 * M;
   const occ = new Uint8Array(GW * GD);
   const floorTop = new Int16Array(GW * GD).fill(-999);
@@ -882,43 +893,78 @@ function stoneOutpost(variant: number): RuinModel {
   const HT = 128; // full wall height
   const R0 = 23, R1 = 18, T = 4;
   const breakA = rng.range(0, Math.PI * 2); // the side that fell
-  const brick = (x: number, y: number, z: number, a: number, r: number) => {
+  const angOff = (a: number, b: number) => Math.abs(((a - b + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+  const block = (y: number, a: number, r: number) => {
     const course = Math.floor(y / 4);
     const along = a * r + (course % 2) * 3.5;
-    const bw = 7 + (hash3(course, 1, Math.floor(along / 7)) * 3) | 0;
-    const joint = y % 4 === 0 || Math.abs(along % bw) < 0.7;
-    if (joint) return STONE.mortar;
+    const bw = 7 + Math.floor(hash3(course, 1, 5) * 3);
+    const bi = Math.floor(along / bw);
+    const ph = ((along % bw) + bw) % bw;
+    return { course, bi, joint: y % 4 === 0 || ph < 0.8, along };
+  };
+  const brick = (x: number, y: number, z: number, a: number, r: number) => {
+    const bk = block(y, a, r);
+    if (bk.joint) return STONE.mortar;
     const n = nz.n3(x * 0.25, y * 0.25, z * 0.25);
-    const blockTint = hash3(course, Math.floor(along / bw), 3);
+    const blockTint = hash3(bk.course, bk.bi, 3);
     let c = blockTint < 0.33 ? STONE.a : blockTint < 0.66 ? STONE.b : STONE.c;
     if (n > 0.45) c = mix(c, STONE.dark, 0.25);
+    if (y < 12) c = mix(c, 0xc9a06a, 0.3 * (1 - y / 12)); // sand-scoured foot
     return c;
   };
-  for (let y = 0; y <= HT; y++) {
-    const t = y / HT;
-    const R = R0 + (R1 - R0) * t;
-    for (let x = -R0 - 2; x <= R0 + 2; x++)
-      for (let z = -R0 - 2; z <= R0 + 2; z++) {
+  const radiusAt = (y: number) => (y < 16 ? R0 + 4 * Math.pow(1 - y / 16, 1.5) : R0 + (R1 - R0) * ((y - 16) / (HT - 16)));
+  const topAt = (a: number) => {
+    const off = angOff(a, breakA);
+    if (off >= 1.5) return HT + 8;
+    return 40 + Math.pow(off / 1.5, 1.6) * (HT - 40) + Math.floor(hash3(Math.floor(a * 12), 2, 3) * 3) * 4 + nz.n2(a * 5, 1) * 6;
+  };
+  const winA = breakA + Math.PI;
+  for (let y = 0; y <= HT + 8; y++) {
+    const R = radiusAt(Math.min(y, HT));
+    for (let x = -R0 - 6; x <= R0 + 6; x++)
+      for (let z = -R0 - 6; z <= R0 + 6; z++) {
         const d = Math.hypot(x, z);
+        if (d > R0 + 6 || d < R1 - T - 2) continue;
         const a = Math.atan2(z, x);
-        const pit = nz.n3(x * 0.3, y * 0.3, z * 0.3) * 0.9;
-        if (d > R + pit || d < R - T) continue;
-        // the collapse: on the broken side the wall stops low with jagged steps
-        const off = Math.abs(((a - breakA + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
-        const wallTop = off < 1.25 ? 62 + (off / 1.25) * 50 + nz.n2(a * 4, 1) * 9 + Math.floor(hash3(Math.floor(a * 9), 2, 3) * 3) * 3 : HT;
-        if (y > wallTop) continue;
-        // arched door (front, +z) and arrow slits
-        if (a > Math.PI / 2 - 0.2 && a < Math.PI / 2 + 0.2 && y < 18 + Math.round(Math.cos((a - Math.PI / 2) * 7.8) * 4)) continue;
+        const bk = block(y, a, R);
+        // rough masonry: whole blocks stand proud or sit back a little
+        const hb = hash3(bk.course, bk.bi, 9);
+        const relief = bk.joint ? -0.4 : hb < 0.22 ? 0.8 : hb > 0.88 ? -0.7 : 0;
+        let Ro = R + relief + nz.n3(x * 0.3, y * 0.3, z * 0.3) * 0.45;
+        // corbelled parapet: a stepped ring of corbels, crenellated merlons above the wall top
+        if (y > HT - 7 && y <= HT) Ro += y > HT - 4 ? 2 : (bk.bi & 1 ? 1.6 : 0);
+        if (y > HT && (Math.floor((a * R) / 8) & 1)) continue;
+        if (d > Ro || d < R - T) continue;
+        if (y > topAt(a)) continue;
+        // arched door (+z) and arrow slits; an arched lookout window high on the intact side
+        if (Math.abs(a - Math.PI / 2) < 0.2 && y < 18 + Math.round(Math.cos((a - Math.PI / 2) * 7.8) * 4)) continue;
         if ([44, 84].some((sy) => y > sy && y < sy + 10) && [0.4, 2.3, 4.2].some((sa) => Math.abs(((a + Math.PI * 2) % (Math.PI * 2)) - sa) < 0.045)) continue;
-        m.set(x, y, z, brick(x, y, z, a, R));
+        const wo = angOff(a, winA);
+        if (wo < 0.17 && y > 98 && y < 108 + Math.round(Math.cos(wo * 9) * 3)) continue;
+        let c = brick(x, y, z, a, R);
+        // putlog holes and a long crack running down from the break
+        if (y % 24 === 12 && ((bk.along % 13) + 13) % 13 < 1 && d > R - 1) c = 0x3a2a1c;
+        const off = angOff(a, breakA);
+        if (Math.abs(off - 1.62 - Math.sin(y * 0.31) * 0.035) < 0.018 && y > 20 && d > R - 1.5) c = 0x4a3826;
+        m.set(x, y, z, c);
       }
+  }
+  // fallen merlons / blocks perched on the broken rim
+  for (let i = 0; i < 6; i++) {
+    const a = breakA + rng.range(-1.3, 1.3);
+    const r = R1 - 1;
+    const y = Math.round(topAt(a)) + 1;
+    if (y > HT) continue;
+    blobV(m, [Math.cos(a) * r, y + 1, Math.sin(a) * r], [2.5, 1.8, 2.2], (xx, yy, zz) => brick(xx, yy, zz, a, r), { noise: nz, amp: 0.3, freq: 0.5 });
   }
   // floor joists at two levels: broken off and sticking out over the collapse
   for (const fy of [56, 100]) {
+    const ux = Math.cos(breakA), uz = Math.sin(breakA);
     for (let j = -3; j <= 3; j++) {
-      const jz = j * 5;
-      const ext = rng.range(4, 12);
-      seg(m, [-R1 + 1, fy, jz], [R1 - 1 + (Math.abs(j) < 2 ? ext : 0), fy - (Math.abs(j) < 2 ? 2 : 0), jz], (t, x, y, z) => (t > 0.95 ? BLEACH : mix(0x8a7056, BLEACH, 0.25 + hash3(x, y, z) * 0.2)), 0.8);
+      const ext = Math.abs(j) < 2 ? rng.range(4, 12) : 0;
+      const A: V3 = [-ux * (R1 - 1) - uz * j * 5, fy, -uz * (R1 - 1) + ux * j * 5];
+      const B: V3 = [ux * (R1 - 1 + ext) - uz * j * 5, fy - (ext ? 2 : 0), uz * (R1 - 1 + ext) + ux * j * 5];
+      seg(m, A, B, (t, x, y, z) => (t > 0.95 ? BLEACH : mix(0x8a7056, BLEACH, 0.25 + hash3(x, y, z) * 0.2)), 0.8);
     }
     for (let x = -R1 + 1; x < R1 - 1; x++) for (let z = -R1 + 1; z < R1 - 1; z++) if (Math.hypot(x, z) < R1 - 2 && nz.n2(x * 0.15, z * 0.15 + fy) > 0.1) m.set(x, fy + 1, z, mix(0xa08a6c, BLEACH, 0.35));
   }

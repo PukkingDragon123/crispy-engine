@@ -255,18 +255,46 @@ function buildHouse(m: VoxelModel) {
   // brackets under the porch, down to the shell
   for (const z of [H.porchZ0 + 0.2, -0.62, 0.78]) cap(m, P(px - 0.1, floor - 0.1, z), P(1.75, domeY(1.75, z) - 0.05, z), U(0.07), U(0.06), WOOD.shade);
   // ---- inside: counter, shelves, stove, rugs, lantern, curios
-  // the counter runs along the side wall; Ozman stands behind it with the window at his back
-  const cx0 = -1.05, cx1 = -0.7, cz0 = -0.6, cz1 = 0.6;
-  for (let x = Math.floor(U(cx0)); x <= Math.ceil(U(cx1)); x++)
-    for (let z = Math.floor(U(cz0)); z <= Math.ceil(U(cz1)); z++)
-      for (let y = Math.floor(U(floor)); y <= Math.floor(U(floor + 0.95)); y++) {
-        const X = M(x), Z = M(z), Y = M(y);
-        const top = Y > floor + 0.88;
-        const face = Math.abs(X - cx1) < VS || Math.abs(Z - cz0) < VS || Math.abs(Z - cz1) < VS || top;
-        if (!face) continue;
-        // a lip on the top, panelled front with a darker kick board
-        m.set(x, y, z, top ? (Math.abs(X - cx1) < VS ? WOOD.dark : WOOD.hi) : Y < floor + 0.12 ? WOOD.dark : Math.floor(Z / 0.15) % 2 ? WOOD.base : WOOD.shade);
+  // the counter runs along the side wall; Ozman stands behind it with the window at his back.
+  // Panelled ends, a thick top with an overhang, and a woven kilim draped over its front
+  const cx0 = -1.05, cx1 = -0.7, cz0 = -0.6, cz1 = 0.6, ctop = floor + 0.9;
+  const ix0 = Math.floor(U(cx0)), ix1 = Math.floor(U(cx1)), iz0 = Math.floor(U(cz0)), iz1 = Math.ceil(U(cz1));
+  const iy0 = Math.floor(U(floor)), iyt = Math.floor(U(ctop));
+  for (let x = ix0; x <= ix1; x++)
+    for (let z = iz0; z <= iz1; z++)
+      for (let y = iy0; y < iyt; y++) {
+        const front = x === ix1, end = z === iz0 || z === iz1;
+        if (!front && !end) continue;
+        const Y = M(y);
+        let c: number = WOOD.shade;
+        if (Y < floor + 0.12) c = WOOD.dark; // kick board
+        else if (end) {
+          const frame = x === ix0 || x === ix1 || y <= iy0 + 2 || y >= iyt - 2;
+          c = frame ? WOOD.dark : (y + x) % 5 === 0 ? WOOD.shade : WOOD.base;
+        }
+        m.set(x, y, z, c);
       }
+  for (let x = ix0; x <= ix1 + 1; x++)
+    for (let z = iz0 - 1; z <= iz1 + 1; z++) {
+      const edge = x === ix1 + 1 || z === iz0 - 1 || z === iz1 + 1;
+      m.set(x, iyt, z, edge ? WOOD.base : h01(x, 7, z, 3) > 0.85 ? WOOD.shade : WOOD.hi);
+      m.set(x, iyt - 1, z, WOOD.dark);
+    }
+  // the kilim: diamonds and bands, soft folds, a zig-zag hem with tassels
+  const KIL = [0x8e2a20, 0xb8432e, 0x2f4a7a, 0xd9a53a, 0xe8d6b0];
+  const yHem = Math.floor(U(floor + 0.2));
+  for (let z = iz0 + 1; z <= iz1 - 1; z++) {
+    const fold = Math.sin(z * 0.9) > 0.55 ? 1 : 0;
+    const zig = Math.abs((((z - iz0) % 4) + 4) % 4 - 2);
+    for (let y = yHem + zig; y < iyt - 1; y++) {
+      const dz = (((z - iz0) % 8) + 8) % 8 - 4, dy = (((y - yHem) % 8) + 8) % 8 - 4;
+      const d = Math.abs(dz) + Math.abs(dy);
+      const band = y >= iyt - 3 || y <= yHem + zig + 1;
+      const c = band ? KIL[2] : d <= 1 ? KIL[3] : d === 2 ? KIL[4] : d === 3 ? KIL[2] : (y >> 1) % 2 ? KIL[0] : KIL[1];
+      m.set(ix1 + 1 + fold, y, z, c, VF.SOFTAO);
+    }
+    if ((z - iz0) % 3 === 1) for (let k = 1; k <= 2; k++) m.set(ix1 + 1, yHem + zig - k, z, KIL[4], VF.SOFTAO);
+  }
   // a basket on the counter (the wares come out of it), brass scales, a cash tin
   vessel(m, P(-0.88, floor + 0.95, -0.35), [2.6, 3.0, 3.1, 3.2, 3.2], (row, x, z, a) => (row === 4 ? WOOD.dark : (Math.floor((a + 4) * 4) + row) % 2 ? 0xc8a060 : 0xa8803e), { seed: 5, hollowTop: 1 });
   cap(m, P(-0.88, floor + 0.96, 0.36), P(-0.88, floor + 1.25, 0.36), U(0.025), U(0.02), 0xc8a050, { fl: VF.METAL });

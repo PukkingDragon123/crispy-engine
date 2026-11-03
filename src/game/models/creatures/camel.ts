@@ -151,18 +151,18 @@ function tufts(m: VoxelModel, pred: (X: number, Y: number, Z: number) => boolean
   for (const [x, y, z, c] of add) if (!m.has(x, y, z)) m.set(x, y, z, c);
 }
 
-/** woven kilim pattern (by metres on the blanket): bands, diamonds and a dark border */
+/** woven kilim pattern (by metres on the blanket): a deep red field, clean woven bands, a dark border */
 function kilim(Y: number, Z: number, edge: number) {
-  if (edge < 0.035) return KILIM.deep;
-  if (edge < 0.06) return KILIM.ochre;
-  const bz = Math.floor((Z + 2) / 0.09);
-  const cz = ((Z + 2) % 0.09) / 0.09 - 0.5;
-  const cy = ((Y * 1.3) % 0.12) / 0.12 - 0.5;
-  const diamond = Math.abs(cz) + Math.abs(cy) < 0.32;
-  const ring = Math.abs(Math.abs(cz) + Math.abs(cy) - 0.42) < 0.07;
-  if (diamond) return bz % 2 ? KILIM.cream : KILIM.ochre;
-  if (ring) return KILIM.indigo;
-  return bz % 3 === 1 ? KILIM.green : KILIM.red;
+  if (edge < 0.03) return KILIM.deep;
+  if (edge < 0.05) return KILIM.ochre;
+  if (edge < 0.065) return KILIM.deep;
+  // two bands down each flank: indigo with a row of cream lozenges, then ochre
+  const by = Y - 1.36;
+  const lz = ((Z + 2) % 0.12) / 0.12 - 0.5;
+  if (by > 0.1 && by < 0.17) return Math.abs(lz) * 0.12 < (0.035 - Math.abs(by - 0.135)) * 0.9 ? KILIM.cream : KILIM.indigo;
+  if (by > 0.2 && by < 0.225) return KILIM.ochre;
+  if (by > 0.42 && by < 0.445) return KILIM.ochre;
+  return KILIM.red;
 }
 
 let cached: RigSpec | null = null;
@@ -285,18 +285,18 @@ function buildCamel(): RigSpec {
         const out = (px * fx + pz * fz) / d;
         if (out < -0.15) continue;
         if (py / d < 0.18 - out * 0.05) continue; // covers the upper part of the eye (heavy, sleepy)
-        const rim = py / d < 0.32;
-        lid.m.set(i, j, k, rim ? mulRGB(HIDE.dark, 0.85) : coat(i, j, k));
+        const rim = py / d < 0.26;
+        lid.m.set(i, j, k, rim ? mix(coat(i, j, k), HIDE.dark, 0.45) : coat(i, j, k));
       }
   // lashes: long, dark, curling up at the tips, from the lid rim outward and down
-  for (let a = -0.7; a <= 0.7; a += 0.14) {
+  for (let a = -0.5; a <= 0.51; a += 0.2) {
     const dirx = fx * Math.cos(a) - fz * Math.sin(a), dirz = fz * Math.cos(a) + fx * Math.sin(a);
-    const r0: M3 = [EYE[0] + dirx * 0.05, EYE[1] + 0.012, EYE[2] + dirz * 0.05];
-    const L = 0.05 + Math.cos(a) * 0.02;
-    const mid: M3 = [r0[0] + dirx * L * 0.6, r0[1] - 0.008, r0[2] + dirz * L * 0.6];
-    const tip: M3 = [r0[0] + dirx * L, r0[1] + 0.006, r0[2] + dirz * L];
-    lid.line(r0, mid, 0x24160c);
-    lid.line(mid, tip, 0x24160c);
+    const r0: M3 = [EYE[0] + dirx * 0.05, EYE[1] + 0.01, EYE[2] + dirz * 0.05];
+    const L = 0.03 + Math.cos(a) * 0.012;
+    const mid: M3 = [r0[0] + dirx * L * 0.6, r0[1] - 0.006, r0[2] + dirz * L * 0.6];
+    const tip: M3 = [r0[0] + dirx * L, r0[1] + 0.004, r0[2] + dirz * L];
+    lid.line(r0, mid, 0x4a3020);
+    lid.line(mid, tip, 0x5a3c26);
   }
   // ears: small, rounded, cupped forward-out, with pale inner fluff
   const earP: M3 = [0.066, 2.19, 1.335];
@@ -428,9 +428,9 @@ function dressPack(body: Sc) {
   // two layers of woven cloth over the hump and down the flanks
   for (let layer = 0; layer < 2; layer++)
     thicken(m, (x, y, z) => inBlanket(M(x), M(y), M(z)), (x, y, z) => {
-      const X = M(x), Y = M(y), Z = M(z);
+      const Y = M(y), Z = M(z);
       const edge = Math.min(0.44 - Math.abs(Z - cz), Y - 1.36);
-      return kilim(Y + Math.abs(X) * 0.6, Z, edge);
+      return kilim(Y, Z, edge);
     }, [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1]]);
   // fringe: woollen threads hanging from the lower hem
   const hem: V3[] = [];

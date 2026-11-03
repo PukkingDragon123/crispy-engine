@@ -58,6 +58,7 @@ import { WagonRepair } from '../run/WagonRepair';
 import { NeckSlicer } from '../player/NeckSlicer';
 import { ZoneCine } from './ZoneCine';
 import { Tutorial } from '../run/Tutorial';
+import { RuinNests } from '../run/RuinNests';
 import { Equipment } from '../player/Equipment';
 import { GearPickups } from '../run/GearLoot';
 import { GearHud } from '../ui/GearHud';
@@ -175,6 +176,7 @@ export class RunScene implements GameScene {
   private pickerShown = false;
   private zoneCine: ZoneCine | null = null;
   tutorial: Tutorial | null = null;
+  ruins: RuinNests | null = null;
   equipment!: Equipment;
   gearLoot!: GearPickups;
   gearHud!: GearHud;
@@ -299,6 +301,7 @@ export class RunScene implements GameScene {
       chest: (x, z, tier) => this.spawnChest(x, z, tier),
       addBounty: (v) => this.addBounty(v),
     });
+    this.ruins = new RuinNests({ ctx: this.ctx, player: this.player, enemies: this.enemies, props: this.props, inter: this.inter, chest: (x, z, t, r) => this.spawnChest(x, z, t, r) });
     this.populateZone(this.world.sa.zones[0]);
     if (this.world.sa.zones[1]) this.populateZone(this.world.sa.zones[1]);
     this.spawnQuests();
@@ -395,6 +398,7 @@ export class RunScene implements GameScene {
     this.slicer?.cancel();
     this.zoneCine?.dispose();
     this.tutorial?.dispose();
+    this.ruins?.dispose();
     this.engine.paused = false;
     this.engine.post.u.uDesat.value = 0;
     this.qte.dispose();
@@ -600,6 +604,8 @@ export class RunScene implements GameScene {
           x: sp.x, z: sp.z,
         });
     }
+    // ruins: chests, webs, nests and egg sacs; outposts; oasis drinking
+    this.ruins?.populateZone(z);
   }
 
   spawnChest(x: number, z: number, tier: 'wood' | 'silver' | 'gold' | 'divine', rot = rnd.next() * 6.28) {
@@ -979,6 +985,7 @@ export class RunScene implements GameScene {
       this.wagon = null;
     }
     this.missions.update(dt);
+    this.ruins?.update(dt);
     for (const s of this.scarabs) s.update(dt, this.player);
     for (let i = this.bosses.length - 1; i >= 0; i--) {
       const b = this.bosses[i];
