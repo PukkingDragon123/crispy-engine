@@ -2355,6 +2355,17 @@ export class HubScene implements GameScene {
       // the gasp: she jolts back, mouth open, eyes wide, the knitting forgotten in her lap
       this.gasp = Math.max(0, this.gasp - rdt * 0.32);
       const gp = this.gasp > 0 ? Math.sin(Math.min(1, (1 - this.gasp) * 6) * Math.PI * 0.5) * Math.min(1, this.gasp * 2.2) : 0;
+      if (this.wake && n['head'] && this.hero?.nodes['head']) {
+        const hp = this.hero.nodes['head'].getWorldPosition(this.v5);
+        const loc = n['head'].parent!.worldToLocal(hp);
+        const yaw = THREE.MathUtils.clamp(Math.atan2(loc.x - n['head'].position.x, loc.z - n['head'].position.z), -1.0, 1.0);
+        this.mamaTurn = damp(this.mamaTurn, this.wake.t > 2.3 ? yaw : 0, 5, rdt);
+        n['head'].rotation.y += this.mamaTurn;
+      } else if (this.mamaTurn) {
+        this.mamaTurn = Math.abs(this.mamaTurn) < 1e-3 ? 0 : damp(this.mamaTurn, 0, 3, rdt);
+        n['head']?.rotation.set(n['head'].rotation.x, n['head'].rotation.y + this.mamaTurn, n['head'].rotation.z);
+      }
+      if (n['body']) n['body'].rotation.y = this.mamaTurn * 0.3;
       if (gp > 0.001) {
         if (n['head']) n['head'].rotation.x -= 0.28 * gp;
         if (n['jaw']) n['jaw'].rotation.x += 0.3 * gp;
@@ -2601,6 +2612,7 @@ export class HubScene implements GameScene {
     this.hero?.setExpression('laugh');
     this.nailPoster(res, false);
     this.title.style.display = 'none';
+    for (const e of [this.hint, this.prompt, this.bank]) e.style.visibility = 'hidden';
     this.wakeCam = { pos: new THREE.Vector3(fc.x + 0.05, 1.74, fc.z + 2.1), look: new THREE.Vector3(fc.x + 0.25, sy + 0.2, fc.z + 0.05), fov: 44 };
     this.updateWake(0);
   }
@@ -2662,9 +2674,10 @@ export class HubScene implements GameScene {
       look = this.v2.set(fc.x + 0.25, sy + 0.2, fc.z + 0.05);
       fov = 44;
     } else if (t < 9.2 || !this.posterShot) {
-      pos = this.v1.set(fc.x - 0.8, 1.36, fc.z + 2.05);
-      look = this.v2.set(fc.x + 0.65, sy + 0.42, fc.z + 0.1);
-      fov = 42;
+      const u = Math.min(1, (t - 2.7) / 6.5);
+      pos = this.v1.set(fc.x - 1.62 + u * 0.12, 1.5 - u * 0.04, fc.z + 2.5 - u * 0.15);
+      look = this.v2.set(fc.x + 0.48, sy + 0.36, fc.z + 0.62);
+      fov = 47;
     } else {
       pos = this.v1.copy(this.posterShot.pos);
       look = this.v2.copy(this.posterShot.look);
@@ -2724,6 +2737,7 @@ export class HubScene implements GameScene {
 
   private showBank(n: number) {
     this.updateBank();
+    this.bank.style.visibility = '';
     if (!n) return;
     const el = document.createElement('div');
     el.style.cssText = "position:absolute;left:50%;top:13vh;transform:translate(-50%,8px);z-index:9;pointer-events:none;font-family:'Alagard';font-size:30px;color:#ffd36b;opacity:0;transition:opacity .5s,transform .8s cubic-bezier(.2,.7,.2,1);text-shadow:0 3px 0 #2a1408,0 0 16px rgba(255,180,80,.5);white-space:nowrap";
@@ -2763,6 +2777,7 @@ export class HubScene implements GameScene {
     this.intro = false;
     this.gasp = 0;
     this.title.style.display = '';
+    for (const e of [this.hint, this.prompt, this.bank]) e.style.visibility = '';
     const hearth = this.stations.find((s) => s.id === 'hearth') ?? this.stations[0];
     this.go(hearth);
     // round behind Mama's chair (between it and the fire) rather than through the coffee table
@@ -2771,6 +2786,7 @@ export class HubScene implements GameScene {
     this.speed = 1.35;
   }
 
+  private mamaTurn = 0;
   private slideK = 0;
   private knitK = 1;
   private mamaLook = 0;

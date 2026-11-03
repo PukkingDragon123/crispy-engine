@@ -3,8 +3,11 @@
 // 1/12 m (wagon & gallows 1/16 m). Fronts face +Z.
 import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
 import { Ramp } from '../style';
-import { S, StaticModel, V3, PR, rngOf, meters, board, post, seg, cylY, inCircle, chunk, sandDrift, rope, sagPoints, Wall, plankWall, windowW, doorW, tinRoof, shingleRoof, stampText, textWidth, toMeters, masonry, mod } from './helpers';
+import { S, StaticModel, V3, PR, rngOf, meters, board, post, seg, cylY, inCircle, chunk, sandDrift, rope, sagPoints, Wall, plankWall, windowW, doorW, tinRoof, shingleRoof, stampText, textWidth, toMeters, masonry, mod, mixRGB } from './helpers';
 import { cowSkullModel } from './nature';
+import { NOCOL } from './ruins';
+import { hash3, noise as noiseField } from '../../../engine/math/rand';
+import { WOOD, WoodName, WoodSpecies, agedPaper, blackIron, rustedIron, tin, brass, leather, weathered, darkWood, timber, split, wrapBand, nailHead, ironStrap, knotHole, wormHoles, bulletHole, bolt, chainLinks, sandMat, fieldStone, sandstone } from '../materials';
 
 const VS = 1 / 20;
 const BVS = 1 / 12;
@@ -862,44 +865,387 @@ export function shack(seed = 0): StaticModel & { meta: { entrance: [number, numb
   };
 }
 
-/** notice board with a little roof and wanted posters. 1/20 */
+// ---------------------------------------------------------------------------
+// WANTED board (1/40): two hand-hewn, sun-silvered posts with rusty tin caps
+// poking through a shingled gable roof; a planked board (gaps, a split, a knot
+// hole, worm holes) nailed on with rust-bleeding nails and iron corner straps;
+// layered posters (a faded one ripped half away under two fresh WANTED sheets
+// with relief-printed portraits, a knife-pinned notice, torn scraps round old
+// nails); bullet holes punched clean through; a lantern on a chain from a
+// wrought bracket; a padlocked chain; stones and drifted sand at the feet.
+// ---------------------------------------------------------------------------
+const WVS = 1 / 40;
+/** weathered grey with a little brown left in it */
+const BROWN_GREY: WoodSpecies = { ...WOOD.weathered, tones: WOOD.weathered.tones.map((c) => mixRGB(c, 0x8a6a48, 0.18)) };
+const INK = 0x2a1d14;
+const RED_INK = 0x8e2a1a;
+
+type SheetKind = 'wanted' | 'old' | 'notice';
+/** a paper sheet built flat in its own coords (paper z=0, relief z=1..2), origin bottom-left */
+function posterSheet(kind: SheetKind, w: number, h: number, seed: number, o: { look?: number; reward?: string; tear?: 'half' | 'corner' | 'strip' | 'none'; dogEar?: boolean; lines?: string[] } = {}) {
+  const p = new VoxelModel('sheet');
+  const paperTone = kind === 'old' ? 0xd2bc90 : kind === 'notice' ? 0xf2e6c8 : 0xecd9aa;
+  const paper = agedPaper({ seed, tone: paperTone, rect: [0, 0, w - 1, h - 1], age: kind === 'old' ? 1 : 0.45 });
+  const ink = kind === 'old' ? mixRGB(INK, paperTone, 0.45) : kind === 'notice' ? 0x45372c : INK;
+  const red = kind === 'old' ? mixRGB(RED_INK, paperTone, 0.45) : RED_INK;
+  const jag = (k: number) => Math.round((hash3(k, seed, 41) - 0.5) * 3);
+  const torn = (x: number, y: number) => {
+    const t = o.tear ?? 'none';
+    if (t === 'half') return y - h * 0.42 > (x - w * 0.25) * 0.9 + jag(x + y * 3);
+    if (t === 'corner') return x + y < 12 + jag(x - y);
+    if (t === 'strip') return y < 7 + jag(x);
+    return false;
+  };
+  for (let x = 0; x < w; x++)
+    for (let y = 0; y < h; y++) {
+      const edge = Math.min(x, w - 1 - x, y, h - 1 - y);
+      if (edge === 0 && hash3(x, y, seed) < 0.24) continue; // deckled, weathered edge
+      if (torn(x, y)) continue;
+      p.set(x, y, 0, paper);
+    }
+  // fresh torn edges show pale paper fibre
+  p.forEach((x, y) => {
+    if (torn(x + 1, y) || torn(x - 1, y) || torn(x, y + 1) || torn(x, y - 1)) p.set(x, y, 0, mixRGB(paperTone, 0xfff6e2, 0.55));
+  });
+  const txt = (s: string, yTop: number, col: number) => stampText(p, 'z+', s, Math.floor((w - textWidth(s)) / 2), yTop, 0, { color: col });
+  if (kind === 'notice') {
+    (o.lines ?? ['LOST', 'MULE']).forEach((l, i) => txt(l, h - 3 - i * 6, ink));
+  } else {
+    txt('WANTED', h - 3, ink);
+    for (let x = 2; x < w - 2; x++) if (p.has(x, h - 9, 0)) p.set(x, h - 9, 0, ink);
+    // portrait frame (printed rule) + relief-printed bust
+    const cx = Math.floor(w / 2), cy = h - 18;
+    for (let x = cx - 7; x <= cx + 7; x++) for (const y of [cy - 7, cy + 7]) if (p.has(x, y, 0)) p.set(x, y, 0, ink);
+    for (let y = cy - 7; y <= cy + 7; y++) for (const x of [cx - 7, cx + 7]) if (p.has(x, y, 0)) p.set(x, y, 0, ink);
+    bustRelief(p, cx, cy, o.look ?? 0, ink, paperTone, red, torn);
+    txt(o.reward ?? '$500', 7, red);
+  }
+  if (o.dogEar) {
+    // bottom-right corner folded forward: the flap shows the paper's back
+    for (let i = 0; i < 4; i++)
+      for (let j = 0; j < 4 - i; j++) {
+        const x = w - 1 - i, y = j;
+        if (!p.has(x, y, 0)) continue;
+        p.del(x, y, 0);
+        const fi = 3 - j, fj = 3 - i;
+        if (fi + fj > 3) p.set(w - 1 - fi, fj, 1, mixRGB(paperTone, 0x8a7048, 0.22));
+      }
+  }
+  return p;
+}
+
+/** the poster portrait: a shallow relief (2 voxels) of a skull outlaw, tinted like an ink wash; lit, not drawn */
+function bustRelief(p: VoxelModel, cx: number, cy: number, look: number, ink: number, paper: number, red: number, torn: (x: number, y: number) => boolean) {
+  const r1 = mixRGB(paper, ink, 0.4), r2 = mixRGB(paper, ink, 0.2), dk = ink;
+  const put = (x: number, y: number, z: number, c: number) => {
+    if (torn(cx + x, cy + y) || !p.has(cx + x, cy + y, 0)) return;
+    p.set(cx + x, cy + y, z, c);
+  };
+  const hole = (x: number, y: number) => {
+    p.del(cx + x, cy + y, 2);
+    p.del(cx + x, cy + y, 1);
+    if (p.has(cx + x, cy + y, 0)) p.set(cx + x, cy + y, 0, dk);
+  };
+  // coat shoulders + collar
+  for (let x = -6; x <= 6; x++) put(x, -6, 1, r1);
+  for (let x = -5; x <= 5; x++) if (x !== 0) put(x, -5, 1, r1);
+  put(-1, -5, 2, r2);
+  put(1, -5, 2, r2);
+  for (let x = -1; x <= 1; x++) put(x, -4, 1, r1);
+  // skull: wider cranium, narrower jaw, raised centre
+  for (let x = -4; x <= 4; x++)
+    for (let y = -3; y <= 3; y++) {
+      const rx = y > 0 ? 3.7 : y < -1 ? 2.6 : 3.3;
+      if ((x * x) / (rx * rx) + (y * y) / 12.5 > 1) continue;
+      put(x, y, 1, r1);
+      if ((x * x) / ((rx - 1.1) * (rx - 1.1)) + (y * y) / 6 <= 1) put(x, y, 2, r2);
+    }
+  for (const sx of [-1, 1]) for (const [x, y] of [[sx, 0], [sx * 2, 0], [sx, 1], [sx * 2, 1]]) hole(x, y); // eye sockets (empty, modelled)
+  hole(0, -1); // nose
+  for (let x = -2; x <= 2; x++) {
+    p.del(cx + x, cy - 2, 2);
+    put(x, -2, 1, x % 2 ? r2 : dk); // teeth
+  }
+  if (look === 1) {
+    // bandit: bandana up over the jaw, knot at the side; flat cap
+    for (let x = -3; x <= 3; x++) for (let y = -3; y <= -1; y++) if (!(y === -1 && Math.abs(x) < 1)) put(x, y, 2, mixRGB(red, paper, 0.25));
+    put(4, -2, 2, red);
+    put(5, -3, 1, red);
+    for (let x = -5; x <= 5; x++) put(x, 3, 2, mixRGB(dk, paper, 0.3));
+    for (let x = -3; x <= 3; x++)
+      for (let y = 4; y <= 5; y++) {
+        put(x, y, 1, r1);
+        if (Math.abs(x) < 3) put(x, y, 2, r2);
+      }
+  } else if (look === 2) {
+    // sombrero: wide double brim, peaked crown
+    for (let x = -6; x <= 6; x++) put(x, 3, 2, mixRGB(dk, paper, 0.3));
+    for (let x = -5; x <= 5; x++) put(x, 4, 1, r1);
+    for (let x = -2; x <= 2; x++) {
+      put(x, 5, 1, r1);
+      put(x, 5, 2, r2);
+    }
+    put(0, 6, 1, r1);
+    put(0, 6, 2, r2);
+  } else {
+    // stetson: brim, pinched crown, dark band
+    for (let x = -6; x <= 6; x++) put(x, 3, 2, mixRGB(dk, paper, 0.3));
+    for (let x = -3; x <= 3; x++) put(x, 4, 1, dk);
+    for (let x = -3; x <= 3; x++)
+      for (let y = 5; y <= 6; y++) {
+        if (y === 6 && x === 0) continue; // pinched crown
+        put(x, y, 1, r1);
+        if (Math.abs(x) < 3) put(x, y, 2, r2);
+      }
+  }
+}
+
+/** paste a sheet onto the board: paper plane at zBase, tilted by `tilt` (y shear). returns local->world mapper */
+function placeSheet(m: VoxelModel, sheet: VoxelModel, px: number, py: number, zBase: number, tilt: number) {
+  const b = sheet.bounds();
+  const w = b.maxX + 1;
+  const at = (lx: number, ly: number, lz = 0): V3 => [px + lx, py + ly + Math.round((lx - w / 2) * tilt), zBase + lz];
+  sheet.forEach((x, y, z, c, f) => {
+    const [X, Y, Z] = at(x, y, z);
+    m.set(X, Y, Z, c, f | VF.SOFTAO);
+  });
+  return at;
+}
+
+/** a hanging barn lantern: bail, vented cone cap, corner posts, sooty glass (front pane broken), candle with a small flame */
+function hangingLantern(m: VoxelModel, cx: number, top: number, cz: number, seed: number) {
+  const iron = blackIron(seed, 0.35);
+  const tn = tin({ seed: seed + 3, rust: 0.35 });
+  const glass = (_x: number, y: number) => (y > top - 7 ? 0x6e6a5c : 0xb8c8bc); // soot clouds the top of the glass
+  // bail loop
+  m.set(cx - 1, top, cz, iron, VF.METAL).set(cx + 1, top, cz, iron, VF.METAL).set(cx, top + 1, cz, iron, VF.METAL);
+  // cone cap with vent gaps
+  m.set(cx, top - 1, cz, tn, VF.METAL);
+  for (let x = -1; x <= 1; x++) for (let z = -1; z <= 1; z++) m.set(cx + x, top - 2, cz + z, tn, VF.METAL);
+  for (let x = -2; x <= 2; x++) for (let z = -2; z <= 2; z++) if (!(Math.abs(x) === 2 && Math.abs(z) === 2) && !((x === 0 || z === 0) && (Math.abs(x) === 2 || Math.abs(z) === 2))) m.set(cx + x, top - 3, cz + z, tn, VF.METAL);
+  for (let x = -3; x <= 3; x++) for (let z = -3; z <= 3; z++) if (Math.abs(x) === 3 || Math.abs(z) === 3) m.set(cx + x, top - 4, cz + z, tn, VF.METAL);
+  // body
+  const yb = top - 13;
+  for (let y = yb + 1; y <= top - 5; y++)
+    for (let x = -3; x <= 3; x++)
+      for (let z = -3; z <= 3; z++) {
+        const side = Math.abs(x) === 3 || Math.abs(z) === 3;
+        if (!side) continue;
+        const corner = Math.abs(x) === 3 && Math.abs(z) === 3;
+        if (corner) {
+          m.set(cx + x, y, cz + z, iron, VF.METAL);
+          continue;
+        }
+        const guard = y === top - 9 || ((x === 0 || z === 0) && y < top - 5);
+        if (guard) {
+          m.set(cx + x, y, cz + z, iron, VF.METAL);
+          continue;
+        }
+        // the front pane (+z) is broken out: jagged shards remain at the frame
+        if (z === 3 && Math.abs(x) <= 2 && !(y === yb + 1 || (Math.abs(x) === 2 && hash3(x, y, seed) < 0.5))) continue;
+        m.set(cx + x, y, cz + z, glass(x, y), VF.SOFTAO);
+      }
+  // base: drip pan + fuel font
+  for (let x = -3; x <= 3; x++) for (let z = -3; z <= 3; z++) m.set(cx + x, yb, cz + z, tn, VF.METAL);
+  for (let x = -2; x <= 2; x++) for (let z = -2; z <= 2; z++) if (Math.abs(x) + Math.abs(z) < 4) m.set(cx + x, yb - 1, cz + z, tn, VF.METAL);
+  // candle stub + wax drips + tiny flame
+  for (let y = yb + 1; y <= yb + 4; y++) m.set(cx, y, cz, y === yb + 1 ? 0xd8c8a0 : 0xeee0c0);
+  m.set(cx + 1, yb + 1, cz, 0xe6d6b0);
+  m.set(cx, yb + 5, cz, 0x3a2a1a);
+  m.set(cx, yb + 6, cz, 0xffc45a, VF.EMISSIVE);
+}
+
+/** lantern bracket on a post side face (sx = +1: x+ face at faceX) with a chain down to the lantern */
+function lanternOnBracket(m: VoxelModel, faceX: number, sx: 1 | -1, y: number, seed: number) {
+  const iron = blackIron(seed + 7, 0.4);
+  const X = (d: number) => faceX + sx * d;
+  for (let yy = y - 7; yy <= y + 1; yy++) for (let z = -1; z <= 1; z++) m.set(X(0), yy, z, iron, VF.METAL); // mounting plate
+  bolt(m, [X(0), y - 1, 0], sx > 0 ? 'x+' : 'x-', { size: 2, washer: false, mat: iron });
+  bolt(m, [X(0), y - 6, 0], sx > 0 ? 'x+' : 'x-', { size: 2, washer: false, mat: iron });
+  for (let d = 1; d <= 5; d++) m.set(X(d), y, 0, iron, VF.METAL); // arm
+  for (let d = 1; d <= 4; d++) m.set(X(d), y - 5 + d, 0, iron, VF.METAL); // diagonal stay
+  // scroll curl at the tip + drop hook
+  m.set(X(6), y + 1, 0, iron, VF.METAL).set(X(5), y + 2, 0, iron, VF.METAL).set(X(4), y + 1, 0, iron, VF.METAL);
+  m.set(X(4), y - 1, 0, iron, VF.METAL);
+  chainLinks(m, [[X(4), y - 2, 0], [X(4), y - 8, 0]], { mat: iron, link: 3 });
+  hangingLantern(m, X(4), y - 10, 0, seed);
+}
+
+/** wanted board: see the block comment above. 1/40, footprint ~2.4 x 2.5 m */
 export function wantedBoard(seed = 0): StaticModel {
   const m = new VoxelModel('wanted_board');
-  for (const x of [-20, 18]) post(m, x, -1, 0, 46, 3, PR.woodDark, seed + x);
-  // board
-  for (let x = -18; x <= 18; x++) for (let y = 16; y <= 40; y++) m.set(x, y, 0, mod(y, 4) === 0 ? PR.wood.dark : PR.wood.base).set(x, y, -1, PR.wood.shade);
-  for (let x = -19; x <= 19; x++) for (const y of [15, 41]) m.set(x, y, 1, PR.woodDark.base);
-  // roof
-  for (let x = -23; x <= 23; x++)
-    for (let z = -5; z <= 5; z++) {
-      const y = 47 - Math.round(Math.abs(z) * 0.6);
-      m.set(x, y, z, mod(x, 3) === 0 ? PR.woodDark.dark : PR.woodDark.base);
-    }
-  // posters
-  const xs = [-15, -4, 7];
-  xs.forEach((x0, i) => {
-    const y0 = i === 1 ? 20 : 22;
-    const torn = seed % 2 === 1 && i === 2;
-    for (let x = x0; x < x0 + 9; x++)
-      for (let y = y0; y < y0 + 15; y++) {
-        if (torn && y < y0 + 6 && x > x0 + 3 + (y - y0) % 2) continue;
-        m.set(x, y, 1, y === y0 + 13 ? PR.ink.base : PR.parchment.base);
+  const flip = mod(seed, 2) === 1;
+  const PX = 37; // post centres at x = +-PX, 7 x 7 section
+  const yS = (z: number) => 93 - Math.round(Math.abs(z) * 0.6); // roof surface
+  // ---- frame: lintel, ridge beam, knee braces, rafters
+  timber(m, [-46, 84, -2, 46, 88, 2], 'x', { seed: seed + 11, hewn: 0.2, wear: 0.1 });
+  timber(m, [-47, 89, -1, 46, 91, 1], 'x', { seed: seed + 12, chamfer: 0 });
+  for (const sx of [-1, 1]) seg(m, [sx * (PX - 4), 71, 0], [sx * 22, 83, 0], 3, weathered({ along: 'y', seed: seed + 13 + sx }));
+  for (const rx of [-46, -16, 14, 45]) for (let z = -11; z <= 11; z++) for (const x of [rx, rx + 1]) m.set(x, yS(z) - 2, z, mixRGB(WOOD.weathered.tones[1], 0x3a3028, 0.25));
+  // ---- roof: dark deck boards under staggered weathered shingles (courses with proud butts), barge boards, ridge cap
+  const deck = darkWood({ along: 'x', seed: seed + 14, bleach: 0.35, knots: 0 });
+  for (let x = -47; x <= 46; x++)
+    for (let z = -11; z <= 11; z++) m.set(x, yS(z) - 1, z, deck);
+  for (const side of [-1, 1]) {
+    for (let c = 0; c < 4; c++) {
+      // course c: |z| in (11-3c-2 .. 11-3c)
+      let x = -47 - ((c * 3 + (side > 0 ? 1 : 0)) % 5);
+      let sh = 0;
+      while (x <= 46) {
+        const wdt = 4 + Math.floor(hash3(c, sh, seed + side * 7) * 4);
+        const id = c * 97 + sh * 13 + side * 5 + seed * 1000;
+        const gone = hash3(id, 1, 2) < 0.05;
+        const lift = hash3(id, 3, 4) < 0.08 ? 1 : 0;
+        const mat = weathered({ along: 'z', seed: id, checks: 0.5, knots: 0, species: hash3(id, 5, 6) < 0.3 ? 'bleached' : 'weathered' });
+        for (let xx = Math.max(-47, x); xx <= Math.min(46, x + wdt - 1); xx++)
+          for (let k = 0; k < 3; k++) {
+            const az = 11 - 3 * c - k;
+            if (az < 0) continue;
+            const z = side * az;
+            if (side < 0 && az === 0) continue;
+            if (gone) continue;
+            const butt = k === 0 ? 1 : 0;
+            const seam = xx === x + wdt - 1;
+            m.set(xx, yS(z) + butt + lift * (k === 0 ? 1 : 0), z, seam ? 0x3a3129 : mat);
+            if (butt) m.set(xx, yS(z), z, seam ? 0x2e2620 : mat);
+          }
+        x += wdt;
+        sh++;
       }
-    // portrait: skull or cowboy silhouette
-    for (let x = x0 + 2; x <= x0 + 6; x++) for (let y = y0 + 5; y <= y0 + 10; y++) m.set(x, y, 1, PR.parchment.shade);
-    if (i % 2 === 0) {
-      m.box(x0 + 3, y0 + 6, 1, x0 + 5, y0 + 9, 1, PR.bone.base);
-      m.set(x0 + 3, y0 + 8, 1, PR.ink.base).set(x0 + 5, y0 + 8, 1, PR.ink.base);
-    } else {
-      m.box(x0 + 3, y0 + 6, 1, x0 + 5, y0 + 8, 1, PR.ink.shade);
-      m.box(x0 + 2, y0 + 9, 1, x0 + 6, y0 + 9, 1, PR.ink.base);
-      m.set(x0 + 4, y0 + 10, 1, PR.ink.base);
     }
-    m.box(x0 + 2, y0 + 2, 1, x0 + 6, y0 + 2, 1, PR.red.base);
-    m.set(x0 + 4, y0 + 14, 2, PR.red.base);
+  }
+  const ridge = weathered({ along: 'x', seed: seed + 15, species: 'walnut', checks: 0.4 });
+  for (let x = -48; x <= 47; x++) {
+    for (let z = -2; z <= 2; z++) m.set(x, 94, z, ridge);
+    for (let z = -1; z <= 1; z++) m.set(x, 95, z, ridge);
+  }
+  for (const bx of [-48, 47]) for (let z = -12; z <= 12; z++) for (let y = yS(z) - 2; y <= yS(z) + 1; y++) m.set(bx, y, z, weathered({ along: 'z', seed: seed + bx }));
+  // ---- posts (after the roof so they pierce it cleanly), tin-capped, bolted to the lintel
+  for (const sx of [-1, 1]) {
+    const cx = sx * PX;
+    timber(m, [cx - 3, 0, -3, cx + 3, 99, 3], 'y', { mat: weathered({ along: 'y', seed: seed * 5 + sx + 2, ends: [0, 99], checks: 0.9, rotBelow: 7, rotFrom: 0 }), chamfer: 1, hewn: 0.28, wear: 0.12, seed: seed + sx });
+    split(m, [cx + 1, 99, 3], 'z+', [0, -1, 0], 14, { seed: seed + sx * 3, depth: 2 });
+    const cap = tin({ seed: seed + sx, rust: 0.55 });
+    for (let k = 0; k <= 3; k++) {
+      const r = 4 - k;
+      for (let x = -r; x <= r; x++) for (let z = -r; z <= r; z++) m.set(cx + x, 100 + k, z, cap, VF.METAL);
+    }
+    for (const [x, z] of [[-4, -4], [4, 4], [-4, 4]] as [number, number][]) m.set(cx + x, 99, z, cap, VF.METAL); // bent drip corners
+    wrapBand(m, 'y', [cx - 3, -3, cx + 3, 3], 13, 15, { mat: blackIron(seed + sx) });
+    bolt(m, [cx, 86, 3], 'z+', { size: 2, mat: rustedIron({ seed: seed + sx, rust: 0.6 }) });
+    bolt(m, [cx, 86, -3], 'z-', { size: 2, mat: rustedIron({ seed: seed + sx + 1, rust: 0.6 }) });
+  }
+  // ---- the board: seven planks with gaps, nailed to the posts' front faces
+  for (let i = 0; i < 7; i++) {
+    const y0 = 30 + i * 7;
+    const tall = i === 6 || hash3(i, seed, 1) < 0.35 ? 6 : 5; // some seams closed, some open (light shows through)
+    const broken = flip && i === 4;
+    const x0 = -43 + (hash3(i, seed, 2) < 0.4 ? 1 : 0), x1 = broken ? 26 : 43 - (hash3(i, seed, 3) < 0.4 ? 1 : 0);
+    const sp: WoodName | WoodSpecies = i % 3 === 1 ? 'bleached' : i % 3 === 2 ? WOOD.weathered : BROWN_GREY;
+    timber(m, [x0, y0, 4, x1, y0 + tall, 5], 'x', { mat: weathered({ along: 'x', seed: seed * 31 + i, ends: [x0, x1], checks: 0.8, species: sp }), chamfer: 0, wear: 0.1, seed: seed + i });
+    if (broken) for (let y = y0; y <= y0 + tall; y++) for (let k = 0; k < 1 + Math.floor(hash3(y, seed, 9) * 5); k++) m.set(x1 + 1 + k, y, 4 + (k % 2), WOOD.bleached.tones[4]); // splintered end
+    for (const sx of [-1, 1]) {
+      for (const [dx, dy] of [[-2, 1], [2, tall - 1]]) nailHead(m, [sx * PX + dx * sx, y0 + dy, 5], 'z+', { rust: 0.7, seed: i });
+    }
+    if (hash3(i, seed, 4) < 0.5) split(m, [hash3(i, seed, 5) < 0.5 ? x0 : x1, y0 + 2, 5], 'z+', [hash3(i, seed, 5) < 0.5 ? 1 : -1, 0, 0], 8 + Math.floor(hash3(i, seed, 6) * 10), { seed: seed + i, depth: 2 });
+  }
+  timber(m, [-2, 31, 2, 1, 77, 3], 'y', { seed: seed + 16, chamfer: 0 }); // centre batten behind the gaps
+  knotHole(m, [flip ? -20 : 18, 34, 5], 'z+', { r: 1.3, through: 2 });
+  wormHoles(m, [-43, 30, 5, 43, 36, 5], 'z+', { density: 0.03, seed, galleries: true });
+  // top drip ledge + bottom ledge
+  timber(m, [-45, 79, 3, 45, 80, 8], 'x', { seed: seed + 17, chamfer: 0, wear: 0.15 });
+  timber(m, [-44, 27, 3, 44, 28, 7], 'x', { seed: seed + 18, chamfer: 0, wear: 0.15 });
+  // iron corner straps over the post lines
+  for (const sx of [-1, 1])
+    for (const [yy, dy] of [[77, -1], [31, 1]] as [number, number][]) {
+      ironStrap(m, [sx * 43, yy, 5], [sx * 31, yy, 5], 'z+', { width: 2, rivetEvery: 5, mat: blackIron(seed + sx + yy) });
+      ironStrap(m, [sx * 42, yy + dy, 5], [sx * 42, yy + dy * 11, 5], 'z+', { width: 2, rivetEvery: 5, mat: blackIron(seed + sx + yy + 1) });
+    }
+  // ---- posters (oldest first; later sheets overlap earlier ones)
+  const L = flip
+    ? { old: [14, 36] as [number, number], A: [-31, 40], B: [4, 38], N: [-40, 33], lookA: 2, lookB: 1, rewA: '$250', rewB: '$900', tearB: 'corner' as const }
+    : { old: [-40, 36] as [number, number], A: [-30, 38], B: [4, 41], N: [22, 33], lookA: 0, lookB: 1, rewA: '$500', rewB: '$750', tearB: 'none' as const };
+  placeSheet(m, posterSheet('old', 25, 34, seed + 101, { look: 2, reward: '$100', tear: 'half' }), L.old[0], L.old[1], 6, flip ? 0.05 : -0.04);
+  const atA = placeSheet(m, posterSheet('wanted', 25, 34, seed + 102, { look: L.lookA, reward: L.rewA, dogEar: !flip }), L.A[0], L.A[1], 6, flip ? -0.03 : 0.035);
+  const atB = placeSheet(m, posterSheet('wanted', 25, 34, seed + 103, { look: L.lookB, reward: L.rewB, tear: L.tearB, dogEar: flip }), L.B[0], L.B[1], 6, flip ? 0.04 : -0.025);
+  const atN = placeSheet(m, posterSheet('notice', 17, 15, seed + 104, { lines: flip ? ['GOLD', 'MINE'] : ['LOST', 'MULE'] }), L.N[0], L.N[1], 6, flip ? 0.06 : -0.07);
+  // nails pinning the sheets (top corners; the old one hangs from one)
+  for (const at of [atA, atB]) for (const lx of [1, 23]) nailHead(m, at(lx, 32), 'z+', { rust: 0.5, streak: 0 });
+  nailHead(m, atN(1, 13), 'z+', { rust: 0.5, streak: 0 });
+  nailHead(m, [L.old[0] + 1, L.old[1] + 32 + (flip ? -1 : 1), 6], 'z+', { rust: 0.8, streak: 0 });
+  // a knife pinning the notice: blade in the board, brass guard, leather grip, pommel
+  {
+    const [kx, ky] = atN(13, 9);
+    const grip = leather({ seed, tone: 0x5a3820, wear: 0.4 });
+    m.set(kx, ky, 6, 0xc8ccd0, VF.METAL).set(kx, ky + 1, 6, 0xc8ccd0, VF.METAL);
+    for (let y = ky - 2; y <= ky + 3; y++) m.set(kx, y, 7, brass({ seed }), VF.METAL);
+    for (let z = 8; z <= 12; z++) for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) m.set(kx + dx, ky + dy - (z > 10 ? 1 : 0), z, mod(z, 2) ? grip : mixRGB(0x5a3820, 0x2a1a10, 0.4));
+    m.set(kx, ky - 1, 13, brass({ seed: seed + 1 }), VF.METAL).set(kx + 1, ky - 1, 13, brass({ seed: seed + 1 }), VF.METAL);
+  }
+  // torn scraps left round old nails along the top
+  for (const [sx0, sy0, w, hh] of (flip ? [[-12, 74, 4, 3], [30, 72, 3, 4]] : [[-3, 75, 4, 3], [33, 70, 3, 5]]) as [number, number, number, number][]) {
+    for (let x = 0; x < w; x++) for (let y = 0; y < hh; y++) if (x + (hh - 1 - y) < w + 1 - (hash3(x, y, seed) < 0.4 ? 1 : 0)) m.set(sx0 + x, sy0 + y, 6, mixRGB(0xd8c49a, 0xfff2da, 0.3), VF.SOFTAO);
+    nailHead(m, [sx0 + 1, sy0 + hh - 1, 6], 'z+', { rust: 0.9, streak: 0 });
+  }
+  // ---- bullet holes: a grouping through poster A's portrait, the rest scattered
+  const shots: [number, number][] = [];
+  for (const [lx, ly] of [[11, 17], [14, 15], [12, 13]]) {
+    const p = atA(lx, ly);
+    shots.push([p[0], p[1]]);
+  }
+  for (let i = 0; i < 8; i++) shots.push([Math.round(-40 + hash3(i, seed, 51) * 80), Math.round(31 + hash3(i, seed, 52) * 45)]);
+  shots.forEach(([x, y], i) => {
+    if (m.has(x, y, 8)) return; // not into the knife or a ledge
+    let z = 7;
+    while (z > 2 && !m.has(x, y, z)) z--;
+    if (z < 4) return;
+    const paper = z >= 6;
+    bulletHole(m, [x, y, z], 'z+', { through: z - 3, seed: seed + i, paper, big: i === 4 });
+    // splintered exit on the back of the board
+    if (!m.has(x, y, 3)) for (const [dx, dy] of [[1, 0], [-1, 1], [0, -1]]) if (hash3(i, dx, dy) < 0.6) m.set(x + dx, y + dy, 3, WOOD.bleached.tones[4]);
   });
-  return S(m, VS);
+  // ---- lantern on a wrought bracket (outer face of one post), padlocked chain on the other
+  const ls: 1 | -1 = flip ? -1 : 1;
+  lanternOnBracket(m, ls * (PX + 4), ls, 77, seed);
+  {
+    const cx = -ls * PX;
+    const iron = blackIron(seed + 21, 0.5);
+    m.set(cx - 1, 23, 4, iron, VF.METAL).set(cx + 1, 23, 4, iron, VF.METAL);
+    for (let x = cx - 1; x <= cx + 1; x++) m.set(x, 23, 5, iron, VF.METAL);
+    chainLinks(m, [[cx, 22, 5], [cx, 14, 5]], { mat: iron, link: 3 });
+    const lock = brass({ seed: seed + 22, patina: 0.5 });
+    for (let x = cx - 2; x <= cx + 2; x++) for (let y = 7; y <= 11; y++) for (let z = 4; z <= 6; z++) if (!(Math.abs(x - cx) === 2 && (y === 7 || y === 11))) m.set(x, y, z, lock, VF.METAL);
+    m.set(cx, 8, 7, 0x1a120c).set(cx, 9, 7, 0x1a120c);
+    m.set(cx - 1, 12, 5, iron, VF.METAL).set(cx + 1, 12, 5, iron, VF.METAL).set(cx - 1, 13, 5, iron, VF.METAL).set(cx + 1, 13, 5, iron, VF.METAL);
+  }
+  // a dented tin can on the bottom ledge
+  {
+    const cx = flip ? 30 : -18, cz = 5;
+    const can = tin({ seed: seed + 23, rust: 0.6, rustBelow: 31 });
+    for (let y = 29; y <= 33; y++) for (let x = -2; x <= 2; x++) for (let z = -2; z <= 2; z++) if (x * x + z * z <= 5 && !(y === 33 && x * x + z * z <= 1)) m.set(cx + x, y, cz + z, y === 31 ? mixRGB(RED_INK, 0xd8c8a0, 0.3) : can, VF.METAL);
+    m.set(cx + 1, 34, cz - 1, can, VF.METAL).set(cx + 1, 35, cz - 2, can, VF.METAL); // peeled lid
+  }
+  // ---- feet: drifted sand mounds and wedge stones round each post, a dropped scrap
+  const sand = sandMat({ seed });
+  for (const sx of [-1, 1]) {
+    const cx = sx * PX;
+    for (let x = -12; x <= 12; x++)
+      for (let z = -10; z <= 11; z++) {
+        const d = Math.hypot(x / 12, z / (z > 0 ? 11 : 9));
+        if (d > 1) continue;
+        const h = Math.round(4.6 * Math.pow(1 - d, 1.3) + n3s(cx + x, z, seed) * 0.9);
+        for (let y = 0; y < h; y++) if (!m.has(cx + x, y, z)) m.set(cx + x, y, z, sand, NOCOL);
+      }
+    for (let k = 0; k < 4; k++) {
+      const a = hash3(sx, k, seed) * Math.PI * 2;
+      fieldStone(m, [cx + Math.round(Math.cos(a) * 6), 2, Math.round(Math.sin(a) * 6)], [2.2 + hash3(k, sx, 1) * 1.8, 1.6 + hash3(k, sx, 2), 2 + hash3(k, sx, 3) * 1.5], { seed: seed * 9 + k + sx * 4, mat: sandstone({ seed: seed + k, bed: 2 }), flags: NOCOL });
+    }
+  }
+  for (let x = 0; x < 6; x++) for (let z = 0; z < 4; z++) if (x + z < 7 && hash3(x, z, seed + 5) > 0.15) m.set((flip ? 6 : -10) + x, 0, 9 + z - (x >> 2), mixRGB(0xd2bc90, 0xfff2da, 0.2), NOCOL | VF.SOFTAO);
+  return S(m, WVS);
 }
+/** seeded 2D noise helper (-1..1) for the props in this file */
+const n3s = (x: number, z: number, seed: number) => noiseField.n2(x * 0.21 + seed * 3.1, z * 0.21 - seed * 1.7);
 
 /** stone well with a little gable roof, crank, rope and bucket. 1/20 */
 export function well(seed = 0): StaticModel {

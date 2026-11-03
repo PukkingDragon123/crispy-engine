@@ -14,7 +14,7 @@
 import * as THREE from 'three';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
-import { sculpt, Surf, PixelFx, inkText, wrapInk, measureInk, fbm3, h3, mixc, mulc, clamp, clamp01, TAU, uiSfx, METAL, len2, lerp } from './HudKit';
+import { sculpt, Surf, PixelFx, inkText, wrapInk, measureInk, fbm3, h3, mixc, mulc, clamp, clamp01, TAU, uiSfx, METAL, len2, lerp, KNZ } from './HudKit';
 
 /** what one note says */
 export interface PaperQuest {
@@ -56,7 +56,7 @@ const VS = /* glsl */ `
 varying vec2 vUv; varying vec3 vN;
 void main(){ vUv = uv; vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 const FS = /* glsl */ `
-uniform sampler2D map, stampMap;
+uniform sampler2D baseMap, map, stampMap;
 uniform vec4 uRect;
 uniform float uAspect, uSeed, uShade, uLocalAsp;
 uniform vec4 uStampXf;   // centre uv, rotation, height (uv)
@@ -64,8 +64,6 @@ uniform vec2 uStamp;     // slam 0..1, opacity
 uniform float uStampAsp;
 uniform vec4 uStroke;    // x0, x1, y (uv, y up), reveal
 uniform vec3 uCheck;     // x, y (uv), reveal
-uniform vec3 uCoffee;    // centre uv, radius
-uniform vec2 uScorch;    // charred corner (uv)
 uniform vec2 uHole;      // nail hole (uv)
 uniform vec3 uBurn;      // origin uv, progress
 uniform float uRip;      // 1 = this note was ripped off the nail (a ragged notch at the hole)
@@ -73,54 +71,31 @@ varying vec2 vUv; varying vec3 vN;
 float h(vec2 p){ p = fract(p * vec2(123.34, 456.21) + uSeed); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float n2(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
-float fbm(vec2 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++){ s += a * n2(p); p = p * 2.07 + 1.3; a *= 0.5; } return s; }
+float fbm(vec2 p){ return n2(p) * 0.57 + n2(p * 2.07 + 1.3) * 0.29 + n2(p * 4.3 + 3.1) * 0.14; }
 float segD(vec2 p, vec2 a, vec2 b){ vec2 pa = p - a, ba = b - a; float t = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * t); }
 float sdRB(vec2 p, vec2 b, float r){ vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
 void main(){
   vec2 uv = uRect.xy + vUv * uRect.zw;
   vec2 A = vec2(uAspect, 1.0);
-  // deckled, torn edge (all round the local piece)
-  vec2 e = min(vUv, 1.0 - vUv);
-  float edge = min(e.x * uLocalAsp, e.y) * uRect.w;
-  float tear = 0.010 + fbm(uv * 19.0) * 0.026;
-  if (edge < tear) discard;
-  // ripped off the nail: a ragged notch where the nail tore through
-  if (uRip > 0.5) {
-    float dn = length((uv - uHole) * A);
-    if (dn < 0.05 + fbm(uv * 30.0) * 0.05) discard;
+  // the parchment (fibres, foxing, coffee rings, charred corner, torn deckle) is baked per note
+  vec4 base = texture2D(baseMap, uv);
+  if (base.a < 0.5) discard;
+  if (uRect.z < 0.999) {
+    // a scrap: torn all the way round
+    vec2 e = min(vUv, 1.0 - vUv);
+    if (min(e.x * uLocalAsp, e.y) * uRect.w < 0.008 + n2(uv * 40.0) * 0.02) discard;
   }
-  // burning away
-  float bd = length((uv - uBurn.xy) * A) * 0.85 + fbm(uv * 6.0 + 3.0) * 0.32;
-  float bth = uBurn.z * 1.6;
-  if (uBurn.z > 0.0 && bd < bth) discard;
-  // aged parchment
-  vec3 paper = mix(vec3(0.94, 0.86, 0.69), vec3(0.80, 0.66, 0.46), smoothstep(0.2, 0.9, fbm(uv * vec2(4.0, 3.0))));
-  paper *= 0.94 + 0.06 * fbm(uv * vec2(150.0, 34.0));
-  float fox = smoothstep(0.72, 0.9, fbm(uv * 12.0 + 7.0));
-  paper = mix(paper, vec3(0.64, 0.43, 0.24), fox * 0.38);
-  // coffee: a dried ring with a darker lip, a faint pool and a second partial ring
-  float cd = length((uv - uCoffee.xy) * A);
-  float wob = (fbm(uv * 9.0) - 0.5) * 0.02;
-  float ring = exp(-pow((cd - uCoffee.z - wob) / 0.010, 2.0));
-  float pool = smoothstep(uCoffee.z + wob, uCoffee.z - 0.03, cd) * 0.16;
-  float cd2 = length((uv - uCoffee.xy - vec2(0.05, -0.07)) * A);
-  float ring2 = exp(-pow((cd2 - uCoffee.z * 0.9 - wob) / 0.008, 2.0)) * step(0.0, uv.x - uCoffee.x - 0.02);
-  paper = mix(paper, vec3(0.42, 0.24, 0.10), clamp(ring * 0.5 + ring2 * 0.32 + pool, 0.0, 0.65));
-  // creases: one fold across, one diagonal
-  float c1 = uv.y - 0.5 - 0.015 * sin(uv.x * 7.0 + uSeed * 6.0);
-  float c2 = (uv.x - uv.y * 0.6) - 0.62;
-  float fold = smoothstep(0.012, 0.0, abs(c1)) * (c1 > 0.0 ? 0.08 : -0.06) + smoothstep(0.01, 0.0, abs(c2)) * (c2 > 0.0 ? 0.05 : -0.04);
-  // the torn rim browns; one corner is charred from a campfire
-  float rim = smoothstep(tear + 0.05, tear, edge);
-  paper = mix(paper, vec3(0.40, 0.23, 0.10), rim * 0.65);
-  float sc = smoothstep(0.55, 0.0, length((uv - uScorch) * A) + (fbm(uv * 7.0) - 0.5) * 0.35);
-  paper = mix(paper, vec3(0.30, 0.15, 0.06), sc * 0.55);
-  paper = mix(paper, vec3(0.08, 0.04, 0.02), sc * smoothstep(tear + 0.09, tear + 0.01, edge));
-  vec3 col = paper;
-  // ink (soaks in unevenly)
+  if (uRip > 0.5 && length((uv - uHole) * A) < 0.05 + n2(uv * 30.0) * 0.05) discard;
+  float bd = 0.0, bth = 0.0;
+  if (uBurn.z > 0.0) {
+    bd = length((uv - uBurn.xy) * A) * 0.85 + fbm(uv * 6.0 + 3.0) * 0.32;
+    bth = uBurn.z * 1.6;
+    if (bd < bth) discard;
+  }
+  vec3 col = base.rgb;
+  // ink
   vec4 ink = texture2D(map, uv);
-  float soak = 0.8 + 0.2 * fbm(uv * 70.0);
-  col = mix(col, ink.rgb * mix(vec3(1.0), paper * 1.08, 0.3), ink.a * soak);
+  col = mix(col, ink.rgb * mix(vec3(1.0), col * 1.08, 0.3), ink.a * 0.92);
   vec3 inkRed = vec3(0.42, 0.07, 0.04);
   // the progress stroke: a quick brush underline
   if (uStroke.w > 0.0) {
@@ -138,8 +113,7 @@ void main(){
     float d1 = segD(p, a, a + (b - a) * clamp(L / l1, 0.0, 1.0));
     float d2 = L > l1 ? segD(p, b, b + (c - b) * clamp((L - l1) / l2, 0.0, 1.0)) : 9.0;
     float w = 0.16 + 0.06 * n2(p * 6.0);
-    float on = smoothstep(w, w * 0.5, min(d1, d2 + 0.02 * p.x));
-    col = mix(col, inkRed, on * 0.9);
+    col = mix(col, inkRed, smoothstep(w, w * 0.5, min(d1, d2 + 0.02 * p.x)) * 0.9);
   }
   // the DONE stamp: slams down from above, red ink with a broken double frame
   if (uStamp.y > 0.0) {
@@ -159,14 +133,16 @@ void main(){
     col = mix(col, vec3(0.70, 0.09, 0.06), m * grain * uStamp.y * smoothstep(0.75, 1.0, sl));
   }
   // nail puncture: crushed fibres round the hole
-  float hd = length((uv - uHole) * A);
-  col = mix(col, vec3(0.30, 0.18, 0.08), smoothstep(0.05, 0.02, hd) * 0.6);
+  col = mix(col, vec3(0.30, 0.18, 0.08), smoothstep(0.05, 0.02, length((uv - uHole) * A)) * 0.6);
   // burning edge: char, then a glowing ember line
   if (uBurn.z > 0.0) {
     col = mix(col, vec3(0.06, 0.03, 0.02), smoothstep(bth + 0.11, bth + 0.02, bd));
     col = mix(col, vec3(1.0, 0.55, 0.15), smoothstep(bth + 0.028, bth, bd));
   }
-  // light: the cloth's folds catch a cel-stepped key light
+  // light: the cloth's folds and the paper's creases catch a cel-stepped key light
+  float c1 = uv.y - 0.5 - 0.015 * sin(uv.x * 7.0 + uSeed * 6.0);
+  float c2 = (uv.x - uv.y * 0.6) - 0.62;
+  float fold = smoothstep(0.012, 0.0, abs(c1)) * (c1 > 0.0 ? 0.08 : -0.06) + smoothstep(0.01, 0.0, abs(c2)) * (c2 > 0.0 ? 0.05 : -0.04);
   vec3 n = normalize(vN) * (gl_FrontFacing ? 1.0 : -1.0);
   float l = dot(n, normalize(vec3(-0.35, 0.55, 1.0))) + fold;
   float ramp = 0.66 + 0.24 * smoothstep(0.45, 0.52, l) + 0.10 * smoothstep(0.86, 0.9, l);
@@ -174,6 +150,72 @@ void main(){
   gl_FragColor = vec4(col * ramp * uShade, 1.0);
   #include <colorspace_fragment>
 }`;
+
+/** fbm of simplex noise mapped to ~0..1 */
+function fbm01(x: number, y: number, oct = 3) {
+  let s = 0, a = 0.5, f = 1, n = 0;
+  for (let i = 0; i < oct; i++) {
+    s += a * KNZ.n2(x * f, y * f);
+    n += a;
+    f *= 2.07;
+    a *= 0.5;
+  }
+  return 0.5 + 0.5 * (s / n) * 1.4;
+}
+const sm = (a: number, b: number, v: number) => {
+  const t = clamp01((v - a) / (b - a));
+  return t * t * (3 - 2 * t);
+};
+/**
+ * bake a note's parchment: aged colour, fibres, foxing, a dried coffee ring,
+ * a charred corner, the browned rim and the deckled torn edge (alpha)
+ */
+function paperBase(w: number, h: number, seed: number, coffee: [number, number, number], scorch: [number, number]) {
+  const R = 1.5;
+  const W = Math.max(8, Math.round(w * R)), H = Math.max(8, Math.round(h * R));
+  const data = new Uint8Array(W * H * 4);
+  const asp = w / h;
+  const o = seed * 97.3;
+  const mixv = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  for (let j = 0; j < H; j++)
+    for (let i = 0; i < W; i++) {
+      const u = (i + 0.5) / W, v = (j + 0.5) / H;
+      const edge = Math.min(Math.min(u, 1 - u) * asp, Math.min(v, 1 - v));
+      const tear = 0.012 + fbm01(u * 19 + o, v * 19) * 0.026;
+      const k = (j * W + i) * 4;
+      if (edge < tear - 0.004) {
+        data[k + 3] = 0;
+        continue;
+      }
+      let c = mixv([0.94, 0.86, 0.69], [0.8, 0.66, 0.46], sm(0.25, 0.85, fbm01(u * 4 + o, v * 3)));
+      const fib = 0.94 + 0.06 * (0.5 + 0.5 * KNZ.n2(u * 150 + o, v * 34));
+      c = [c[0] * fib, c[1] * fib, c[2] * fib];
+      c = mixv(c, [0.64, 0.43, 0.24], sm(0.66, 0.84, fbm01(u * 12 + 7 + o, v * 12 + 7)) * 0.4);
+      // coffee: a dried ring with a darker lip, a faint pool and a second partial ring
+      const cd = Math.hypot((u - coffee[0]) * asp, v - coffee[1]);
+      const wob = (fbm01(u * 9 + o, v * 9) - 0.5) * 0.02;
+      const ring = Math.exp(-(((cd - coffee[2] - wob) / 0.01) ** 2));
+      const pool = sm(coffee[2] + wob, coffee[2] - 0.03, cd) * 0.16;
+      const cd2 = Math.hypot((u - coffee[0] - 0.05) * asp, v - coffee[1] + 0.07);
+      const ring2 = Math.exp(-(((cd2 - coffee[2] * 0.9 - wob) / 0.008) ** 2)) * (u > coffee[0] + 0.02 ? 1 : 0);
+      c = mixv(c, [0.42, 0.24, 0.1], clamp01(Math.min(0.65, ring * 0.5 + ring2 * 0.32 + pool)));
+      // browned rim and a charred corner
+      const rim = sm(tear + 0.05, tear, edge);
+      c = mixv(c, [0.4, 0.23, 0.1], rim * 0.65);
+      const sc = sm(0.55, 0, Math.hypot((u - scorch[0]) * asp, v - scorch[1]) + (fbm01(u * 7 + o, v * 7) - 0.5) * 0.35);
+      c = mixv(c, [0.3, 0.15, 0.06], sc * 0.55);
+      c = mixv(c, [0.08, 0.04, 0.02], sc * sm(tear + 0.09, tear + 0.01, edge));
+      data[k] = Math.round(clamp01(c[0]) * 255);
+      data[k + 1] = Math.round(clamp01(c[1]) * 255);
+      data[k + 2] = Math.round(clamp01(c[2]) * 255);
+      data[k + 3] = Math.round(sm(tear - 0.004, tear + 0.004, edge) * 255);
+    }
+  const t = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
+  t.minFilter = THREE.LinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.needsUpdate = true;
+  return t;
+}
 
 // ------------------------------------------------------------------ the nail
 /** a hand-forged rosehead nail head, hammered facets, rust (4 voxels per HUD px, head faces +z) */
@@ -189,7 +231,8 @@ function nailModel() {
     if (Z < 0) return 1;
     // the domed rosehead: a 5-facet pyramid on a short neck
     let d = -9;
-    for (const [nx, ny, nz] of facets) d = Math.max(d, X * nx + Y * ny + Z * nz - 2.05 + 0.25 * fbm3(X * 1.3, Y * 1.3, 0.5));
+    const dent = 0.25 * fbm3(X * 1.3, Y * 1.3, 0.5);
+    for (const [nx, ny, nz] of facets) d = Math.max(d, X * nx + Y * ny + Z * nz - 2.05 + dent);
     d = Math.max(d, len2(X, Y) - 3.3, -Z);
     return d * V;
   };
@@ -258,6 +301,8 @@ class Note {
   springs: [number, number, number, number][] = [];
   state: State = 'in';
   st = 0;
+  /** simulated seconds in this state (the cloth runs at most 1/30 s per frame) */
+  simT = 0;
   /** seconds this quest has been missing from the HUD state */
   missing = 0;
   /** fan angle (rest pose rotation) and its target */
@@ -276,11 +321,17 @@ class Note {
   checkT = -1;
   checked = false;
   ending: 'done' | 'fail' | 'quiet' | null = null;
+  stamped = false;
   private compact = false;
   private seed = Math.random();
   private ownsTex: boolean;
 
-  constructor(q: PaperQuest, private nx: number, private ny: number, private rect = new THREE.Vector4(0, 0, 1, 1), ink?: { tex: THREE.CanvasTexture; w: number; h: number }) {
+  /** the baked parchment */
+  base: THREE.DataTexture | null = null;
+  private coffee: [number, number, number] = [0.18 + Math.random() * 0.6, 0.15 + Math.random() * 0.3, 0.1 + Math.random() * 0.05];
+  private scorch: [number, number] = [Math.random() < 0.5 ? 0 : 1, Math.random() < 0.6 ? 0 : 1];
+
+  constructor(q: PaperQuest, private nx: number, private ny: number, private rect = new THREE.Vector4(0, 0, 1, 1), ink?: { tex: THREE.CanvasTexture; base: THREE.DataTexture | null; w: number; h: number }) {
     this.q = q;
     this.ownsTex = !ink;
     this.tex = ink?.tex ?? new THREE.CanvasTexture(this.cv);
@@ -294,6 +345,7 @@ class Note {
     this.geo = new THREE.PlaneGeometry(1, 1, nx - 1, ny - 1);
     this.mat = new THREE.ShaderMaterial({
       uniforms: {
+        baseMap: { value: ink?.base ?? null },
         map: { value: this.tex },
         stampMap: { value: stampTexture() },
         uRect: { value: rect },
@@ -306,8 +358,6 @@ class Note {
         uStampAsp: { value: stampAsp },
         uStroke: { value: new THREE.Vector4(0, 0, 0, 0) },
         uCheck: { value: new THREE.Vector3(0, 0, 0) },
-        uCoffee: { value: new THREE.Vector3(0.18 + Math.random() * 0.6, 0.15 + Math.random() * 0.3, 0.1 + Math.random() * 0.05) },
-        uScorch: { value: new THREE.Vector2(Math.random() < 0.5 ? 0 : 1, Math.random() < 0.6 ? 0 : 1) },
         uHole: { value: new THREE.Vector2(0.5, 0.92) },
         uBurn: { value: new THREE.Vector3(0, 0, 0) },
         uRip: { value: 0 },
@@ -327,10 +377,10 @@ class Note {
   setQuest(q: PaperQuest, compact: boolean, q2: number, force = false) {
     this.q = q;
     const title = q.title;
-    const maxW = compact ? 136 : 168;
+    const maxW = compact ? 140 : 204;
     const obj = wrapInk(q.objective, maxW - PAD * 2, 16, compact ? 1 : 2);
     const prog = q.progress ? wrapInk(q.progress, maxW - PAD * 2 - 11, 16, 1)[0] : '';
-    const reward = compact ? '' : q.reward ?? '';
+    const reward = compact || !q.reward ? '' : wrapInk(q.reward, maxW - PAD * 2, 16, 1)[0];
     const lines: { t: string; kind: 'title' | 'obj' | 'prog' | 'rew' }[] = [{ t: title, kind: 'title' }, ...obj.map((t) => ({ t, kind: 'obj' as const }))];
     if (prog) lines.push({ t: prog, kind: 'prog' });
     if (reward) lines.push({ t: reward, kind: 'rew' });
@@ -390,7 +440,12 @@ class Note {
       u.uStroke.value.set((PAD + 10) / w, (PAD + 12 + this.progW) / w, yv, u.uStroke.value.w);
       u.uCheck.value.set((PAD + 4) / w, 1 - (this.progLine + 6) / h, u.uCheck.value.z);
     }
-    if (resized) this.buildCloth();
+    if (resized) {
+      this.buildCloth();
+      this.base?.dispose();
+      this.base = paperBase(w, h, this.seed, this.coffee, this.scorch);
+      u.baseMap.value = this.base;
+    }
   }
 
   // ---------------------------------------------------- cloth
@@ -455,6 +510,7 @@ class Note {
   /** z offset this note keeps from the board (stacking) */
   step(dt: number, t: number, wind: number, zBase: number) {
     const sub = 3, h = Math.min(dt, 1 / 30) / sub;
+    this.simT += h * sub;
     const c = Math.cos(this.ang), s = Math.sin(this.ang);
     const st = this.state;
     const free = st === 'tear' || st === 'gone';
@@ -483,7 +539,8 @@ class Note {
           ay = (ty - p.y) * homing - 40 + Math.cos(t * 4.4 + i * 0.6) * 25 * wind * far;
           az = (zBase - p.z) * 30 + turb * 260 * wind * far;
         }
-        const vx = (p.x - p.px) * 0.97, vy = (p.y - p.py) * 0.97, vz = (p.z - p.pz) * 0.93;
+        const vmax = free ? 14 : 6;
+        const vx = clamp((p.x - p.px) * 0.97, -vmax, vmax), vy = clamp((p.y - p.py) * 0.97, -vmax, vmax), vz = clamp((p.z - p.pz) * 0.9, -vmax, vmax);
         p.px = p.x;
         p.py = p.y;
         p.pz = p.z;
@@ -516,7 +573,7 @@ class Note {
 
   /** a shove out of the board (the slap of a stamp, a nail blow) */
   kick(z: number) {
-    for (const p of this.pts) if (!p.pin) p.pz -= z * (0.4 + Math.random() * 0.6) * Math.min(1, Math.hypot(p.rx, p.ry) / 40);
+    for (const p of this.pts) if (!p.pin) p.pz -= z * 0.12 * (0.5 + Math.random() * 0.5) * Math.min(1, Math.hypot(p.rx, p.ry) / 40);
   }
 
   tickAnims(dt: number) {
@@ -540,14 +597,17 @@ class Note {
     this.mesh.removeFromParent();
     this.geo.dispose();
     this.mat.dispose();
-    if (this.ownsTex) this.tex.dispose();
+    if (this.ownsTex) {
+      this.tex.dispose();
+      this.base?.dispose();
+    }
   }
 }
 
 // ------------------------------------------------------------------ the stack
 export interface PaperAnchor {
-  /** nail position, HUD px */
-  x: number;
+  /** the right margin the notes keep to, and the nail height, HUD px */
+  right: number;
   y: number;
   /** size factor (small screens) */
   k: number;
@@ -571,6 +631,8 @@ export class MissionPaper {
   private ended = new Map<string, 'done' | 'fail'>();
   /** bottom edge of the stack, HUD px (the toasts line up under it) */
   bottom = 0;
+  /** the nail's x (HUD px): the top note hangs centred on it, clear of the right margin */
+  private nailX = -1;
 
   constructor(private scene: THREE.Scene) {
     this.nailMat = makeVoxelMaterial({ fog: false });
@@ -597,9 +659,13 @@ export class MissionPaper {
     }
   }
 
-  update(dt: number, quests: PaperQuest[], a: PaperAnchor, visible: boolean, s: number, recent: { text: string; age: number }[]) {
+  update(dt: number, quests: PaperQuest[], pa: PaperAnchor, visible: boolean, s: number, recent: { text: string; age: number }[]) {
     this.t += dt;
-    const k = a.k;
+    const k = pa.k;
+    const topW = this.notes.find((n) => !n.ending)?.w ?? 150;
+    const want = pa.right - (topW / 2 + 2) * k;
+    this.nailX = this.nailX < 0 ? want : this.nailX + (want - this.nailX) * Math.min(1, dt * 5);
+    const a = { ...pa, x: this.nailX };
     const q2 = Math.max(1, Math.round(s * k));
     // ---------------------------------------------------- sync with the quest list
     for (const q of quests) {
@@ -692,13 +758,16 @@ export class MissionPaper {
     this.glow.update(dt, s);
   }
 
-  private advance(n: Note, dt: number, a: PaperAnchor) {
+  private advance(n: Note, dt: number, a: PaperAnchor & { x: number }) {
     const k = a.k;
     if (n.state === 'in') {
-      if (n.st > 0.42) {
+      const c = n.centroid();
+      const restY = 7 - n.h / 2;
+      if (n.simT > 0.5 || (n.simT > 0.25 && Math.hypot(c.x, c.y - restY) < 6)) {
         // slap! the nail is driven through it
         n.state = 'pinned';
         n.st = 0;
+        n.simT = 0;
         n.pinToNail(true);
         n.kick(10);
         this.nailT = 0;
@@ -712,9 +781,10 @@ export class MissionPaper {
       }
     } else if (n.state === 'stamp') {
       const u = n.mat.uniforms;
-      const sl = clamp01(n.st / 0.13);
+      const sl = clamp01(n.simT / 0.13);
       u.uStamp.value.set(sl, 1);
-      if (sl >= 1 && n.st - dt < 0.13) {
+      if (sl >= 1 && !n.stamped) {
+        n.stamped = true;
         n.kick(7);
         uiSfx('poster_slam', 0.7, 1.35);
         uiSfx('counter_clang', 0.25, 1.6);
@@ -724,10 +794,10 @@ export class MissionPaper {
           this.fx.emit({ x: c.x + Math.cos(ang) * 14 * k, y: c.y + Math.sin(ang) * 6 * k, vx: Math.cos(ang) * v, vy: Math.sin(ang) * v * 0.5, ay: 140, drag: 2, life: 0.35 + Math.random() * 0.3, size: 1, c0: 0xc42a1a, c1: 0x6a0e08, alpha: 0.9 });
         }
       }
-      if (n.st > 1.35) this.rip(n, a);
+      if (n.simT > 1.35) this.rip(n, a);
     } else if (n.state === 'burn') {
       const u = n.mat.uniforms;
-      const b = clamp01(n.st / 1.7);
+      const b = clamp01(n.simT / 1.7);
       u.uBurn.value.z = b;
       // embers and smoke off the burning front
       const ox = u.uBurn.value.x, oy = u.uBurn.value.y;
@@ -740,15 +810,15 @@ export class MissionPaper {
         this.glow.emit({ x: c.x, y: c.y, vx: (Math.random() - 0.5) * 20 - 10, vy: -25 - Math.random() * 30, ay: -20, drag: 0.8, life: 0.4 + Math.random() * 0.6, size: 1, c0: 0xffd070, c1: 0xff4a10, alpha: 1, flick: 0.6 });
         if (Math.random() < 0.4) this.fx.emit({ x: c.x, y: c.y, vx: -6 + (Math.random() - 0.5) * 10, vy: -16 - Math.random() * 10, drag: 0.6, life: 0.8 + Math.random() * 0.6, size: 1, size1: 3, c0: 0x4a3a30, c1: 0x2a2420, alpha: 0.45, curl: 5 });
       }
-      if (n.st > 1.75) n.state = 'gone';
+      if (n.simT > 1.75) n.state = 'gone';
     } else if (n.state === 'tear') {
       const c = n.centroid();
-      if (n.st > 2.2 || c.x < -a.x / a.k - n.w || c.y > 40 + a.y / a.k) n.state = 'gone';
+      if (n.simT > 2.2 || c.x < -a.x / a.k - n.w || c.y > 40 + a.y / a.k) n.state = 'gone';
     }
   }
 
   /** a point of a pinned note in HUD px (approximate: uses its current cloth) */
-  private noteScreen(n: Note, a: PaperAnchor, u: number, v: number) {
+  private noteScreen(n: Note, a: PaperAnchor & { x: number }, u: number, v: number) {
     const NX = 11, NY = 9;
     const i = Math.round(clamp01(u) * (NX - 1)), j = Math.round((1 - clamp01(v)) * (NY - 1));
     const p = n.pts[j * NX + i] ?? { x: 0, y: 0 };
@@ -762,6 +832,7 @@ export class MissionPaper {
     if (kind === 'done') {
       // the stamp hits the paper's lower-right; finish the pending check
       n.state = 'stamp';
+      n.simT = 0;
       const u = n.mat.uniforms;
       u.uStampXf.value.set(0.62, 0.36, -0.2 - Math.random() * 0.12, Math.min(0.42, 30 / n.h));
       if (n.mat.uniforms.uCheck.value.z <= 0 && n.mat.uniforms.uStroke.value.x > 0) {
@@ -770,15 +841,17 @@ export class MissionPaper {
       }
     } else if (kind === 'fail') {
       n.state = 'burn';
+      n.simT = 0;
       n.mat.uniforms.uBurn.value.set(Math.random() < 0.5 ? 0.05 : 0.95, 0.04, 0.001);
       uiSfx('dynamite_fuse', 0.35, 0.8);
     } else this.rip(n, null);
   }
 
   /** the wind rips the note off the nail; a torn scrap stays behind */
-  private rip(n: Note, a: PaperAnchor | null) {
+  private rip(n: Note, a: (PaperAnchor & { x: number }) | null) {
     n.state = 'tear';
     n.st = 0;
+    n.simT = 0;
     n.pinToNail(false);
     n.kick(-12);
     n.mat.uniforms.uRip.value = 1;
@@ -786,13 +859,11 @@ export class MissionPaper {
     // the scrap: the strip of paper round the nail hole
     const hv = n.mat.uniforms.uHole.value.y;
     const rect = new THREE.Vector4(0.42, hv - 0.09, 0.16, Math.min(1 - (hv - 0.09), 0.2));
-    const sc = new Note(n.q, 4, 3, rect, { tex: n.tex, w: n.w, h: n.h });
+    const sc = new Note(n.q, 4, 3, rect, { tex: n.tex, base: n.base, w: n.w, h: n.h });
     sc.mat.uniforms.uAspect.value = n.w / n.h;
     sc.mat.uniforms.uLocalAsp.value = (n.w * rect.z) / (n.h * rect.w);
     sc.mat.uniforms.uSeed.value = Math.random();
-    sc.mat.uniforms.uCoffee.value.set(-1, -1, 0);
     sc.mat.uniforms.uHole.value.copy(n.mat.uniforms.uHole.value);
-    sc.mat.uniforms.uScorch.value.set(-3, -3);
     sc.buildCloth();
     sc.ang = n.ang;
     sc.pinToNail(true);

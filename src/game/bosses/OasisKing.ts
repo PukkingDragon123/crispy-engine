@@ -233,8 +233,6 @@ export class OasisKing extends Boss {
   private lastCallout = '';
   private rest: Record<string, THREE.Vector3> = {};
   private bodyPivot = new THREE.Vector3(0, 1.95, 0.4);
-  /** set by the arena: start submerged where the lurker swam (intro eruption) */
-  startSubmerged = true;
 
   constructor(d: BossDeps, private arena: KingArena, geo: RigGeo, private tier = 1) {
     // the base builds a cheap placeholder; the real rig (built off-thread) is swapped in below
@@ -831,6 +829,7 @@ export class OasisKing extends Boss {
     ctx.sfx('water_loop', this.pos, 1, 0.5);
     ctx.shake(0.5);
     this.swallowed = true;
+    this.radius = 0.1; // no contact bumps while the hunter is inside
     this.bellyDmg = 0;
     this.hunterVis = pl.root.visible;
     pl.root.visible = false;
@@ -866,6 +865,7 @@ export class OasisKing extends Boss {
     } finally {
       // retch: the hunter comes back out of the mouth in a geyser
       this.swallowed = false;
+      this.radius = 2.6;
       this.belly = 0;
       this.mouth = 1;
       const m = this.sock('mouth', new THREE.Vector3());

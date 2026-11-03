@@ -11,7 +11,7 @@ import { STATUS_INFO, StatusId } from '../combat/Status';
 import { UI, FONT, woodPanel, ironPlate, slot, parchment, ribbon, barFrame, drawBarFill, keycap, starBadge, chain, text, measure, px } from './PixelUI';
 import type { PaperQuest } from './MissionPaper';
 import type { SoulAnchor } from './SoulBar';
-import type { OutlawAnchors } from './OutlawHud';
+import { WATCH_DROP, type OutlawAnchors } from './OutlawHud';
 import { isTouchDevice } from './TouchControls';
 
 /** one quest note on the mission paper stack */
@@ -83,8 +83,8 @@ export interface HudAnchors {
   soul: SoulAnchor | null;
   /** tin star, tally board, wave plaque, stopwatch (3D layer) */
   outlaw: OutlawAnchors | null;
-  /** the mission paper's nail */
-  paper: { x: number; y: number; k: number; compact: boolean; speed: number };
+  /** the mission paper: the right margin it keeps and its nail height */
+  paper: { right: number; y: number; k: number; compact: boolean; speed: number };
 }
 
 interface Toast {
@@ -166,7 +166,7 @@ export class Hud {
     slide: 0,
     soul: null,
     outlaw: null,
-    paper: { x: 0, y: 0, k: 1, compact: false, speed: 0 },
+    paper: { right: 0, y: 0, k: 1, compact: false, speed: 0 },
   };
   /** recent toasts (the mission paper reads them to tell a finished quest from a failed one) */
   recent: { text: string; sub?: string; at: number }[] = [];
@@ -483,7 +483,7 @@ export class Hud {
         const jx = x - 11, jy = y - 15;
         const ready = s.ult >= 1;
         this.anchors.soul = { x: jx, y: jy, k, frac: s.ult, ready, heroX: hx, heroY: hy };
-        const tx = Math.round(jx + 17 * k), ty0 = Math.round(jy - 56 * k);
+        const tx = Math.round(jx + 22 * k), ty0 = Math.round(jy - 68 * k);
         if (ready) {
           const kc = keycap('Z');
           const pulse = Math.round(Math.sin(this.t * 6) * 1.5);
@@ -597,14 +597,15 @@ export class Hud {
       this.outlawBase.plaque = { x: cx, y: py, label: s.waveLabel, time: tl < 900 ? `${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}` : null, drop };
       this.outlawBase.watch = brk ? { left: s.intermission!, total: s.intermissionTotal ?? 30, bell: s.bell ?? 0 } : null;
       if (brk) {
-        // under the watch: how to cut the break short
-        const wy = Math.round(py + 15 * k + 47 * k * 0.95 + 21 * k) - drop;
+        // beside the watch: how to cut the break short
+        const wy = Math.round(py + 14 * k + WATCH_DROP * k) - drop;
         const kc = keycap('T');
-        const label = (s.bell ?? 0) > 0.02 ? 'RINGING THE BELL...' : 'HOLD TO RING THE BELL';
-        const tw = Math.ceil(measure(c, label, 16));
-        const bx = cx - (tw + kc.width + 5) / 2;
-        this.blit(kc, bx, wy + 2);
-        text(c, label, bx + kc.width + 5, wy + 3, (s.bell ?? 0) > 0.02 ? UI.brass.h : 'rgba(240,220,180,0.9)', 16);
+        const ringing = (s.bell ?? 0) > 0.02;
+        const l1 = ringing ? 'RINGING' : 'HOLD TO RING', l2 = 'THE BELL';
+        const ex = Math.round(cx - 26 * k);
+        this.blit(kc, ex - kc.width, wy - 14);
+        text(c, l1, ex - kc.width - 4, wy - 13, ringing ? UI.brass.h : 'rgba(240,220,180,0.92)', 16, 'right');
+        text(c, l2, ex, wy + 1, ringing ? UI.brass.h : 'rgba(240,220,180,0.92)', 16, 'right');
       } else text(c, s.zone, cx, Math.round(py + 15 * k + (tl < 900 ? 14 : 3) * k) + 4 - drop, 'rgba(240,220,180,0.85)', 16, 'center');
     } else if (!s.boss) {
       if (s.wave !== this.lastWave) {
@@ -745,7 +746,7 @@ export class Hud {
     }
     // ---------------------------------------------------------- objective + marker
     // (on touch screens the pause / tab buttons own the top-right corner: hang the note under them)
-    this.anchors.paper = { x: W - 10 - 78 * k + slide * 220, y: 10 * k + (this.touch ? 32 : 0), k, compact: H < 250 || W < 520, speed: s.speed };
+    this.anchors.paper = { right: W - 8 + slide * 220, y: 10 * k + (this.touch ? 32 : 0), k, compact: H < 250 || W < 520, speed: s.speed };
     if (s.objective && !this.use3D) {
       const ow = Math.max(150, Math.ceil(Math.max(measure(c, s.objective.text, 16), measure(c, s.objective.sub, 16))) + 20);
       const ox = W - ow - 8 + slide * 200, oy = 8;

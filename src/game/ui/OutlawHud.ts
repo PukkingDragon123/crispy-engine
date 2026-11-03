@@ -18,7 +18,7 @@ import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { VF } from '../../engine/voxel/VoxelModel';
 import {
-  sculpt, Surf, TextPlane, PixelFx, inkText, measureInk, fbm3, h3, mixc, mulc, clamp, clamp01, sstep, len2, len3, segD, sdRoundBox2, TAU, uiSfx, METAL, KNZ,
+  sculpt, JobQueue, Surf, TextPlane, PixelFx, inkText, measureInk, fbm3, h3, mixc, mulc, clamp, clamp01, sstep, len2, len3, segD, sdRoundBox2, TAU, uiSfx, METAL, KNZ,
 } from './HudKit';
 
 const V2 = 2; // voxels per HUD px for the big pieces
@@ -56,11 +56,18 @@ function starModel() {
     if (r > 5.4 && r < 6.1) z -= 0.55; // struck ring round the boss
     return z + 0.18 * fbm3(X * 0.25, Y * 0.25, 2); // little dents
   };
-  const sd = (x: number, y: number, z: number) => {
-    const X = x / V2, Y = y / V2, Z = z / V2;
+  const col = (x: number, y: number) => {
+    const X = x / V2, Y = y / V2;
     const d2 = sdStar2(X, Y, R, 6, 3.3);
-    let d = Math.max(d2, Z - top(X, Y, d2), -Z);
-    for (const [tx, ty] of tips) d = Math.min(d, len3(X - tx, Y - ty, (Z - 1.5) * 1.25) - 2.2);
+    let tip = 99;
+    for (const [tx, ty] of tips) tip = Math.min(tip, len2(X - tx, Y - ty));
+    return { d2, top: d2 < 0.5 ? top(X, Y, d2) : 0, tip };
+  };
+  const sd = (x: number, y: number, z: number, c: { d2: number; top: number; tip: number }) => {
+    const Z = z / V2;
+    if (c.d2 > 0.5 && c.tip > 2.4) return 1;
+    let d = Math.max(c.d2, Z - c.top, -Z);
+    if (c.tip < 2.4) d = Math.min(d, len2(c.tip, (Z - 1.5) * 1.25) - 2.2);
     return d * V2;
   };
   const paint = (x: number, y: number, z: number, s: Surf): [number, number] => {
@@ -73,7 +80,7 @@ function starModel() {
     if (h3(Math.floor(x * 0.4 + y * 0.9), Math.floor(y * 0.35 - x * 0.2), 3) > 0.985) c = TIN.hi; // scratches
     return [mulc(c, 0.94 + h3(x, y, z, 2) * 0.1), METAL];
   };
-  return sculpt('hud_tinstar', [-32, -30, 0, 32, 32, 10], sd, paint);
+  return sculpt('hud_tinstar', [-32, -30, 0, 32, 32, 10], sd, paint, VF.SOLID, col);
 }
 
 // ------------------------------------------------------------------ tally board
@@ -87,30 +94,41 @@ function boardModel() {
   for (const p of planks) nails.push([p.cx - p.hw + 3.4, p.cy + 0.6], [p.cx + p.hw - 3.6, p.cy - 0.5]);
   const grain = (lx: number, ly: number, s: number) => Math.abs(Math.sin((ly + fbm3(lx * 0.035, ly * 0.08, s) * 4.5) * 1.75));
   const knot = (lx: number, ly: number, s: number) => len2((lx - (s > 3 ? 18 : -22)) / 2.2, (ly - (s > 3 ? 1.2 : -1.5)) / 1.4);
-  const sd = (x: number, y: number, z: number) => {
-    const X = x / V2, Y = y / V2, Z = z / V2;
-    let d = 9;
+  // per column: the plank under it (outline distance + carved height) and the nearest nail
+  const col = (x: number, y: number) => {
+    const X = x / V2, Y = y / V2;
+    let best = { d2: 9, zt: 0 };
     for (const p of planks) {
       const lx = X - p.cx, ly = Y - p.cy;
+      if (Math.abs(ly) > p.hh + 1 || Math.abs(lx) > p.hw + 3) continue;
       const rag = KNZ.n2(ly * 0.5 + p.s, p.s) * 1.3 + KNZ.n2(ly * 1.7, p.s * 3) * 0.5;
       const d2 = sdRoundBox2(lx, ly, p.hw + rag * Math.sign(lx), p.hh, 0.8);
+      if (d2 > 0.5) continue;
       let zt = 2.7 - 0.5 * sstep(0.82, 1, grain(lx, ly, p.s)) - 0.7 * sstep(-1.4, 0, d2);
       const kn = knot(lx, ly, p.s);
       if (kn < 1.6) zt -= 0.35 * (1 - Math.abs(kn - 1) * 1.5);
       // a crack running in from one end along the grain
       const cy0 = p.s > 3 ? 1.6 : -1.9;
-      if (Math.abs(ly - cy0 - KNZ.n2(lx * 0.2, p.s) * 0.8) < 0.32 && (p.s > 3 ? lx < -p.hw + 20 : lx > p.hw - 17)) zt -= 1.6;
-      d = Math.min(d, Math.max(d2, Z - zt, -Z));
+      if ((p.s > 3 ? lx < -p.hw + 20 : lx > p.hw - 17) && Math.abs(ly - cy0 - KNZ.n2(lx * 0.2, p.s) * 0.8) < 0.32) zt -= 1.6;
+      if (d2 < best.d2) best = { d2, zt };
     }
-    for (const [nx, ny] of nails) d = Math.min(d, len3((X - nx) / 1.35, (Y - ny) / 1.35, (Z - 2.6) / 0.75) - 1);
+    let nail = 99;
+    for (const [nx, ny] of nails) nail = Math.min(nail, len2(X - nx, Y - ny));
+    const bent = X > 28.5 && X < 36.5 && Y > -6 && Y < -0.5;
+    return { ...best, nail, bent };
+  };
+  const sd = (x: number, y: number, z: number, c: { d2: number; zt: number; nail: number; bent: boolean }) => {
+    const X = x / V2, Y = y / V2, Z = z / V2;
+    let d = Math.max(c.d2, Z - c.zt, -Z);
+    if (c.nail < 1.5) d = Math.min(d, len2(c.nail / 1.35, (Z - 2.6) / 0.75) - 1);
     // a bent nail sticking out of the lower plank
-    d = Math.min(d, segD(X, Y, Z, 30, -4.5, 2.5, 31.6, -3.6, 5.6) - 0.42, segD(X, Y, Z, 31.6, -3.6, 5.6, 34.4, -2.2, 6.4) - 0.42, len3(X - 34.7, Y - 2.1 + 4.2, Z - 6.4) - 0.8);
+    if (c.bent) d = Math.min(d, segD(X, Y, Z, 30, -4.5, 2.5, 31.6, -3.6, 5.6) - 0.42, segD(X, Y, Z, 31.6, -3.6, 5.6, 34.4, -2.2, 6.4) - 0.42, len3(X - 34.7, Y + 2.1, Z - 6.4) - 0.8);
     return d * V2;
   };
   const W = { base: 0x8c6440, grey: 0x9d958a, dark: 0x4a3220, hi: 0xc4a47a, knot: 0x5a3a20 };
   const paint = (x: number, y: number, z: number, s: Surf): [number, number] => {
     const X = x / V2, Y = y / V2, Z = z / V2;
-    const nailHit = nails.some(([nx, ny]) => len2(X - nx, Y - ny) < 1.6 && Z > 2.2) || (X > 29.5 && Y > -5 && Z > 2.6);
+    const nailHit = nails.some(([nx, ny]) => len2(X - nx, Y - ny) < 1.6 && Z > 2.2) || (X > 29.5 && X < 36 && Y > -5 && Y < -0.5 && Z > 2.75);
     if (nailHit) {
       const lit = s.nx * -0.4 + s.ny * 0.55 + s.nz * 0.7;
       const n = fbm3(x * 0.2, y * 0.2, 4);
@@ -130,7 +148,7 @@ function boardModel() {
     if (s.exp > 0.5 && s.nz > 0.3) c = mixc(c, W.hi, 0.35);
     return [mulc(c, 0.9 + h3(x, y, z, 5) * 0.16), VF.SOLID];
   };
-  return sculpt('hud_tally', [-92, -30, 0, 92, 30, 14], sd, paint);
+  return sculpt('hud_tally', [-92, -30, 0, 92, 30, 14], sd, paint, VF.SOLID, col);
 }
 
 // ------------------------------------------------------------------ leather plaque
@@ -144,22 +162,34 @@ function plaqueModel() {
     d = Math.max(d, -(len2(Math.abs(X) - hw - 0.5, Y) - 3.4)); // V-notches mid-sides
     return d;
   };
-  const sd = (x: number, y: number, z: number) => {
-    const X = x / V2, Y = y / V2, Z = z / V2;
+  // per column: outline distance, carved height (dome, burnished edge, stitch groove + stitches), tack / ring nearby
+  const col = (x: number, y: number) => {
+    const X = x / V2, Y = y / V2;
     const d2 = outline(X, Y);
     let zt = 2.0 + 0.6 * clamp01(-d2 / 7) - 0.8 * sstep(1.1, 0, -d2);
     const gd = Math.abs(d2 + 3.0);
     if (gd < 0.42) zt -= 0.55; // stitching groove
-    zt += 0.12 * fbm3(X * 0.4, Y * 0.4, 1); // grain / wrinkles
-    let d = Math.max(d2, Z - zt, -Z);
-    // saddle stitches sitting in the groove
+    if (d2 < 0.5) zt += 0.12 * fbm3(X * 0.4, Y * 0.4, 1); // grain / wrinkles
+    let stitch = false;
     if (gd < 0.5) {
       const along = Math.atan2(Y, X * 0.25) * 30;
-      if (((along % 1) + 1) % 1 < 0.55) d = Math.min(d, Math.max(d2 + 2.55 > 0 ? -1 : d2, Z - (zt + 0.45), -Z) );
+      stitch = ((along % 1) + 1) % 1 < 0.55;
     }
-    for (const [tx, ty] of TACKS) d = Math.min(d, len3((X - tx) / 1.75, (Y - ty) / 1.75, (Z - 2.3) / 1.0) - 1);
+    let tack = 99;
+    for (const [tx, ty] of TACKS) tack = Math.min(tack, len2(X - tx, Y - ty));
+    let ring = -1;
+    for (let i = 0; i < RINGS.length; i++) if (Math.abs(X - RINGS[i][0]) < 4 && Math.abs(Y - RINGS[i][1]) < 6.5) ring = i;
+    return { d2, zt, stitch, tack, ring };
+  };
+  const sd = (x: number, y: number, z: number, c: { d2: number; zt: number; stitch: boolean; tack: number; ring: number }) => {
+    const X = x / V2, Y = y / V2, Z = z / V2;
+    let d = Math.max(c.d2, Z - c.zt, -Z);
+    // saddle stitches proud of the groove
+    if (c.stitch) d = Math.min(d, Math.max(c.d2, Z - (c.zt + 0.45), -Z));
+    if (c.tack < 1.8) d = Math.min(d, len2(c.tack / 1.75, (Z - 2.3) / 1.0) - 1);
     // D-rings on riveted leather tabs
-    for (const [rx, ry] of RINGS) {
+    if (c.ring >= 0) {
+      const [rx, ry] = RINGS[c.ring];
       d = Math.min(d, len2(len2(X - rx, (Y - ry) * 1.15) - 2.6, Z - 2.4) - 0.62);
       d = Math.min(d, Math.max(sdRoundBox2(X - rx, Y - ry + 3.2, 2.6, 2.4, 0.9), Z - 2.9, -Z));
     }
@@ -183,7 +213,7 @@ function plaqueModel() {
     if (s.exp < 0.3) c = mixc(c, L.edge, 0.45);
     return [mulc(c, 0.92 + h3(x, y, z, 8) * 0.12), VF.SOLID | VF.SOFTAO];
   };
-  return sculpt('hud_plaque', [-136, -34, 0, 136, 42, 10], sd, paint);
+  return sculpt('hud_plaque', [-136, -34, 0, 136, 42, 10], sd, paint, VF.SOLID, col);
 }
 
 /** riveted brass tag for the wave clock (hangs under the plaque) */
@@ -230,6 +260,10 @@ function linkModel() {
 
 // ------------------------------------------------------------------ pocket stopwatch
 const WR = 19; // case radius (HUD px)
+/** the stopwatch is shown a little larger than modelled */
+export const WATCH_S = 1.1;
+/** HUD px from the plaque's bottom edge to the watch centre (chain + bow), at k = 1 */
+export const WATCH_DROP = (4 * 4.3 + WR + 9.6) * WATCH_S;
 function watchModel() {
   const sd = (x: number, y: number, z: number) => {
     const X = x / V2, Y = y / V2, Z = z / V2;
@@ -373,6 +407,8 @@ const swing = (s: Swing, dt: number, k = 40, c = 2.2) => {
 export class OutlawHud {
   private mat: VoxelMaterial;
   private built = false;
+  private jobs = new JobQueue();
+  private linkGeo: THREE.BufferGeometry | null = null;
   // star
   private star = new THREE.Group();
   private starNum = new TextPlane(14, 14, 1);
@@ -428,63 +464,64 @@ export class OutlawHud {
     scene.add(this.fx.points, this.glow.points);
   }
 
+  /** queue the sculpting: one piece per frame so the run never hitches */
   private build() {
     this.built = true;
-    const T0 = performance.now(); setTimeout(() => console.log('[TMPPERF] build', 'OutlawHud.ts', Math.round(performance.now() - T0)), 0);
-    const mk = (fn: () => ReturnType<typeof sculpt>, vph: number) => {
-      try {
-        return new THREE.Mesh(geoOf(fn(), vph), this.mat);
-      } catch (e) {
-        console.warn('[outlaw hud] model failed', e);
-        return new THREE.Mesh();
+    const mk = (fn: () => ReturnType<typeof sculpt>, vph: number) => new THREE.Mesh(geoOf(fn(), vph), this.mat);
+    const J = this.jobs;
+    J.add(() => {
+      this.star.add(mk(starModel, V2));
+      this.starNum.mesh.position.z = 4.05;
+      this.star.add(this.starNum.mesh);
+    });
+    J.add(() => {
+      this.board.add(mk(boardModel, V2));
+      this.boardText.mesh.position.z = 2.75;
+      this.board.add(this.boardText.mesh);
+    });
+    J.add(() => {
+      this.plaque.add(mk(plaqueModel, V2));
+      this.plaqueText.mesh.position.set(0, -0.5, 3.05);
+      this.plaque.add(this.plaqueText.mesh);
+      this.linkGeo = geoOf(linkModel(), 4);
+      for (const [rx, ry] of RINGS)
+        for (let i = 0; i < 7; i++) {
+          const l = new THREE.Mesh(this.linkGeo, this.mat);
+          l.position.set(rx, ry + 3.4 + i * 4.3, 2.4);
+          l.rotation.y = i % 2 ? Math.PI / 2 : 0.15;
+          this.plaque.add(l);
+        }
+    });
+    J.add(() => {
+      this.tag.add(mk(tagModel, V2));
+      this.tagText.mesh.position.z = 1.75;
+      this.tag.add(this.tagText.mesh);
+      this.tag.position.set(0, -PLQ_H / 2 - TAG_H / 2 + 2.5, 0.8);
+      this.plaque.add(this.tag);
+    });
+    J.add(() => {
+      this.watchBody.add(mk(watchModel, V2));
+      this.watchBody.add(this.dial);
+      this.watchNum.mesh.position.set(0, -6.5, 2.6);
+      this.watchBody.add(this.watchNum.mesh);
+      this.watch.add(this.watchBody);
+      for (let i = 0; i < 4; i++) {
+        const l = new THREE.Mesh(this.linkGeo ?? geoOf(linkModel(), 4), this.mat);
+        l.rotation.y = i % 2 ? Math.PI / 2 : 0.1;
+        this.watch.add(l);
+        this.watchChain.push(l);
       }
-    };
-    // star
-    this.star.add(mk(starModel, V2));
-    this.starNum.mesh.position.z = 4.05;
-    this.star.add(this.starNum.mesh);
-    // tally board
-    this.board.add(mk(boardModel, V2));
-    this.boardText.mesh.position.z = 2.75;
-    this.board.add(this.boardText.mesh);
-    // plaque + chains + tag
-    this.plaque.add(mk(plaqueModel, V2));
-    this.plaqueText.mesh.position.set(0, -0.5, 3.05);
-    this.plaque.add(this.plaqueText.mesh);
-    const linkGeo = geoOf(linkModel(), 4);
-    for (const [rx, ry] of RINGS)
-      for (let i = 0; i < 7; i++) {
-        const l = new THREE.Mesh(linkGeo, this.mat);
-        l.position.set(rx, ry + 3.4 + i * 4.3, 2.4);
-        l.rotation.y = i % 2 ? Math.PI / 2 : 0.15;
-        this.plaque.add(l);
-        this.chains.push(l);
-      }
-    this.tag.add(mk(tagModel, V2));
-    this.tagText.mesh.position.z = 1.75;
-    this.tag.add(this.tagText.mesh);
-    this.tag.position.set(0, -PLQ_H / 2 - TAG_H / 2 + 2.5, 0.8);
-    this.plaque.add(this.tag);
-    // watch
-    this.watchBody.add(mk(watchModel, V2));
-    this.watchBody.add(this.dial);
-    const hand = mk(handModel, 4);
-    hand.position.z = 2.0;
-    this.hand.add(hand);
-    this.watchBody.add(this.hand);
-    this.watchNum.mesh.position.set(0, -6.5, 2.6);
-    this.watchBody.add(this.watchNum.mesh);
-    const lid = mk(lidModel, V2);
-    this.watchLid.add(lid);
-    this.watchLid.position.set(-WR + 0.4, 0, -0.6);
-    this.watchBody.add(this.watchLid);
-    this.watch.add(this.watchBody);
-    for (let i = 0; i < 4; i++) {
-      const l = new THREE.Mesh(linkGeo, this.mat);
-      l.rotation.y = i % 2 ? Math.PI / 2 : 0.1;
-      this.watch.add(l);
-      this.watchChain.push(l);
-    }
+    });
+    J.add(() => {
+      const hand = mk(handModel, 4);
+      hand.position.z = 2.0;
+      this.hand.add(hand);
+      this.watchBody.add(this.hand);
+      this.watchLid.add(mk(lidModel, V2));
+      // hinged on the right; open, its engraved inner face turns to us beside the dial
+      this.watchLid.position.set(WR - 0.4, 0, 3.6);
+      this.watchBody.add(this.watchLid);
+    });
   }
 
   private dialNumerals(q: number) {
@@ -517,6 +554,7 @@ export class OutlawHud {
       return;
     }
     if (!this.built) this.build();
+    this.jobs.step();
 
     // ---------------------------------------------------- tin star
     {
@@ -562,8 +600,8 @@ export class OutlawHud {
       }
       const amt = '$' + now.toLocaleString('en-US');
       this.boardText.draw(amt, q, (c, qq) => {
-        inkText(c, qq, { text: 'BOUNTY', x: BOARD_W / 2 - 1, y: 1, color: '#7a2214', align: 'center', style: 'paint' });
-        inkText(c, qq, { text: amt, x: BOARD_W / 2 + 1, y: 14.5, color: '#f4e2b8', align: 'center', style: 'paint' });
+        inkText(c, qq, { text: 'BOUNTY', x: BOARD_W / 2 - 1, y: 1, color: '#e2c48c', align: 'center', style: 'paint', chip: 0.62 });
+        inkText(c, qq, { text: amt, x: BOARD_W / 2 + 1, y: 14.5, color: '#fff2cc', align: 'center', style: 'paint', chip: 0.56 });
       });
     }
 
@@ -630,13 +668,13 @@ export class OutlawHud {
       const top = watchTop + (1 - this.watchShow) * -80 * k;
       const drop = this.watchChain.length * 4.3 + WR + 9.6;
       this.watch.position.set(pq.x * s, -top * s, 60);
-      this.watch.scale.setScalar(s * k * 0.95);
+      this.watch.scale.setScalar(s * k * WATCH_S);
       this.watch.rotation.set(0, 0, ang);
       this.watchBody.position.set(0, -drop, 0);
       this.watchBody.rotation.set(0.1, 0.32 + Math.sin(this.t * 0.6) * 0.06, 0);
       for (let i = 0; i < this.watchChain.length; i++) this.watchChain[i].position.set(0, -2.15 - i * 4.3, 0.5);
-      const rx = pq.x - Math.sin(ang) * drop * k, ry = top + Math.cos(ang) * drop * k;
-      this.watchLid.rotation.y = -this.lidOpen * 1.95;
+      const rx = pq.x - Math.sin(ang) * drop * k * WATCH_S, ry = top + Math.cos(ang) * drop * k * WATCH_S;
+      this.watchLid.rotation.y = -Math.PI + 0.02 + this.lidOpen * (Math.PI - 0.62);
       // the hand points at the seconds left (one turn = the whole break)
       const frac = clamp01(left / total);
       this.hand.rotation.z = -(1 - frac) * TAU;

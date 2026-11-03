@@ -20,7 +20,7 @@ import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMater
 import { buildRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { VF } from '../../engine/voxel/VoxelModel';
 import { modelEntry } from '../models/lookup';
-import { sculpt, Surf, PixelFx, fbm3, h3, mixc, mulc, clamp01, sstep, len2, len3, TAU, uiSfx, METAL, lerp } from './HudKit';
+import { sculpt, JobQueue, Surf, PixelFx, fbm3, h3, mixc, mulc, clamp01, sstep, len2, len3, TAU, uiSfx, METAL, lerp } from './HudKit';
 
 // ------------------------------------------------------------------ profile (HUD px)
 /** interior bottom of the glass above the foot */
@@ -33,8 +33,10 @@ const PROF: [number, number][] = [
 ];
 const GLASS_T = 0.7;
 const VPH = 2; // voxels per HUD px
+/** the jar is shown this much larger than its HUD-px model */
+export const SOUL_JAR_SCALE = 1.3;
 /** the jar's full height incl. Pinch, HUD px (for layout) */
-export const SOUL_JAR_H = 50;
+export const SOUL_JAR_H = 50 * SOUL_JAR_SCALE;
 
 function catmull(p0: number, p1: number, p2: number, p3: number, t: number) {
   const t2 = t * t, t3 = t2 * t;
@@ -247,46 +249,50 @@ float level(vec2 xz){
   float a = atan(xz.y, xz.x);
   return uLevel * 29.6 + (sin(a * 2.0 + uT * 2.3) * 0.35 + sin(a * 3.0 - uT * 1.7) * 0.22) * (0.7 + uSurge * 2.5) + uTilt * xz.x;
 }
-float dens(vec3 p, out float body){
+float dens(vec3 p, out float body, out float n){
   body = 0.0;
+  n = 0.0;
   float r = length(p.xz);
   if (p.y < 0.0 || r > rAt(p.y) - 0.3) return 0.0;
   float L = level(p.xz);
+  if (p.y > L + 7.5 * uReady + 0.7) return 0.0;
   float sw = uT * (0.5 + uSurge * 2.5 + uDrain * 7.0) + p.y * 0.2 + uDrain * (7.0 - r) * 0.7;
   float c = cos(sw), s = sin(sw);
   vec2 q = mat2(c, -s, s, c) * p.xz;
-  float n = fbm(vec3(q.x * 0.17, p.y * 0.12 - uT * 0.32, q.y * 0.17));
+  n = fbm(vec3(q.x * 0.17, p.y * 0.12 - uT * 0.32, q.y * 0.17));
   body = smoothstep(L + 0.6, L - 1.6, p.y);
-  float d = body * (0.25 + 1.1 * n * n * 1.6);
+  float d = body * (0.25 + 1.76 * n * n);
   // wisps curling above the surface once the jar is full
   float w = (1.0 - body) * uReady * smoothstep(0.52, 0.8, n) * smoothstep(L + 7.0, L + 0.5, p.y) * 0.9;
   return d + w;
 }
 void main(){
   vec3 dir = normalize(uDir);
-  vec3 p = vObj + dir * 0.2;
+  vec3 p = vObj + dir * 0.3;
   vec3 acc = vec3(0.0);
-  float T = 1.0, body;
-  for (int i = 0; i < 24; i++){
-    float d = dens(p, body);
+  float T = 1.0, body, n;
+  vec2 lxz = normalize(uLdir.xz + 1e-4);
+  for (int i = 0; i < 18; i++){
+    float d = dens(p, body, n);
     if (d > 0.01){
-      float bl;
-      float dl = dens(p + uLdir * 1.8, bl);
-      float lit = clamp(0.55 + (d - dl) * 1.2 - (1.0 - body) * 0.2, 0.0, 1.0);
-      // anime-painted: a stepped light ramp with soft edges
-      float ramp = smoothstep(0.32, 0.38, lit) * 0.5 + smoothstep(0.66, 0.72, lit) * 0.5;
-      vec3 col = mix(uDeep, uMid, ramp * 0.9 + 0.1);
-      col = mix(col, uHi, smoothstep(0.85, 1.0, lit) * 0.8);
+      // light: billows facing the key light (upper left) and the swell of the noise
+      float r = length(p.xz);
+      float side = r > 0.01 ? dot(p.xz / r, lxz) : 0.0;
       float L = level(p.xz);
+      float lit = clamp(0.18 + n * 0.85 + side * 0.18 + clamp((p.y - L) * 0.06, -0.15, 0.2), 0.0, 1.0);
+      // anime-painted: a stepped light ramp with soft edges
+      float ramp = smoothstep(0.40, 0.46, lit) * 0.5 + smoothstep(0.66, 0.72, lit) * 0.5;
+      vec3 col = mix(uDeep, uMid, ramp * 0.9 + 0.1);
+      col = mix(col, uHi, smoothstep(0.84, 0.95, lit) * 0.8);
       col += uHi * smoothstep(1.4, 0.0, abs(p.y - L)) * (0.25 + uReady * 0.25) * body;
       col *= 0.8 + uReady * (0.35 + 0.25 * sin(uT * 5.0));
       col += uMid * uSurge * 0.4;
-      float a = 1.0 - exp(-d * 0.62);
+      float a = 1.0 - exp(-d * 0.85);
       acc += T * a * col;
       T *= 1.0 - a;
       if (T < 0.04) break;
     }
-    p += dir * 1.05;
+    p += dir * 1.45;
   }
   float A = 1.0 - T;
   if (A < 0.01) discard;
@@ -369,6 +375,7 @@ export class SoulBar {
   private tiltV = 0;
   private pinchHop = 0;
   private built = false;
+  private jobs = new JobQueue();
 
   constructor(private scene: THREE.Scene, private hud: Hud) {
     this.brassMat = makeVoxelMaterial({ fog: false });
@@ -424,43 +431,38 @@ export class SoulBar {
     scene.add(this.fx.points, this.glow.points);
   }
 
-  /** the voxel parts are sculpted on first use (keeps scene start snappy) */
+  /** the voxel parts are sculpted on first use, one per frame (keeps the run start smooth) */
   private build() {
     this.built = true;
-    const T0 = performance.now(); setTimeout(() => console.log('[TMPPERF] build', 'SoulBar.ts', Math.round(performance.now() - T0)), 0);
-    try {
-      const vs = 1 / VPH;
-      const foot = new THREE.Mesh(buildVoxelGeometry(footModel(), { voxelSize: vs, pivot: [0, 0, 0] }), this.brassMat);
-      const cage = new THREE.Mesh(buildVoxelGeometry(cageModel(), { voxelSize: vs, pivot: [0, 0, 0] }), this.brassMat);
-      const lid = new THREE.Mesh(buildVoxelGeometry(lidModel(), { voxelSize: vs, pivot: [0, 0, 0] }), this.brassMat);
-      this.jar.add(foot, cage);
-      this.lid.add(lid);
+    const vs = 1 / VPH;
+    const J = this.jobs;
+    J.add(() => this.jar.add(new THREE.Mesh(buildVoxelGeometry(footModel(), { voxelSize: vs, pivot: [0, 0, 0] }), this.brassMat)));
+    J.add(() => this.jar.add(new THREE.Mesh(buildVoxelGeometry(cageModel(), { voxelSize: vs, pivot: [0, 0, 0] }), this.brassMat)));
+    J.add(() => {
+      this.lid.add(new THREE.Mesh(buildVoxelGeometry(lidModel(), { voxelSize: vs, pivot: [0, 0, 0] }), this.brassMat));
       this.lid.position.y = 34.9;
-    } catch (e) {
-      console.warn('[soul] jar build failed', e);
-    }
-    try {
+    });
+    J.add(() => {
       const ps = modelEntry('pinch')?.() as RigSpec | undefined;
-      if (ps?.parts) {
-        this.pinch = new RigInstance(buildRigGeo(ps, ps.name + ':soul'), { material: this.pinchMat, castShadow: false });
-        const len = (ps.meta?.length as number) ?? 0.65;
-        this.pinch.root.scale.setScalar(17 / len);
-        this.pinch.root.position.set(0, 6.6, 0);
-        this.lid.add(this.pinch.root);
-      }
-    } catch (e) {
-      console.warn('[soul] pinch failed', e);
-    }
+      if (!ps?.parts) return;
+      this.pinch = new RigInstance(buildRigGeo(ps, ps.name + ':soul'), { material: this.pinchMat, castShadow: false });
+      const len = (ps.meta?.length as number) ?? 0.65;
+      this.pinch.root.scale.setScalar(17 / len);
+      this.pinch.root.position.set(0, 6.6, 0);
+      this.lid.add(this.pinch.root);
+    });
   }
 
-  update(dt: number, a: SoulAnchor | null, visible: boolean, s: number) {
+  update(dt: number, anchor: SoulAnchor | null, visible: boolean, s: number) {
     this.t += dt;
+    const a = anchor ? { ...anchor, k: anchor.k * SOUL_JAR_SCALE } : null;
     const show = !!a && visible;
     this.root.visible = show;
     this.fx.update(dt, s);
     this.glow.update(dt, s);
     if (!a) return;
     if (show && !this.built) this.build();
+    this.jobs.step();
     const ult = Math.max(0, Math.min(1, a.frac));
     const k = a.k;
     if (this.lastUlt < 0) {

@@ -63,18 +63,29 @@ export type Painter = (x: number, y: number, z: number, s: Surf) => number | [nu
 /**
  * Voxelise a signed distance field (negative inside) on the integer grid of the
  * box [x0..x1]×[y0..y1]×[z0..z1] (cell centres at +0.5) and paint the surface.
+ * `col(x, y)` (optional) is evaluated once per (x, y) column and handed to `sd`,
+ * so expensive 2D work (outlines, height fields, noise) is not repeated per cell.
+ * Surface normals and exposure come from the occupancy grid itself.
  */
-export function sculpt(name: string, box: [number, number, number, number, number, number], sd: (x: number, y: number, z: number) => number, paint: Painter, flags: number = VF.SOLID) {
+export function sculpt<C = undefined>(
+  name: string,
+  box: [number, number, number, number, number, number],
+  sd: (x: number, y: number, z: number, col: C) => number,
+  paint: Painter,
+  flags: number = VF.SOLID,
+  col?: (x: number, y: number) => C
+) {
   const [x0, y0, z0, x1, y1, z1] = box;
   const sx = x1 - x0 + 1, sy = y1 - y0 + 1, sz = z1 - z0 + 1;
   const a = new Uint8Array(sx * sy * sz);
   const id = (x: number, y: number, z: number) => x - x0 + sx * (y - y0 + sy * (z - z0));
-  for (let z = z0; z <= z1; z++)
-    for (let y = y0; y <= y1; y++)
-      for (let x = x0; x <= x1; x++) if (sd(x + 0.5, y + 0.5, z + 0.5) < 0) a[id(x, y, z)] = 1;
+  for (let y = y0; y <= y1; y++)
+    for (let x = x0; x <= x1; x++) {
+      const c = (col ? col(x + 0.5, y + 0.5) : undefined) as C;
+      for (let z = z0; z <= z1; z++) if (sd(x + 0.5, y + 0.5, z + 0.5, c) < 0) a[id(x, y, z)] = 1;
+    }
   const at = (x: number, y: number, z: number) => (x < x0 || y < y0 || z < z0 || x > x1 || y > y1 || z > z1 ? 0 : a[id(x, y, z)]);
   const m = new VoxelModel(name);
-  const e = 0.6;
   for (let z = z0; z <= z1; z++)
     for (let y = y0; y <= y1; y++)
       for (let x = x0; x <= x1; x++) {
@@ -84,19 +95,46 @@ export function sculpt(name: string, box: [number, number, number, number, numbe
           m.set(x, y, z, 0x201810, flags);
           continue;
         }
-        let empty = 0;
-        for (let dz = -1; dz <= 1; dz++) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (!at(x + dx, y + dy, z + dz)) empty++;
-        const px = x + 0.5, py = y + 0.5, pz = z + 0.5;
-        let nx = sd(px + e, py, pz) - sd(px - e, py, pz), ny = sd(px, py + e, pz) - sd(px, py - e, pz), nz = sd(px, py, pz + e) - sd(px, py, pz - e);
+        // exposure from the 3×3×3 block; the normal points toward the empty side of a 5×5×5 block
+        let empty = 0, nx = 0, ny = 0, nz = 0;
+        for (let dz = -2; dz <= 2; dz++)
+          for (let dy = -2; dy <= 2; dy++)
+            for (let dx = -2; dx <= 2; dx++) {
+              if (at(x + dx, y + dy, z + dz)) continue;
+              const w = 1 / (dx * dx + dy * dy + dz * dz);
+              nx += dx * w;
+              ny += dy * w;
+              nz += dz * w;
+              if (dx >= -1 && dx <= 1 && dy >= -1 && dy <= 1 && dz >= -1 && dz <= 1) empty++;
+            }
         const l = Math.hypot(nx, ny, nz) || 1;
-        nx /= l;
-        ny /= l;
-        nz /= l;
-        const c = paint(x, y, z, { nx, ny, nz, exp: clamp01((empty - 6) / 10) });
+        const c = paint(x, y, z, { nx: nx / l, ny: ny / l, nz: nz / l, exp: clamp01((empty - 6) / 10) });
         if (Array.isArray(c)) m.set(x, y, z, c[0], c[1]);
         else m.set(x, y, z, c, flags);
       }
   return m;
+}
+
+/** run queued build jobs, one per call (spreads sculpting over frames) */
+export class JobQueue {
+  private jobs: (() => void)[] = [];
+  add(fn: () => void) {
+    this.jobs.push(fn);
+  }
+  get busy() {
+    return this.jobs.length > 0;
+  }
+  step() {
+    const j = this.jobs.shift();
+    if (!j) return;
+    try {
+      const T0 = performance.now();
+      j();
+      console.log('[TMPPERF] job', Math.round(performance.now() - T0));
+    } catch (e) {
+      console.warn('[hud] build job failed', e);
+    }
+  }
 }
 
 // ------------------------------------------------------------------ sdf helpers
@@ -139,6 +177,8 @@ export interface InkLine {
   style?: 'outline' | 'brand' | 'paint' | 'ink' | 'emboss';
   /** extra colour for brand/emboss/outline effects */
   alt?: string;
+  /** 'paint': how worn (0 = flaked away … 1 = intact; default 0.42) */
+  chip?: number;
 }
 
 /** Alagard set at an integer multiple of its pixel size, with a few material treatments */
@@ -184,8 +224,9 @@ export function inkText(c: CanvasRenderingContext2D, q: number, l: InkLine) {
     for (let yy = Y; yy < Y + size; yy += cell)
       for (let xx = x0; xx < x0 + w; xx += cell) {
         const n = KNZ.n2(xx * 0.09 / q, yy * 0.09 / q) * 0.6 + h3(xx, yy, 7) * 0.4;
-        if (n > 0.42) {
-          c.fillStyle = `rgba(0,0,0,${n > 0.55 ? 0.95 : 0.5})`;
+        const th = l.chip ?? 0.42;
+        if (n > th) {
+          c.fillStyle = `rgba(0,0,0,${n > th + 0.13 ? 0.95 : 0.5})`;
           c.fillRect(xx, yy, cell, cell);
         }
       }
