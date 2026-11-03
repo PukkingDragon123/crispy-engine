@@ -60,6 +60,8 @@ import { ZoneCine } from './ZoneCine';
 import { Tutorial } from '../run/Tutorial';
 import { RuinNests } from '../run/RuinNests';
 import { Barks } from '../audio/Barks';
+import { DeathCine, deathCineFromRun } from './DeathCine';
+import { CodexRun } from '../ui/codex/CodexRun';
 import { Equipment } from '../player/Equipment';
 import { GearPickups } from '../run/GearLoot';
 import { GearHud } from '../ui/GearHud';
@@ -179,6 +181,7 @@ export class RunScene implements GameScene {
   private zoneCine: ZoneCine | null = null;
   tutorial: Tutorial | null = null;
   ruins: RuinNests | null = null;
+  private codexRun: CodexRun | null = null;
   equipment!: Equipment;
   gearLoot!: GearPickups;
   gearHud!: GearHud;
@@ -356,6 +359,7 @@ export class RunScene implements GameScene {
     this.director = new WaveDirector(this.ctx, this.enemies, () => this.player);
     this.wireEvents();
     new Barks(this.ctx, this.player); // Sundown's voiced quips; tears itself down with the scene
+    this.codexRun = new CodexRun(this.ctx, this);
 
     // place player
     const st = this.world.sa.start;
@@ -402,6 +406,7 @@ export class RunScene implements GameScene {
     this.zoneCine?.dispose();
     this.tutorial?.dispose();
     this.ruins?.dispose();
+    this.codexRun?.dispose();
     this.engine.paused = false;
     this.engine.post.u.uDesat.value = 0;
     this.qte.dispose();
@@ -882,6 +887,11 @@ export class RunScene implements GameScene {
       banked: awardRun(this.run, this.codexKills),
       hero: this.player.rig.geo.spec,
     };
+    // a true death: the killing blow in slow motion, the sky wheels through the days, he wakes at home
+    if (!won && !this.player.alive) {
+      eng.tweens.after(1.4, () => void eng.setScene(new DeathCine(eng, deathCineFromRun(this, res)), 0.35, '#fff3dc'), true);
+      return;
+    }
     eng.tweens.after(2.6, () => {
       void eng.setScene(
         new ResultsScene(eng, res, () => void eng.setScene(new RunScene(eng, { ...this.opts, seed: (this.opts.seed * 31 + 7) % 100000, startWave: 1 }), 0.8)),
@@ -893,6 +903,7 @@ export class RunScene implements GameScene {
   // ------------------------------------------------------------------ update
   update(dt: number, rdt: number) {
     if (!this.ready) return;
+    this.codexRun?.update(rdt);
     const e = this.engine;
     this.run.time += dt;
     // pause toggle (simple until poster scene)
