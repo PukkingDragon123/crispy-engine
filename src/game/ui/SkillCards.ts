@@ -111,7 +111,7 @@ function cardMaterial(emissiveStrength = 1): CardMat {
             float grate = 0.5 + 0.5 * sin((cp.x * 0.8 - cp.y) * 260.0 + va.x * 40.0);
             float glit = step(0.94, vhash(floor(vCardP * 170.0) + vec3(floor(ph * 5.0))));
             float fo = uFoil * (0.15 + 0.85 * metal);
-            totalEmissiveRadiance += irid * (0.16 + 0.22 * grate + 1.1 * glit * metal) * fo * (0.55 + 0.45 * diffuseColor.rgb);
+            totalEmissiveRadiance += irid * (0.09 + 0.22 * grate + 1.2 * glit * metal) * fo * (0.55 + 0.45 * diffuseColor.rgb);
           }
           // the gold sheen: a hot band sweeping across the card
           float sb = cp.x * 0.75 + cp.y * 0.55 - uSheen;
@@ -672,7 +672,7 @@ function paintDetail(o: Offer, d: CardDetail) {
     // levels: a line, then a row of real gems (3D, placed by the panel)
     const lvText = def.learn ? 'A TAROT SKILL  ·  YOURS FOR GOOD' : def.cat === 'evolution' ? 'EVOLUTION  ·  ONE OF A KIND' : def.maxLv === 1 ? 'SINGLE LEVEL' : o.fromLv === 0 ? `NEW  ·  LEVEL 1 OF ${def.maxLv}` : `LEVEL ${o.fromLv} → ${o.toLv}  OF ${def.maxLv}`;
     centre(lvText, 30, INK_SOFT);
-    ops.push({ h: 50 * s, draw: (y) => (pipY = (y + 25 * s) / H) });
+    ops.push({ h: 66 * s, draw: (y) => (pipY = (y + 36 * s) / H) });
     // the stat changes, current → new, coloured by whether it helps
     if (d.rows.length) {
       label('CHANGES');
@@ -738,7 +738,8 @@ function paintDetail(o: Offer, d: CardDetail) {
     }
     return ops;
   };
-  let s = 1;
+  // as large as the parchment allows
+  let s = 1.32;
   let ops = build(s);
   const room = H * 0.94;
   for (let i = 0; i < 14 && ops.reduce((a, b) => a + b.h, 0) > room; i++) {
@@ -797,7 +798,7 @@ export class DetailPanel {
       const lit = i < o.toLv;
       const g = new THREE.Mesh(gemGeo(col, lit), lit ? this.gemMat : this.mat);
       g.position.set(ix + (i - (n - 1) / 2) * step, gy, 0.0);
-      g.scale.setScalar(1.25);
+      g.scale.setScalar(1.15);
       this.group.add(g);
       if (i >= o.fromLv && i < o.toLv) this.fresh.push(g);
     }
@@ -806,7 +807,7 @@ export class DetailPanel {
   update(dt: number, hover: number) {
     this.t += dt;
     this.gemMat.userData.emissiveStrength.value = 1.8 + hover * 1.6;
-    for (const g of this.fresh) g.scale.setScalar(1.25 * (1 + Math.max(0, Math.sin(this.t * 5)) * 0.2));
+    for (const g of this.fresh) g.scale.setScalar(1.15 * (1 + Math.max(0, Math.sin(this.t * 5)) * 0.2));
   }
 
   setDissolve(k: number) {

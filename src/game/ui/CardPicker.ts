@@ -466,8 +466,8 @@ export class CardPicker {
     const asp = eng.width / eng.height;
     const tanH = this.tanH;
     const s = c.base * 1.06;
-    // close enough that the ledger's body text is ~17 px tall, never so close the card leaves the frame
-    const dText = (eng.height * 0.036) / (2 * 17 * tanH);
+    // close enough that the ledger's body text is ~15 px tall, never so close the card leaves the frame
+    const dText = (eng.height * 0.036) / (2 * 15 * tanH);
     const dMin = (CARD_H * s) / (0.92 * 2 * tanH);
     let d = Math.max(dMin, Math.min(c.homeC.z - 0.4, dText));
     const pairW = (CARD_W + 0.03 + PANEL_W) * s;

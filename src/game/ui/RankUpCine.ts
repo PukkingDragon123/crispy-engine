@@ -15,7 +15,8 @@
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import { Particles } from '../fx/Particles';
-import { GlyphRings, LightSigil, SandVortex } from '../fx/SerketSpirit';
+import { GlyphRings, LightSigil } from '../fx/SerketSpirit';
+import { SpriteBatch } from '../fx/SpriteBatch';
 import { VoxelModel, VF } from '../../engine/voxel/VoxelModel';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { globalUniforms, makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
@@ -166,9 +167,9 @@ class ShockRing {
     cg.setIndex(ci);
     this.cmat = new THREE.ShaderMaterial({
       uniforms: { uFade: { value: 1 }, uT: globalUniforms.uTime },
-      vertexShader: /* glsl */ `attribute vec2 aux; varying vec2 vA; void main(){ vA = aux; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      vertexShader: /* glsl */ `attribute vec2 aux; varying vec2 vA; varying float vD; void main(){ vA = aux; vec4 mv = modelViewMatrix * vec4(position, 1.0); vD = -mv.z; gl_Position = projectionMatrix * mv; }`,
       fragmentShader: /* glsl */ `
-        uniform float uFade, uT; varying vec2 vA;
+        uniform float uFade, uT; varying vec2 vA; varying float vD;
         ${NOISE_GLSL}
         void main(){
           float ang = vA.x * 6.2831853;
@@ -178,7 +179,7 @@ class ShockRing {
           float a = (1.0 - smoothstep(top - 0.3, top, vA.y)) * (1.0 - vA.y * 0.3);
           float streak = 0.45 + 0.55 * sin(ang * 96.0 + n * 7.0 + vA.y * 3.0);
           vec3 col = mix(vec3(1.0, 0.8, 0.4), vec3(0.45, 1.0, 0.75), smoothstep(0.0, 0.8, vA.y)) * (0.7 + streak) * 1.3;
-          a *= uFade;
+          a *= uFade * smoothstep(0.8, 2.6, vD);
           if (a < 0.004) discard;
           gl_FragColor = vec4(col, a);
         }`,
@@ -193,7 +194,7 @@ class ShockRing {
     parent.add(this.curtain);
   }
 
-  update(k: number, p: Particles) {
+  update(k: number, p: Particles, eye: THREE.Vector3) {
     // k: 0..1 life of the wave
     const e = outCubic(k);
     this.r = 0.3 + e * SHOCK_R;
@@ -217,13 +218,14 @@ class ShockRing {
       for (let i = 0; i < 9; i++) {
         const a = Math.random() * Math.PI * 2;
         const x = a0.x + Math.cos(a) * this.r, z = a0.z + Math.sin(a) * this.r;
+        if (Math.hypot(x - eye.x, z - eye.z) < 2.2) continue;
         const out = 2 + 5 * (1 - e);
         p.emit({ pos: { x, y: this.groundAt(x, z) + 0.05, z }, count: 1, vel: { x: Math.cos(a) * out, y: 2 + Math.random() * 3, z: Math.sin(a) * out }, spread: 0.6, life: [0.5, 1.0], size: [0.06, 0.035], sprite: GRAIN, color: SAND, gravity: 9, drag: 1.2, ground: true, bounce: 0.1 });
       }
       if (Math.random() < 0.7) {
         const a = Math.random() * Math.PI * 2;
         const x = a0.x + Math.cos(a) * this.r, z = a0.z + Math.sin(a) * this.r;
-        p.emit({ pos: { x, y: this.groundAt(x, z) + 0.2, z }, count: 1, vel: { x: Math.cos(a) * 1.5, y: 0.6, z: Math.sin(a) * 1.5 }, life: [0.7, 1.3], size: [0.5, 1.6], sprite: PUFF, color: SAND, alpha: 0.6, drag: 2, rot: 6, rotSpeed: 0.6 });
+        if (Math.hypot(x - eye.x, z - eye.z) > 4) p.emit({ pos: { x, y: this.groundAt(x, z) + 0.2, z }, count: 1, vel: { x: Math.cos(a) * 1.5, y: 0.6, z: Math.sin(a) * 1.5 }, life: [0.7, 1.3], size: [0.5, 1.6], sprite: PUFF, color: SAND, alpha: 0.6, drag: 2, rot: 6, rotSpeed: 0.6 });
       }
     }
   }
@@ -399,6 +401,89 @@ class RankStamp {
   }
 }
 
+// ------------------------------------------------------------------ sand spiralling up around him
+
+/**
+ * Pixel sand lifting off the dune and spiralling up around the hero: grains,
+ * a few soft puffs and glints, on a tight funnel (it never drifts into the lens).
+ */
+class SandSpiral {
+  center = new THREE.Vector3();
+  intensity = 0;
+  height = 3;
+  burst = 0;
+  private n: number;
+  private a: Float32Array;
+  private h: Float32Array;
+  private r: Float32Array;
+  private w: Float32Array;
+  private vy: Float32Array;
+  private batch: SpriteBatch;
+  private glow: SpriteBatch;
+  private t = 0;
+
+  constructor(parent: THREE.Object3D, n = 760) {
+    this.n = n;
+    this.a = new Float32Array(n);
+    this.h = new Float32Array(n);
+    this.r = new Float32Array(n);
+    this.w = new Float32Array(n);
+    this.vy = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      this.a[i] = Math.random() * Math.PI * 2;
+      this.h[i] = Math.random();
+      this.r[i] = 0.55 + Math.pow(Math.random(), 0.7) * 0.9;
+      this.w[i] = (2.0 + Math.random() * 2.4) * (1.25 - (this.r[i] - 0.55) * 0.4);
+      this.vy[i] = 0.1 + Math.random() * 0.18;
+    }
+    this.batch = new SpriteBatch(n);
+    this.glow = new SpriteBatch(Math.ceil(n / 5), true);
+    parent.add(this.batch.mesh, this.glow.mesh);
+  }
+
+  update(dt: number, fog: THREE.Fog | null, eye: THREE.Vector3) {
+    this.t += dt;
+    this.batch.begin();
+    this.glow.begin();
+    const I = Math.max(0, Math.min(1.3, this.intensity));
+    const b = this.burst;
+    if (I > 0.01) {
+      const c = this.center;
+      for (let i = 0; i < this.n; i++) {
+        this.a[i] += this.w[i] * dt * (1 - b * 0.6);
+        this.h[i] += this.vy[i] * dt * (0.6 + I * 0.6);
+        if (this.h[i] > 1) {
+          this.h[i] -= 1;
+          this.r[i] = 0.55 + Math.pow(Math.random(), 0.7) * 0.9;
+        }
+        const hf = this.h[i];
+        const rad = this.r[i] * (0.8 + 0.35 * hf) * (1 + b * (2.5 + hf * 3));
+        const x = c.x + Math.cos(this.a[i]) * rad, z = c.z + Math.sin(this.a[i]) * rad;
+        const y = c.y + hf * this.height + b * hf * 1.5;
+        const al = Math.min(1, I) * Math.min(1, hf * 6) * (1 - Math.max(0, hf - 0.8) * 5) * (1 - b);
+        if (al < 0.03) continue;
+        const dx = x - eye.x, dy = y - eye.y, dz = z - eye.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        const col = SAND[i % SAND.length];
+        if (i % 13 === 0) {
+          if (d2 > 2.6 && b < 0.05) this.batch.push(x, y, z, PUFF[i % PUFF.length], 0.22 + hf * 0.3, 0.22 + hf * 0.3, this.a[i] + this.t * 0.4, col, al * 0.5);
+        } else if (i % 5 === 0) this.glow.push(x, y, z, i % 2 ? 'glow8' : 'star4', 0.08, 0.08, 0, i % 3 ? 0xffd890 : JADE, al * 0.9);
+        else if (d2 > 0.3) this.batch.push(x, y, z, GRAIN[i % GRAIN.length], 0.06 + (i % 3) * 0.022, 0.06 + (i % 3) * 0.022, 0, col, al);
+      }
+    }
+    this.batch.end(fog);
+    this.glow.end(null);
+  }
+
+  dispose() {
+    for (const bt of [this.batch, this.glow]) {
+      bt.mesh.removeFromParent();
+      bt.mesh.geometry.dispose();
+      (bt.mesh.material as THREE.Material).dispose();
+    }
+  }
+}
+
 // ------------------------------------------------------------------ the director
 
 export class RankUpCine {
@@ -435,7 +520,7 @@ export class RankUpCine {
   private stampQ = new THREE.Quaternion();
   private shock: ShockRing | null = null;
   private sigil: LightSigil | null = null;
-  private vortex: SandVortex | null = null;
+  private vortex: SandSpiral | null = null;
   private rings: GlyphRings | null = null;
   private lightA: THREE.PointLight;
   private lightB: THREE.PointLight;
@@ -581,9 +666,8 @@ export class RankUpCine {
       const at = new THREE.Vector3(this.H.x, g, this.H.z);
       this.shock = new ShockRing(ctx.scene, at, ctx.world.groundAt);
       this.sigil = new LightSigil(ctx.scene, at, Math.atan2(this.dir.x, this.dir.z), ctx.world.groundAt, 0.56);
-      this.vortex = new SandVortex(ctx.scene, 900);
+      this.vortex = new SandSpiral(ctx.scene);
       this.vortex.center.copy(at);
-      this.vortex.height = 2;
       this.rings = new GlyphRings(ctx.scene, [{ radius: 1.55, y: 0.18, count: 16, speed: 0.7 }], 2.2);
       this.rings.group.position.copy(at);
       if (rank !== null) {
@@ -719,6 +803,8 @@ export class RankUpCine {
     // the world's own dust hangs in the air: it creeps at a crawl while time is frozen
     if (paused) {
       const crawl = 0.035 + 0.6 * Math.max(0, 1 - t * 4);
+      // frozen dust and spray the swinging camera would pass through: pixel puffs in the lens read as ink mush
+      if (this.owns) this.clearLens(ctx.particles as any, ctx.camera.position);
       ctx.particles.update(rdt * crawl, fog);
       ctx.fx.update(rdt * crawl);
     }
@@ -730,7 +816,7 @@ export class RankUpCine {
         ctx.sfx('quake_rumble', H, 0.5);
         this.kick(0.25);
       }
-      if (this.shock) this.shock.update(Math.min(1, (t - this.shockT0) / 1.25), this.p);
+      if (this.shock) this.shock.update(Math.min(1, (t - this.shockT0) / 1.25), this.p, ctx.camera.position);
       if (this.once('sigil', BEAT.sigil)) ctx.sfx('sand_rise', H, 0.8);
       if (this.once('eyes', BEAT.eyes)) {
         ctx.sfx('divine_whisper', H, 0.7);
@@ -753,10 +839,10 @@ export class RankUpCine {
       if (this.vortex) {
         const v = this.vortex;
         const inCards = t >= this.tPull;
-        v.intensity = (inCards ? 0.42 : sm((t - 0.3) / 0.8)) * (1 - rel);
-        v.height = inCards ? 2.6 : 2 + 2.4 * sm((t - 0.3) / 1.0);
+        v.intensity = (inCards ? 0.5 : sm((t - 0.3) / 0.8)) * (1 - rel * 0.5);
+        v.height = inCards ? 2.6 : 1.6 + 1.8 * sm((t - 0.3) / 1.0);
         v.burst = rel;
-        v.update(rdt, fog);
+        v.update(rdt, fog, ctx.camera.position);
       }
       if (this.rings) {
         this.rings.appear = sat((t - 0.5) / 0.8);
@@ -802,6 +888,18 @@ export class RankUpCine {
       if (this.releaseT >= 0 && t - this.releaseT > 0.6) this.teardown();
     } else if (this.alive && this.releaseT >= 0 && t - this.releaseT > 0.6) this.teardown();
     this.p.update(rdt, fog);
+  }
+
+  private clearLens(P: { n: number; px: Float32Array; py: Float32Array; pz: Float32Array; s0: Float32Array; s1: Float32Array; life: Float32Array; maxLife: Float32Array; flags: Uint8Array }, eye: THREE.Vector3) {
+    if (!P || !P.px) return;
+    for (let i = 0; i < P.n; i++) {
+      if (P.flags[i] & 5) continue; // additive or screen-space sprites are fine
+      const s = Math.max(P.s0[i], P.s1[i]);
+      if (s < 0.12) continue;
+      const dx = P.px[i] - eye.x, dy = P.py[i] - eye.y, dz = P.pz[i] - eye.z;
+      const r = 1.4 + s * 1.5;
+      if (dx * dx + dy * dy + dz * dz < r * r) P.life[i] = P.maxLife[i];
+    }
   }
 
   private camera(rdt: number) {
@@ -899,7 +997,7 @@ export class RankUpCine {
       this.p.emit({ pos: p, count: 2, spread: 4, up: 1.5, life: [0.3, 0.75], size: [0.09, 0.02], sprite: ['spark', 'star4'], additive: true, color: [GOLD, 0xfff6d0, JADE], drag: 2.5, stretch: 0.04 });
     }
     this.p.emit({ pos: c, count: 1, life: [0.22, 0.22], size: [2.4, 0.4], sprite: ['flash0', 'flash1'], additive: true, color: 0xfff0c0, sizeJitter: 0 });
-    this.p.emit({ pos: c, count: 8, spread: 1.4, life: [0.6, 1.2], size: [0.3, 0.9], sprite: PUFF, color: [0xf0d8a8, 0xe3bd80], alpha: 0.55, drag: 2.2, rot: 6, rotSpeed: 0.8, jitter: hw * 0.8 });
+    this.p.emit({ pos: c, count: 5, spread: 1.0, life: [0.5, 0.9], size: [0.15, 0.4], sprite: PUFF, color: [0xf0d8a8, 0xe3bd80], alpha: 0.45, drag: 2.2, rot: 6, rotSpeed: 0.8, jitter: hw * 0.6 });
   }
 
   private updateStamp(t: number) {

@@ -1022,6 +1022,7 @@ const FX: Partial<Record<GearId, (g: GearCtx) => void>> = {
       pl.invuln = Math.max(pl.invuln, 2.5);
       const p = pl.pos.clone();
       ctx.engine.tweens.after(0, () => {
+        pl.invuln = Math.max(pl.invuln, 2.4); // takeHit resets its own short i-frames after this filter
         ctx.toast("DEAD MAN'S HAND", '#ff5a3a', 'Aces and eights. Not today.', true);
         ctx.events.emit('cutin', "DEAD MAN'S HAND", '#ff5a3a', 'angry');
         ctx.sfx('resurrect', p, 0.9);

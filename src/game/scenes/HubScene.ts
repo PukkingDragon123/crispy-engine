@@ -3,14 +3,19 @@
 // big barn doors thrown open on the left to the sunset street, where a low sun
 // pours dusty god rays across the garage and the floor; a stone fireplace
 // crackling in the back corner; one ragged hole in the roof.
-// Stations Sundown walks up to (E / T / Enter, or click them):
-//   the weapon bench (vise, tools, the gun stripped on an oilcloth)  → gun bench
-//   the wardrobe and the cheval mirror (a live reflection)           → hats & outfits
-//   the garage: the board rack and the board on the sawhorses        → boards
-//   the lectern with the Book of Skills                              → skills & codex
-//   Mama Frog rocking by the fire (she has opinions)                 → a chat
-//   the gramophone on the coffee table                               → music
+// You don't walk it. The hideout is a cinematic carousel of stations: LEFT / RIGHT
+// (A / D, the arrow keys, or the carved arrow signs at the screen's edges) swing
+// the camera in a slow eased arc to the next station while Sundown walks over.
+// Each stop is a close, composed shot (rule of thirds, warm practicals) with the
+// station's name in gilded 3D Alagard letters, a subtitle, and an action
+// (E / Enter / click):
 //   the barn doors                                                   → ride out
+//   the weapon bench (vise, tools, the gun stripped on an oilcloth)  → gun bench
+//   the garage: the board rack and the board on the sawhorses        → boards
+//   the wardrobe and the cheval mirror (a live reflection)           → hats & outfits
+//   the lectern with the Book of Skills                              → skills & codex
+//   the hearth, where Mama Toad knits in her rocking chair            → a chat
+//   the gramophone on the coffee table (squeeze the duck)            → music
 // Lighting: a warm low key sun with crisp cel shadows, volumetric shafts through
 // every opening (with window-mullion shadows), firelight, lamp pools, cool
 // skylight at the shaded windows, and an interior light probe baked from the
@@ -36,27 +41,44 @@ import { CardStudio } from '../ui/CardStudio';
 import { TAROT, Kit } from '../ui/TarotCards';
 import { TECHNIQUES, isUnlocked } from '../player/Techniques';
 import { leg } from '../anim/gait';
-import { legIK, LegPose } from '../anim/playerAnim';
+import { legIK, LegPose, armIK } from '../anim/playerAnim';
+import { FloatText3D } from '../fx/FloatText3D';
+import type { VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { damp, rnd } from '../../engine/math/rand';
 
 interface Shot {
   pos: THREE.Vector3;
   look: THREE.Vector3;
   fov: number;
+  /** compose on thirds: `subject` lands at screen `ndc` (the look is solved for the live aspect) */
+  subject?: THREE.Vector3;
+  ndc?: [number, number];
 }
+type HeroPose = 'door' | 'bench' | 'board' | 'mirror' | 'book' | 'hearth' | 'music';
 interface Station {
   id: string;
   label: string;
-  /** where Sundown stands to use it (x, z) and the way he faces */
+  /** the big 3D title, the short name on the arrow signs, the subtitle, the action */
+  title: string;
+  short: string;
+  sub: string;
+  verb: string;
+  /** where Sundown stands (x, z) and the way he faces */
   stand: THREE.Vector2;
   face: number;
-  /** prompt anchor */
+  /** what he works on / looks at */
   at: THREE.Vector3;
-  /** reach around the stand point */
   r: number;
   objs: THREE.Object3D[];
-  shot?: Shot;
-  pose?: 'bench' | 'mirror' | 'book' | 'board' | 'chat' | 'idle';
+  shot: Shot;
+  pose: HeroPose;
+  /** the walk in from the lane (the stand itself excluded) */
+  via: THREE.Vector2[];
+  /** the title's corner in the frame (ndc) and the side it reads from */
+  slot: [number, number, 'left' | 'right'];
+  /** pose data: the work surface height (m) and how far in front of him it is */
+  surf?: number;
+  reach?: number;
 }
 interface Rect {
   x0: number;
@@ -83,17 +105,109 @@ const SUN_TO = new THREE.Vector3(0.78, -0.43, -0.45).normalize();
 const WALK = { x0: IN.left + 0.25, x1: IN.right - 0.28, z0: IN.back + 0.32, z1: 1.15 };
 const HERO_R = 0.26;
 
+/** the carousel, left to right */
+const ORDER = ['ride', 'bench', 'garage', 'wardrobe', 'book', 'hearth', 'gramophone'];
+/** the open strip of floor Sundown walks along between stations */
+const LANE_Z = 0.25;
+
 const MAMA_LINES = [
-  "Wipe your boots, sugar. I just swept that sand.",
-  "You're all bones, dear. Sit. I'll find you a cookie.",
+  "There's my boy. Come warm your bones by the fire, sugar.",
+  "Sit a spell. The kettle's nearly singing.",
+  "I'm knitting you a scarf. Don't you dare peek.",
+  "You're all bones, dear. I'll find you a cookie.",
   "Pinch ate three of my cookies and blamed the duck.",
-  "Ribbit— I mean: welcome home, handsome.",
+  "Wipe your boots, honey. I just swept that sand.",
+  "Mind the little ones. They nap wherever they flop.",
+  "Pardon me. Frog in my throat. Well. Toad.",
   "That revolver of yours could use a good oiling.",
-  "Mind the babies, they nap wherever they flop.",
   "When the sand's done screaming, the stars come out lovely.",
   "Wear the poncho. It brings out your cheekbones.",
   "Ride careful. Come back hungry.",
 ];
+
+const ease = (u: number) => (u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2);
+const backOut = (u: number) => 1 + 2.70158 * Math.pow(u - 1, 3) + 1.70158 * Math.pow(u - 1, 2);
+const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
+const sstep = (a: number, b: number, v: number) => {
+  const k = clamp01((v - a) / (b - a));
+  return k * k * (3 - 2 * k);
+};
+/** the look point that puts `subject` at screen (nx, ny) from `pos` (thirds composition, live aspect) */
+function thirdsLook(pos: THREE.Vector3, subject: THREE.Vector3, nx: number, ny: number, fov: number, aspect: number, out: THREE.Vector3) {
+  const dx = subject.x - pos.x, dy = subject.y - pos.y, dz = subject.z - pos.z;
+  const tH = Math.tan(THREE.MathUtils.degToRad(fov) / 2);
+  const yaw = Math.atan2(dx, dz) + Math.atan(nx * tH * aspect);
+  const pitch = Math.atan2(dy, Math.hypot(dx, dz)) - Math.atan(ny * tH);
+  const L = Math.hypot(dx, dy, dz);
+  return out.set(pos.x + Math.sin(yaw) * Math.cos(pitch) * L, pos.y + Math.sin(pitch) * L, pos.z + Math.cos(yaw) * Math.cos(pitch) * L);
+}
+const mixHex = (a: number, b: number, t: number) => {
+  const k = clamp01(t);
+  const r = ((a >> 16) & 255) + ((((b >> 16) & 255) - ((a >> 16) & 255)) * k), g = ((a >> 8) & 255) + ((((b >> 8) & 255) - ((a >> 8) & 255)) * k), bl = (a & 255) + (((b & 255) - (a & 255)) * k);
+  return (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(bl);
+};
+/**
+ * Gilded 3D letters: each Alagard glyph's mask (the typography is the only
+ * thing drawn) extruded into voxels: a gold-leaf face shading from bright at the
+ * top to deep at the foot, a raised spine on wide strokes, a bevelled rim, carved
+ * walnut sides and back. One mesh per letter so they can flip in one by one.
+ */
+function voxelTitle(text: string, capH: number, mat: THREE.Material) {
+  const PX = 32;
+  const cv = document.createElement('canvas');
+  const c = cv.getContext('2d', { willReadFrequently: true })!;
+  c.font = `${PX}px Alagard`;
+  const cap = Math.max(8, Math.round(c.measureText('H').actualBoundingBoxAscent || PX * 0.62));
+  const vs = capH / cap;
+  cv.width = PX * 2;
+  cv.height = Math.ceil(PX * 1.6);
+  const base = Math.round(PX * 1.15);
+  const root = new THREE.Group();
+  const letters: THREE.Mesh[] = [];
+  let pen = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    c.font = `${PX}px Alagard`;
+    const adv = c.measureText(text.slice(0, i + 1)).width - c.measureText(text.slice(0, i)).width;
+    if (ch.trim()) {
+      c.clearRect(0, 0, cv.width, cv.height);
+      c.fillStyle = '#fff';
+      c.textBaseline = 'alphabetic';
+      c.fillText(ch, 4, base);
+      const img = c.getImageData(0, 0, cv.width, cv.height).data;
+      const on = (x: number, y: number) => x >= 0 && y >= 0 && x < cv.width && y < cv.height && img[(y * cv.width + x) * 4 + 3] > 120;
+      const m = new VoxelModel('glyph');
+      let x0 = 1e9, x1 = -1e9;
+      for (let y = 0; y < cv.height; y++)
+        for (let x = 0; x < cv.width; x++) {
+          if (!on(x, y)) continue;
+          x0 = Math.min(x0, x);
+          x1 = Math.max(x1, x);
+          const vy = base - 1 - y;
+          const edge = !on(x - 1, y) || !on(x + 1, y) || !on(x, y - 1) || !on(x, y + 1);
+          const inner = !edge && on(x - 2, y) && on(x + 2, y) && on(x, y - 2) && on(x, y + 2);
+          const D = inner ? 5 : edge ? 3 : 4;
+          const k = clamp01((vy + 2) / (cap + 2));
+          const gold = mixHex(0xa8661c, 0xffe28e, k * k * 0.6 + k * 0.4);
+          for (let z = 0; z < D; z++) {
+            const front = z === D - 1;
+            const col = front ? (edge ? mixHex(gold, 0xfff0c0, 0.25) : inner ? mixHex(gold, 0xfff4cc, 0.18) : gold) : z === 0 ? 0x2e1a0c : 0x4e2c14;
+            m.set(x, vy, z, col, front ? VF.METAL | VF.EMISSIVE : VF.EMISSIVE);
+          }
+        }
+      if (x1 >= x0) {
+        const g = buildVoxelGeometry(m, { voxelSize: vs, pivot: [(x0 + x1 + 1) / 2, 0, 1.5] });
+        const mesh = new THREE.Mesh(g, mat);
+        mesh.position.x = (pen - 4 + (x0 + x1 + 1) / 2) * vs;
+        mesh.renderOrder = 4;
+        root.add(mesh);
+        letters.push(mesh);
+      }
+    }
+    pen += adv;
+  }
+  return { root, letters, width: pen * vs, capH };
+}
 
 /** the tarot bar's abilities (the moves — rope, kick, neck slicer — have their own page, from player/Techniques) */
 const SKILL_PAGES: [string, string, string][] = [
@@ -219,10 +333,40 @@ export class HubScene implements GameScene {
   ready = false;
   private particles = new Particles();
   private ray = new THREE.Raycaster();
+  /** the carousel stations, left to right (debug: __hub.stations, __hub.use(st), __hub.step(±1), __hub.go(i)) */
   private stations: Station[] = [];
-  private near: Station | null = null;
+  private idx = 1;
   private hovered: Station | null = null;
+  private hoverArrow = 0;
   private active: Station | null = null;
+  /** the camera's swing between stations (a quadratic arc through `c`, eased) */
+  private mv: { t: number; dur: number; p0: THREE.Vector3; l0: THREE.Vector3; f0: number; c: THREE.Vector3; intro: boolean } | null = null;
+  private intro = true;
+  /** the camera's composed pose before parallax and sway */
+  private baseP = new THREE.Vector3();
+  private baseL = new THREE.Vector3();
+  private par = new THREE.Vector2();
+  /** Sundown's walk: the waypoints still ahead, his pace, how settled into the station pose he is */
+  private route: THREE.Vector2[] = [];
+  private speed = 1.6;
+  private atK = 0;
+  private armL1 = 0.264;
+  private armL2 = 0.321;
+  private qa = new THREE.Quaternion();
+  private qb = new THREE.Quaternion();
+  private qc = new THREE.Quaternion();
+  private eu = new THREE.Euler();
+  private m4 = new THREE.Matrix4();
+  // the on-screen 3D UI: carved arrow signs riding with the camera, gilded titles anchored in the shot
+  private ui = new THREE.Group();
+  private uiK = 0;
+  private arrowScale = 1;
+  private arrows: { dir: -1 | 1; grp: THREE.Group; mesh: THREE.Mesh; mat: VoxelMaterial; hover: number; push: number; label: HTMLDivElement }[] = [];
+  private titleMat: VoxelMaterial | null = null;
+  private titles = new Map<string, ReturnType<typeof voxelTitle>>();
+  private ttl: { st: Station; t: number; out: number; anchor: THREE.Vector3; q: THREE.Quaternion; up: THREE.Vector3; right: THREE.Vector3; set: ReturnType<typeof voxelTitle> } | null = null;
+  private sub: FloatText3D | null = null;
+  private gramTop = new THREE.Vector3();
   private walls: Rect[] = [];
   private hero: RigInstance | null = null;
   private heroSpec: RigSpec | null = null;
@@ -274,7 +418,8 @@ export class HubScene implements GameScene {
   private mug = new THREE.Vector3();
   private chair: RigInstance | null = null;
   private mama: RigInstance | null = null;
-  private babies: { rig: RigInstance; phase: number; blink: number }[] = [];
+  private mamaSpec: RigSpec | null = null;
+  private toadlets: { rig: RigInstance; spec: RigSpec; home: THREE.Vector3; yaw: number; phase: number; blink: number; hop: number; hopT: number; from: THREE.Vector3; to: THREE.Vector3; turn: number; floor: boolean }[] = [];
   private mamaBlink = 2;
   private mamaTalk = 0;
   private mamaLine = 0;
@@ -486,8 +631,15 @@ export class HubScene implements GameScene {
       // the gramophone at the table's end, the rubber duck by the mug
       const gr = put(B(() => HX.gramophoneCraft()), 0.86, -1.52, 0.5, top, 0.52, false);
       this.duck = put(modelEntry('rubber_duck')?.() as SM, 1.86, -1.36, -0.7, top, 0.85, false);
-      station({ id: 'gramophone', label: 'Gramophone — music on / off', stand: new THREE.Vector2(0.75, -0.72), face: Math.PI, at: new THREE.Vector3(0.86, top + 0.62, -1.52), r: 0.55, objs: [gr], pose: 'idle' });
-      station({ id: 'duck', label: 'Rubber Duck', stand: new THREE.Vector2(1.75, -0.72), face: Math.PI, at: new THREE.Vector3(1.86, top + 0.25, -1.36), r: 0.45, objs: [this.duck], pose: 'idle' });
+      const gb = gr ? new THREE.Box3().setFromObject(gr) : null;
+      if (gb) this.gramTop.set((gb.min.x + gb.max.x) / 2, gb.min.y + (gb.max.y - gb.min.y) * 0.3, (gb.min.z + gb.max.z) / 2);
+      else this.gramTop.set(0.86, top + 0.15, -1.52);
+      station({
+        id: 'gramophone', label: 'Gramophone', title: 'THE GRAMOPHONE', short: 'GRAMOPHONE', sub: 'a little night music', verb: 'Music on / off',
+        stand: new THREE.Vector2(0.8, -0.93), face: Math.PI, at: this.gramTop.clone(), r: 0.55, objs: [gr, this.duck], pose: 'music',
+        via: [new THREE.Vector2(0.86, LANE_Z)], slot: [0.92, 0.86, 'right'],
+        shot: { pos: new THREE.Vector3(1.95, 1.3, 0.42), look: new THREE.Vector3(), fov: 42, subject: new THREE.Vector3(0.8, 1.45, -0.93), ndc: [-0.3, 0.1] },
+      });
     }
     void fut;
     put(B(() => WS.plaidChair()), -0.32, -1.55, Math.PI / 2 - 0.25);
@@ -497,37 +649,58 @@ export class HubScene implements GameScene {
       against(B(() => WS.guitar()), 'back', -0.02, 1.2, 0.02, 1, false);
       put(B(() => HX.bottlesCraft(2)), 0.0, IN.back + 0.25, 0.3, topOf(cab), 0.7, false);
     }
-    // Mama Frog in her rocking chair by the fire, knitting basket at her feet, the babies about
+    // Mama Toad in her rocking chair by the fire, knitting; her basket at her feet; the toadlets about
     const chSpec = safe(() => WS.rockingChairRig());
     const CH_AT = new THREE.Vector3(2.62, 0, -1.42), CH_YAW = -0.5;
     this.chair = rig(chSpec, CH_AT.x, 0, CH_AT.z, CH_YAW);
+    const fpFront = fp ? new THREE.Box3().setFromObject(fp).max.z : IN.back + 0.6;
+    const toadMat = makeVoxelMaterial();
     if (this.chair && chSpec) {
       this.walls.push({ x0: CH_AT.x - 0.62, z0: CH_AT.z - 0.52, x1: CH_AT.x + 0.62, z1: CH_AT.z + 0.5 });
-      const ms = modelEntry('rain_frog_mama')?.() as RigSpec | undefined;
+      const ms = safe(() => modelEntry('mama_toad')?.() as RigSpec | undefined);
       if (ms?.parts) {
-        this.mama = new RigInstance(buildRigGeo(ms, ms.name + ':hub'), { material: makeVoxelMaterial(), castShadow: true });
+        this.mamaSpec = ms;
+        this.mama = new RigInstance(buildRigGeo(ms, ms.name + ':hub'), { material: toadMat, castShadow: true });
+        // her spectacle lenses are real glass
+        const lens = this.mama.meshes[(ms.meta?.lensPart as string) ?? 'lenses'];
+        if (lens) {
+          const glass = makeVoxelMaterial({ transparent: true, opacity: 0.28 });
+          glass.depthWrite = false;
+          lens.material = glass;
+          lens.castShadow = false;
+          lens.renderOrder = 3;
+        }
         const seat = chSpec.meta!.seat as number[], piv = chSpec.meta!.pivot as number[];
-        this.mama.root.position.set(seat[0] - piv[0], seat[1] - piv[1] - 0.03, seat[2] - piv[2] + 0.02);
-        this.mama.root.scale.setScalar(0.86);
+        this.mama.root.position.set(seat[0] - piv[0], seat[1] - piv[1] - 0.015, seat[2] - piv[2] + 0.05);
         this.chair.nodes['chair']?.add(this.mama.root);
-        this.mama.setExpression?.('happy');
       }
     }
     put(B(() => WS.knittingBasket()), CH_AT.x + 0.62, CH_AT.z + 0.45, 0.6, 0, 1, false);
     lamp(0xffa860, 1.5, 2.2, 1.6, new THREE.Vector3(CH_AT.x - 0.55, 1.1, CH_AT.z + 0.75), 0.06);
-    const babyAt: [number, number, number, number, number][] = [[3.95, 0.07, -2.0, -0.4, 2], [2.05, 0.46, -2.95, 0.5, 4], [-3.1, 0.0, 1.0, 2.6, 1]];
-    for (const [bx, by, bz, ry, v] of babyAt) {
-      const bs = modelEntry('rain_frog_baby_v' + v)?.() as RigSpec | undefined;
-      if (!bs?.parts) continue;
-      const bri = new RigInstance(buildRigGeo(bs, bs.name + ':hub'), { material: sharedVoxelMaterial, castShadow: true });
-      bri.root.position.set(bx, by, bz);
-      bri.root.rotation.y = ry;
-      s.add(bri.root);
-      this.babies.push({ rig: bri, phase: bx * 3.1, blink: 1 + Math.random() * 3 });
-    }
+    // the toadlets: one warming itself at the hearth, one on the rug, one in the corner by the fire, one up on her chair arm
+    const toadlet = (key: string, x: number, y: number, z: number, ry: number, floor: boolean, parent: THREE.Object3D = s, sc = 1) => {
+      const ts = safe(() => modelEntry(key)?.() as RigSpec | undefined);
+      if (!ts?.parts) return;
+      const tr = new RigInstance(buildRigGeo(ts, ts.name + ':hub'), { material: toadMat, castShadow: true });
+      tr.root.position.set(x, y, z);
+      tr.root.rotation.y = ry;
+      tr.root.scale.setScalar(sc);
+      parent.add(tr.root);
+      this.toadlets.push({ rig: tr, spec: ts, home: new THREE.Vector3(x, y, z), yaw: ry, phase: x * 3.1 + z, blink: 1 + Math.random() * 3, hop: 4 + Math.random() * 6, hopT: -1, from: new THREE.Vector3(x, y, z), to: new THREE.Vector3(x, y, z), turn: ry, floor });
+    };
+    toadlet('toadlet', this.firePos.x - 0.08, 0, fpFront + 0.22, Math.PI + 0.35, true);
+    toadlet('toadlet_v2', 1.62, 0.012, -0.78, -1.75, true);
+    toadlet('toadlet_v1', this.firePos.x + 0.74, 0, fpFront + 0.24, Math.PI - 0.6, true, s, 0.88);
+    if (this.chair?.nodes['chair']) toadlet('toadlet_v1', -0.452, 0.8 - ((chSpec?.meta?.pivot as number[])?.[1] ?? 1.21), 0.02, 0.1, false, this.chair.nodes['chair']);
     if (this.chair) {
-      this.mamaHead.set(CH_AT.x, 1.35, CH_AT.z);
-      station({ id: 'mama', label: 'Mama Frog', stand: new THREE.Vector2(CH_AT.x - 0.75, CH_AT.z + 1.05), face: Math.atan2(0.75, -1.05), at: new THREE.Vector3(CH_AT.x, 1.62, CH_AT.z), r: 0.8, objs: [this.chair.root], pose: 'chat', shot: { pos: new THREE.Vector3(CH_AT.x - 1.45, 1.42, CH_AT.z + 2.0), look: new THREE.Vector3(CH_AT.x + 0.1, 0.95, CH_AT.z), fov: 42 } });
+      const stand = new THREE.Vector2(this.firePos.x + 0.3, fpFront + 0.7);
+      this.mamaHead.set(CH_AT.x - 0.08, 1.0, CH_AT.z + 0.14);
+      station({
+        id: 'hearth', label: 'Mama Toad', title: 'THE HEARTH', short: 'HEARTH', sub: 'Mama Toad keeps the kettle on', verb: 'Chat with Mama',
+        stand, face: Math.atan2(this.firePos.x - stand.x, this.firePos.z - stand.y), at: this.firePos.clone(), r: 0.8, objs: [this.chair.root], pose: 'hearth',
+        via: [new THREE.Vector2(stand.x - 0.08, LANE_Z)], slot: [-0.92, 0.86, 'left'],
+        shot: { pos: new THREE.Vector3(1.32, 1.28, 0.42), look: new THREE.Vector3(), fov: 42, subject: new THREE.Vector3(CH_AT.x - 0.05, 0.98, CH_AT.z + 0.05), ndc: [-0.2, -0.06] },
+      });
     }
     // the wardrobe and the cheval mirror (the dressing corner by the right window)
     const arm = against(B(() => HX.armoire(1)), 'right', -1.42, 0, 0.06);
@@ -544,15 +717,9 @@ export class HubScene implements GameScene {
     let mirrorAt = new THREE.Vector3(MIR.x, 1.05, MIR.z);
     if (mir && mirSm) mirrorAt = local(mir, mirSm.meta.glass);
     station({
-      id: 'wardrobe',
-      label: 'Wardrobe & Mirror — hats and outfits',
-      stand: mirStand(mirrorAt),
-      face: Math.atan2(-mn.x, -mn.z),
-      at: new THREE.Vector3(MIR.x - 0.1, 1.95, MIR.z),
-      r: 0.8,
-      objs: [arm, mir],
-      pose: 'mirror',
-      shot: mirShot(mirrorAt),
+      id: 'wardrobe', label: 'Wardrobe & Mirror', title: 'THE MIRROR', short: 'MIRROR', sub: 'hats, jackets and swagger', verb: 'Try things on',
+      stand: mirStand(mirrorAt), face: Math.atan2(-mn.x, -mn.z), at: mirrorAt.clone(), r: 0.8, objs: [arm, mir], pose: 'mirror',
+      via: [new THREE.Vector2(3.0, LANE_Z)], slot: [-0.92, 0.86, 'left'], shot: mirShot(mirrorAt),
     });
     put(B(() => HX.steamerTrunk(1)), 4.25, 2.55, -Math.PI / 2 - 0.2, 0, 1, false);
     put(B(() => HX.potCactus(2)), 4.35, 1.05, 0.4, 0, 1, false);
@@ -577,7 +744,12 @@ export class HubScene implements GameScene {
       }
       lamp(0xffb860, 1.5, 2.4, 1.8, local(lec, lecSm.meta.flame).add(new THREE.Vector3(0, 0.03, 0)), 0.1);
     }
-    station({ id: 'book', label: 'The Book of Skills', stand: new THREE.Vector2(LEC.x - 0.46, LEC.z + 0.5), face: Math.PI - 0.62, at: bookAt.clone().add(new THREE.Vector3(0, 0.45, 0)), r: 0.75, objs: [lec], pose: 'book', shot: { pos: new THREE.Vector3(LEC.x + 0.85, 1.9, LEC.z + 1.3), look: bookAt.clone().add(new THREE.Vector3(-0.1, -0.05, 0)), fov: 42 } });
+    station({
+      id: 'book', label: 'The Book of Skills', title: 'THE BOOK OF SKILLS', short: 'BOOK', sub: 'moves, cards and the codex', verb: 'Read',
+      stand: new THREE.Vector2(LEC.x - 0.46, LEC.z + 0.5), face: Math.PI - 0.62, at: bookAt.clone(), r: 0.75, objs: [lec], pose: 'book',
+      via: [new THREE.Vector2(LEC.x - 0.34, LANE_Z)], slot: [0.92, 0.86, 'right'], surf: bookAt.y,
+      shot: { pos: new THREE.Vector3(-1.05, 1.55, 0.62), look: new THREE.Vector3(), fov: 42, subject: new THREE.Vector3(LEC.x - 0.46, 1.42, LEC.z + 0.5), ndc: [-0.3, 0.12] },
+    });
 
     // ------------------------------------------------ the weapon bench (back wall, left)
     const wbSm = safe(() => WS.weaponBench());
@@ -593,7 +765,13 @@ export class HubScene implements GameScene {
       s.add(spot, spot.target);
       this.flick.push({ l: spot, base: spot.intensity, k: 0.015 });
       put(B(() => HX.barStool(2, 'ok')), -1.0, -2.08, 0.4);
-      station({ id: 'bench', label: 'Weapon Bench — tune your revolver', stand: new THREE.Vector2(-1.78, -1.84), face: Math.PI, at: new THREE.Vector3(-1.32, 1.5, IN.back + 0.5), r: 0.75, objs: [wb], pose: 'bench', shot: { pos: new THREE.Vector3(-0.22, 1.66, -1.2), look: new THREE.Vector3(-1.42, 1.0, IN.back + 0.3), fov: 46 } });
+      const bst = new THREE.Vector2(gp.x - 0.12, gp.z + 0.6);
+      station({
+        id: 'bench', label: 'Weapon Bench', title: 'THE WORKBENCH', short: 'WORKBENCH', sub: 'tune your iron', verb: 'Tune the gun',
+        stand: bst, face: Math.PI, at: gp.clone(), r: 0.75, objs: [wb], pose: 'bench',
+        via: [new THREE.Vector2(-1.15, LANE_Z), new THREE.Vector2(bst.x + 0.4, bst.y + 0.75)], slot: [0.92, 0.86, 'right'], surf: wbSm.meta.top, reach: 0.4,
+        shot: { pos: new THREE.Vector3(-0.42, 1.55, -0.5), look: new THREE.Vector3(), fov: 44, subject: new THREE.Vector3(bst.x, 1.45, bst.y), ndc: [-0.3, 0.1] },
+      });
     }
 
     // ------------------------------------------------ the garage (left)
@@ -612,7 +790,12 @@ export class HubScene implements GameScene {
     const wx = safe(() => WS.waxBench());
     const wxg = against(wx, 'left', -2.25, 0, 0.05);
     if (wx && wxg) lamp(0x9ac0ff, 0.6, 1.2, 2, local(wxg, wx.meta.burner).add(new THREE.Vector3(0, 0.05, 0)), 0.25);
-    station({ id: 'garage', label: 'Garage — pick your board', stand: new THREE.Vector2(-3.42, -0.6), face: Math.PI, at: new THREE.Vector3(-3.45, 1.5, -1.6), r: 0.8, objs: [rack, this.boardBench, wxg], pose: 'board', shot: { pos: new THREE.Vector3(-2.18, 1.66, 0.62), look: new THREE.Vector3(-3.72, 0.92, -1.9), fov: 46 } });
+    station({
+      id: 'garage', label: 'Garage', title: 'THE GARAGE', short: 'GARAGE', sub: 'wax a board, pick your ride', verb: 'Pick a board',
+      stand: new THREE.Vector2(-3.43, -0.8), face: Math.PI, at: this.boardBench.position.clone(), r: 0.8, objs: [rack, this.boardBench, wxg], pose: 'board',
+      via: [new THREE.Vector2(-3.3, LANE_Z)], slot: [0.92, 0.86, 'right'], surf: this.boardBench.position.y + 0.035, reach: 0.5,
+      shot: { pos: new THREE.Vector3(-2.2, 1.48, 0.42), look: new THREE.Vector3(), fov: 44, subject: new THREE.Vector3(-3.43, 1.4, -0.8), ndc: [-0.3, 0.1] },
+    });
     this.walls.push({ x0: -4.1, z0: -1.55, x1: -2.75, z1: -1.1 });
     put(B(() => HX.woodPile(1)), -4.25, 2.3, Math.PI / 2, 0, 0.9);
     put(B(() => HX.saddleRail(1)), -3.6, 2.85, 0.05);
@@ -626,7 +809,12 @@ export class HubScene implements GameScene {
       const ri = rig(safe(() => WS.barnDoorRig(mirror)), hingeX, 0, hz, mirror ? -Math.PI / 2 + 1.72 : -Math.PI / 2 - 1.72, mirror ? 'r' : 'l');
       if (ri) this.barn.push(ri);
     }
-    station({ id: 'ride', label: 'Barn Doors — RIDE OUT', stand: new THREE.Vector2(-4.42, 0.05), face: -Math.PI / 2, at: new THREE.Vector3(-4.75, 2.1, 0), r: 0.75, objs: this.barn.map((b) => b.root), pose: 'idle' });
+    station({
+      id: 'ride', label: 'Barn Doors', title: 'RIDE OUT', short: 'RIDE OUT', sub: 'the dunes are calling', verb: 'Ride out',
+      stand: new THREE.Vector2(-4.38, 0.1), face: -Math.PI / 2, at: new THREE.Vector3(-9, 1.5, 0.1), r: 0.75, objs: this.barn.map((b) => b.root), pose: 'door',
+      via: [new THREE.Vector2(-3.9, LANE_Z)], slot: [-0.92, 0.86, 'left'],
+      shot: { pos: new THREE.Vector3(-2.5, 1.42, 1.28), look: new THREE.Vector3(), fov: 44, subject: new THREE.Vector3(-4.38, 1.42, 0.1), ndc: [0.3, 0.1] },
+    });
 
     // ------------------------------------------------ hanging things that swing
     const lanternAt = (x: number, top: number, z: number, chain: number, seed: number, light = true) => {
@@ -759,14 +947,19 @@ export class HubScene implements GameScene {
       glass.position.copy(mirrorAt);
       glass.rotation.set(mirSm.meta.tilt, MIR_YAW, 0, 'YXZ');
       // the reflection pass reuses this frame's shadow maps instead of re-rendering them
+      // (and the on-screen UI never shows up in the glass)
       const reflect = glass.onBeforeRender;
+      const ui = () => [this.ui, this.sub?.mesh, this.ttl?.set.root].filter((o): o is THREE.Object3D => !!o);
       glass.onBeforeRender = function (this: Reflector, r: THREE.WebGLRenderer, ...rest: unknown[]) {
         const au = r.shadowMap.autoUpdate;
         r.shadowMap.autoUpdate = false;
+        const hide = ui(), vis = hide.map((o) => o.visible);
+        for (const o of hide) o.visible = false;
         try {
           (reflect as (...a: unknown[]) => void).call(this, r, ...rest);
         } finally {
           r.shadowMap.autoUpdate = au;
+          hide.forEach((o, i) => (o.visible = vis[i]));
         }
       } as typeof glass.onBeforeRender;
       s.add(glass);
@@ -785,14 +978,19 @@ export class HubScene implements GameScene {
     u.uVignette.value = 0.4;
     u.uSaturation.value = 1.1;
 
-    // ------------------------------------------------ camera + UI
+    // ------------------------------------------------ the on-screen UI, the camera, the walk in
+    this.stations.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
+    this.buildUI();
     this.camera.aspect = eng.width / eng.height;
-    this.camera.updateProjectionMatrix();
-    this.camPos.set(-10.2, 1.7, 2.4);
-    this.camLook.set(-4.6, 1.2, -0.3);
-    this.camera.position.copy(this.camPos);
     this.camera.fov = 48;
-    this.walkTo = { x: -3.3, z: 0.25, face: Math.PI / 2 + 0.35 };
+    this.camera.updateProjectionMatrix();
+    this.baseP.set(-10.2, 1.7, 2.4);
+    this.baseL.set(-5.7, 1.15, -0.05);
+    this.camPos.copy(this.baseP);
+    this.camLook.copy(this.baseL);
+    this.camera.position.copy(this.baseP);
+    this.camera.lookAt(this.baseL);
+    this.go(Math.max(0, this.stations.findIndex((st) => st.id === 'bench')), true);
     (window as any).__music?.setMood('hub');
     this.wind = eng.audio.loop('wind_loop', 0.16);
     eng.input.setWantLock(false);
@@ -800,15 +998,17 @@ export class HubScene implements GameScene {
     this.bank.style.cssText = "position:absolute;left:24px;top:20px;z-index:7;pointer-events:none;font-family:'Alagard';font-size:22px;color:#ffd36b;text-shadow:0 3px 0 #2a1408";
     this.title.style.cssText = "position:absolute;right:28px;top:22px;z-index:7;pointer-events:none;font-family:'Alagard';font-size:30px;color:#fff3d6;text-align:right;text-shadow:0 3px 0 #2a1408,0 0 14px #000;opacity:0;transition:opacity 1.2s";
     this.title.innerHTML = 'THE HIDEOUT<div style="font-size:15px;opacity:.8">home, at the edge of the Last Chance</div>';
-    this.prompt.style.cssText = "position:absolute;z-index:7;pointer-events:none;display:none;transform:translate(-50%,-100%);font-family:'Alagard';font-size:18px;color:#fff3d6;text-shadow:0 2px 0 #2a1408,0 0 8px #000;white-space:nowrap";
-    this.hint.style.cssText = "position:absolute;left:50%;bottom:22px;transform:translateX(-50%);z-index:7;pointer-events:none;font-family:'Alagard';font-size:16px;color:#fff3d6;opacity:0;transition:opacity 1.5s;text-shadow:0 2px 0 #2a1408,0 0 8px #000;white-space:nowrap";
-    this.hint.textContent = this.touch ? 'Tap anything to walk over and use it' : 'WASD walk · Shift run · E use · click anything · Esc menu';
+    // the action: a big prompt under the shot (E / Enter, or click / tap it)
+    this.prompt.style.cssText = "position:absolute;left:50%;bottom:64px;transform:translateX(-50%);z-index:8;pointer-events:auto;cursor:pointer;display:block;opacity:0;transition:opacity .35s;font-family:'Alagard';font-size:24px;color:#fff3d6;text-shadow:0 2px 0 #2a1408,0 0 10px #000;white-space:nowrap";
+    this.prompt.onmousedown = (e) => e.stopPropagation();
+    this.prompt.onclick = () => this.act();
+    this.hint.style.cssText = "position:absolute;left:50%;bottom:24px;transform:translateX(-50%);z-index:7;pointer-events:none;font-family:'Alagard';font-size:15px;color:#fff3d6;opacity:0;transition:opacity 1.5s;text-shadow:0 2px 0 #2a1408,0 0 8px #000;white-space:nowrap";
+    this.hint.textContent = this.touch ? 'Tap the arrows to look around · tap the prompt to use it' : 'A / D or the arrows: look around   ·   E: use   ·   Esc: menu';
     this.bubble.style.cssText = "position:absolute;z-index:7;pointer-events:none;display:none;transform:translate(-50%,-100%);max-width:260px;padding:8px 12px;background:#f4e6c4;border:3px solid #5a3418;border-radius:14px;box-shadow:0 4px 0 #2a1408;font-family:'Alagard';font-size:16px;color:#2a1a10;text-align:center";
     eng.overlay.append(this.tip, this.bank, this.title, this.prompt, this.hint, this.bubble);
-    setTimeout(() => (this.title.style.opacity = '1'), 1200);
-    setTimeout(() => (this.title.style.opacity = '0'), 6500);
-    setTimeout(() => (this.hint.style.opacity = '0.9'), 5200);
-    setTimeout(() => (this.hint.style.opacity = '0'), 16000);
+    setTimeout(() => (this.title.style.opacity = '1'), 900);
+    setTimeout(() => (this.title.style.opacity = '0'), 5200);
+    setTimeout(() => (this.hint.style.opacity = '0.85'), 4600);
     this.updateBank();
     this.ready = true;
   }
@@ -844,10 +1044,10 @@ export class HubScene implements GameScene {
         return ri;
       };
       if (who === 'mama') {
-        add('rain_frog_mama', 0, 0, 0);
-        add('rain_frog_baby_v1', -0.42, 0.32, 0.4);
-        add('rain_frog_baby_v3', 0.4, 0.3, -0.3);
-        add('rain_frog_baby_v4', 0.05, 0.48, 0.1);
+        add('mama_toad', 0, 0, 0);
+        add('toadlet_v1', -0.36, 0.3, 0.4);
+        add('toadlet_v2', 0.36, 0.28, -0.3);
+        add('toadlet', 0.04, 0.42, 0.1);
       } else {
         const d = loadSave();
         const hs = safe(() => (CH as any).skeletonCowboyRig?.({ hat: d.look.hat, outfit: d.look.outfit }) as RigSpec);
@@ -920,6 +1120,8 @@ export class HubScene implements GameScene {
     this.heroHolder.add(this.hero.root);
     if (!this.heroHolder.parent) this.scene.add(this.heroHolder);
     this.hero.setExpression('smug');
+    this.armL1 = this.hero.nodes['fore_r']?.position.length() || 0.264;
+    this.armL2 = this.hero.geo.sockets['hand_r']?.offset.length() || 0.321;
     CH.attachBoardOnBack(this.hero, CH.sandboardModel(d.look.board as CH.BoardId), { material: this.hero.material });
     // Pinch asleep on his shoulder
     const ps = modelEntry('pinch')?.() as RigSpec | undefined;
