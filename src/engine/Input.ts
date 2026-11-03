@@ -52,6 +52,9 @@ export class Input {
   bindings: Record<Action, string[]> = JSON.parse(JSON.stringify(DEFAULT_BINDINGS));
   mouseDX = 0;
   mouseDY = 0;
+  /** last time the mouse actually turned the view (ms); the camera follows the board when it rests */
+  mouseMovedAt = 0;
+  private edgeAt = 0;
   wheel = 0;
   mouseX = 0; // pixels
   mouseY = 0;
@@ -106,6 +109,7 @@ export class Input {
       if (this.locked || (this.lockFailed && this.wantLock)) {
         this.mouseDX += e.movementX;
         this.mouseDY += e.movementY;
+        if (Math.abs(e.movementX) + Math.abs(e.movementY) > 1) this.mouseMovedAt = performance.now();
       }
       this.mouseX = e.clientX;
       this.mouseY = e.clientY;
@@ -251,6 +255,18 @@ export class Input {
     return (this.held(pos) ? 1 : 0) - (this.held(neg) ? 1 : 0);
   }
   consumeMouse() {
+    // no real pointer lock (some embeds refuse it): the cursor stops at the window edge, so resting
+    // it in an edge band keeps turning the view, faster the deeper it sits
+    const now = performance.now();
+    const fdt = Math.min(0.1, Math.max(0, (now - (this.edgeAt || now)) / 1000));
+    this.edgeAt = now;
+    if (this.lockFailed && this.wantLock && !this.touchMode && this.enabled) {
+      const ax = Math.abs(this.ndcX);
+      if (ax > 0.86 && ax <= 1) {
+        this.mouseDX += Math.sign(this.ndcX) * ((ax - 0.86) / 0.14) * 900 * fdt;
+        this.mouseMovedAt = now;
+      }
+    }
     const dx = this.mouseDX * this.sensitivity;
     const dy = this.mouseDY * this.sensitivity * (this.invertY ? -1 : 1);
     this.mouseDX = 0;

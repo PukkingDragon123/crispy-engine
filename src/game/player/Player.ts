@@ -410,6 +410,14 @@ export class Player {
     const fzDir = Math.max(0, fz);
     let dx = cf.x * fzDir + -cf.z * fx;
     let dz = cf.z * fzDir + cf.x * fx;
+    if (st.active && Math.abs(st.x) > 0.06) {
+      // the thumb steers the board itself (left / right of where it points now), so holding it
+      // over keeps carving round in a circle instead of stalling side-on to the camera
+      const h = this.board.heading - st.x * 1.15;
+      const m = Math.max(Math.abs(st.x), fzDir, 0.35);
+      dx = Math.sin(h) * m;
+      dz = Math.cos(h) * m;
+    }
     const dl = Math.hypot(dx, dz);
     if (dl > 1) {
       dx /= dl;
@@ -486,6 +494,7 @@ export class Player {
     this.updateAim();
     this.updateAssist(dt, this.aiming && !wasAiming);
     if (inp.touchMode) this.touchAssist(dt);
+    else this.followCarve(dt, fx);
     if (this.alive) {
       this.weapons.preUpdate(dt);
       // a dig (treasure hunt) puts the gun away: no shooting with a shovel in hand
@@ -624,13 +633,25 @@ export class Player {
     if (on && !hold && this.fireCd <= 0.02 && !inp.held('fire')) inp.touchTap('fire');
     const b = this.board;
     const idle = performance.now() - inp.touchAimAt;
-    if (this.alive && idle > 650 && !this.aiming && !this.stickE && b.speed > 2.2 && !b.wall.on) {
+    if (this.alive && idle > 650 && !this.aiming && !this.stickE && (b.speed > 0.6 || Math.abs(this.input.stick.x) > 0.06) && !b.wall.on) {
       const want = b.drifting || !b.grounded ? Math.atan2(b.vel.x, b.vel.z) : b.heading;
       const k = 1 - Math.exp(-dt * (b.grounded ? 1.7 : 0.7) * clamp((idle - 650) / 700, 0, 1));
       this.cam.nudge(wrapAngle(want - this.cam.yaw) * k, 0);
     }
   }
   private autoHold = false;
+
+  /** desktop: when the mouse rests, the camera swings round behind a carving board, so A / D alone
+   *  can turn you all the way round (steering is camera-relative, so a still camera would stall
+   *  the carve side-on) */
+  private followCarve(dt: number, fx: number) {
+    const b = this.board;
+    const idle = performance.now() - this.input.mouseMovedAt;
+    if (!this.alive || this.aiming || fx === 0 || idle < 350 || b.wall.on || this.cam.cine) return;
+    const want = b.drifting || !b.grounded ? Math.atan2(b.vel.x, b.vel.z) : b.heading;
+    const k = 1 - Math.exp(-dt * 2.4 * clamp((idle - 350) / 300, 0, 1));
+    this.cam.nudge(wrapAngle(want - this.cam.yaw) * k, 0);
+  }
 
   /** touch auto-fire: a body inside the bullet-magnetism cone, in range and in clear sight */
   private autoTarget() {
