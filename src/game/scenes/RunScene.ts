@@ -57,6 +57,7 @@ import { TravelerEscort } from '../run/TravelerEscort';
 import { WagonRepair } from '../run/WagonRepair';
 import { NeckSlicer } from '../player/NeckSlicer';
 import { ZoneCine } from './ZoneCine';
+import { Tutorial } from '../run/Tutorial';
 import { unlock, technique } from '../player/Techniques';
 import { KhonsuAvatar } from '../bosses/Khonsu';
 import { ULT_INFO } from '../player/Ultimate';
@@ -167,6 +168,7 @@ export class RunScene implements GameScene {
   slicer!: NeckSlicer;
   private pickerShown = false;
   private zoneCine: ZoneCine | null = null;
+  tutorial: Tutorial | null = null;
   private waveIntroT = 0;
   private gameOver = false;
   ready = false;
@@ -267,8 +269,6 @@ export class RunScene implements GameScene {
     this.qte = new Qte(e.overlay, e.input, e.audio);
     this.skills = new Skills(this.ctx, this.player, e.input);
     this.items = new Inventory(this.ctx, this.player);
-    this.items.add('bandage', 2);
-    this.items.add('dynamite', 1);
     this.ult = new Ultimate(this.ctx, this.player, this.qte, this.camRig);
     void ULT_INFO;
     this.upgrades = new UpgradeManager(this.player.stats);
@@ -349,9 +349,11 @@ export class RunScene implements GameScene {
     if (this.opts.intro) {
       // the HUD stays hidden for the whole cinematic
       this.hud.visible = false;
-      void playIntro({ engine: e, cam: this.camRig, player: this.player, fx: this.fx, particles: this.particles, world: this.world, scene: this.scene, cutIn: (t, c, x) => this.hud3d.cutIn(t, c, x) }).then(() => {
+      void playIntro({ engine: e, cam: this.camRig, player: this.player, fx: this.fx, particles: this.particles, world: this.world, scene: this.scene, cutIn: (t, c, x) => this.hud3d.cutIn(t, c, x) }).then((r) => {
         this.hud.visible = true;
-        this.director.start(this.opts.startWave ?? 1);
+        // Serket stays to teach the ropes (skipping the intro skips the lesson)
+        if (r.skipped) this.director.start(this.opts.startWave ?? 1);
+        else this.tutorial = new Tutorial({ ctx: this.ctx, player: this.player, cam: this.camRig });
       });
     } else this.director.start(this.opts.startWave ?? 1);
   }
@@ -374,6 +376,7 @@ export class RunScene implements GameScene {
     this.wagon?.dispose();
     this.slicer?.cancel();
     this.zoneCine?.dispose();
+    this.tutorial?.dispose();
     this.engine.paused = false;
     this.engine.post.u.uDesat.value = 0;
     this.qte.dispose();
@@ -913,6 +916,14 @@ export class RunScene implements GameScene {
     this.player.update(dt);
     if (!e.paused) this.slicer.post(rdt);
     this.skills.update(dt);
+    if (this.tutorial) {
+      this.tutorial.update(dt);
+      if (this.tutorial.done) {
+        this.tutorial.dispose();
+        this.tutorial = null;
+        this.director.start(this.opts.startWave ?? 1);
+      }
+    }
     this.items.update(dt, e.input);
     this.upFx.update(dt);
     this.garments.update(this.world.sa.wind.x * 3, this.world.sa.wind.z * 3, this.player.board.vel);

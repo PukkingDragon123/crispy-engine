@@ -19,6 +19,7 @@ export const SKILL_ART: [number, number] = [240, 200];
 const ASPECT = SKILL_ART[0] / SKILL_ART[1];
 
 const FAMILY: Record<string, string> = {
+  learnScorpionToss: 'brood', learnLocustSwarm: 'swarm', learnDungBomb: 'dung',
   venomRounds: 'venom', venomTank: 'venom', serketsKiss: 'venom',
   quickdraw: 'gun', hollowPoints: 'gun', grit: 'gun', steadyHand: 'gun', sixGunStorm: 'gunstorm',
   extraChamber: 'rounds', speedLoader: 'rounds', bandolier: 'rounds',
