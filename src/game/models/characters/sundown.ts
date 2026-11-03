@@ -1371,6 +1371,128 @@ function buildHat(id: HatId, o: OutfitId) {
 }
 const HAT_TOP: Record<HatId, number> = { stetson: 67.3, duck: 73.3, sombrero: 72.8, nemes: 64.6, tophat: 75.5, bandit: 66.2, wig: FROG_WIG_TOP };
 
+// ================================================================== OUTLAW MASK (cloth tied over the lower face)
+/** the cloth wraps the jaw like a loose cylinder: rows [y, half width, half depth, centre z] (head frame) */
+const MASK_ENV: Env = [
+  [43.6, 5.0, 3.9, 3.3],
+  [45.0, 6.0, 5.05, 2.05],
+  [46.6, 6.3, 5.73, 1.12],
+  [48.0, 6.15, 6.8, -0.25],
+  [49.4, 6.1, 7.03, -0.53],
+  [51.2, 6.2, 7.03, -0.68],
+];
+const MASK_T = 0.8;
+/** top hem: just under the nose cavity at the front, rising over the cheeks to the knot at the back */
+const maskTop = (c: number) => 50.9 - 1.55 * Math.pow((c + 1) / 2, 1.6);
+/** bottom edge: under the chin at the front (the drape carries on below), a narrow band at the back */
+const maskBot = (c: number) => 48.6 - 4.6 * Math.pow((c + 1) / 2, 0.7);
+const MASK_LOOK: Record<OutfitId, { r: Ramp; print: number; dim: number }> = {
+  punk: { r: ramp(0x7c2622, 0x5c1a17, 0x9c3c33, 0x380f0c), print: 0xc08a76, dim: 0x8e4a3e }, // oxblood, faded rose paisley
+  bare: { r: TOON.red, print: 0xd8b8a0, dim: TOON.red.hi },
+  duster: { r: TOON.red, print: 0xd8b8a0, dim: TOON.red.hi },
+  vest: { r: TOON.red, print: 0xd8b8a0, dim: TOON.red.hi },
+  poncho: { r: TOON.turquoise, print: 0xe6dcc4, dim: TOON.turquoise.hi },
+  sheriff: { r: TOON.black, print: 0x8a8580, dim: 0x58524e },
+  pharaoh: { r: TOON.lapis, print: TOON.gold.base, dim: TOON.lapis.hi },
+};
+
+/** an outlaw's cloth pulled up over the jaw and teeth, knotted behind the skull (child of `head`; the jaw moves inside it) */
+function outlawMask(o: OutfitId) {
+  const { r: R, print, dim } = MASK_LOOK[o] ?? MASK_LOOK.punk;
+  const m = sc('mask');
+  const e = MASK_ENV;
+  const cOf = (x: number, y: number, z: number) => -Math.cos(thetaOf(e, x, y, z)); // 1 front, -1 back
+  // faded paisley: teardrop dots on a staggered lattice (deliberate, not noise)
+  const printAt = (x: number, y: number, z: number) => {
+    const i = Math.floor(x * S), j = Math.floor(y * S), l = Math.floor(z * S);
+    const h = i + l + (Math.floor(j / 4) & 1) * 3;
+    const jm = ((j % 4) + 4) % 4, hm = ((h % 6) + 6) % 6;
+    if (jm === 0 && hm === 0) return print;
+    if (jm === 1 && hm === 1) return dim;
+    if (jm === 2 && hm === 3) return dim;
+    return null;
+  };
+  // the band wrapping jaw, cheeks and the back of the skull
+  m.region([-7.5, 43.4, -9], [7.5, 51.6, 8.5], (x, y, z) => {
+    const rr = rhoOf(e, x, y, z);
+    if (rr < 1 || rr > 1 + MASK_T / havg(e, y)) return false;
+    const c = cOf(x, y, z);
+    return y <= maskTop(c) && y >= maskBot(c);
+  }, (x, y, z) => {
+    const c = cOf(x, y, z), t = maskTop(c);
+    if (t - y < 0.5) return R.hi; // rolled top hem
+    const th = Math.abs(thetaOf(e, x, y, z));
+    // tension creases running from the chin up toward the knot
+    if (Math.abs(c) < 0.85 && ((y - 44.2 + th * 1.35) / 1.55) % 1 < 0.17) return R.shade;
+    return printAt(x, y, z) ?? R.base;
+  });
+  // the rolled hem stands proud just under the nose
+  m.region([-7, 48.6, -9], [7, 51.4, 8.5], (x, y, z) => {
+    const rr = rhoOf(e, x, y, z);
+    const c = cOf(x, y, z), t = maskTop(c);
+    return rr >= 1 + MASK_T / havg(e, y) && rr <= 1 + (MASK_T + 0.45) / havg(e, y) && y <= t && y > t - 0.55;
+  }, R.hi);
+  // raised folds where the cloth is pulled taut round the jaw (both cheeks)
+  for (const s of [1, -1])
+    for (const [y0, y1] of [[49.3, 45.6], [48.4, 44.9]] as [number, number][]) {
+      const pts: V3[] = [];
+      for (let k = 0; k <= 12; k++) {
+        const t = k / 12, th = s * lerp(1.0, 2.55, t), y = lerp(y0, y1, t);
+        const c = -Math.cos(th);
+        if (y > maskTop(c) - 0.3 || y < maskBot(c) + 0.2) continue;
+        pts.push(envPoint(e, th, y, MASK_T - 0.1).p);
+      }
+      if (pts.length > 1) m.path(pts, (t) => 0.36 * Math.sin(Math.PI * clamp(t * 1.1, 0, 1)) + 0.12, R.shade);
+    }
+  // the drape hanging in front of the throat: a frayed triangle with soft folds
+  const drapeZ = (x: number, v: number) => 7.15 - v * 0.75 - 0.05 * x * x + 0.32 * Math.sin(x * 1.9 + v * 2) * (0.3 + v);
+  const drapeW = (v: number) => 4.7 * (1 - v);
+  const tipX = (v: number) => 0.35 * v;
+  m.region([-5.2, 40.4, 3.5], [5.2, 44.7, 8.6], (x, y, z) => {
+    const v = (44.55 - y) / 3.75;
+    if (v < 0 || v > 1) return false;
+    const w = drapeW(v) * (1 + 0.06 * Math.sin(y * 7.3));
+    if (Math.abs(x - tipX(v)) > w) return false;
+    return Math.abs(z - drapeZ(x, v)) < 0.42;
+  }, (x, y, z) => {
+    const v = (44.55 - y) / 3.75, w = drapeW(v);
+    if (w - Math.abs(x - tipX(v)) < 0.55) return print; // faded border
+    if (Math.sin(x * 1.9 + v * 2) < -0.55 && v > 0.2) return R.shade; // fold valleys
+    return printAt(x, y, z) ?? R.base;
+  });
+  // fraying: loose threads off both lower edges of the drape and the sides of the band
+  for (let k = 1; k <= 9; k++) {
+    const v = k / 10;
+    for (const s of [1, -1]) {
+      if ((k + (s > 0 ? 0 : 1)) % 2) continue;
+      const y = 44.55 - v * 3.75, x = tipX(v) + s * drapeW(v);
+      const z = drapeZ(x, v);
+      m.cap([x, y, z], [x + s * 0.15, y - 0.6 - 0.35 * (k % 3), z - 0.1], 0.22, 0.16, k % 3 ? R.shade : dim);
+    }
+  }
+  for (const s of [1, -1])
+    for (const th of [1.55, 1.95, 2.3]) {
+      const c = -Math.cos(th), y = maskBot(c) + 0.1;
+      const { p } = envPoint(e, s * th, y, MASK_T * 0.5);
+      m.cap(p, [p[0], p[1] - 0.7, p[2]], 0.22, 0.16, R.shade);
+    }
+  // the knot behind the skull, with two short tails (the long ends flutter as engine cloth from bandana_anchor)
+  m.ell([0.45, 50.05, -8.25], [1.25, 1.0, 0.95], R.shade);
+  m.ell([-0.65, 50.3, -8.0], [0.85, 0.78, 0.75], R.base);
+  m.ell([1.55, 50.3, -8.0], [0.85, 0.78, 0.75], R.base);
+  m.region([-0.2, 49.2, -9.4], [1.1, 51.0, -8.6], (x, y, z) => Math.abs(x - 0.45) < 0.22 && z < -8.9, R.dark, { mode: 'paint' });
+  for (const [pts, w0] of [
+    [[[0.1, 49.4, -8.6], [-0.55, 48.0, -9.0], [-0.75, 46.9, -9.1]], 0.78],
+    [[[0.9, 49.4, -8.6], [1.65, 47.85, -9.05], [2.05, 46.5, -9.15]], 0.72],
+  ] as [V3[], number][]) {
+    m.sweep(pts, (t) => [w0 - 0.3 * t, 0.42, 0.3], (x, y) => (y < pts[2][1] + 0.5 ? dim : R.base), 0.18);
+    const end = pts[2];
+    for (const dx of [-0.35, 0.3]) m.cap([end[0] + dx, end[1], end[2]], [end[0] + dx * 1.3, end[1] - 0.55, end[2] - 0.05], 0.18, 0.14, R.shade);
+  }
+  shadeRamps(m.m, [R], true);
+  return { m: m.m, R };
+}
+
 // ================================================================== RIG
 const STRAP_OFF: Record<OutfitId, [Env, number]> = {
   punk: [PUNK_ENV, PUNK_T + 0.5],
@@ -1403,7 +1525,10 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     torso.path([[-1.0, 45.0, 1.6], [0, 41.0, 4.9], [0, 37.6, 5.3]], () => 0.2, TOON.black.base); // bolo string
     torso.ell([0, 41.6, 5.0], [0.6, 0.6, 0.35], TOON.silver.hi, { flags: M });
   }
-  if (o !== 'sheriff' && o !== 'pharaoh') bandana(torso, LK.band);
+  // the outlaw mask (default on every outfit) is the bandana pulled up over the face; without it he wears it round the neck
+  const masked = look.mask !== false;
+  const mask = masked ? outlawMask(o) : null;
+  if (!masked && o !== 'sheriff' && o !== 'pharaoh') bandana(torso, LK.band);
   const [senv, soff] = STRAP_OFF[o] ?? STRAP_OFF.punk;
   sling(torso, senv, soff);
   shadeRamps(torso.m, [BN, LK.coat, LK.trim, LK.band, STRAP], true);
@@ -1497,6 +1622,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   P('brow_l', sk.brow_l, J.brow, 'head');
   P('brow_r', sk.brow_r, mg(J.brow), 'head');
   P('hat', hat, J.hat, 'head');
+  if (mask) P('mask', mask.m, J.neck, 'head');
   P('arm_l', armL.m, J.shoulder, 'torso');
   P('fore_l', foreL.m, J.elbow, 'arm_l');
   P('arm_r', armR.m, mg(J.shoulder), 'torso');
@@ -1529,7 +1655,8 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     eye_r: sock('head', mg(J.eye)),
     mouth: sock('jaw', [0, 47.5, 6]),
     hat_top: sock('hat', [0, topY, -1]),
-    bandana_anchor: sock('torso', [0, 45.2, -5.6]),
+    // the cloth tails flutter from the mask knot (or from the back of the neck bandana)
+    bandana_anchor: mask ? sock('mask', [0.45, 48.9, -8.75]) : sock('torso', [0, 45.2, -5.6]),
     // the sandboard rides between the shoulder blades, held by the sling (see attachBoardOnBack)
     board_back: sock('torso', [0, 39, backZu - 1.0]),
     ...(poncho
@@ -1556,7 +1683,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   const mm = (p: V3) => [p[0] * U, p[1] * U, p[2] * U];
   const clothCoat = coatish || poncho;
   return {
-    name: `cowboy_${look.hat}_${look.outfit}`,
+    name: `cowboy_${look.hat}_${look.outfit}${mask ? '' : '_nomask'}`,
     voxelSize: SUNDOWN_HD_VS,
     parts,
     sockets,
@@ -1585,8 +1712,8 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
         coatStyle: poncho ? 'poncho' : clothCoat ? 'tails' : undefined,
         coatLen: o === 'sheriff' ? 0.56 : o === 'duster' ? 0.5 : poncho ? 0.3 : 0,
         coatWidth: poncho ? 0.6 : 0.5,
-        bandana: o !== 'sheriff' && o !== 'pharaoh' ? [LK.band.base, LK.band.shade] : undefined,
-        bandanaLen: 0.16,
+        bandana: mask ? [mask.R.base, mask.R.shade] : o !== 'sheriff' && o !== 'pharaoh' ? [LK.band.base, LK.band.shade] : undefined,
+        bandanaLen: mask ? 0.2 : 0.16,
       },
     },
   };

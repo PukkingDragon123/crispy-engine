@@ -299,7 +299,7 @@ export class Env {
     u[6] = hz.b;
     u[7] = 0.034;
     u[10] = 3.2;
-    this.dustDensity = day ? (p.sunElev < 18 ? 0.8 : 0.6) : 0.25;
+    this.dustDensity = day ? (p.sunElev < 18 ? 0.65 : 0.5) : 0.22;
     u[11] = this.dustDensity;
     ATMO.sunDir.copy(this.sunDir);
     ATMO.sunColor.setHex(p.sunColor);

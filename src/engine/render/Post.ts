@@ -171,7 +171,8 @@ export class OutlinePass extends Pass {
                 float dz = d0 - 0.5 * (da + db);
                 float near = min(d0 - da, d0 - db);
                 float w = smoothstep(0.004, 0.03, dz / d0) * step(-0.003 * d0, near) * (1.0 - smoothstep(0.6, 1.8, max(abs(d0 - da), abs(d0 - db))));
-                w *= 1.0 - tc * ta * tb;
+                // only contact shadows on the ground (voxel models carry their own baked AO)
+                w *= tc * (1.0 - ta * tb);
                 occ += w;
               }
             }
@@ -192,8 +193,8 @@ export class OutlinePass extends Pass {
           float thr = 0.45 + d0 * 0.1;
           float e = smoothstep(thr, thr * 1.6, dm);
           e *= 1.0 - smoothstep(90.0, 220.0, d0);
-          // far sand silhouettes melt into the haze instead of carrying hard ink
-          e *= 1.0 - t0 * smoothstep(28.0, 110.0, d0) * 0.92;
+          // far silhouettes melt into the haze instead of carrying hard ink
+          e *= 1.0 - smoothstep(30.0, 115.0, d0) * mix(0.8, 0.95, t0);
           vec3 ink = mix(uColor * c.rgb * 0.25 + uColor, c.rgb * 0.6, smoothstep(25.0, 140.0, d0));
           gl_FragColor = vec4(mix(c.rgb, ink, e * uStrength), 1.0);
         }`,

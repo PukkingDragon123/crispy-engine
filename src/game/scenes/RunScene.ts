@@ -56,6 +56,7 @@ import { FrogFamily } from '../run/FrogFamily';
 import { TravelerEscort } from '../run/TravelerEscort';
 import { WagonRepair } from '../run/WagonRepair';
 import { NeckSlicer } from '../player/NeckSlicer';
+import { ZoneCine } from './ZoneCine';
 import { unlock, technique } from '../player/Techniques';
 import { KhonsuAvatar } from '../bosses/Khonsu';
 import { ULT_INFO } from '../player/Ultimate';
@@ -165,6 +166,7 @@ export class RunScene implements GameScene {
   wagon: WagonRepair | null = null;
   slicer!: NeckSlicer;
   private pickerShown = false;
+  private zoneCine: ZoneCine | null = null;
   private waveIntroT = 0;
   private gameOver = false;
   ready = false;
@@ -200,6 +202,12 @@ export class RunScene implements GameScene {
     this.camRig = new CameraRig(this.camera, this.world.groundAt);
     this.hud = new Hud(e.overlay);
     this.hud3d = new Hud3D(this.hud);
+    this.zoneCine = new ZoneCine({
+      engine: e, world: this.world, camRig: this.camRig, scene: this.scene, camera: this.camera,
+      player: () => this.player?.pos,
+      hud: (on) => this.hud.setVisible(on),
+      canPlay: () => !this.gameOver && !!this.player?.alive && !this.trial && !this.picker?.active && !this.choice?.active && !this.shop?.active && !this.ledger?.open && !this.pausedByUser && !this.slicer?.active,
+    });
     this.hud3d.scene.environment = this.scene.environment;
     this.scene.add(this.faces.mesh);
 
@@ -365,6 +373,7 @@ export class RunScene implements GameScene {
     this.escort?.dispose();
     this.wagon?.dispose();
     this.slicer?.cancel();
+    this.zoneCine?.dispose();
     this.engine.paused = false;
     this.engine.post.u.uDesat.value = 0;
     this.qte.dispose();

@@ -46,7 +46,7 @@ export const ATMO = {
 export const ATMO_HAZE_GLSL = /* glsl */ `
 vec3 atmoHaze(vec3 rd, vec3 awayCol) {
   float mu = dot(rd, uAtmo[0].xyz);
-  float w = clamp(mu * 0.5 + 0.5, 0.0, 1.0);
+  float w = pow(clamp(mu * 0.5 + 0.5, 0.0, 1.0), 1.6);
   vec3 c = mix(awayCol, uAtmo[1].xyz, w * w * (3.0 - 2.0 * w));
   c += uAtmo[1].xyz * pow(max(mu, 0.0), 10.0) * uAtmo[0].w * 0.35;
   return c;
@@ -98,7 +98,7 @@ THREE.ShaderChunk.fog_pars_fragment = /* glsl */ `
       // aerial perspective: thicker low down, thinning with altitude (mesa tops stand out of it)
       float hm = clamp(atmoMean(uAtmo[1].w, y0, y1), 0.0, 3.0);
       float x = max(dist - fogNear, 0.0) / max(fogFar - fogNear, 1.0);
-      float odA = x * (0.3 + 1.35 * hm);
+      float odA = x * (0.22 + 1.05 * hm);
       // low dust: pools in the troughs and drifts downwind in slow patches
       float L = min(dist, 240.0);
       vec2 mp = cameraPosition.xz + rd.xz * L * 0.5;

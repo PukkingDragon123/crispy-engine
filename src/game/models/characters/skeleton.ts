@@ -22,6 +22,8 @@ export type OutfitId = 'bare' | 'punk' | 'duster' | 'poncho' | 'vest' | 'sheriff
 export interface CowboyLook {
   hat: HatId;
   outfit: OutfitId;
+  /** HD Sundown only: the outlaw cloth over the lower face (default true) */
+  mask?: boolean;
 }
 export const HAT_IDS: HatId[] = ['stetson', 'duck', 'sombrero', 'nemes', 'tophat', 'bandit', 'wig'];
 export const OUTFIT_IDS: OutfitId[] = ['bare', 'punk', 'duster', 'poncho', 'vest', 'sheriff', 'pharaoh'];

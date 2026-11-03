@@ -44,6 +44,7 @@ interface Mark {
 const PRIORITY: Record<string, number> = { landmark: 10, capstone: 9, sphinx: 9, statue: 8, giantSkull: 8, stoneGate: 7, boneGate: 7, ribArch: 6, obelisk: 6, watchtower: 5, windmill: 5, waterTower: 5, hieroglyphWall: 4, column: 3, shack: 2, totem: 1 };
 const HEIGHT: Record<string, number> = { landmark: 12, sphinx: 8, statue: 8, giantSkull: 6, stoneGate: 8, boneGate: 8, ribArch: 8, obelisk: 9, watchtower: 10, windmill: 12, waterTower: 11, hieroglyphWall: 5, column: 7, shack: 6, totem: 4 };
 const GLOW: Record<string, string> = { A: '#ff9a3a', B: '#46d8c8', C: '#ff5a3a' };
+const _f = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _p = new THREE.Vector3();
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
 
 /** seconds: flyover length, title in, title out, blend back */
@@ -63,6 +64,8 @@ export class ZoneCine {
   private shot: CineShot = { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 52 };
   private title: FloatText3D | null = null;
   private sub: FloatText3D | null = null;
+  private titleSize = 1.4;
+  private titleLines = 1;
   private ending = false;
   private resolve: (() => void) | null = null;
   private disposed = false;
@@ -140,6 +143,7 @@ export class ZoneCine {
       this.sub?.show(false);
     }
     const cam = this.d.camera;
+    if (this.title) this.placeTitle(t);
     this.title?.update(rdt, cam);
     this.sub?.update(rdt, cam);
     if (t >= DUR && !this.ending) this.handBack();
@@ -161,17 +165,17 @@ export class ZoneCine {
 
   private showTitle(zone: ZoneDef) {
     const sa = this.d.world.sa;
-    const L = this.mark;
     const name = zone.name.toUpperCase();
+    const lines = name.length > 20 ? 2 : 1;
     const len = Math.min(20, name.length);
-    const size = THREE.MathUtils.clamp(26 / (len * 0.56), 2.0, 4.0);
+    // about 60% of the frame wide at the title's distance in front of the lens
+    const size = THREE.MathUtils.clamp(15 / (len * 0.56), 0.9, 2.2);
+    this.titleSize = size;
+    this.titleLines = lines;
     const glow = GLOW[sa.key] ?? '#ffb070';
     this.title = new FloatText3D(name, { size, px: 112, cps: 15, wrap: 20, color: '#fff0cf', glow, hdr: 1.45 });
-    this.sub = new FloatText3D(`${ROMAN[zone.index] ?? zone.index + 1}  ·  ${sa.name}`, { size: size * 0.3, px: 64, cps: 0, wrap: 48, color: '#f6dcae', glow, hdr: 1.2 });
-    const lines = name.length > 20 ? 2 : 1;
-    const top = L.y + L.h + 3 + size * lines * 0.6;
-    this.title.anchor.set(L.x, top, L.z);
-    this.sub.anchor.set(L.x, top - size * lines * 0.62 - size * 0.32, L.z);
+    this.sub = new FloatText3D(`ZONE ${ROMAN[zone.index] ?? zone.index + 1}  ·  ${sa.name.toUpperCase()}`, { size: size * 0.32, px: 64, cps: 0, wrap: 48, color: '#f6dcae', glow, hdr: 1.2 });
+    this.placeTitle(this.t);
     for (const ft of [this.title, this.sub]) {
       (ft.mesh.material as THREE.MeshBasicMaterial).fog = false;
       this.d.scene.add(ft.mesh);
@@ -179,6 +183,24 @@ export class ZoneCine {
     this.sub.show(true);
     this.d.engine.audio.play('divine_chime', { volume: 0.45 });
     this.d.onTitle?.(zone);
+  }
+
+  /**
+   * The title floats in the air between the lens and the landmark, a little above the
+   * centre of frame and drifting slowly across it, so it is always framed whatever
+   * the crane does.
+   */
+  private placeTitle(t: number) {
+    const cam = this.d.camera;
+    const fwd = _f.copy(this.shot.look).sub(this.shot.pos).normalize();
+    const right = _r.crossVectors(fwd, _u.set(0, 1, 0)).normalize();
+    const up = _u.crossVectors(right, fwd).normalize();
+    const D = 17;
+    const drift = (t - T_TITLE) * 0.18 - 0.4;
+    const s = this.titleSize;
+    const base = _p.copy(cam.position).addScaledVector(fwd, D).addScaledVector(right, drift).addScaledVector(up, 2.0 + s * 0.3);
+    this.title!.anchor.copy(base);
+    this.sub!.anchor.copy(base).addScaledVector(up, -(s * this.titleLines * 0.62 + s * 0.38));
   }
 
   private handBack() {

@@ -662,10 +662,15 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
       if (clicked && hoverIdx >= 0) pick = hoverIdx;
     }
     clicked = false;
-    for (const t of texts) t.update(dt, camera, t === speaking ? () => eng.audio.play('ui_hover', { volume: 0.08, pitch: 0.8 + Math.random() * 0.5 }) : undefined);
+    for (const t of texts) {
+      const w = nearLens.get(t);
+      if (w) t.anchor.copy(camera.position).addScaledVector(w.clone().sub(camera.position).normalize(), 3.4);
+      t.update(dt, camera, t === speaking ? () => eng.audio.play('ui_hover', { volume: 0.08, pitch: 0.8 + Math.random() * 0.5 }) : undefined);
+    }
   };
   let choices: FloatText3D[] = [];
   let speaking: FloatText3D | null = null;
+  const nearLens = new Map<FloatText3D, THREE.Vector3>();
   let last = performance.now();
   // ?cinedt=0.5 lets slow headless test machines get through the scene
   const dtCap = +(new URLSearchParams(location.search).get('cinedt') ?? 0.05);
@@ -697,11 +702,14 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
   const say = async (who: 'serket' | 'sundown' | 'pinch', line: string, hold = 1.4) => {
     if (skipped) return;
     const ap = actor.root.position;
+    // spoken lines float beside the speaker's head, held at a fixed distance from the lens so
+    // they read the same in a close-up and a wide shot
     const at =
       who === 'serket'
-        ? spirit.root.position.clone().add(new THREE.Vector3(0, soulH * 0.92, 0)).addScaledVector(side, -2.4 * (spirit.scale / SOUL_SCALE))
-        : ap.clone().add(new THREE.Vector3(0, 2.35, 0)).addScaledVector(side, who === 'pinch' ? 0.6 : -0.4);
-    const t = text(line, at, who === 'serket' ? { size: 0.5, color: JADE, glow: JADE_GLOW, cps: 36, wrap: 30, hdr: 1.7 } : { size: 0.2, color: who === 'pinch' ? '#c8ff8a' : '#fff3d6', glow: who === 'pinch' ? '#6aff1a' : '#ffb070', cps: 40, wrap: 28, hdr: 1.3 });
+        ? spirit.root.position.clone().add(new THREE.Vector3(0, soulH * 0.86 * (spirit.scale / SOUL_SCALE), 0)).addScaledVector(side, -1.2 * (spirit.scale / SOUL_SCALE))
+        : ap.clone().add(new THREE.Vector3(0, 2.2, 0)).addScaledVector(side, who === 'pinch' ? 0.5 : -0.35);
+    const t = text(line, at, who === 'serket' ? { size: 0.135, color: JADE, glow: JADE_GLOW, cps: 36, wrap: 28, hdr: 1.7 } : { size: 0.11, color: who === 'pinch' ? '#c8ff8a' : '#fff3d6', glow: who === 'pinch' ? '#6aff1a' : '#ffb070', cps: 40, wrap: 28, hdr: 1.3 });
+    nearLens.set(t, at.clone());
     speaking = t;
     if (who === 'serket') {
       spirit.talking = true;
