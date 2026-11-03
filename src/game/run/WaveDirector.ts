@@ -385,7 +385,7 @@ export class WaveDirector {
     if (!p) return;
     if (!this.met.has(def.id)) {
       this.met.add(def.id);
-      if (def.firstWave > 1 && def.firstWave >= n - 1) this.ctx.toast(`NEW BOUNTY: ${def.name.toUpperCase()}`, '#e0b373', def.weakness);
+      // a new kind of bounty is announced by its codex entry when first sighted (no flat banner)
     }
     const alphaRoll = rnd.next() < alphaChance && n >= 4;
     for (let i = 0; i < count; i++) {

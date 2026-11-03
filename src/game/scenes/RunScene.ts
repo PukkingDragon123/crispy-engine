@@ -775,7 +775,8 @@ export class RunScene implements GameScene {
   private onWaveStart(s: WaveSpec) {
     this.waveIntroT = 0;
     const label = s.boss === 'major' ? 'THE RECKONING' : s.boss === 'mini' ? 'WANTED' : s.theme ? s.theme.name : `WAVE ${s.n}`;
-    this.hud.toast(label, s.boss !== 'none' ? '#ff8a4a' : '#fff3d6', s.boss === 'none' ? this.world.zone.name : `Wave ${s.n}`, true);
+    // the wave title is cast in voxel letters in the world, not a flat banner
+    this.hud3d.cutIn(label, s.boss !== 'none' ? '#ff8a4a' : '#ffd36b', 'determined');
     this.ctx.sfx('wave_start', null, 0.7);
     this.ctx.shake(0.25);
     this.ctx.sfx('quake_rumble', null, 0.4);
@@ -1013,7 +1014,7 @@ export class RunScene implements GameScene {
       return;
     }
     // codex discoveries wait until cutscenes, staged encounters and the rank-up are over
-    if (!this.picker.cinematic && !Cinema.busy() && !cineFlags.choice) this.codexRun?.update(rdt);
+    this.codexRun?.update(rdt, this.picker.cinematic || Cinema.busy() || cineFlags.choice);
     const e = this.engine;
     this.run.time += dt;
     // pause toggle (simple until poster scene)

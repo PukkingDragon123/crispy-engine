@@ -37,7 +37,8 @@ export class CodexRun {
     return !!p && !!q && Math.hypot(q.x - p.x, q.z - p.z) < r;
   }
 
-  update(rdt: number) {
+  /** hold: a cutscene, staged encounter or rank-up owns the screen; the card ducks out and new ones wait */
+  update(rdt: number, hold = false) {
     this.stingCd -= rdt;
     // ---- sightings, twice a second
     this.scanT -= rdt;
@@ -68,6 +69,7 @@ export class CodexRun {
       }
     }
     // ---- the card
+    if (hold && this.showT >= 0 && this.showT < 3.4) this.showT = 3.4;
     if (this.showT >= 0) {
       this.showT += rdt;
       if (this.showT > 3.4 && this.card) {
@@ -80,7 +82,7 @@ export class CodexRun {
         this.showT = -1;
       }
     }
-    if (this.showT < 0 && this.queue.length) this.show(this.merge());
+    if (!hold && this.showT < 0 && this.queue.length) this.show(this.merge());
   }
 
   /** several discoveries at once fold into one card */
