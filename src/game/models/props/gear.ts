@@ -15,19 +15,22 @@
 //   sling     the upper back (grapple coils are slung there, clear of the duster's
 //             cloth); the frame is turned so +X points out of the back
 //   neck      upper chest, left of the sternum (charms hang on a neck cord)
+//   board     the sandboard's own centre (deck up, nose +Z); board mods ride on it,
+//             so they follow the board wherever it is (underfoot or slung on his back)
 // Moving bits are separate pieces with a joint (swing / spin / focus / hook) so
 // Equipment can animate them; glass pieces render with a see-through material.
 import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
 import { TOON, Ramp } from '../style';
 import { hash3 } from '../../../engine/math/rand';
 import type { RigSpec } from '../../../engine/voxel/Rig';
-import { skeletonCowboyRig } from '../characters';
+import { skeletonCowboyRig, sandboardModel } from '../characters';
 
 export const GEAR_VS = 1 / 48;
 type V3 = [number, number, number];
 
-export type GearAnchor = 'face' | 'torso' | 'shoulder_l' | 'shoulder_r' | 'hand_l' | 'hand_r' | 'foot_l' | 'foot_r' | 'sling' | 'neck';
-export type GearJoint = 'swing' | 'spin' | 'focus' | 'hook';
+export type GearAnchor = 'face' | 'torso' | 'shoulder_l' | 'shoulder_r' | 'hand_l' | 'hand_r' | 'foot_l' | 'foot_r' | 'sling' | 'neck' | 'board';
+/** swing: pendulum · spin: rowel · focus: goggle lens · hook: flies to the grapple anchor · wing: folds out in the air · jet: booster flame core */
+export type GearJoint = 'swing' | 'spin' | 'focus' | 'hook' | 'wing' | 'jet';
 
 /** rig parts gear can be skinned onto (their own voxel models, in their own grid) */
 export type SkinPartName = 'fore_l' | 'fore_r' | 'shin_l' | 'shin_r' | 'torso';
@@ -64,6 +67,8 @@ export interface GearFit {
   hand_l: Box;
   hand_r: Box;
   foot: { hw: number; toe: number; heel: number; h: number; shinHW: number; shinZ0: number; shinZ1: number };
+  /** the sandboard: half width / half length, deck top and bottom (gear voxels, board centre = origin) */
+  board: { hw: number; hl: number; top: number; bottom: number };
   /** the body's own part models for skinned pieces (from the live rig, or Sundown's reference rig) */
   parts?: Partial<Record<SkinPartName, SkinPart>>;
 }
@@ -83,6 +88,7 @@ export const DEFAULT_FIT: GearFit = {
   hand_l: { x0: -3.4, x1: 3.4, y0: -4.6, y1: 3, z0: -2.7, z1: 3.4 },
   hand_r: { x0: -3.4, x1: 3.4, y0: -4.6, y1: 3, z0: -2.7, z1: 3.4 },
   foot: { hw: 2.2, toe: 7.5, heel: -4.5, h: 4, shinHW: 1.8, shinZ0: -1.6, shinZ1: 1.8 },
+  board: { hw: 9.8, hl: 34.5, top: 3, bottom: -3 },
 };
 
 // ------------------------------------------------------------------ palette
@@ -908,6 +914,175 @@ function deadMansHand(): GearPiece[] {
 }
 
 
+
+// ================================================================== BOARD MODS (turbo / wings / blades)
+/** a solid of revolution around an axis parallel to Z through (cx, cy) */
+function lathe(m: VoxelModel, cx: number, cy: number, z0: number, z1: number, rOf: (z: number) => number, col: (a: number, rr: number, z: number, R: number) => number, flags?: number, hollow = 0) {
+  for (let z = z0; z <= z1; z++) {
+    const R = rOf(z);
+    if (R <= 0) continue;
+    const C = Math.ceil(R + 0.5);
+    for (let x = -C; x <= C; x++)
+      for (let y = -C; y <= C; y++) {
+        const d = Math.hypot(x, y);
+        if (d > R + 0.3 || (hollow > 0 && d < R - hollow)) continue;
+        m.set(cx + x, cy + y, z, col(Math.atan2(y, x), d, z, R), flags);
+      }
+  }
+}
+
+/** a canister lying along the board: rimmed caps, bands, rivets */
+function canister(m: VoxelModel, cx: number, cy: number, z0: number, z1: number, R: number, body: Ramp, band: Ramp, bands: number[]) {
+  lathe(m, cx, cy, z0, z1, (z) => (z === z0 || z === z1 ? R - 0.8 : z === z0 + 1 || z === z1 - 1 ? R + 0.4 : R), (a, d, z) => {
+    if (bands.includes(z)) return d > R - 0.5 ? band.hi : band.base;
+    if (z === z0 + 1 || z === z1 - 1) return BR.base;
+    const k = Math.cos(a - 1.9);
+    return k > 0.6 ? body.hi : k < -0.5 ? body.shade : body.base;
+  }, M);
+  for (const z of [z0 + 1, z1 - 1]) for (const a of [0.6, 2.2, 3.8, 5.4]) m.set(cx + Math.round(Math.cos(a) * (R + 0.5)), cy + Math.round(Math.sin(a) * (R + 0.5)), z, BR.hi, M);
+}
+
+/** a flared rocket bell pointing back (−Z) from z0 */
+function nozzle(m: VoxelModel, cx: number, cy: number, z0: number, len: number, r0: number, r1: number, rp: Ramp) {
+  lathe(m, cx, cy, z0 - len, z0, (z) => r0 + (r1 - r0) * ((z0 - z) / len) ** 1.6, (a, d, z, R) => (z === z0 - len ? rp.dark : d > R - 0.6 ? (Math.cos(a - 1.9) > 0.4 ? rp.hi : rp.base) : rp.shade), M, 1.1);
+  lathe(m, cx, cy, z0 - 1, z0, () => r0 - 0.5, () => LACQ.dark);
+}
+
+/** the white-hot flame core inside a nozzle (shown and flickered only while boosting) */
+function jetCore(r0: number, len: number, hot: number) {
+  const m = new VoxelModel('gear_jet_core');
+  lathe(m, 0, 0, -len, 0, (z) => r0 * (1 - (-z / len) * 0.6), (_a, d, z) => (d < 0.8 ? 0xffffff : -z < len * 0.3 ? 0xfff0b0 : hot), VF.EMISSIVE | VF.GLOW);
+  return m;
+}
+
+function turbo(fit: GearFit, tier: 1 | 2 | 3): GearPiece[] {
+  const B = fit.board;
+  const m = new VoxelModel('gear_turbo_' + tier);
+  const tail = -Math.round(B.hl);
+  const out: GearPiece[] = [];
+  if (tier === 1) {
+    // a brass nitro can strapped to the tail, red band, valve wheel, iron nozzle
+    const cy = Math.round(B.top) + 3, z0 = tail + 3, z1 = tail + 15;
+    canister(m, 0, cy, z0, z1, 3, BR, TOON.red, [z0 + 5, z0 + 6]);
+    nozzle(m, 0, cy, z0 - 1, 4, 1.6, 2.8, IR);
+    for (const z of [z0 + 3, z1 - 3]) for (let a = -0.2; a <= Math.PI + 0.2; a += 0.18) m.set(Math.round(Math.cos(a) * 4), Math.round(B.top) + 1 + Math.round(Math.sin(a) * 4) * (a < 0 || a > Math.PI ? 0 : 1), z, LD.base);
+    ringXY(m, 0, cy + 5, z1 - 4, z1 - 4, 0.8, 1.6, () => TOON.red.base, M);
+    m.set(0, cy + 4, z1 - 4, BR.dark, M).set(0, cy + 5, z1 - 4, BR.hi, M);
+    out.push(piece('turbo', 'board', [0, 0, 0], m), piece('jet', 'board', [0, cy, z0 - 5], jetCore(1.6, 3, 0xff9a3a), { joint: 'jet' }));
+  } else if (tier === 2) {
+    // twin iron cans, copper feed pipes to a pressure gauge, twin nozzles
+    const cy = Math.round(B.top) + 3, z0 = tail + 3, z1 = tail + 17;
+    for (const sx of [-4, 4]) {
+      canister(m, sx, cy, z0, z1, 2.6, IR, COPPER, [z0 + 4, z1 - 4]);
+      nozzle(m, sx, cy, z0 - 1, 4, 1.4, 2.4, COPPER);
+      out.push(piece('jet' + (sx > 0 ? 'l' : 'r'), 'board', [sx, cy, z0 - 5], jetCore(1.4, 3, 0x6ad8ff), { joint: 'jet' }));
+    }
+    rope(m, [[-4, cy + 3, z1 - 2], [-2, cy + 5, z1], [0, cy + 5, z1 + 1]], 0, COPPER);
+    rope(m, [[4, cy + 3, z1 - 2], [2, cy + 5, z1], [0, cy + 5, z1 + 1]], 0, COPPER);
+    ringXY(m, 0, cy + 6, z1 + 1, z1 + 2, 0, 2.2, (_a, d) => (d > 1.5 ? BR.base : 0xf4f0e8), M);
+    m.set(0, cy + 7, z1 + 3, TOON.red.base).set(0, cy + 6, z1 + 3, LACQ.dark);
+    for (const z of [z0 + 2, z1 - 2]) for (let x = -7; x <= 7; x++) m.set(x, Math.round(B.top) + 1, z, Math.abs(x) % 4 === 0 ? BR.hi : LD.base, Math.abs(x) % 4 === 0 ? M : undefined);
+    out.unshift(piece('turbo', 'board', [0, 0, 0], m));
+  } else {
+    // Ra's sun-furnace: a gold-and-lapis rocket, scarab-wing fins, a sun-disk intake, a big bell
+    const cy = Math.round(B.top) + 4, z0 = tail + 3, z1 = tail + 21;
+    lathe(m, 0, cy, z0, z1, (z) => (z > z1 - 4 ? 4 - (z - (z1 - 4)) * 0.8 : 4), (a, d, z) => {
+      const band = (z - z0) % 5 === 0;
+      const k = Math.cos(a - 1.9);
+      if (band) return d > 3.5 ? GO.hi : GO.base;
+      return k > 0.55 ? TOON.lapis.hi : k < -0.5 ? TOON.lapis.shade : TOON.lapis.base;
+    }, M);
+    discXY(m, 0, cy, z1 + 1, 3, (_x, _y, d) => (d < 1.2 ? TOON.red.hi : d < 2.2 ? TOON.red.base : GO.hi), M);
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      for (let k = 0; k < 6; k++) for (let z = z0 + 1; z <= z0 + 7 - k; z++) m.set(Math.round(Math.cos(a) * (4 + k)), cy + Math.round(Math.sin(a) * (4 + k)), z, k === 5 ? GO.hi : (z + k) % 3 ? TOON.turquoise.base : GO.base, M);
+    }
+    nozzle(m, 0, cy, z0 - 1, 6, 2.4, 4.4, GO);
+    for (const z of [z0 + 4, z1 - 6]) for (let x = -6; x <= 6; x++) m.set(x, Math.round(B.top) + 1, z, Math.abs(x) % 3 === 0 ? GO.hi : LD.base, Math.abs(x) % 3 === 0 ? M : undefined);
+    out.push(piece('turbo', 'board', [0, 0, 0], m), piece('jet', 'board', [0, cy, z0 - 7], jetCore(2.4, 4, 0xffb040), { joint: 'jet' }));
+  }
+  return out;
+}
+
+/** glider wings: authored spread (left wing toward +X from a hinge on the rail), folded by their joint */
+function wing(tier: 1 | 2 | 3): VoxelModel {
+  const m = new VoxelModel('gear_wing_' + tier);
+  const span = tier === 3 ? 32 : tier === 2 ? 30 : 27, chord = tier === 3 ? 13 : 12;
+  const spar = tier === 1 ? TOON.wood : tier === 2 ? BO : GO;
+  const sparF = tier === 3 ? M : undefined;
+  // leading-edge spar (front), bowed
+  for (let x = 0; x <= span; x++) {
+    const z = 2 - Math.round((x / span) ** 2 * 4);
+    m.set(x, 0, z, x % 6 === 0 ? spar.hi : spar.base, sparF).set(x, 1, z, spar.shade, sparF);
+  }
+  // three ribs (finger bones) fanning back from the spar
+  const ribs = [0.35, 0.65, 0.92];
+  for (const f of ribs) {
+    const x0 = Math.round(span * f * 0.6);
+    for (let k = 0; k <= chord; k++) m.set(x0 + Math.round(k * (0.2 + f * 0.5)), 0, 2 - Math.round((x0 / span) ** 2 * 4) - k, k % 4 === 0 ? spar.hi : spar.base, sparF);
+  }
+  // the membrane / feathers between, with a scalloped trailing edge
+  for (let x = 1; x <= span; x++) {
+    const zl = 2 - Math.round((x / span) ** 2 * 4);
+    const depth = Math.round(chord * (1 - (x / span) ** 1.6 * 0.55)) - ((x % 5 === 0) ? 0 : (x % 5 === 2 || x % 5 === 3) ? 1 : 0);
+    for (let k = 1; k <= depth; k++) {
+      const z = zl - k;
+      if (m.has(x, 0, z)) continue;
+      let c: number;
+      if (tier === 1) c = ((Math.floor(x / 7) + Math.floor(k / 5)) % 2 ? 0xe2cfa4 : 0xd6bf8e) - (k === depth ? 0x101010 : 0);
+      else if (tier === 2) c = k > depth - 3 ? (x % 2 ? 0x3a2c22 : 0x2a201a) : k > depth - 6 ? 0x5a4434 : 0x6e5440;
+      else c = k > depth - 4 ? (x % 3 ? TOON.lapis.base : TOON.lapis.shade) : k > depth - 7 ? (x % 2 ? TOON.turquoise.base : TOON.turquoise.hi) : k > 2 ? GO.base : GO.hi;
+      m.set(x, 0, z, c, tier === 3 && k <= depth - 7 ? M : undefined);
+    }
+  }
+  // stitches / lashings at the root and a knuckle at the hinge
+  m.set(0, 1, 2, BR.hi, M).set(0, -1, 2, BR.shade, M).set(0, 0, 3, BR.base, M);
+  if (tier === 1) for (let k = 2; k <= chord; k += 3) m.set(1, 1, 2 - k, ROPE.hi);
+  return m;
+}
+function wings(fit: GearFit, tier: 1 | 2 | 3): GearPiece[] {
+  const B = fit.board;
+  const l = wing(tier);
+  const at = (s: number): V3 => [s * Math.round(B.hw - 1), Math.round(B.bottom) - 1, Math.round(B.hl * 0.35)];
+  return [piece('wing_l', 'board', at(1), l, { joint: 'wing' }), piece('wing_r', 'board', at(-1), mirrorModel(l), { joint: 'wing' })];
+}
+
+/** serrated blades bolted along both rails, teeth outward */
+function blades(fit: GearFit, tier: 1 | 2 | 3): GearPiece[] {
+  const B = fit.board;
+  const len = Math.round(B.hl * 0.82);
+  const rp = tier === 1 ? r(0x8a7a6a, 0x6a5a4c, 0xa8988a, 0x3a2e24) : tier === 2 ? TOON.silver : r(0xd8a250, 0xa8742a, 0xf6d488, 0x5a3a10);
+  const make = () => {
+    const m = new VoxelModel('gear_blade_' + tier);
+    const y = 0;
+    for (let z = -len; z <= len; z++) {
+      const t = z / len;
+      // khopesh blades swell into a sickle belly toward the nose
+      const belly = tier === 3 ? Math.round(Math.max(0, Math.sin((t + 0.2) * Math.PI * 0.9)) * 2.4) : 0;
+      const w = 2 + belly;
+      const tooth = tier === 1 ? ((z + 400) % 4 < 2 ? 1 : 0) : tier === 2 ? ((z + 400) % 3 === 0 ? 1 : 0) : ((z + 400) % 5 === 0 ? 1 : 0);
+      const reach = w + tooth;
+      for (let x = 0; x <= reach; x++) {
+        const edge = x >= reach - 1;
+        let c = edge ? rp.hi : x === 0 ? rp.dark : rp.base;
+        if (tier === 1 && hash3(x + 3, z, 5) > 0.82) c = 0x8a4a22; // rust
+        if (tier === 3 && x === 1 && (z + 400) % 6 === 0) c = TOON.lapis.base; // glyph inlay
+        m.set(x, y, z, c, M);
+        if (x <= 1) m.set(x, y + 1, z, x === 0 ? rp.dark : rp.shade, M); // spine
+      }
+      // bolts through the rail every so often
+      if ((z + 400) % 9 === 0) m.set(0, y + 2, z, tier === 3 ? GO.hi : IR.hi, M).set(-1, y + 1, z, tier === 3 ? GO.base : IR.base, M);
+    }
+    // nose: a hooked tip (khopesh) or a bevelled end
+    if (tier === 3) m.set(2, 0, len + 1, rp.hi, M).set(3, 0, len + 2, rp.hi, M).set(4, 0, len + 2, rp.base, M);
+    else m.set(1, 0, len + 1, rp.hi, M);
+    return m;
+  };
+  const l = make();
+  const x = Math.round(B.hw), y = Math.round((B.top + B.bottom) / 2);
+  return [piece('blade_l', 'board', [x, y, 0], l), piece('blade_r', 'board', [-x, y, 0], mirrorModel(l))];
+}
+
 // ================================================================== SKINNED PIECES
 // Gloves, boots and body armour are sculpted straight onto the hero's own part
 // voxels (same grid, same pivot), slice by slice, so they hug bony hands, jean
@@ -1356,9 +1531,12 @@ export type GearModelId =
   | 'gunslingerGloves' | 'stingerGauntlet' | 'brassKnuckles'
   | 'ironSpurs' | 'rattlesnakeBoots' | 'duneStriders'
   | 'barbedHook' | 'twinClaw' | 'lightningReel'
-  | 'glassEye' | 'hourglass' | 'deadMansHand';
+  | 'glassEye' | 'hourglass' | 'deadMansHand'
+  | 'nitroCan' | 'twinTurbo' | 'sunRocket'
+  | 'canvasGlider' | 'vultureWings' | 'horusWings'
+  | 'rustyRails' | 'serratedRails' | 'khopeshEdges';
 
-export const GEAR_MODEL_IDS: GearModelId[] = ['sunGoggles', 'thothSpecs', 'jackalMask', 'respirator', 'scarabPlate', 'mummyWrap', 'bonePauldrons', 'cactusJerkin', 'gunslingerGloves', 'stingerGauntlet', 'brassKnuckles', 'ironSpurs', 'rattlesnakeBoots', 'duneStriders', 'barbedHook', 'twinClaw', 'lightningReel', 'glassEye', 'hourglass', 'deadMansHand'];
+export const GEAR_MODEL_IDS: GearModelId[] = ['sunGoggles', 'thothSpecs', 'jackalMask', 'respirator', 'scarabPlate', 'mummyWrap', 'bonePauldrons', 'cactusJerkin', 'gunslingerGloves', 'stingerGauntlet', 'brassKnuckles', 'ironSpurs', 'rattlesnakeBoots', 'duneStriders', 'barbedHook', 'twinClaw', 'lightningReel', 'glassEye', 'hourglass', 'deadMansHand', 'nitroCan', 'twinTurbo', 'sunRocket', 'canvasGlider', 'vultureWings', 'horusWings', 'rustyRails', 'serratedRails', 'khopeshEdges'];
 
 /** the wearable pieces of one gear item, fitted to a body */
 export function gearPieces(id: GearModelId, fit: GearFit = DEFAULT_FIT): GearPiece[] {
@@ -1395,12 +1573,21 @@ export function gearPieces(id: GearModelId, fit: GearFit = DEFAULT_FIT): GearPie
     case 'glassEye': return glassEye();
     case 'hourglass': return hourglass();
     case 'deadMansHand': return deadMansHand();
+    case 'nitroCan': return turbo(fit, 1);
+    case 'twinTurbo': return turbo(fit, 2);
+    case 'sunRocket': return turbo(fit, 3);
+    case 'canvasGlider': return wings(fit, 1);
+    case 'vultureWings': return wings(fit, 2);
+    case 'horusWings': return wings(fit, 3);
+    case 'rustyRails': return blades(fit, 1);
+    case 'serratedRails': return blades(fit, 2);
+    case 'khopeshEdges': return blades(fit, 3);
   }
 }
 
 /** where each anchor sits in the showcase layout (pairs side by side, voxels) */
 const SHOW: Record<GearAnchor, V3> = {
-  face: [0, 0, 0], torso: [0, 0, 0], neck: [0, 0, -4], sling: [0, 0, 0],
+  face: [0, 0, 0], torso: [0, 0, 0], neck: [0, 0, -4], sling: [0, 0, 0], board: [0, 0, 0],
   shoulder_l: [9, 0, 0], shoulder_r: [-9, 0, 0],
   hand_l: [6, 0, 0], hand_r: [-6, 0, 0],
   foot_l: [5, 0, 0], foot_r: [-5, 0, 0],
@@ -1417,7 +1604,11 @@ export interface DisplayPart {
   /** where that origin sits in the showcase (metres) */
   pos: V3;
   glass: boolean;
+  /** showcase-only prop (the board under board mods): not part of the item */
+  prop?: boolean;
 }
+
+let boardRef: { model: VoxelModel; voxelSize: number } | null = null;
 
 /**
  * One showcase arrangement of a gear item for world drops, the shop, card photos
@@ -1449,12 +1640,22 @@ export function gearDisplayParts(id: GearModelId, fit: GearFit = DEFAULT_FIT): D
       out.push({ model: p.model, voxelSize: GEAR_VS, pivot: [0.5, 0.5, 0.5], pos: [(p.at[0] + o[0]) * GEAR_VS, (p.at[1] + o[1]) * GEAR_VS, (p.at[2] + o[2]) * GEAR_VS], glass: !!p.glass });
     }
   }
+  // board mods are shown mounted on a plain driftwood board
+  if (pieces.some((p) => p.anchor === 'board')) {
+    try {
+      boardRef ??= sandboardModel('driftwood' as any);
+      const b = boardRef.model.bounds();
+      out.push({ model: boardRef.model, voxelSize: boardRef.voxelSize, pivot: [(b.minX + b.maxX + 1) / 2, (b.minY + b.maxY + 1) / 2, (b.minZ + b.maxZ + 1) / 2], pos: [0, 0, 0], glass: false, prop: true });
+    } catch {
+      /* no board model: show the mods alone */
+    }
+  }
   return out;
 }
 
 /** registry form (one model, one grid; glass baked in as tinted voxels) for the shop rug and model viewer */
 export function gearStatic(id: GearModelId) {
-  const parts = gearDisplayParts(id);
+  const parts = gearDisplayParts(id).filter((p) => !p.prop);
   const vs = parts.some((p) => p.voxelSize !== GEAR_VS) ? parts.find((p) => p.voxelSize !== GEAR_VS)!.voxelSize : GEAR_VS;
   const m = new VoxelModel('gear_static_' + id);
   for (const p of parts) {

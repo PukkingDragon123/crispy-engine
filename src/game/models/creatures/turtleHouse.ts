@@ -69,7 +69,7 @@ const J = {
   crown: [-0.75, 6.55, -2.6] as V3,
   ramp: [H.porchX, H.floor, 0.1] as V3,
   porch: [1.98, H.floor, 0.86] as V3,
-  counter: [-0.1, H.floor, -1.22] as V3,
+  counter: [-1.38, H.floor, -0.05] as V3,
 };
 
 // ------------------------------------------------------------------ skin, shell
@@ -253,22 +253,26 @@ function buildHouse(m: VoxelModel) {
   vessel(m, P(2.25, floor, -1.15), [2.2, 2.8, 3.0, 2.8, 2.6], (row, x, z) => (row === 4 ? CLAY.shade : h01(x, row, z, 4) > 0.8 ? CLAY.hi : CLAY.base), { seed: 9 });
   ell(m, P(2.25, floor + 0.55, -1.15), [U(0.22), U(0.16), U(0.22)], (x, y, z) => (h01(x, y, z, 3) > 0.85 ? 0xe86a8a : LEAF.b), { keep: (lx, ly) => ly > -0.3 || lx > 0.4 });
   // brackets under the porch, down to the shell
-  for (const z of [H.porchZ0 + 0.2, 0.1, H.porchZ1 - 0.2]) cap(m, P(px - 0.1, floor - 0.1, z), P(1.75, domeY(1.75, z) - 0.05, z), U(0.07), U(0.06), WOOD.shade);
+  for (const z of [H.porchZ0 + 0.2, -0.62, 0.78]) cap(m, P(px - 0.1, floor - 0.1, z), P(1.75, domeY(1.75, z) - 0.05, z), U(0.07), U(0.06), WOOD.shade);
   // ---- inside: counter, shelves, stove, rugs, lantern, curios
-  const cx0 = -0.95, cx1 = 0.75, cz0 = -0.95, cz1 = -0.6;
+  // the counter runs along the side wall; Ozman stands behind it with the window at his back
+  const cx0 = -1.05, cx1 = -0.7, cz0 = -0.6, cz1 = 0.6;
   for (let x = Math.floor(U(cx0)); x <= Math.ceil(U(cx1)); x++)
     for (let z = Math.floor(U(cz0)); z <= Math.ceil(U(cz1)); z++)
       for (let y = Math.floor(U(floor)); y <= Math.floor(U(floor + 0.95)); y++) {
         const X = M(x), Z = M(z), Y = M(y);
-        const face = Math.abs(Z - cz1) < VS || Math.abs(X - cx0) < VS || Math.abs(X - cx1) < VS || Y > floor + 0.88;
+        const top = Y > floor + 0.88;
+        const face = Math.abs(X - cx1) < VS || Math.abs(Z - cz0) < VS || Math.abs(Z - cz1) < VS || top;
         if (!face) continue;
-        m.set(x, y, z, Y > floor + 0.88 ? WOOD.hi : Math.floor(X / 0.15) % 2 ? WOOD.base : WOOD.shade);
+        // a lip on the top, panelled front with a darker kick board
+        m.set(x, y, z, top ? (Math.abs(X - cx1) < VS ? WOOD.dark : WOOD.hi) : Y < floor + 0.12 ? WOOD.dark : Math.floor(Z / 0.15) % 2 ? WOOD.base : WOOD.shade);
       }
-  // a basket on the counter (the wares come out of it), scales, a cash tin
-  vessel(m, P(-0.3, floor + 0.95, -0.8), [2.6, 3.0, 3.1, 3.2, 3.2], (row, x, z, a) => (row === 4 ? WOOD.dark : (Math.floor((a + 4) * 4) + row) % 2 ? 0xc8a060 : 0xa8803e), { seed: 5, hollowTop: 1 });
-  cap(m, P(0.45, floor + 0.96, -0.78), P(0.45, floor + 1.25, -0.78), U(0.025), U(0.02), 0xc8a050, { fl: VF.METAL });
-  cap(m, P(0.3, floor + 1.25, -0.78), P(0.6, floor + 1.25, -0.78), U(0.02), U(0.02), 0xc8a050, { fl: VF.METAL });
-  ell(m, P(0.15, floor + 1.0, -0.82), [U(0.12), U(0.05), U(0.09)], 0x5a6a7a, { fl: VF.METAL });
+  // a basket on the counter (the wares come out of it), brass scales, a cash tin
+  vessel(m, P(-0.88, floor + 0.95, -0.35), [2.6, 3.0, 3.1, 3.2, 3.2], (row, x, z, a) => (row === 4 ? WOOD.dark : (Math.floor((a + 4) * 4) + row) % 2 ? 0xc8a060 : 0xa8803e), { seed: 5, hollowTop: 1 });
+  cap(m, P(-0.88, floor + 0.96, 0.36), P(-0.88, floor + 1.25, 0.36), U(0.025), U(0.02), 0xc8a050, { fl: VF.METAL });
+  cap(m, P(-0.88, floor + 1.25, 0.21), P(-0.88, floor + 1.25, 0.51), U(0.02), U(0.02), 0xc8a050, { fl: VF.METAL });
+  for (const z of [0.21, 0.51]) vessel(m, P(-0.88, floor + 1.08, z), [1.4, 0.9], () => 0xb08a40, { seed: 6, fl: VF.METAL });
+  ell(m, P(-0.86, floor + 1.0, 0.05), [U(0.09), U(0.05), U(0.12)], 0x5a6a7a, { fl: VF.METAL });
   // shelves on the back wall, with jars, bottles and books
   for (const sy of [4.1, 4.7]) {
     for (let x = Math.floor(U(-1.0)); x <= Math.ceil(U(1.3)); x++) for (let z = Math.floor(U(-1.48)); z <= Math.floor(U(-1.26)); z++) m.set(x, Math.floor(U(sy)), z, WOOD.shade);
@@ -282,12 +286,12 @@ function buildHouse(m: VoxelModel) {
   // the stove in the back-left corner, embers glowing in its belly
   vessel(m, P(-1.35, floor, -1.15), [2.2, 2.6, 3.4, 3.8, 3.8, 3.6, 3.2, 2.6, 2.0, 1.6], (row, x, z) => (row === 4 && x * 0.7 + z > U(-1.35) * 0.7 + U(-1.15) + 2 ? 0xff8a3a : row < 2 ? IRON.hi : IRON.base), { seed: 11 });
   for (let i = 0; i < 4; i++) m.set(Math.floor(U(-1.2)) + (i & 1), Math.floor(U(floor + 0.36)) + (i >> 1), Math.floor(U(-1.0)), 0xffb04a, VF.EMISSIVE | VF.GLOW);
-  // rugs on the floor by the door and under the window
-  for (let x = Math.floor(U(0.55)); x <= Math.ceil(U(1.3)); x++)
+  // a woven doormat inside the door
+  for (let x = Math.floor(U(1.05)); x <= Math.floor(U(1.34)); x++)
     for (let z = Math.floor(U(-0.25)); z <= Math.ceil(U(0.45)); z++) m.set(x, Math.floor(U(floor)), z, (x + z) % 5 === 0 ? 0xe8d6b0 : Math.abs(M(z) - 0.1) < 0.08 ? 0x2f4a7a : 0xa83a2a, VF.SOFTAO);
-  // a tapestry and a cow skull on the side wall
-  for (let z = Math.floor(U(-1.35)); z <= Math.ceil(U(-0.75)); z++)
-    for (let y = Math.floor(U(3.5)); y <= Math.ceil(U(4.75)); y++) m.set(Math.floor(U(H.x0)) + 1, y, z, (Math.floor(M(y) / 0.1) + Math.floor(M(z) / 0.1)) % 3 === 0 ? 0xd9a53a : (Math.floor(M(y) / 0.2) % 2 ? 0x8e2a20 : 0x2f4a7a), VF.SOFTAO);
+  // a tapestry on the inside of the front wall, a cow skull by the side window
+  for (let x = Math.floor(U(0.1)); x <= Math.ceil(U(0.9)); x++)
+    for (let y = Math.floor(U(3.5)); y <= Math.ceil(U(4.75)); y++) m.set(x, y, Math.floor(U(H.z1)) - 1, (Math.floor(M(y) / 0.1) + Math.floor(M(x) / 0.1)) % 3 === 0 ? 0xd9a53a : Math.floor(M(y) / 0.2) % 2 ? 0x8e2a20 : 0x2f4a7a, VF.SOFTAO);
   ell(m, P(H.x0 + 0.12, 4.85, 0.62), [U(0.1), U(0.13), U(0.12)], 0xe8dcc0);
   for (const s of [-1, 1]) cap(m, P(H.x0 + 0.14, 4.92, 0.62 + s * 0.08), P(H.x0 + 0.2, 5.05, 0.62 + s * 0.3), U(0.035), U(0.015), 0xe8dcc0);
   // the inside lantern on the ridge beam, warm
@@ -325,7 +329,7 @@ function buildTree(rig: CRig) {
     if (h01(x, y, z, 6) > 0.985) return LEAF.flower;
     return M(y) > 7.25 ? (k > 0.6 ? LEAF.c : LEAF.a) : k > 0.6 ? LEAF.a : k > 0.45 ? LEAF.b : LEAF.d;
   };
-  for (const [dx, dy, dz, r] of [[0, 0.55, 0, 1.0], [1.15, 0.42, 0.3, 0.8], [-1.1, 0.45, 0.45, 0.85], [0.25, 0.4, 1.2, 0.75], [-0.3, 0.38, -1.1, 0.8], [0.85, 0.35, -0.85, 0.7], [-0.85, 0.5, -0.4, 0.65]] as [number, number, number, number][])
+  for (const [dx, dy, dz, r] of [[0, 0.55, 0, 1.0], [1.15, 0.42, 0.3, 0.8], [-1.1, 0.45, 0.45, 0.85], [0.45, 0.4, 1.1, 0.75], [-0.3, 0.38, -1.1, 0.8], [0.85, 0.35, -0.85, 0.7], [-0.85, 0.5, -0.4, 0.65]] as [number, number, number, number][])
     ell(c, P(-0.75 + dx, 6.55 + dy, -2.6 + dz), [U(r), U(r * 0.38), U(r * 0.9)], leaf);
   hollow(c, 2);
 }
@@ -420,19 +424,22 @@ function buildDoor(rig: CRig) {
 }
 
 /** a shutter, modelled closed; rest rotation folds it open against the wall */
-function buildShutter(rig: CRig, name: string, hinge: V3, along: V3, w: number, h: number, open: number, axisX: boolean) {
+function buildShutter(rig: CRig, name: string, hinge: V3, along: V3, w: number, h: number, open: number) {
   const m = rig.part(name, 'shell', Pv(hinge), [0, open, 0]);
-  for (let s = 0; s < U(w); s++)
-    for (let v = 0; v < U(h); v++) {
-      const x = hinge[0] + along[0] * s * VS, z = hinge[2] + along[2] * s * VS;
-      const slat = v % 3 === 0;
-      m.set(Math.floor(U(x) + (axisX ? 0 : 0)), Math.floor(U(hinge[1]) + v), Math.floor(U(z)), slat ? 0x2f5a56 : s === 0 || s >= U(w) - 1 ? 0x2f5a56 : 0x4f8a86);
+  const x0 = Math.floor(U(hinge[0])), y0 = Math.floor(U(hinge[1])), z0 = Math.floor(U(hinge[2]));
+  const nw = Math.round(U(w)), nh = Math.round(U(h));
+  for (let s = 0; s < nw; s++)
+    for (let v = 0; v < nh; v++) {
+      const frame = s === 0 || s === nw - 1 || v === 0 || v === nh - 1;
+      const slat = v % 2 === 0;
+      m.set(x0 + along[0] * s, y0 + v, z0 + along[2] * s, frame ? 0x2f5a56 : slat ? 0x3f7470 : h01(s, v, 3, 2) > 0.85 ? 0x6aa29a : 0x4f8a86);
     }
 }
 
+const RAMP_TILT = Math.atan2(H.floor - 0.08, 2.9);
 function buildRamp(rig: CRig) {
   const p = J.ramp;
-  const m = rig.part('ramp', 'shell', Pv(p), [0, 0, 1.95]);
+  const m = rig.part('ramp', 'shell', Pv(p), [0, 0, RAMP_TILT]);
   const end: V3 = [p[0] + 2.9, 0.08, p[2]];
   const L = Math.hypot(end[0] - p[0], end[1] - p[1]);
   const n = Math.ceil(U(L) * 1.5);
@@ -460,11 +467,14 @@ function buildLantern(rig: CRig, name: string, at: V3) {
 function buildChime(rig: CRig, at: V3) {
   const m = rig.part('chime', 'shell', Pv(at));
   const [x, y, z] = at;
-  cap(m, P(x - 0.12, y - 0.05, z), P(x + 0.12, y - 0.05, z), U(0.025), U(0.025), WOOD.dark);
-  for (let i = 0; i < 4; i++) {
-    const dx = -0.1 + i * 0.07, len = 0.22 + (i % 2) * 0.1;
-    line(m, [P(x + dx, y - 0.05, z), P(x + dx, y - 0.1, z)], ROOF.tinD);
-    cap(m, P(x + dx, y - 0.1, z), P(x + dx, y - 0.1 - len, z), U(0.03), U(0.025), i % 2 ? 0xe8dcc0 : 0xc8b890); // bleached bones and shells
+  // a driftwood bar, five strings, bleached bones and little shells
+  cap(m, P(x, y - 0.05, z - 0.2), P(x, y - 0.06, z + 0.2), U(0.04), U(0.035), WOOD.dark);
+  line(m, [P(x, y, z), P(x, y - 0.05, z)], ROOF.tinD);
+  for (let i = 0; i < 5; i++) {
+    const dz = -0.16 + i * 0.08, len = 0.22 + ((i * 7) % 3) * 0.08;
+    line(m, [P(x, y - 0.08, z + dz), P(x, y - 0.12 - len * 0.4, z + dz)], 0xc9a86a);
+    const top = y - 0.12 - len * 0.4;
+    for (let k = 0; k < 3; k++) m.set(Math.floor(U(x)), Math.floor(U(top)) - k, Math.floor(U(z + dz)), i % 2 ? 0xe8dcc0 : k === 2 ? 0xc8b890 : 0xd8ccb0);
   }
 }
 
@@ -498,17 +508,17 @@ export function turtleHouseRig(): RigSpec {
   buildTail(rig);
   buildTree(rig);
   buildDoor(rig);
-  buildShutter(rig, 'shut_fa', [-1.25, 3.9, H.z1 + 2 * VS], [1, 0, 0], 0.4, 0.7, -1.55, false);
-  buildShutter(rig, 'shut_fb', [-0.45, 3.9, H.z1 + 2 * VS], [-1, 0, 0], 0.4, 0.7, 1.55, false);
-  buildShutter(rig, 'shut_sa', [H.x0 - 2 * VS, 3.9, -0.6], [0, 0, 1], 0.4, 0.7, 1.55, true);
-  buildShutter(rig, 'shut_sb', [H.x0 - 2 * VS, 3.9, 0.2], [0, 0, -1], 0.4, 0.7, -1.55, true);
+  buildShutter(rig, 'shut_fa', [-1.25, 3.9, H.z1 + 2 * VS], [1, 0, 0], 0.4, 0.7, -1.75);
+  buildShutter(rig, 'shut_fb', [-0.45 - VS, 3.9, H.z1 + 2 * VS], [-1, 0, 0], 0.4, 0.7, 1.75);
+  buildShutter(rig, 'shut_sa', [H.x0 - 2 * VS, 3.9, -0.6], [0, 0, 1], 0.4, 0.7, -1.75);
+  buildShutter(rig, 'shut_sb', [H.x0 - 2 * VS, 3.9, 0.2 - VS], [0, 0, -1], 0.4, 0.7, 1.75);
   buildRamp(rig);
   buildLantern(rig, 'lantern_a', [H.porchX + 0.02, 4.55, -0.6]);
   buildLantern(rig, 'lantern_b', [H.porchX + 0.02, 4.55, 0.8]);
   buildChime(rig, [H.porchX + 0.05, 4.52, -1.25]);
   buildPots(rig, [2.0, 4.72, 1.05]);
   rig.socket('porch', 'shell', Pv(J.porch), [0, Math.PI / 2, 0]);
-  rig.socket('counter', 'shell', Pv(J.counter));
+  rig.socket('counter', 'shell', Pv(J.counter), [0, Math.PI / 2, 0]);
   rig.socket('head_top', 'head', P(0, 2.7, 4.8));
   let top = 0;
   for (const p of rig.parts) p.model.forEach((_x, y) => (top = Math.max(top, y + 1)));
@@ -529,16 +539,17 @@ export function turtleHouseRig(): RigSpec {
     /** onto the plastron once the legs are in, then how far he burrows on top of that (m) */
     shellDrop: 1.05,
     dig: 0.85,
-    swing: ['lantern_a', 'lantern_b', 'chime', 'pots'],
+    swing: ['lantern_a', 'lantern_b', 'chime', 'pots', 'tree', 'canopy'],
     /** shutters and the door: closed = rotation 0; open = their rest rotation */
     shutters: ['shut_fa', 'shut_fb', 'shut_sa', 'shut_sb'],
     door: { part: 'door', open: -1.65 },
-    ramp: { part: 'ramp', down: 0, up: 1.95, foot: [H.porchX + 2.9, 0.08, 0.1], top: [H.porchX - 0.05, H.floor, 0.1] },
+    /** level at rest; `stow` slides it in under the porch, `tilt` lowers it to the sand */
+    ramp: { part: 'ramp', tilt: RAMP_TILT, stow: [-3.95, -0.24, 0], foot: [H.porchX + 2.9, 0.08, 0.1], top: [H.porchX - 0.05, H.floor, 0.1] },
     /** in root space (m): the doorway, a spot inside the door, the room's camera, where the wares come from */
     doorway: [H.x1 + 0.35, H.floor, 0.1],
     inside: [0.75, H.floor, 0.1],
-    room: { rug: [-0.15, H.floor, 0.32], cam: [1.18, 4.45, 1.0], look: [-0.35, 3.75, -0.85] },
-    pack: [-0.3, H.floor + 1.25, -0.8],
+    room: { rug: [-0.05, H.floor, -0.1], cam: [1.2, 4.42, 1.0], look: [-0.8, 3.75, -0.2], stand: [0.85, H.floor, -0.95], lamp: [-0.85, 4.6, 0.15] },
+    pack: [-0.88, H.floor + 1.2, -0.35],
     chimney: [-1.35, 6.75, -1.15],
     eyes: 'voxel',
   });

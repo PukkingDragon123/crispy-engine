@@ -43,7 +43,6 @@ import { TECHNIQUES, isUnlocked } from '../player/Techniques';
 import { leg } from '../anim/gait';
 import { legIK, LegPose, armIK } from '../anim/playerAnim';
 import { FloatText3D } from '../fx/FloatText3D';
-import type { VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { damp, rnd } from '../../engine/math/rand';
 
 interface Shot {
@@ -197,7 +196,7 @@ function voxelTitle(text: string, capH: number, mat: THREE.Material) {
           }
         }
       if (x1 >= x0) {
-        const g = buildVoxelGeometry(m, { voxelSize: vs, pivot: [(x0 + x1 + 1) / 2, 0, 1.5] });
+        const g = bakeUILight(buildVoxelGeometry(m, { voxelSize: vs, pivot: [(x0 + x1 + 1) / 2, 0, 1.5] }));
         const mesh = new THREE.Mesh(g, mat);
         mesh.position.x = (pen - 4 + (x0 + x1 + 1) / 2) * vs;
         mesh.renderOrder = 4;
@@ -208,6 +207,28 @@ function voxelTitle(text: string, capH: number, mat: THREE.Material) {
     pen += adv;
   }
   return { root, letters, width: pen * vs, capH };
+}
+/**
+ * The on-screen pieces carry their own painted light: a two-tone cel ramp from a
+ * key over the left shoulder, baked into the vertex colours in the piece's own
+ * (camera-facing) frame, with a hard glint on the metal. They render unlit, so a
+ * practical lamp beside the lens can never blow them out, and they still get the
+ * ink outlines, bloom and grade of the frame.
+ */
+function bakeUILight(g: THREE.BufferGeometry) {
+  if (!g.getAttribute('normal')) g.computeVertexNormals();
+  const n = g.getAttribute('normal'), c = g.getAttribute('color'), mx = g.getAttribute('matx');
+  if (!c) return g;
+  const L = new THREE.Vector3(-0.45, 0.72, 0.53).normalize();
+  for (let i = 0; i < c.count; i++) {
+    const nx = n.getX(i), ny = n.getY(i), nz = n.getZ(i);
+    const d = nx * L.x + ny * L.y + nz * L.z;
+    let k = 0.56 + 0.44 * sstep(-0.08, 0.2, d) + Math.max(0, ny) * 0.06;
+    if (mx && mx.getY(i) > 0.5 && d > 0.55) k *= 1.22;
+    c.setXYZ(i, c.getX(i) * k, c.getY(i) * k, c.getZ(i) * k);
+  }
+  c.needsUpdate = true;
+  return g;
 }
 
 /** the tarot bar's abilities (the moves — rope, kick, neck slicer — have their own page, from player/Techniques) */
@@ -362,8 +383,10 @@ export class HubScene implements GameScene {
   private ui = new THREE.Group();
   private uiK = 0;
   private arrowScale = 1;
-  private arrows: { dir: -1 | 1; grp: THREE.Group; mesh: THREE.Mesh; mat: VoxelMaterial; hover: number; push: number; label: HTMLDivElement }[] = [];
-  private titleMat: VoxelMaterial | null = null;
+  private arrows: { dir: -1 | 1; grp: THREE.Group; mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; hover: number; push: number; label: HTMLDivElement }[] = [];
+  private titleMat: THREE.MeshBasicMaterial | null = null;
+  /** one typewriter subtitle per station (a FloatText3D keeps its first texture size) */
+  private subs = new Map<string, FloatText3D>();
   private titles = new Map<string, ReturnType<typeof voxelTitle>>();
   private ttl: { st: Station; t: number; out: number; anchor: THREE.Vector3; q: THREE.Quaternion; up: THREE.Vector3; right: THREE.Vector3; set: ReturnType<typeof voxelTitle> } | null = null;
   private sub: FloatText3D | null = null;
@@ -636,7 +659,7 @@ export class HubScene implements GameScene {
       station({
         id: 'gramophone', label: 'Gramophone', title: 'THE GRAMOPHONE', short: 'GRAMOPHONE', sub: 'a little night music', verb: 'Music on / off',
         stand: new THREE.Vector2(0.8, -0.93), face: Math.PI, at: this.gramTop.clone(), r: 0.55, objs: [gr, this.duck], pose: 'music',
-        via: [new THREE.Vector2(0.86, LANE_Z)], slot: [-0.92, 0.86, 'left'],
+        via: [new THREE.Vector2(0.86, LANE_Z)], slot: [-0.86, 0.84, 'left'],
         shot: { pos: new THREE.Vector3(-0.9, 1.25, -1.15), look: new THREE.Vector3(), fov: 46, subject: new THREE.Vector3(0.8, 1.45, -0.93), ndc: [0.3, 0.42] },
       });
     }
@@ -663,7 +686,7 @@ export class HubScene implements GameScene {
         // her spectacle lenses are real glass
         const lens = this.mama.meshes[(ms.meta?.lensPart as string) ?? 'lenses'];
         if (lens) {
-          const glass = makeVoxelMaterial({ transparent: true, opacity: 0.28 });
+          const glass = makeVoxelMaterial({ transparent: true, opacity: 0.16 });
           glass.depthWrite = false;
           lens.material = glass;
           lens.castShadow = false;
@@ -687,18 +710,18 @@ export class HubScene implements GameScene {
       parent.add(tr.root);
       this.toadlets.push({ rig: tr, spec: ts, home: new THREE.Vector3(x, y, z), yaw: ry, phase: x * 3.1 + z, blink: 1 + Math.random() * 3, hop: 4 + Math.random() * 6, hopT: -1, from: new THREE.Vector3(x, y, z), to: new THREE.Vector3(x, y, z), turn: ry, floor });
     };
-    toadlet('toadlet', this.firePos.x - 0.02, 0, fpFront + 0.92, Math.PI + 0.4, true);
+    toadlet('toadlet', 3.05, 0, -0.62, -2.63, true);
     toadlet('toadlet_v2', 1.62, 0.012, -0.78, -1.75, true);
     toadlet('toadlet_v1', this.firePos.x + 0.55, 0, fpFront + 0.12, Math.PI - 0.5, true, s, 0.88);
     if (this.chair?.nodes['chair']) toadlet('toadlet_v1', -0.452, 0.8 - ((chSpec?.meta?.pivot as number[])?.[1] ?? 1.21), 0.02, 0.1, false, this.chair.nodes['chair']);
     if (this.chair) {
-      const stand = new THREE.Vector2(this.firePos.x + 0.42, fpFront + 0.45);
+      const stand = new THREE.Vector2(this.firePos.x + 0.27, fpFront + 0.45);
       this.mamaHead.set(CH_AT.x - 0.08, 1.0, CH_AT.z + 0.14);
       station({
         id: 'hearth', label: 'Mama Toad', title: 'THE HEARTH', short: 'HEARTH', sub: 'Mama Toad keeps the kettle on', verb: 'Chat with Mama',
-        stand, face: Math.atan2(this.firePos.x - stand.x, this.firePos.z - stand.y), at: this.firePos.clone(), r: 0.8, objs: [this.chair.root], pose: 'hearth',
-        via: [new THREE.Vector2(stand.x - 0.08, LANE_Z)], slot: [-0.92, 0.86, 'left'],
-        shot: { pos: new THREE.Vector3(2.2, 1.24, 0.3), look: new THREE.Vector3(), fov: 42, subject: new THREE.Vector3(CH_AT.x - 0.02, 0.95, CH_AT.z + 0.05), ndc: [-0.33, -0.08] },
+        stand, face: -2.1, at: this.firePos.clone(), r: 0.8, objs: [this.chair.root], pose: 'hearth',
+        via: [new THREE.Vector2(stand.x - 0.08, LANE_Z)], slot: [-0.86, 0.84, 'left'],
+        shot: { pos: new THREE.Vector3(2.0, 1.3, 0.5), look: new THREE.Vector3(), fov: 40, subject: new THREE.Vector3(CH_AT.x - 0.02, 0.92, CH_AT.z + 0.05), ndc: [-0.35, -0.05] },
       });
     }
     // the wardrobe and the cheval mirror (the dressing corner by the right window)
@@ -718,7 +741,7 @@ export class HubScene implements GameScene {
     station({
       id: 'wardrobe', label: 'Wardrobe & Mirror', title: 'THE MIRROR', short: 'MIRROR', sub: 'hats, jackets and swagger', verb: 'Try things on',
       stand: mirStand(mirrorAt), face: Math.atan2(-mn.x, -mn.z), at: mirrorAt.clone(), r: 0.8, objs: [arm, mir], pose: 'mirror',
-      via: [new THREE.Vector2(3.0, LANE_Z)], slot: [-0.92, 0.86, 'left'], shot: mirShot(mirrorAt),
+      via: [new THREE.Vector2(3.0, LANE_Z)], slot: [-0.86, 0.84, 'left'], shot: mirShot(mirrorAt),
     });
     put(B(() => HX.steamerTrunk(1)), 4.25, 2.55, -Math.PI / 2 - 0.2, 0, 1, false);
     put(B(() => HX.potCactus(2)), 4.35, 1.05, 0.4, 0, 1, false);
@@ -746,7 +769,7 @@ export class HubScene implements GameScene {
     station({
       id: 'book', label: 'The Book of Skills', title: 'THE BOOK OF SKILLS', short: 'BOOK', sub: 'moves, cards and the codex', verb: 'Read',
       stand: new THREE.Vector2(LEC.x - 0.46, LEC.z + 0.5), face: Math.PI - 0.62, at: bookAt.clone(), r: 0.75, objs: [lec], pose: 'book',
-      via: [new THREE.Vector2(LEC.x - 0.34, LANE_Z)], slot: [0.92, 0.86, 'right'], surf: bookAt.y,
+      via: [new THREE.Vector2(LEC.x - 0.34, LANE_Z)], slot: [0.86, 0.84, 'right'], surf: bookAt.y,
       shot: { pos: new THREE.Vector3(-1.05, 1.55, 0.62), look: new THREE.Vector3(), fov: 42, subject: new THREE.Vector3(LEC.x - 0.46, 1.42, LEC.z + 0.5), ndc: [-0.3, 0.12] },
     });
 
@@ -763,13 +786,13 @@ export class HubScene implements GameScene {
       spot.target.position.copy(lp).add(new THREE.Vector3(-0.15, -1, 0.2));
       s.add(spot, spot.target);
       this.flick.push({ l: spot, base: spot.intensity, k: 0.015 });
-      put(B(() => HX.barStool(2, 'ok')), -0.42, -2.12, 0.4);
+      put(B(() => HX.barStool(2, 'ok')), -0.34, -2.64, 0.4);
       const bst = new THREE.Vector2(gp.x - 0.36, gp.z + 0.6);
       station({
         id: 'bench', label: 'Weapon Bench', title: 'THE WORKBENCH', short: 'WORKBENCH', sub: 'tune your iron', verb: 'Tune the gun',
         stand: bst, face: Math.PI, at: gp.clone(), r: 0.75, objs: [wb], pose: 'bench',
-        via: [new THREE.Vector2(-1.15, LANE_Z), new THREE.Vector2(bst.x + 0.4, bst.y + 0.75)], slot: [0.92, 0.86, 'right'], surf: wbSm.meta.top, reach: 0.4,
-        shot: { pos: new THREE.Vector3(bst.x + 1.25, 1.55, bst.y + 1.55), look: new THREE.Vector3(), fov: 44, subject: new THREE.Vector3(bst.x, 1.45, bst.y), ndc: [-0.3, 0.1] },
+        via: [new THREE.Vector2(-1.15, LANE_Z), new THREE.Vector2(bst.x + 0.4, bst.y + 0.75)], slot: [-0.86, 0.84, 'left'], surf: wbSm.meta.top, reach: 0.4,
+        shot: { pos: new THREE.Vector3(bst.x + 1.32, 1.5, bst.y - 0.08), look: new THREE.Vector3(), fov: 46, subject: new THREE.Vector3(bst.x, 1.42, bst.y), ndc: [-0.28, 0.05] },
       });
     }
 
@@ -791,9 +814,9 @@ export class HubScene implements GameScene {
     if (wx && wxg) lamp(0x9ac0ff, 0.6, 1.2, 2, local(wxg, wx.meta.burner).add(new THREE.Vector3(0, 0.05, 0)), 0.25);
     station({
       id: 'garage', label: 'Garage', title: 'THE GARAGE', short: 'GARAGE', sub: 'wax a board, pick your ride', verb: 'Pick a board',
-      stand: new THREE.Vector2(-3.43, -0.8), face: Math.PI, at: this.boardBench.position.clone(), r: 0.8, objs: [rack, this.boardBench, wxg], pose: 'board',
-      via: [new THREE.Vector2(-3.3, LANE_Z)], slot: [0.92, 0.86, 'right'], surf: this.boardBench.position.y + 0.035, reach: 0.5,
-      shot: { pos: new THREE.Vector3(-2.2, 1.48, 0.42), look: new THREE.Vector3(), fov: 44, subject: new THREE.Vector3(-3.43, 1.4, -0.8), ndc: [-0.3, 0.1] },
+      stand: new THREE.Vector2(-3.43, -1.86), face: 0, at: this.boardBench.position.clone(), r: 0.8, objs: [rack, this.boardBench, wxg], pose: 'board',
+      via: [new THREE.Vector2(-2.55, LANE_Z), new THREE.Vector2(-2.5, -1.12), new THREE.Vector2(-2.62, -1.86)], slot: [0.86, 0.84, 'right'], surf: this.boardBench.position.y + 0.035, reach: 0.52,
+      shot: { pos: new THREE.Vector3(-2.38, 1.55, 0.3), look: new THREE.Vector3(), fov: 44, subject: new THREE.Vector3(-3.43, 1.38, -1.86), ndc: [-0.26, 0.12] },
     });
     this.walls.push({ x0: -4.1, z0: -1.55, x1: -2.75, z1: -1.1 });
     put(B(() => HX.woodPile(1)), -4.25, 2.3, Math.PI / 2, 0, 0.9);
@@ -811,7 +834,7 @@ export class HubScene implements GameScene {
     station({
       id: 'ride', label: 'Barn Doors', title: 'RIDE OUT', short: 'RIDE OUT', sub: 'the dunes are calling', verb: 'Ride out',
       stand: new THREE.Vector2(-4.38, 0.1), face: -Math.PI / 2, at: new THREE.Vector3(-9, 1.5, 0.1), r: 0.75, objs: this.barn.map((b) => b.root), pose: 'door',
-      via: [new THREE.Vector2(-3.9, LANE_Z)], slot: [-0.92, 0.86, 'left'],
+      via: [new THREE.Vector2(-3.9, LANE_Z)], slot: [-0.86, 0.84, 'left'],
       shot: { pos: new THREE.Vector3(-2.5, 1.42, 1.28), look: new THREE.Vector3(), fov: 44, subject: new THREE.Vector3(-4.38, 1.42, 0.1), ndc: [0.3, 0.1] },
     });
 
@@ -948,7 +971,7 @@ export class HubScene implements GameScene {
       // the reflection pass reuses this frame's shadow maps instead of re-rendering them
       // (and the on-screen UI never shows up in the glass)
       const reflect = glass.onBeforeRender;
-      const ui = (): THREE.Object3D[] => [this.ui, this.sub?.mesh, this.ttl?.set.root].filter((o) => !!o) as THREE.Object3D[];
+      const ui = (): THREE.Object3D[] => [this.ui, ...[...this.subs.values()].map((q) => q.mesh), this.ttl?.set.root].filter((o) => !!o) as THREE.Object3D[];
       glass.onBeforeRender = function (this: Reflector, r: THREE.WebGLRenderer, ...rest: unknown[]) {
         const au = r.shadowMap.autoUpdate;
         r.shadowMap.autoUpdate = false;
@@ -1619,7 +1642,7 @@ export class HubScene implements GameScene {
     this.mirror?.dispose();
     this.envRT?.dispose();
     this.icons?.dispose();
-    this.sub?.dispose();
+    for (const sub of this.subs.values()) sub.dispose();
     for (const set of this.titles.values()) for (const m of set.letters) m.geometry.dispose();
     this.titleMat?.dispose();
     for (const a of this.arrows) {
@@ -1990,8 +2013,8 @@ export class HubScene implements GameScene {
       const sm = safe(() => WS.arrowSign(dir));
       const g = geoOf(sm, 'center');
       if (!sm || !g) continue;
-      const mat = makeVoxelMaterial({ emissiveStrength: 0.42 });
-      const mesh = new THREE.Mesh(g, mat);
+      const mat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false });
+      const mesh = new THREE.Mesh(bakeUILight(g), mat);
       mesh.renderOrder = 6;
       const grp = new THREE.Group();
       grp.add(mesh);
@@ -2005,11 +2028,15 @@ export class HubScene implements GameScene {
       this.engine.overlay.appendChild(label);
       this.arrows.push({ dir, grp, mesh, mat, hover: 0, push: 0, label });
     }
-    this.titleMat = makeVoxelMaterial({ emissiveStrength: 0.38 });
-    for (const st of this.stations) this.titles.set(st.id, voxelTitle(st.title, 0.08, this.titleMat));
-    this.sub = new FloatText3D('', { size: 0.03, px: 48, cps: 34, wrap: 60, align: 'left', hdr: 1.15, color: '#fff3d6', glow: '#ffb070' });
-    this.sub.show(false);
-    s.add(this.sub.mesh);
+    this.titleMat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false });
+    this.titleMat.color.setScalar(1.18);
+    for (const st of this.stations) {
+      this.titles.set(st.id, voxelTitle(st.title, 0.08, this.titleMat));
+      const sub = new FloatText3D(st.sub, { size: 0.03, px: 48, cps: 34, wrap: 60, align: 'left', hdr: 1.15, color: '#fff3d6', glow: '#ffb070' });
+      sub.show(false);
+      s.add(sub.mesh);
+      this.subs.set(st.id, sub);
+    }
   }
 
   private placeUI(t: number, rdt: number) {
@@ -2034,7 +2061,7 @@ export class HubScene implements GameScene {
       a.grp.rotation.set(0.12 + Math.sin(t * 0.8 + a.dir) * 0.04, -a.dir * 0.34 + Math.sin(t * 0.6) * 0.03, Math.sin(t * 0.9 + a.dir * 2) * 0.03 - a.push * a.dir * 0.12);
       a.grp.scale.setScalar(this.arrowScale * (1 + a.hover * 0.1 + kick * 2));
       a.grp.visible = this.uiK > 0.02;
-      a.mat.userData.fx.value.z = a.hover * 1.3 + a.push * 0.8;
+      a.mat.color.setScalar(1.12 + a.hover * 0.4 + a.push * 0.3);
       // the neighbour's name under the sign
       const nb = this.stations[(((this.idx + a.dir) % n) + n) % n];
       const txt = a.dir < 0 ? '◀ ' + nb.short : nb.short + ' ▶';
@@ -2084,7 +2111,7 @@ export class HubScene implements GameScene {
         const D = 1.3;
         const halfH = D * Math.tan(THREE.MathUtils.degToRad(shot.fov) / 2), halfW = halfH * this.camera.aspect;
         const [sx, sy, side] = want.slot;
-        const sc = Math.min(1, (halfW * 0.92) / Math.max(0.01, set.width));
+        const sc = Math.min(1, (halfW * 0.8) / Math.max(0.01, set.width));
         const anchor = shot.pos.clone().addScaledVector(fwd, D).addScaledVector(right, sx * halfW).addScaledVector(up, sy * halfH);
         // +X along the screen's right, +Y up, +Z back at the lens; turned in a few degrees so the carving shows
         const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, fwd.clone().negate()));
@@ -2098,23 +2125,26 @@ export class HubScene implements GameScene {
         }
         this.scene.add(set.root);
         this.ttl = { st: want, t: 0, out: -1, anchor, q, up, right, set };
-        this.sub?.setText(want.sub);
-        this.sub?.show(true);
+        const sub = this.subs.get(want.id);
+        if (sub) {
+          sub.setText(want.sub);
+          sub.show(true);
+        }
+        this.sub = sub ?? null;
       }
     }
-    if (this.ttl?.out !== undefined && this.ttl.out >= 0) this.sub?.show(false);
-    if (!this.ttl) this.sub?.show(false);
     // the subtitle types itself out under the letters (FloatText3D billboards; it is pinned here, without its bob)
-    if (this.sub) {
-      this.sub.update(rdt, this.camera);
-      const tt2 = this.ttl;
-      if (tt2) {
-        const w = this.sub.mesh.scale.x;
-        const sc = tt2.set.root.scale.x;
-        const p = tt2.set.root.position.clone().addScaledVector(tt2.up, -0.034);
-        if (tt2.st.slot[2] === 'left') p.addScaledVector(tt2.right, w / 2 + 0.004);
-        else p.addScaledVector(tt2.right, tt2.set.width * sc - w / 2);
-        this.sub.mesh.position.copy(p);
+    const live = this.ttl && this.ttl.out < 0 ? this.ttl : null;
+    for (const [id, sub] of this.subs) {
+      if (!live || live.st.id !== id) sub.show(false);
+      sub.update(rdt, this.camera);
+      if (live && live.st.id === id) {
+        const w = sub.mesh.scale.x;
+        const sc = live.set.root.scale.x;
+        const p = live.set.root.position.clone().addScaledVector(live.up, -0.034);
+        if (live.st.slot[2] === 'left') p.addScaledVector(live.right, w / 2 + 0.004);
+        else p.addScaledVector(live.right, live.set.width * sc - w / 2);
+        sub.mesh.position.copy(p);
       }
     }
   }

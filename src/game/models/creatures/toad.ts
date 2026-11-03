@@ -337,7 +337,7 @@ function toad(cfg: ToadCfg): RigSpec {
 
   // ---------------------------------------------------------------- pose
   const PIV = T(0, 4, -40), NECK = T(0, 30, 14);
-  const A = mama ? -0.45 : 0, H = mama ? 0.36 : 0;
+  const A = mama ? -0.22 : 0, H = mama ? 0.1 : 0;
   // ---------------------------------------------------------------- the forms (toad space, T units)
   const trunkT: Prim[] = [
     { c: T(0, 21, -16), r: T(33, 16.5, 30), rot: [-0.28, 0, 0] }, // main body
@@ -636,7 +636,7 @@ function toad(cfg: ToadCfg): RigSpec {
       if (rho > 0.8) return EYE.goldLo;
       if (w > 0.42) return mixc(EYE.gold, EYE.goldLo, 0.55); // shaded under the hooded lid
       return w < -0.25 ? EYE.goldHi : EYE.gold;
-    }, { fl: VF.METAL });
+    }, { fl: VF.SOLID });
     // catchlights (the same corner on both eyes)
     const hl = norm3(add3(add3(f, [0, 0.62, 0]), [0.22, 0, 0.3]));
     const best = { v: null as V3 | null, s: -1e9 };
@@ -844,23 +844,28 @@ function toad(cfg: ToadCfg): RigSpec {
         const b = add3(p, scl3(across, -0.9));
         knit.set(Math.floor(b[0]), Math.floor(b[1]), Math.floor(b[2]), mulc(c, 0.8), VF.SOFTAO);
       }
-    // ---- spectacles low on her snout: gold wire rims, glass, a mended bridge, temples back to the tympana
-    const specs = rig.part('specs', 'head', pose.head(T(0, 39.4, 44.4)));
-    const lenses = rig.part('lenses', 'specs', pose.head(T(0, 39.4, 44.4)));
-    const nT = norm3([0.16, 0.3, 0.94]);
-    const rl = 5.1 * s, rw = Math.max(0.6, 0.55 * s);
-    const lensC = (sx: number) => pose.head(T(sx * 8.4, 37.9, 43.6));
+    // ---- half-moon reading glasses low on her snout (she looks over them): gold wire, a flat top bar, real glass
+    const specs = rig.part('specs', 'head', pose.head(T(0, 37.2, 45.4)));
+    const lenses = rig.part('lenses', 'specs', pose.head(T(0, 37.2, 45.4)));
+    const nT = norm3([0.18, 0.32, 0.93]);
+    const rl = 4.3 * s, rw = Math.max(0.6, 0.5 * s), top = rl * 0.22;
+    const lensC = (sx: number) => pose.head(T(sx * 7.1, 35.6, 44.6));
     for (const sx of [1, -1]) {
       const C = lensC(sx), n = norm3(pose.dir([sx * nT[0], nT[1], nT[2]], true));
+      const upA = pose.dir([0, 1, -0.3], true);
+      const u = norm3(sub3(upA, scl3(n, dot3(upA, n))));
       const B = Math.ceil(rl + 2);
       for (let i = Math.floor(C[0] - B); i <= Math.ceil(C[0] + B); i++)
         for (let j = Math.floor(C[1] - B); j <= Math.ceil(C[1] + B); j++)
           for (let k = Math.floor(C[2] - B); k <= Math.ceil(C[2] + B); k++) {
             const d: V3 = [i + 0.5 - C[0], j + 0.5 - C[1], k + 0.5 - C[2]];
-            const dn = dot3(d, n);
+            const dn = dot3(d, n), du = dot3(d, u);
             const dp = Math.hypot(d[0] - n[0] * dn, d[1] - n[1] * dn, d[2] - n[2] * dn);
-            if (Math.hypot(dp - rl, dn) < rw + 0.18) specs.set(i, j, k, j + 0.5 > C[1] + rl * 0.5 ? WIRE.gold : mixc(WIRE.gold, WIRE.dark, 0.4), VF.METAL);
-            else if (Math.abs(dn) < 0.5 && dp < rl - 0.3) lenses.set(i, j, k, dp > rl - 1.4 ? 0xe8f0ee : 0xd4e2e4, VF.SOFTAO);
+            if (Math.abs(dn) > rw + 0.25 || du > top + rw + 0.2) continue;
+            const arc = Math.hypot(dp - rl, dn) < rw + 0.18 && du < top;
+            const bar = Math.hypot(du - top, dn) < rw + 0.18 && dp < rl + 0.2;
+            if (arc || bar) specs.set(i, j, k, bar ? WIRE.gold : mixc(WIRE.gold, WIRE.dark, 0.35), VF.METAL);
+            else if (Math.abs(dn) < 0.5 && dp < rl - 0.3 && du < top - 0.4) lenses.set(i, j, k, 0xe6eef0, VF.SOFTAO);
           }
     }
     const hug = (p: V3, d: V3, clear: number) => {
@@ -869,12 +874,12 @@ function toad(cfg: ToadCfg): RigSpec {
     };
     const P = (sx: number, x: number, y: number, z: number) => pose.head(T(sx * x, y, z));
     // bridge (a saddle over the snout, mended with a twist of yarn) and two nose pads
-    tube(specs, [P(1, 3.4, 39.4, 44.4), P(1, 1.4, 40.4, 44.9), P(-1, 1.4, 40.4, 44.9), P(-1, 3.4, 39.4, 44.4)].map((p) => hug(p, pose.dir([0, 1, 0.2], true), rw + 0.7)), [rw, rw, rw, rw], WIRE.gold, { fl: VF.METAL });
-    ell(specs, hug(P(1, 0, 40.6, 45), pose.dir([0, 1, 0.2], true), rw + 1.2), [1.3 * s + 0.4, 1.2 * s + 0.4, 1.2 * s + 0.4], KNIT[0], { fl: VF.SOFTAO });
+    tube(specs, [P(1, 3.1, 36.6, 45.3), P(1, 1.3, 37.4, 45.7), P(-1, 1.3, 37.4, 45.7), P(-1, 3.1, 36.6, 45.3)].map((p) => hug(p, pose.dir([0, 1, 0.2], true), rw + 0.7)), [rw, rw, rw, rw], WIRE.gold, { fl: VF.METAL });
+    ell(specs, hug(P(1, 0, 37.5, 45.8), pose.dir([0, 1, 0.2], true), rw + 1.1), [1.2 * s + 0.4, 1.1 * s + 0.4, 1.1 * s + 0.4], KNIT[0], { fl: VF.SOFTAO });
     for (const sx of [1, -1]) {
-      ell(specs, hug(P(sx, 3.6, 35.2, 45.3), pose.dir([sx * 0.2, 0.3, 1], true), 0.4), [0.9 * s + 0.3, 0.9 * s + 0.3, 0.7 * s + 0.3], 0xe8e4d8, { fl: VF.METAL });
+      ell(specs, hug(P(sx, 3.4, 33.6, 45.6), pose.dir([sx * 0.2, 0.3, 1], true), 0.4), [0.9 * s + 0.3, 0.9 * s + 0.3, 0.7 * s + 0.3], 0xe8e4d8, { fl: VF.METAL });
       const out = pose.dir([sx, 0.15, 0], true);
-      const pts = [P(sx, 13.4, 38.6, 43.2), P(sx, 19.6, 35.6, 36.4), P(sx, 25.2, 32.6, 27.2), P(sx, 25.6, 32.2, 18.4), P(sx, 24.6, 29.6, 15.4)].map((p, i) => (i ? hug(p, out, rw + 0.6) : p));
+      const pts = [P(sx, 11.4, 36.6, 43.6), P(sx, 18.6, 34.4, 37.2), P(sx, 24.6, 32.2, 27.6), P(sx, 25.4, 32, 18.4), P(sx, 24.6, 29.6, 15.4)].map((p, i) => (i ? hug(p, out, rw + 0.6) : p));
       tube(specs, pts, pts.map(() => rw), WIRE.gold, { fl: VF.METAL });
     }
     // ---- the shawl: crocheted shell rows in madder rose and cream, a mustard hem, a fringe

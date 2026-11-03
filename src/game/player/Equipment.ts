@@ -21,12 +21,14 @@ import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { GEAR_VS, GearAnchor, GearFit, GearModelId, GearPiece, DEFAULT_FIT, gearPieces, gearDisplayParts, partsFromSpec, Box } from '../models/props/gear';
 
-export type GearSlot = 'head' | 'body' | 'hands' | 'feet' | 'tool' | 'charm';
+export type GearSlot = 'head' | 'body' | 'hands' | 'feet' | 'tool' | 'charm' | 'turbo' | 'wings' | 'blades';
 export type GearId = GearModelId;
 export type GearRarity = Exclude<Rarity, 'mythic'>;
 type M = Omit<Modifier, 'source'>;
 
-export const GEAR_SLOTS: GearSlot[] = ['head', 'body', 'hands', 'feet', 'tool', 'charm'];
+export const GEAR_SLOTS: GearSlot[] = ['head', 'body', 'hands', 'feet', 'tool', 'charm', 'turbo', 'wings', 'blades'];
+/** the three board mounts (they stack: one of each) */
+export const BOARD_SLOTS: GearSlot[] = ['turbo', 'wings', 'blades'];
 export const SLOT_INFO: Record<GearSlot, { name: string }> = {
   head: { name: 'Head' },
   body: { name: 'Body' },
@@ -34,6 +36,9 @@ export const SLOT_INFO: Record<GearSlot, { name: string }> = {
   feet: { name: 'Feet' },
   tool: { name: 'Grapple' },
   charm: { name: 'Charm' },
+  turbo: { name: 'Board · Turbo' },
+  wings: { name: 'Board · Wings' },
+  blades: { name: 'Board · Blades' },
 };
 
 export interface GearDef {
@@ -75,6 +80,18 @@ export const GEAR: Record<GearId, GearDef> = {
   // ------------------------------------------------------------------ charm
   glassEye: { id: 'glassEye', name: 'Lucky Glass Eye', slot: 'charm', rarity: 'rare', price: 140, desc: 'The first shot after every reload is a guaranteed crit. +10% crit chance, +25% crit damage, +3 Luck.', mods: [{ stat: 'critChance', type: 'flat', value: 0.1 }, { stat: 'critDmg', type: 'flat', value: 0.25 }, { stat: 'luck', type: 'flat', value: 3 }] },
   hourglass: { id: 'hourglass', name: 'Hourglass of Khonsu', slot: 'charm', rarity: 'epic', price: 220, god: 'Khonsu', desc: 'When hurt, time slows to a trickle and you are untouchable for a moment (12 s cooldown). +6% cooldown reduction.', mods: [{ stat: 'cdr', type: 'flat', value: 0.06 }] },
+  // ------------------------------------------------------------------ board: turbo
+  nitroCan: { id: 'nitroCan', name: 'Nitro Can', slot: 'turbo', rarity: 'uncommon', price: 90, desc: 'A brass nitro can on the tail: boost thrust +30%, top boost speed +8%, boost recharge +25%. Spits a flame jet.', mods: [{ stat: 'boostRegen', type: 'pct', value: 0.25 }] },
+  twinTurbo: { id: 'twinTurbo', name: 'Twin-Turbo Cans', slot: 'turbo', rarity: 'rare', price: 140, desc: 'Two iron cans and a pressure gauge: boost thrust +55%, top boost speed +12%, boost recharge +40%.', mods: [{ stat: 'boostRegen', type: 'pct', value: 0.4 }] },
+  sunRocket: { id: 'sunRocket', name: "Ra's Sun-Furnace", slot: 'turbo', rarity: 'legendary', price: 320, god: 'Ra', desc: 'A gold rocket that burns like noon: boost thrust +90%, top boost speed +18%, recharge +60%, and the jet scorches whatever chases you.', lore: 'Do not look directly into the exhaust.', mods: [{ stat: 'boostRegen', type: 'pct', value: 0.6 }] },
+  // ------------------------------------------------------------------ board: wings
+  canvasGlider: { id: 'canvasGlider', name: 'Canvas Glider Wings', slot: 'wings', rarity: 'uncommon', price: 90, desc: 'Wings fold out of the rails in the air: you fall 32% slower and float off every jump. +8% jump.', mods: [{ stat: 'jump', type: 'pct', value: 0.08 }] },
+  vultureWings: { id: 'vultureWings', name: 'Vulture-Bone Wings', slot: 'wings', rarity: 'rare', price: 140, desc: 'Bone fingers and black feathers: falls 45% slower, floatier jumps, +12% jump.', lore: 'The vultures want them back.', mods: [{ stat: 'jump', type: 'pct', value: 0.12 }] },
+  horusWings: { id: 'horusWings', name: 'Wings of Horus', slot: 'wings', rarity: 'epic', price: 220, god: 'Horus', desc: 'Gold and lapis feathers: falls 60% slower, +18% jump, and shots while gliding get +15% crit chance.', mods: [{ stat: 'jump', type: 'pct', value: 0.18 }] },
+  // ------------------------------------------------------------------ board: blades
+  rustyRails: { id: 'rustyRails', name: 'Rusty Saw Rails', slot: 'blades', rarity: 'common', price: 60, desc: 'Saw blades bolted to the rails: riding through enemies slices them (speed-scaled damage, bleed). Drifting cuts 30% deeper.' },
+  serratedRails: { id: 'serratedRails', name: 'Serrated Steel Rails', slot: 'blades', rarity: 'rare', price: 140, desc: 'Razor-serrated rails: slicing hits much harder, bleeds more and can take legs off. Drifting cuts 60% deeper.' },
+  khopeshEdges: { id: 'khopeshEdges', name: 'Khopesh Edges', slot: 'blades', rarity: 'epic', price: 220, god: 'Sekhmet', desc: 'Sickle-sword rails: brutal slices and bleed, drifting cuts twice as deep, and drift kills refill 8% boost.' },
   deadMansHand: { id: 'deadMansHand', name: "Dead Man's Hand", slot: 'charm', rarity: 'legendary', price: 320, god: 'Anubis', desc: 'Cheat death once per run: a fatal blow leaves you at 1 HP, untouchable for 2.5 s, and blasts everything away. +4% crit chance.', lore: 'Aces and eights. Wild Bill would have wanted it this way.', mods: [{ stat: 'critChance', type: 'flat', value: 0.04 }] },
 };
 
@@ -124,7 +141,24 @@ function vbox(a: ArrayLike<number> | null, keep: (x: number, y: number, z: numbe
  * Everything comes from the rig's own sockets and part meshes, so a redesigned
  * hero still wears his gear properly.
  */
-export function measureRig(rig: RigInstance): { fit: GearFit; frames: Partial<Record<GearAnchor, Frame>> } {
+/** the sandboard's centre and size from its own mesh (board mods' frame) */
+function measureBoard(board: THREE.Object3D | null | undefined, fit: GearFit, frames: Partial<Record<GearAnchor, Frame>>) {
+  if (!board) return;
+  const geo = (board as THREE.Mesh).geometry as THREE.BufferGeometry | undefined;
+  let bb: THREE.Box3;
+  if (geo) {
+    geo.computeBoundingBox();
+    bb = geo.boundingBox!.clone();
+  } else {
+    const inv = new THREE.Matrix4().copy(board.matrixWorld).invert();
+    bb = new THREE.Box3().setFromObject(board).applyMatrix4(inv);
+  }
+  const c = bb.getCenter(new THREE.Vector3()), sz = bb.getSize(new THREE.Vector3());
+  fit.board = { hw: sz.x / 2 / VS, hl: sz.z / 2 / VS, top: sz.y / 2 / VS, bottom: -sz.y / 2 / VS };
+  frames.board = { node: board, pos: c };
+}
+
+export function measureRig(rig: RigInstance, board?: THREE.Object3D | null): { fit: GearFit; frames: Partial<Record<GearAnchor, Frame>> } {
   const fit: GearFit = JSON.parse(JSON.stringify(DEFAULT_FIT));
   fit.parts = partsFromSpec(rig.geo.spec);
   const frames: Partial<Record<GearAnchor, Frame>> = {};
@@ -212,6 +246,7 @@ export function measureRig(rig: RigInstance): { fit: GearFit; frames: Partial<Re
     const front = vbox(tv, (x, y) => Math.abs(y - ny) < 0.04 && Math.abs(x - nx) < 0.05);
     frames.neck = { node: torso, pos: new THREE.Vector3(nx, ny, (front.n ? front.z1 : all.z1) + 0.005) };
   }
+  measureBoard(board, fit, frames);
   return { fit, frames };
 }
 
@@ -276,6 +311,8 @@ export function buildGearDisplay(id: GearId, opaque: THREE.Material, glass: THRE
 // ===================================================================== worn visuals
 interface Joint {
   kind: GearPiece['joint'];
+  /** +1 left / −1 right (wings) */
+  side: number;
   node: THREE.Group;
   rest: THREE.Vector3;
   a: THREE.Vector2;
@@ -297,8 +334,8 @@ export class GearRig {
   fit: GearFit;
   frames: Partial<Record<GearAnchor, Frame>>;
   private worn = new Map<GearSlot, Worn>();
-  constructor(private rig: RigInstance, private scene: THREE.Object3D, private opaque: THREE.Material, private glass: THREE.Material = gearGlassMaterial()) {
-    const m = measureRig(rig);
+  constructor(private rig: RigInstance, private scene: THREE.Object3D, private opaque: THREE.Material, private glass: THREE.Material = gearGlassMaterial(), board?: THREE.Object3D | null) {
+    const m = measureRig(rig, board);
     this.fit = m.fit;
     this.frames = m.frames;
   }
@@ -341,7 +378,12 @@ export class GearRig {
         w.roots.push(holder);
         if (key) groups.set(gk, holder);
         if (p.joint) {
-          const j: Joint = { kind: p.joint, node: holder, rest: holder.position.clone(), a: new THREE.Vector2(), w: new THREE.Vector2(), prev: null, pv: new THREE.Vector3(), t: Math.random() * 9 };
+          const j: Joint = { kind: p.joint, side: /_r$/.test(p.name) ? -1 : 1, node: holder, rest: holder.position.clone(), a: new THREE.Vector2(), w: new THREE.Vector2(), prev: null, pv: new THREE.Vector3(), t: Math.random() * 9 };
+          if (p.joint === 'wing') {
+            holder.rotation.order = 'YXZ';
+            holder.rotation.set(0, j.side * Math.PI / 2, 0);
+          }
+          if (p.joint === 'jet') holder.visible = false;
           w.joints.push(j);
           if (p.joint === 'hook') {
             const world = new THREE.Group();
@@ -369,8 +411,13 @@ export class GearRig {
     this.worn.delete(slot);
   }
 
-  /** animate joints: telescoping lenses, spinning rowels, swinging charms, the flying hook */
-  update(dt: number, s: { aiming: boolean; speed: number; grapple: { active: boolean; x: number; y: number; z: number }; from: THREE.Vector3 }) {
+  /** the joint holders of a worn slot (e.g. the turbo's jet nozzles, for the flame particles) */
+  jointNodes(slot: GearSlot, kind: GearPiece['joint']) {
+    return this.worn.get(slot)?.joints.filter((j) => j.kind === kind).map((j) => j.node) ?? [];
+  }
+
+  /** animate joints: telescoping lenses, spinning rowels, swinging charms, the flying hook, folding wings, the jet flame */
+  update(dt: number, s: { aiming: boolean; speed: number; grapple: { active: boolean; x: number; y: number; z: number }; from: THREE.Vector3; board?: { grounded: boolean; airTime: number; boosting: boolean } }) {
     if (dt <= 0) return;
     for (const w of this.worn.values()) {
       for (const j of w.joints) {
@@ -383,6 +430,20 @@ export class GearRig {
         } else if (j.kind === 'spin') {
           j.node.rotation.x -= dt * (1.5 + s.speed * 2.2);
         } else if (j.kind === 'swing') this.swing(j, dt);
+        else if (j.kind === 'wing') {
+          // fold out once properly airborne, snap shut on landing; a little flutter while gliding
+          const b = s.board;
+          const want = b && !b.grounded && b.airTime > 0.12 ? 1 : 0;
+          j.a.x += (want - j.a.x) * Math.min(1, dt * (want ? 5 : 9));
+          const k = j.a.x * j.a.x * (3 - 2 * j.a.x);
+          j.node.rotation.set(k * 0.05 * Math.sin(j.t * 13 + j.side), j.side * (Math.PI / 2 * (1 - k) + 0.25 * k), j.side * 0.14 * k);
+        } else if (j.kind === 'jet') {
+          const on = !!s.board?.boosting;
+          j.a.x += ((on ? 1 : 0) - j.a.x) * Math.min(1, dt * (on ? 14 : 8));
+          j.node.visible = j.a.x > 0.03;
+          const f = 0.8 + Math.random() * 0.45;
+          j.node.scale.set(j.a.x * (0.9 + Math.random() * 0.2), j.a.x * (0.9 + Math.random() * 0.2), j.a.x * f);
+        }
       }
       if (w.hook) {
         const g = s.grapple;
@@ -478,6 +539,8 @@ interface GearCtx {
   filter(fn: (amount: number, source: string, tick: boolean) => number): void;
   /** toggled stat modifiers under a key (null removes) */
   mod(key: string, mods: M[] | null): void;
+  /** run when the piece comes off */
+  cleanup(fn: () => void): void;
 }
 
 interface Active {
@@ -494,7 +557,7 @@ const any = (e: EnemyLike) => e as any;
 const statusApply = (e: EnemyLike, id: string, stacks: number, dur: number, power = 0, cap = 99) => any(e).status?.apply(id, stacks, dur, power, cap, any(e).def?.statusRes ?? {});
 
 export class Equipment {
-  slots: Record<GearSlot, GearId | null> = { head: null, body: null, hands: null, feet: null, tool: null, charm: null };
+  slots: Record<GearSlot, GearId | null> = { head: null, body: null, hands: null, feet: null, tool: null, charm: null, turbo: null, wings: null, blades: null };
   /** (slot, new piece or null, previous piece or null) */
   onChange?: (slot: GearSlot, id: GearId | null, prev: GearId | null) => void;
   visuals: GearRig | null = null;
@@ -515,7 +578,7 @@ export class Equipment {
     this.myApply = (a: number, s: string, tick: boolean) => this.applyDamage(a, s, tick);
     pl.takeHit = this.myTakeHit;
     pl.applyDamage = this.myApply;
-    if (o.visuals !== false) this.visuals = new GearRig(player.rig, ctx.scene, player.rig.material);
+    if (o.visuals !== false) this.visuals = new GearRig(player.rig, ctx.scene, player.rig.material, gearGlassMaterial(), (player as any).boardMesh ?? null);
   }
 
   has(id: GearId) {
@@ -571,7 +634,7 @@ export class Equipment {
     this.t += dt;
     for (const a of this.active.values()) for (const f of a.ticks) f(dt);
     const pl = this.player;
-    this.visuals?.update(dt, { aiming: pl.aiming, speed: pl.speed, grapple: pl.board.grapple, from: pl.muzzleWorld });
+    this.visuals?.update(dt, { aiming: pl.aiming, speed: pl.speed, grapple: pl.board.grapple, from: pl.muzzleWorld, board: pl.board });
   }
 
   dispose() {
@@ -634,6 +697,7 @@ export class Equipment {
         a.modKeys.add(src);
         if (mods) stats.add(mods.map((m) => ({ ...m, source: src })));
       },
+      cleanup: (fn) => a.offs.push(fn),
     };
     FX[id]?.(g);
   }
@@ -668,7 +732,141 @@ function cooldowns() {
   };
 }
 
+
+// ------------------------------------------------------------------ board mods
+const TURBO = { nitroCan: { thrust: 0.3, cap: 1.08, tier: 1 }, twinTurbo: { thrust: 0.55, cap: 1.12, tier: 2 }, sunRocket: { thrust: 0.9, cap: 1.18, tier: 3 } } as const;
+function turboFx(g: GearCtx, id: keyof typeof TURBO) {
+  const T = TURBO[id];
+  const ctx = g.ctx;
+  // raise the boosting top speed on whatever tuning object the board uses now (re-applied if it is rebuilt)
+  const KEY = '__gearBoostCap';
+  const apply = () => {
+    const t = g.pl.board.t as any;
+    if (!t || typeof t.boostCap !== 'number' || t[KEY] === T.cap) return;
+    if (t[KEY]) t.boostCap /= t[KEY];
+    t.boostCap *= T.cap;
+    t[KEY] = T.cap;
+  };
+  apply();
+  g.cleanup(() => {
+    const t = g.pl.board.t as any;
+    if (t?.[KEY]) {
+      t.boostCap /= t[KEY];
+      delete t[KEY];
+    }
+  });
+  let trail = 0, scorch = 0;
+  const wp = new THREE.Vector3();
+  g.tick((dt) => {
+    apply();
+    const pl = g.pl, b = pl.board;
+    if (!b.boosting || !pl.alive) return;
+    const f = b.forward;
+    if (b.grounded) {
+      const thrust = ((b.t as any)?.boostAccel ?? 9.5) * T.thrust;
+      b.vel.x += f.x * thrust * dt;
+      b.vel.z += f.z * thrust * dt;
+    }
+    const v = b.vel;
+    trail -= dt;
+    for (const n of g.eq.visuals?.jointNodes('turbo', 'jet') ?? []) {
+      n.getWorldPosition(wp);
+      // the jet: pixel flames blasting back, hot sparks, a shimmer of heat above
+      ctx.particles.emit({ pos: wp, count: 2 + T.tier, vel: { x: v.x * 0.8 - f.x * (7 + T.tier * 2), y: 0.4, z: v.z * 0.8 - f.z * (7 + T.tier * 2) }, spread: 1.2, life: [0.12, 0.26], size: [0.22 + T.tier * 0.06, 0.05], sprite: ['flame0', 'flame1', 'flame2', 'flame3'], animate: true, additive: true, color: 0xffffff, drag: 3 });
+      if (Math.random() < dt * 25) ctx.particles.emit({ pos: wp, count: 1, vel: { x: v.x * 0.6 - f.x * 4, y: 1.5, z: v.z * 0.6 - f.z * 4 }, spread: 2, life: [0.2, 0.4], size: [0.05, 0.02], sprite: 'spark', additive: true, color: [0xfff0b0, 0xff9a3a], gravity: 6 });
+      if (Math.random() < dt * 14) ctx.particles.emit({ pos: wp, count: 1, vel: { x: v.x * 0.5 - f.x * 2, y: 0.9, z: v.z * 0.5 - f.z * 2 }, spread: 0.4, life: [0.4, 0.7], size: [0.3, 0.9], sprite: ['puff0', 'puff1'], color: 0xfff6e8, alpha: 0.12, drag: 2, rotSpeed: 1 });
+      // a pixel-flame trail left burning on the sand
+      if (trail <= 0 && b.grounded) ctx.particles.emit({ pos: { x: wp.x - f.x * 0.3, y: ctx.world.groundAt(wp.x, wp.z) + 0.08, z: wp.z - f.z * 0.3 }, count: 1, life: [0.45, 0.8], size: [0.26, 0.08], sprite: ['flame0', 'flame1', 'flame2', 'flame3'], animate: true, additive: true, color: 0xffffff, gravity: -1.5, jitter: 0.1 });
+    }
+    if (trail <= 0) trail = 0.045;
+    // Ra's furnace scorches whatever is on your tail
+    if (T.tier === 3 && (scorch -= dt) <= 0) {
+      scorch = 0.3;
+      const back = new THREE.Vector3(pl.pos.x - f.x * 2.2, pl.pos.y, pl.pos.z - f.z * 2.2);
+      ctx.enemies.inRadius(back, 2.2, (e) => ctx.enemies.damage(e, { base: 6, kind: 'magic', source: 'burn', canCrit: false, status: [{ id: 'burn', stacks: 1, dur: 3, power: 2 }] }));
+    }
+  });
+}
+
+const WINGS = { canvasGlider: { lift: 0.32, tier: 1 }, vultureWings: { lift: 0.45, tier: 2 }, horusWings: { lift: 0.6, tier: 3 } } as const;
+function wingsFx(g: GearCtx, id: keyof typeof WINGS) {
+  const W = WINGS[id];
+  const ctx = g.ctx;
+  let glide = false;
+  const wp = new THREE.Vector3();
+  g.tick((dt) => {
+    const pl = g.pl, b = pl.board;
+    const open = !b.grounded && b.airTime > 0.12 && pl.alive;
+    if (W.tier === 3 && open !== glide) g.mod('glide', open ? [{ stat: 'critChance', type: 'flat', value: 0.15 }] : null);
+    glide = open;
+    if (!open) return;
+    const G = (b.t as any)?.gravity ?? 22;
+    // the wings bite the air: slower falls, floatier rises
+    b.vel.y += G * W.lift * (b.vel.y < 0 ? 1 : 0.35) * dt;
+    if (Math.random() < dt * 6)
+      for (const n of g.eq.visuals?.jointNodes('wings', 'wing') ?? []) {
+        n.getWorldPosition(wp);
+        ctx.particles.emit({ pos: wp, count: 1, vel: { x: -b.vel.x * 0.2, y: 0, z: -b.vel.z * 0.2 }, spread: 0.3, life: [0.3, 0.5], size: [0.03, 0.4], sprite: 'speedline', color: 0xffffff, alpha: 0.5, stretch: 0.03 });
+      }
+  });
+  let was = false;
+  g.tick(() => {
+    const open = !g.pl.board.grounded && g.pl.board.airTime > 0.12;
+    if (open && !was) ctx.sfx('paper_flutter', g.pl.pos, 0.5, 0.8);
+    if (!open && was) ctx.sfx('whoosh', g.pl.pos, 0.3, 1.4);
+    was = open;
+  });
+}
+
+const BLADES = { rustyRails: { base: 6, per: 0.7, bleed: 1, drift: 1.3, tier: 1 }, serratedRails: { base: 10, per: 1.0, bleed: 2, drift: 1.6, tier: 2 }, khopeshEdges: { base: 14, per: 1.3, bleed: 3, drift: 2, tier: 3 } } as const;
+const LIMBS = ['shin_l', 'shin_r', 'thigh_l', 'thigh_r', 'leg_l1', 'leg_r1', 'leg_fl', 'leg_fr', 'leg_l2', 'leg_r2'];
+function bladesFx(g: GearCtx, id: keyof typeof BLADES) {
+  const B = BLADES[id];
+  const ctx = g.ctx;
+  const ready = cooldowns();
+  let lastCut = -9;
+  g.tick(() => {
+    const pl = g.pl, b = pl.board;
+    const sp = pl.speed;
+    if (sp < 4 || !pl.alive || (!b.grounded && b.airTime > 0.35)) return;
+    const f = b.forward;
+    const half = 0.75;
+    ctx.enemies.inRadius(pl.pos, half + 1.2, (e) => {
+      if (e.flying) return;
+      // distance from the enemy to the board's length (tail → nose) in the ground plane
+      const dx = e.pos.x - pl.pos.x, dz = e.pos.z - pl.pos.z;
+      const along = THREE.MathUtils.clamp(dx * f.x + dz * f.z, -half, half);
+      const ox = dx - f.x * along, oz = dz - f.z * along;
+      const d = Math.hypot(ox, oz);
+      if (d > 0.45 + e.radius * 0.7 || Math.abs(e.pos.y - pl.pos.y) > 1.6 || !ready(e.id, ctx.run.time, 0.45)) return;
+      const side = new THREE.Vector3(ox, 0, oz).normalize();
+      const limbs = LIMBS.filter((n) => (e as any).part?.(n) >= 0);
+      const tag = limbs.length && Math.random() < 0.5 + B.tier * 0.15 ? limbs[Math.floor(Math.random() * limbs.length)] : 'blade';
+      const at = new THREE.Vector3(pl.pos.x + f.x * along + side.x * 0.3, pl.pos.y + 0.25, pl.pos.z + f.z * along + side.z * 0.3);
+      ctx.enemies.damage(e, { base: (B.base + B.per * sp) * (b.drifting ? B.drift : 1), kind: 'phys', source: 'board', knock: 3, dirX: side.x, dirZ: side.z, canCrit: true, tags: [tag, 'blade'], status: [{ id: 'bleed', stacks: B.bleed, dur: 3.5 }] }, at, side);
+      ctx.particles.emit({ pos: at, count: 8 + B.tier * 3, vel: { x: -f.x * sp * 0.3, y: 1.5, z: -f.z * sp * 0.3 }, spread: 4, life: [0.12, 0.3], size: [0.08, 0.02], sprite: ['spark', 'star4'], additive: true, color: [0xffffff, 0xffe0a0, 0xffb060], drag: 2, stretch: 0.02 });
+      ctx.sfx('dagger_stab', at, 0.7, 1.25 + Math.random() * 0.15);
+      ctx.sfx('hit_armor', at, 0.35, 1.8);
+      lastCut = ctx.run.time;
+    });
+  });
+  if (B.tier === 3)
+    g.on('enemyKilled', () => {
+      const b = g.pl.board;
+      if (b.drifting && ctx.run.time - lastCut < 0.15) b.boostMeter = Math.min(1, b.boostMeter + 0.08);
+    });
+}
+
 const FX: Partial<Record<GearId, (g: GearCtx) => void>> = {
+  nitroCan: (g) => turboFx(g, 'nitroCan'),
+  twinTurbo: (g) => turboFx(g, 'twinTurbo'),
+  sunRocket: (g) => turboFx(g, 'sunRocket'),
+  canvasGlider: (g) => wingsFx(g, 'canvasGlider'),
+  vultureWings: (g) => wingsFx(g, 'vultureWings'),
+  horusWings: (g) => wingsFx(g, 'horusWings'),
+  rustyRails: (g) => bladesFx(g, 'rustyRails'),
+  serratedRails: (g) => bladesFx(g, 'serratedRails'),
+  khopeshEdges: (g) => bladesFx(g, 'khopeshEdges'),
   sunGoggles(g) {
     g.filter((a, src) => (src === 'storm' ? a * 0.25 : a));
     let on = false;
