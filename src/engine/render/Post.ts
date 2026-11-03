@@ -134,15 +134,19 @@ export class OutlinePass extends Pass {
           float d0 = ld(vUv);
           float px = uThick / uRes.x, py = uThick / uRes.y;
           float dm = 0.0;
-          float dl = ld(vUv + vec2(-px, 0.0)), dr = ld(vUv + vec2(px, 0.0));
-          float du = ld(vUv + vec2(0.0, py)), dd = ld(vUv + vec2(0.0, -py));
+          vec2 ol = vUv + vec2(-px, 0.0), or_ = vUv + vec2(px, 0.0), ou = vUv + vec2(0.0, py), od = vUv + vec2(0.0, -py);
+          float dl = ld(ol), dr = ld(or_), du = ld(ou), dd = ld(od);
+          // terrain writes alpha 0: a jump from sand to sand (a dune step) is not a silhouette
+          float t0 = 1.0 - step(0.5, c.a);
+          float tl = 1.0 - step(0.5, texture2D(tDiffuse, ol).a), tr = 1.0 - step(0.5, texture2D(tDiffuse, or_).a);
+          float tu = 1.0 - step(0.5, texture2D(tDiffuse, ou).a), td = 1.0 - step(0.5, texture2D(tDiffuse, od).a);
           // only the nearer side of a depth jump gets ink (lines hug the foreground)
-          dm = max(max(dl - d0, dr - d0), max(du - d0, dd - d0));
+          dm = max(max((dl - d0) * (1.0 - t0 * tl), (dr - d0) * (1.0 - t0 * tr)), max((du - d0) * (1.0 - t0 * tu), (dd - d0) * (1.0 - t0 * td)));
           // silhouettes jump metres; sand steps at grazing angles only jump a little
           float thr = 0.45 + d0 * 0.1;
           float e = smoothstep(thr, thr * 1.6, dm);
           e *= 1.0 - smoothstep(90.0, 220.0, d0);
-          gl_FragColor = vec4(mix(c.rgb, uColor * c.rgb * 0.25 + uColor, e * uStrength), c.a);
+          gl_FragColor = vec4(mix(c.rgb, uColor * c.rgb * 0.25 + uColor, e * uStrength), 1.0);
         }`,
       depthTest: false,
       depthWrite: false,

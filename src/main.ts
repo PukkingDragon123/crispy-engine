@@ -62,10 +62,12 @@ async function main() {
         look: d.look,
         gun: d.gun,
       }),
-      0.6
+      0.6,
+      // the menu zooms up into a blinding sky; the intro comes back down out of it
+      intro ? '#fff4e0' : '#000'
     );
   };
-  nav.menu = () => void engine.setScene(new MenuScene(engine, () => nav.ride(!loadSave().seenIntro)), 0.6);
+  nav.menu = () => void engine.setScene(new MenuScene(engine, () => nav.ride(true)), 0.6);
   nav.hub = () => void engine.setScene(new HubScene(engine, () => nav.ride(false), () => nav.menu()), 0.6);
   if (debug === 'run') {
     music.setMood('explore');

@@ -151,10 +151,15 @@ export function makeTerrainMaterial(wind: { x: number; z: number }) {
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
         totalEmissiveRadiance += vec3(1.0, 0.92, 0.75) * sparkle * 0.45;`
+      )
+      .replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+        gl_FragColor.a = 0.0; // marks terrain for the ink pass (sand-on-sand steps get no outline)`
       );
     celify(sh);
   };
-  m.customProgramCacheKey = () => 'terrain-v4cel';
+  m.customProgramCacheKey = () => 'terrain-v5ink';
   (m as any).userData = { uWind, uMarks, uMarkArea, uMarkClock };
   return m;
 }

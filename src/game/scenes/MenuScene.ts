@@ -264,13 +264,21 @@ export class MenuScene implements GameScene {
           this.pinch.setExpression('surprised');
           emote(this.particles, this.pinch.root.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 0.4, 0)), 'exclaim');
         }
-        // dolly past the sign toward the sunset
+        // tilt up past the sign and zoom into the blinding sky
         const from = this.camera.position.clone();
-        eng.tweens.run(1.6, (k) => {
-          this.camera.position.lerpVectors(from, new THREE.Vector3(-2, 2.8, -30), k);
-          this.camera.lookAt(-6, 3, -120);
-        }, Ease.inQuad, { real: true });
-        eng.tweens.after(1.0, () => this.onRide(), true);
+        const dir0 = this.camera.getWorldDirection(new THREE.Vector3());
+        const sky = new THREE.Vector3(dir0.x * 0.35, 1, dir0.z * 0.35).normalize();
+        const fov0 = this.camera.fov;
+        eng.tweens.run(1.5, (k) => {
+          const e = Ease.inOutCubic(k);
+          this.camera.position.lerpVectors(from, from.clone().add(new THREE.Vector3(0, 3.5, 0)).addScaledVector(dir0, 6), e);
+          const d = dir0.clone().lerp(sky, e).normalize();
+          this.camera.lookAt(this.camera.position.clone().add(d));
+          this.camera.fov = fov0 + (14 - fov0) * Ease.inCubic(k);
+          this.camera.updateProjectionMatrix();
+        }, Ease.linear, { real: true });
+        eng.audio.play('whoosh_big', { volume: 0.7, pitch: 0.7 });
+        eng.tweens.after(0.95, () => this.onRide(), true);
         break;
       case 'SETTINGS':
         this.openSettings();

@@ -306,7 +306,12 @@ export class RunScene implements GameScene {
     e.input.setWantLock(true);
     this.ready = true;
     if (this.opts.intro) {
-      void playIntro({ engine: e, cam: this.camRig, player: this.player, fx: this.fx, particles: this.particles, world: this.world, scene: this.scene, cutIn: (t, c, x) => this.hud3d.cutIn(t, c, x) }).then(() => this.director.start(this.opts.startWave ?? 1));
+      // the HUD stays hidden for the whole cinematic
+      this.hud.visible = false;
+      void playIntro({ engine: e, cam: this.camRig, player: this.player, fx: this.fx, particles: this.particles, world: this.world, scene: this.scene, cutIn: (t, c, x) => this.hud3d.cutIn(t, c, x) }).then(() => {
+        this.hud.visible = true;
+        this.director.start(this.opts.startWave ?? 1);
+      });
     } else this.director.start(this.opts.startWave ?? 1);
   }
 

@@ -116,8 +116,8 @@ export class Engine {
     this.resize();
   }
 
-  async setScene(s: GameScene, fade = 0.5) {
-    if (fade > 0 && this.current) await this.fadeOut(fade);
+  async setScene(s: GameScene, fade = 0.5, color = '#000') {
+    if (fade > 0 && this.current) await this.fadeOut(fade, color);
     this.current?.exit?.();
     this.tweens.clear();
     this.current = s;
