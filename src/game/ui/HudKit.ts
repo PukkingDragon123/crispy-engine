@@ -128,9 +128,7 @@ export class JobQueue {
     const j = this.jobs.shift();
     if (!j) return;
     try {
-      const T0 = performance.now();
       j();
-      console.log('[TMPPERF] job', Math.round(performance.now() - T0));
     } catch (e) {
       console.warn('[hud] build job failed', e);
     }

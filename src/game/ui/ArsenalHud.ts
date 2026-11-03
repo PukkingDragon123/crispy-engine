@@ -223,7 +223,6 @@ export class ArsenalHud {
   // drum
   private drumGeo: THREE.BufferGeometry | null = null;
   private drum: THREE.Mesh | null = null;
-  private drumRot = 0;
   private drumSpin = 0;
   private drumOut = 0;
   // strip
@@ -346,17 +345,16 @@ export class ArsenalHud {
       const on = kind === 'drum' && !!w;
       this.drum.visible = on;
       if (on && w) {
-        if (this.lastAmmo >= 0 && w.ammo < this.lastAmmo) {
-          this.drumRot -= (TAU / Math.max(10, w.mag)) * (this.lastAmmo - w.ammo);
-          this.drumSpin = 1;
-        }
+        // the housing never turns (the rotor inside does): each round kicks it instead
+        if (this.lastAmmo >= 0 && w.ammo < this.lastAmmo) this.drumSpin = 1;
         this.lastAmmo = w.ammo;
         this.drumSpin = Math.max(0, this.drumSpin - dt * 6);
         this.drumOut += ((w.reloading ? 1 : 0) - this.drumOut) * Math.min(1, dt * 7);
         const out = this.drumOut;
         this.drum.position.set((A.x + out * 10 * k) * s, -(A.y + out * 26 * k + swapDrop + Math.sin(this.t * 1.6) * 1.2) * s, 30);
         this.drum.scale.setScalar(s * k * 0.95);
-        this.drum.rotation.set(-0.2 + Math.sin(this.t * 0.9) * 0.04, 0.42 + Math.sin(this.t * 0.7) * 0.06, this.drumRot + out * 2.4 + Math.sin(this.drumSpin * 9) * 0.02);
+        const kick = Math.sin(this.drumSpin * 14) * this.drumSpin;
+        this.drum.rotation.set(-0.2 + Math.sin(this.t * 0.9) * 0.04 - kick * 0.05, 0.42 + Math.sin(this.t * 0.7) * 0.06, out * 2.4 + kick * 0.06);
       }
     }
     // ---------------------------------------------------- carried strip

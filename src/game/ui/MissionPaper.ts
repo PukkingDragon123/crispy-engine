@@ -129,8 +129,8 @@ void main(){
     vec2 tq = q / (hb * 2.0) + 0.5;
     if (tq.x > 0.0 && tq.x < 1.0 && tq.y > 0.0 && tq.y < 1.0) word = texture2D(stampMap, tq).a;
     float m = max(max(smoothstep(0.012, 0.0, frame), smoothstep(0.012, 0.0, frame2)), word);
-    float grain = smoothstep(0.22, 0.5, fbm(uv * 55.0 + 4.0)) * (0.55 + 0.45 * smoothstep(0.3, 0.7, fbm(uv * 9.0)));
-    col = mix(col, vec3(0.70, 0.09, 0.06), m * grain * uStamp.y * smoothstep(0.75, 1.0, sl));
+    float grain = smoothstep(0.14, 0.36, fbm(uv * 55.0 + 4.0)) * (0.72 + 0.28 * smoothstep(0.3, 0.7, fbm(uv * 9.0)));
+    col = mix(col, vec3(0.74, 0.07, 0.04), m * grain * uStamp.y * smoothstep(0.75, 1.0, sl));
   }
   // nail puncture: crushed fibres round the hole
   col = mix(col, vec3(0.30, 0.18, 0.08), smoothstep(0.05, 0.02, length((uv - uHole) * A)) * 0.6);
@@ -283,6 +283,10 @@ function stampTexture() {
   c2.textAlign = 'center';
   c2.textBaseline = 'middle';
   c2.fillStyle = '#b01810';
+  c2.strokeStyle = '#b01810';
+  c2.lineWidth = 5;
+  c2.lineJoin = 'round';
+  c2.strokeText('DONE', w / 2, cv.height / 2 + 4);
   c2.fillText('DONE', w / 2, cv.height / 2 + 4);
   stampAsp = w / cv.height;
   stampTex = new THREE.CanvasTexture(cv);
@@ -835,7 +839,7 @@ export class MissionPaper {
       n.state = 'stamp';
       n.simT = 0;
       const u = n.mat.uniforms;
-      u.uStampXf.value.set(0.6, 0.4, -0.2 - Math.random() * 0.12, Math.min(0.5, 38 / n.h));
+      u.uStampXf.value.set(0.6, 0.38, -0.2 - Math.random() * 0.12, Math.min(0.56, 44 / n.h));
       if (n.mat.uniforms.uCheck.value.z <= 0 && n.mat.uniforms.uStroke.value.x > 0) {
         n.strokeT = 0;
         n.checkT = 0;
