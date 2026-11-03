@@ -1,180 +1,156 @@
-// Canvas painters for physical cards / posters (upgrade cards, wanted posters,
-// shop tags). Aged parchment, rarity frames, big pixel icons, western type.
+// Typography for the 3D upgrade cards — the only thing drawn in 2D. Alagard
+// text on transparent canvases, each sized to one sculpted plaque of the card
+// frame (props/tarot.ts skillFrame) and laid onto it in 3D (SkillCards.ts).
 import * as THREE from 'three';
-import { atlas } from '../fx/PixelArt';
 import { RARITY, Offer } from '../run/Upgrades';
 import { fmtStat, DERIVED_INFO, CORE_INFO, StatId } from '../combat/Stats';
-import { RNG } from '../../engine/math/rand';
+import { SKILL_CARD } from '../models/props/tarot';
 
-export function parchment(c: CanvasRenderingContext2D, w: number, h: number, seed = 1, base = '#e6cf9f', dark = '#b98f55') {
-  const r = new RNG(seed);
-  c.fillStyle = base;
-  c.fillRect(0, 0, w, h);
-  // blotches
-  for (let i = 0; i < 90; i++) {
-    c.fillStyle = `rgba(150,105,55,${r.range(0.03, 0.09)})`;
-    const s = r.range(6, 40);
-    c.fillRect(Math.floor(r.range(0, w)), Math.floor(r.range(0, h)), s, s * r.range(0.4, 1));
-  }
-  // fibers / speckles (pixel)
-  for (let i = 0; i < 900; i++) {
-    c.fillStyle = r.chance(0.5) ? 'rgba(90,60,30,0.18)' : 'rgba(255,245,215,0.25)';
-    c.fillRect(Math.floor(r.range(0, w)), Math.floor(r.range(0, h)), 2, 2);
-  }
-  // burnt edges
-  const g = c.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.75);
-  g.addColorStop(0, 'rgba(0,0,0,0)');
-  g.addColorStop(1, dark + 'cc');
-  c.fillStyle = g;
-  c.fillRect(0, 0, w, h);
+/** canvas pixels per card voxel (1 cm) */
+export const TEXT_PPV = 10;
+const INK = '#2a170c';
+const INK_SOFT = '#6a4626';
+const GAIN = '#2c6410';
+
+type Rect = { x0: number; y0: number; x1: number; y1: number };
+
+function surface(r: Rect) {
+  const cv = document.createElement('canvas');
+  cv.width = (r.x1 - r.x0 + 1) * TEXT_PPV;
+  cv.height = (r.y1 - r.y0 + 1) * TEXT_PPV;
+  const c = cv.getContext('2d')!;
+  c.textBaseline = 'alphabetic';
+  return { cv, c };
 }
 
-export function drawSprite(c: CanvasRenderingContext2D, name: string, x: number, y: number, scale: number) {
-  const f = atlas().get(name);
-  const img = atlas().canvas;
-  c.imageSmoothingEnabled = false;
-  const sx = Math.round(f.u0 * img.width - 0.5), sy = Math.round((1 - f.v1) * img.height - 0.5);
-  c.drawImage(img, sx, sy, f.w, f.h, Math.round(x - (f.w * scale) / 2), Math.round(y - (f.h * scale) / 2), f.w * scale, f.h * scale);
+const font = (px: number) => `${Math.round(px)}px Alagard`;
+
+/** cap height as a fraction of the font size (Alagard) */
+function capOf(c: CanvasRenderingContext2D) {
+  c.font = font(100);
+  const m = c.measureText('HMX');
+  return (m.actualBoundingBoxAscent || 70) / 100;
 }
 
-export function wrapText(c: CanvasRenderingContext2D, text: string, x: number, y: number, maxW: number, lh: number, align: CanvasTextAlign = 'center') {
-  const words = text.split(' ');
+function wrap(c: CanvasRenderingContext2D, text: string, maxW: number) {
+  const out: string[] = [];
   let line = '';
-  let yy = y;
-  c.textAlign = align;
-  for (const w of words) {
-    const test = line ? line + ' ' + w : w;
-    if (c.measureText(test).width > maxW && line) {
-      c.fillText(line, x, yy);
+  for (const w of text.split(/\s+/)) {
+    const t = line ? line + ' ' + w : w;
+    if (line && c.measureText(t).width > maxW) {
+      out.push(line);
       line = w;
-      yy += lh;
-    } else line = test;
+    } else line = t;
   }
-  if (line) c.fillText(line, x, yy);
-  return yy + lh;
+  if (line) out.push(line);
+  return out;
+}
+
+/** engraved ink: a pale lip under the stroke, then the ink */
+function engrave(c: CanvasRenderingContext2D, text: string, x: number, y: number, color = INK, lip = 0.5) {
+  c.fillStyle = `rgba(255,246,222,${lip})`;
+  c.fillText(text, x, y + Math.max(1, TEXT_PPV * 0.12));
+  c.fillStyle = color;
+  c.fillText(text, x, y);
+}
+
+/** one centred line fitted into the canvas (cap height = capFrac of the height) */
+function line(cv: HTMLCanvasElement, c: CanvasRenderingContext2D, text: string, capFrac: number, color = INK) {
+  const cap = capOf(c);
+  let px = (cv.height * capFrac) / cap;
+  c.font = font(px);
+  const w = c.measureText(text).width;
+  if (w > cv.width * 0.94) {
+    px *= (cv.width * 0.94) / w;
+    c.font = font(px);
+  }
+  c.textAlign = 'center';
+  engrave(c, text, cv.width / 2, cv.height / 2 + (px * cap) / 2, color);
 }
 
 const CAT_LABEL: Record<string, string> = { gun: 'IRON', insect: 'BROOD', passive: 'GRIT', gear: 'GEAR', relic: 'RELIC', evolution: 'EVOLUTION' };
 
-export function paintCardFront(o: Offer, w = 384, h = 576) {
-  const cv = document.createElement('canvas');
-  cv.width = w;
-  cv.height = h;
-  const c = cv.getContext('2d')!;
-  const rar = RARITY[o.def.rarity];
-  parchment(c, w, h, o.def.id.length * 31 + o.toLv);
-  // frame
-  c.fillStyle = '#3a2414';
-  c.fillRect(0, 0, w, 14);
-  c.fillRect(0, h - 14, w, 14);
-  c.fillRect(0, 0, 14, h);
-  c.fillRect(w - 14, 0, 14, h);
-  c.fillStyle = rar.color;
-  c.fillRect(6, 6, w - 12, 6);
-  c.fillRect(6, h - 12, w - 12, 6);
-  c.fillRect(6, 6, 6, h - 12);
-  c.fillRect(w - 12, 6, 6, h - 12);
-  // corner studs
-  for (const [x, y] of [[18, 18], [w - 30, 18], [18, h - 30], [w - 30, h - 30]]) {
-    c.fillStyle = '#2a1810';
-    c.fillRect(x, y, 12, 12);
-    c.fillStyle = rar.color;
-    c.fillRect(x + 3, y + 3, 6, 6);
-  }
-  // header
-  c.fillStyle = '#3a2414';
-  c.font = "24px 'Alagard'";
-  c.textAlign = 'center';
-  c.fillText(`${CAT_LABEL[o.def.cat] ?? ''} · ${rar.name.toUpperCase()}`, w / 2, 52);
-  // icon plate
-  c.fillStyle = 'rgba(58,36,20,0.18)';
-  c.fillRect(w / 2 - 96, 70, 192, 172);
-  c.strokeStyle = '#3a2414';
-  c.lineWidth = 4;
-  c.strokeRect(w / 2 - 96, 70, 192, 172);
-  const f = atlas().get(o.def.icon);
-  const scale = Math.max(4, Math.floor(130 / Math.max(f.w, f.h)));
-  drawSprite(c, o.def.icon, w / 2, 156, scale);
-  // title
-  c.fillStyle = '#2a1810';
-  c.font = "32px 'Alagard'";
-  wrapText(c, o.def.name.toUpperCase(), w / 2, 292, w - 50, 36);
-  // level pips
-  const pipW = 22;
-  const total = o.def.maxLv;
-  const x0 = w / 2 - (total * pipW) / 2;
-  for (let i = 0; i < total; i++) {
-    const filled = i < o.toLv;
-    const isNew = i === o.toLv - 1;
-    c.fillStyle = '#2a1810';
-    c.fillRect(x0 + i * pipW + 3, 352, 16, 16);
-    c.fillStyle = filled ? (isNew ? rar.color : '#8a6a3a') : '#d8c49a';
-    c.fillRect(x0 + i * pipW + 6, 355, 10, 10);
-  }
-  // description
-  c.fillStyle = '#3a2414';
-  c.font = "24px 'Alagard'";
-  wrapText(c, o.def.desc(o.toLv), w / 2, 402, w - 64, 27);
-  // footer
-  c.font = "20px 'Alagard'";
-  c.fillStyle = '#6b4a2c';
-  c.fillText(o.fromLv === 0 ? (o.def.cat === 'evolution' ? '✦ EVOLUTION ✦' : 'NEW') : `LV ${o.fromLv} → ${o.toLv}`, w / 2, h - 34);
-  if (o.def.god) {
-    c.font = "18px 'Alagard'";
-    c.fillText(`Gift of ${o.def.god}`, w / 2, h - 58);
-  }
-  return cv;
+export interface FrontText {
+  crest: HTMLCanvasElement;
+  name: HTMLCanvasElement;
+  desc: HTMLCanvasElement;
 }
 
-export function paintCardBack(o: Offer, rows: { stat: StatId; before: number; after: number }[], w = 384, h = 576) {
-  const cv = document.createElement('canvas');
-  cv.width = w;
-  cv.height = h;
-  const c = cv.getContext('2d')!;
-  parchment(c, w, h, 99, '#5a3a22', '#1a0f08');
+/** front plaques: category · rarity on the crest, the name, the description with its level line */
+export function paintCardFront(o: Offer): FrontText {
+  const C = SKILL_CARD;
   const rar = RARITY[o.def.rarity];
-  c.fillStyle = rar.color;
-  c.fillRect(8, 8, w - 16, 5);
-  c.fillRect(8, h - 13, w - 16, 5);
-  c.fillStyle = '#f1e2c2';
-  c.font = "32px 'Alagard'";
+  const crest = surface(C.crest);
+  line(crest.cv, crest.c, `${CAT_LABEL[o.def.cat] ?? ''} · ${rar.name.toUpperCase()}`, 0.5, INK_SOFT);
+  const name = surface(C.name);
+  line(name.cv, name.c, o.def.name.toUpperCase(), 0.56);
+  // description: the largest size whose wrapped lines fit above the footer
+  const d = surface(C.desc);
+  const c = d.c, W = d.cv.width, H = d.cv.height;
+  const cap = capOf(c);
+  const foot = o.fromLv === 0 ? (o.def.cat === 'evolution' ? 'EVOLUTION' : 'NEW') : `LV ${o.fromLv} → ${o.toLv}`;
+  const gift = o.def.god ? `Gift of ${o.def.god}` : '';
+  const footPx = H * 0.13;
+  const bodyH = H - footPx * 2.3 - H * 0.08;
+  let px = H * 0.2;
+  let lines: string[] = [];
+  for (; px > 14; px *= 0.94) {
+    c.font = font(px);
+    lines = wrap(c, o.def.desc(o.toLv), W * 0.9);
+    if (lines.length * px * 1.12 <= bodyH) break;
+  }
+  c.font = font(px);
   c.textAlign = 'center';
-  c.fillText('LEDGER', w / 2, 52);
-  drawSprite(c, 'scorp_x2', w / 2, 100, 5);
-  c.font = "20px 'Alagard'";
-  let y = 160;
+  const lh = px * 1.12;
+  const y0 = H * 0.06 + (bodyH - lines.length * lh) / 2 + px * cap;
+  lines.forEach((l, i) => engrave(c, l, W / 2, y0 + i * lh));
+  c.font = font(footPx);
+  engrave(c, gift ? `${foot}  ·  ${gift}` : foot, W / 2, H - footPx * 0.7, INK_SOFT, 0.35);
+  return { crest: crest.cv, name: name.cv, desc: d.cv };
+}
+
+/** back plaques: LEDGER, then the stat rows (before → after), lineage and lore */
+export function paintCardBack(o: Offer, rows: { stat: StatId; before: number; after: number }[]) {
+  const B = SKILL_CARD.back;
+  const plaque = surface(B.plaque);
+  line(plaque.cv, plaque.c, 'LEDGER', 0.58);
+  const p = surface(B.panel);
+  const c = p.c, W = p.cv.width, H = p.cv.height;
+  const px = H * 0.052;
+  const cap = capOf(c);
+  let y = H * 0.07 + px * cap;
+  c.font = font(px);
   if (rows.length) {
     for (const r of rows) {
-      const name = (DERIVED_INFO as any)[r.stat]?.name ?? (CORE_INFO as any)[r.stat]?.name ?? r.stat;
-      c.fillStyle = '#e6cf9f';
+      const nm = (DERIVED_INFO as any)[r.stat]?.name ?? (CORE_INFO as any)[r.stat]?.name ?? r.stat;
       c.textAlign = 'left';
-      c.fillText(name, 30, y);
+      engrave(c, nm, W * 0.06, y);
       c.textAlign = 'right';
-      c.fillStyle = '#c8ff5a';
-      c.fillText(`${fmtStat(r.stat, r.before)} → ${fmtStat(r.stat, r.after)}`, w - 30, y);
-      y += 30;
+      engrave(c, `${fmtStat(r.stat, r.before)} → ${fmtStat(r.stat, r.after)}`, W * 0.94, y + px * 1.15, GAIN);
+      y += px * 2.6;
     }
   } else {
-    c.fillStyle = '#e6cf9f';
-    c.fillText('Special effect — see front.', w / 2, y);
-    y += 30;
+    c.textAlign = 'center';
+    engrave(c, 'A special effect —', W / 2, y);
+    engrave(c, 'see the front.', W / 2, y + px * 1.2);
+    y += px * 2.8;
   }
   if (o.def.evolveFrom) {
-    c.fillStyle = '#ffd36b';
     c.textAlign = 'center';
-    c.fillText(`Born of: ${o.def.evolveFrom.join(' + ')}`, w / 2, y + 10);
-    y += 40;
+    c.font = font(px * 0.9);
+    engrave(c, `Born of: ${o.def.evolveFrom.join(' + ')}`, W / 2, y + px * 0.4, INK_SOFT);
+    y += px * 1.8;
   }
   if (o.def.lore) {
-    c.fillStyle = '#c9a97c';
-    c.font = "19px 'Alagard'";
-    wrapText(c, `“${o.def.lore}”`, w / 2, y + 20, w - 60, 24);
+    c.font = font(px * 0.9);
+    c.textAlign = 'center';
+    const ls = wrap(c, `“${o.def.lore}”`, W * 0.86);
+    ls.forEach((l, i) => engrave(c, l, W / 2, y + px * 0.8 + i * px * 1.1, INK_SOFT));
   }
-  c.fillStyle = '#8a6a4a';
-  c.font = "17px 'Alagard'";
+  c.font = font(px * 0.8);
   c.textAlign = 'center';
-  c.fillText('drag to turn · click to claim', w / 2, h - 30);
-  return cv;
+  engrave(c, 'drag to turn · click to claim', W / 2, H - px * 0.9, INK_SOFT, 0.3);
+  return { plaque: plaque.cv, panel: p.cv };
 }
 
 export function canvasTex(cv: HTMLCanvasElement) {

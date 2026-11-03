@@ -61,7 +61,7 @@ export function outlawRiderRig(o: EnemyOpts = {}): RigSpec {
   if (poncho) ponchoG(F, L.coat, v);
   else {
     const cp = dusterG(F, L.coat, alpha ? 0x1e1a1a : mulRGB(L.coat, 0.7), { seed: v, len: 13 });
-    frayStrip(cp, -9, 8, -10, 16, 1, 2, clothC(L.coat, v + 9, { fold: 4 }), v + 3); // worn hem
+    if (cp) frayStrip(cp, -9, 8, -10, 16, 1, 2, clothC(L.coat, v + 9, { fold: 4 }), v + 3); // worn hem
     for (const s1 of [1, -1]) sleeveG(F, s1, clothC(L.coat, v + 2, { fold: 3, crease: mulRGB(L.coat, 0.8) }), { cuff: mulRGB(L.coat, 0.72) });
   }
   gunBeltG(F, 0x5a3a22, alpha ? METAL.gold : METAL.silver, { loops: !alpha, holster: true, seed: v + 2 });

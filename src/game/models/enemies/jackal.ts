@@ -17,7 +17,7 @@ import type { HumanoidParts } from '../toon/humanoid';
 import { EnemyOpts, roundBox, roundBoxX, autoShade, mirrored, pickV } from './human';
 import { seg, chain } from './tk';
 import { Fig, finish, figMeta, sections, limbG, cutG, coatG, wrapShell, ell, tube, isSurf, furC, mix, noise, CSpec, G } from './figure/fig';
-import { METAL, frontZ } from './figure/gear';
+import { METAL, frontZ, usekhG } from './figure/gear';
 
 
 const FUR: Ramp[] = [
@@ -109,15 +109,15 @@ const JT: Record<number, [number, number, number]> = {
   46: [3.2, 0.9, -4.4], 47: [3.0, 0.8, -4.3],
 };
 
-export function jackalRig(o: EnemyOpts = {}): RigSpec {
+/** the jackal on Sundown's figure: head, furred body, kilt, digitigrade legs, tail (no weapons). Returns the head top row. */
+export function jackalBody(F: Fig, o: { alpha?: boolean; variant?: number; fur?: { base: number; light: number; dark: number; belly: number } } = {}) {
   const alpha = !!o.alpha;
   const v = (((o.variant ?? 0) % 3) + 3) % 3;
   const seed = 9 + v * 5 + (alpha ? 2 : 0);
-  const Fu = alpha ? { base: 0x1e1c22, light: 0x34303a, dark: 0x0e0c10, belly: 0x3a3640 } : FURS[v];
+  const Fu = o.fur ?? (alpha ? { base: 0x1e1c22, light: 0x34303a, dark: 0x0e0c10, belly: 0x3a3640 } : FURS[v]);
   const fur = furC(Fu.base, Fu.light, Fu.dark, seed);
-  const G = METAL.gold, BR = METAL.bronze, LAP = 0x2a4a9a, TURQ = 0x2e9a8a;
-  const F = new Fig();
-  F.boneMirror('fore_r', 'fore_l'); // fists: one on the khopesh, one on the shield grip
+  const G = METAL.gold, LAP = 0x2a4a9a, TURQ = 0x2e9a8a;
+  F.boneMirror('fore_r', 'fore_l'); // fists: one on the weapon, one on the shield grip / bow
   // ---------------------------------------------------------------- the jackal head on the figure's skull
   const hd = F.s('head');
   // fur over the dome; the human sockets, nose notch and grin are filled
@@ -207,15 +207,7 @@ export function jackalRig(o: EnemyOpts = {}): RigSpec {
   coatG(tr, (x, y, z) => z > 1.5 && Math.abs(x) < 4.2 && y > 29 && y < 43, furC(Fu.belly, mix(Fu.belly, 0xffffff, 0.15), Fu.light, seed + 5));
   for (const sx of [1, -1]) ell(tr, [sx * 3.6, 39.4, 3.6], [3.0, 2.2, 1.4], fur); // pectorals
   // usekh collar
-  const ringC = [G[0], LAP, G[2], TURQ, G[0]];
-  const collar: [number, number, number, number][] = [];
-  tr.m.forEach((x, y, z) => {
-    if (y < 40 || y > 45) return;
-    const r = Math.hypot((x + 0.5) * 0.9, (z + 0.5 + 0.8) * 1.1) + (45 - y) * 0.85;
-    if (r > 10.5) return;
-    for (const [dx, dy, dz] of [[0, 1, 0], [0, 0, 1], [0, 0, -1], [1, 0, 0], [-1, 0, 0]] as G[]) if (!tr.m.has(x + dx, y + dy, z + dz)) collar.push([x + dx, y + dy, z + dz, ringC[Math.floor(r / 1.7) % ringC.length]]);
-  });
-  for (const [x, y, z, c] of collar) tr.m.set(x, y, z, c, c === G[0] || c === G[2] ? VF.METAL : VF.SOLID);
+  usekhG(tr, [G[0], LAP, G[0], TURQ, G[2], LAP], { rMax: 10.0, y0: 39 });
   if (alpha) for (let y = 31; y <= 38; y++) for (let x = -5; x <= 4; x++) if (Math.abs(x + 0.5) < 5.2 - Math.max(0, 33 - y)) tr.m.set(x, y, frontZ(tr.m, x, y) + 1, (x + y) % 4 === 0 ? G[2] : G[0], VF.METAL);
   const pv = F.s('pelvis');
   pv.m.map.clear();
@@ -277,6 +269,18 @@ export function jackalRig(o: EnemyOpts = {}): RigSpec {
   // ---------------------------------------------------------------- bushy tail
   const tl = F.part('tail', 'pelvis', [0, 25.5, -5.5]);
   tube(tl, [[0, 25.5, -6.0], [0, 23.0, -8.6], [0, 18.5, -10.6], [0, 13.0, -11.0], [0, 9.5, -10.2]], (t) => 1.2 + Math.sin(Math.min(1, t * 1.4) * Math.PI) * 1.2 - t * 0.5, (x, y, z) => (y < 12 ? Fu.light : res(fur, x, y, z)));
+  let top = 63;
+  hd.m.forEach((_x, y) => (top = Math.max(top, y + 1)));
+  F.sock('head_top', 'head', [0, top, -2]);
+  return { top, seed, Fu };
+}
+
+export function jackalRig(o: EnemyOpts = {}): RigSpec {
+  const alpha = !!o.alpha;
+  const v = (((o.variant ?? 0) % 3) + 3) % 3;
+  const F = new Fig();
+  const { top, seed } = jackalBody(F, { alpha, variant: v });
+  const G = METAL.gold, BR = METAL.bronze, LAP = 0x2a4a9a;
   // ---------------------------------------------------------------- bronze khopesh in the right fist (hook forward)
   const wp = F.part('weapon', 'fore_r', F.J.hand_r);
   for (let y = 19; y <= 25; y++) for (const x of [-10, -9]) wp.m.set(x, y, 0, y === 19 || y === 25 ? G[0] : 0x3a2414, y === 19 || y === 25 ? VF.METAL : VF.SOLID);
@@ -302,9 +306,6 @@ export function jackalRig(o: EnemyOpts = {}): RigSpec {
   for (const [y, z, c] of [[24, -3, 0], [24, -2, 0], [24, -1, 0], [24, 0, 0], [24, 1, 0], [24, 2, 0], [25, -2, 1], [25, -1, 1], [25, 0, 1], [25, 1, 1], [23, -1, 2], [23, 0, 2], [22, 0, 0], [21, 1, 0], [20, 1, 0], [20, 2, 0], [22, -2, 0], [21, -3, 0], [26, -2, 0], [26, -1, 0], [26, 0, 0], [26, 1, 0]] as number[][])
     sd.m.set(13, y, z, c === 1 ? 0xf6efe0 : c === 2 ? 0x101018 : LAP);
   finish(F);
-  let top = 63;
-  hd.m.forEach((_x, y) => (top = Math.max(top, y + 1)));
-  F.sock('head_top', 'head', [0, top, -2]);
   return F.build(`jackal${alpha ? '_alpha' : ''}_v${v}`, figMeta(F, 'jackal', {
     alpha,
     variant: v,

@@ -384,8 +384,8 @@ function dressBeatle(rig: CRig, B: BeatleInfo) {
     const X = D(x), Y = D(y), Z = D(z);
     const front = Math.cos(Math.atan2(X, Z - 0.003));
     if (front > 0.9 && Math.abs(X) < 0.003) return jDeep; // closure line
-    const crease = Math.sin(Math.atan2(X, Z) * 7 + Y * 120) > 0.86; // a few soft folds
-    if (crease) return jShade;
+    const crease = Math.sin(Math.atan2(X, Z) * 6 + Y * 90) > 0.95; // a few soft folds
+    if (crease) return mixc(jacket, jShade, 0.6);
     return h01(x, y, z, 21) < 0.05 ? jHi : jacket;
   };
   // ---- the jacket over the chest and the upper hips (hem just below the waist)

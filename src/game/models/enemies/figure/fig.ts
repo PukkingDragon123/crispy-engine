@@ -325,9 +325,9 @@ export function leatherC(base: number, seed = 0): ColorFn {
 /** fur with strands running down (dark roots, lighter tips) */
 export function furC(base: number, light: number, dark: number, seed = 0): ColorFn {
   return (x, y, z) => {
-    const n = noise.n3(x / 2.2 + seed, y / 4.5, z / 2.2 - seed);
-    const s = noise.n3(x / 1.2, y / 3.2 + seed, z / 1.2);
-    return s > 0.45 ? light : n < -0.4 || s < -0.55 ? dark : base;
+    const n = noise.n3(x / 3.4 + seed, y / 5.5, z / 3.4 - seed);
+    const s = noise.n3(x / 2.0, y / 4.2 + seed, z / 2.0);
+    return s > 0.55 ? light : n < -0.45 || s < -0.62 ? dark : base;
   };
 }
 /** brushed metal: clean base with crisp highlight rows */

@@ -228,7 +228,7 @@ export class DustMarshal extends Boss {
   constructor(d: BossDeps, public tier: 1 | 2 | 3 = 1) {
     super(d, `dust_marshal_${tier}`, { name: 'The Dust Marshal', title: tier === 3 ? 'Last Law of the Dunes' : 'Badge of Bone', hp: 1800 + tier * 1400, scale: 1.25, eyes: ['glow', 0xffc040] });
     this.hitSpheres = [
-      { node: 'head', r: 0.42, part: 'head', weak: 1.8, offset: [0, 0.2, 0] },
+      { node: 'head', r: 0.5, part: 'head', weak: 1.8, offset: [0, 0.34, 0] },
       { node: 'torso', r: 0.6, part: 'torso', offset: [0, 0.3, 0] },
       { node: 'pelvis', r: 0.5, part: 'legs' },
     ];
@@ -558,7 +558,7 @@ export class Pharaoh extends Boss {
   constructor(d: BossDeps, tier = 1) {
     super(d, 'pharaoh', { name: 'Pharaoh Nekh-Amun', title: 'He Who Refuses to Lie Down', hp: 3000 * tier, scale: 1.3, eyes: ['glow', 0x7fe0ff] });
     this.hitSpheres = [
-      { node: 'head', r: 0.45, part: 'head', weak: 1.8, offset: [0, 0.25, 0] },
+      { node: 'head', r: 0.52, part: 'head', weak: 1.8, offset: [0, 0.36, 0] },
       { node: 'torso', r: 0.65, part: 'torso', offset: [0, 0.3, 0] },
     ];
     this.frontGuard = 0.12;

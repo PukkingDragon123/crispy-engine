@@ -557,7 +557,7 @@ function pillow(m: VoxelModel, c: V3, half: V3, tiltX: number, tiltZ: number, co
     py = ry;
     // thinner towards the corners (pinched), fat in the middle
     const k = 1 - 0.45 * Math.min(1, (px / half[0]) ** 2 + (py / half[1]) ** 2);
-    return dRBox(px, 0, pz / Math.max(0.3, k), 0, 0, 0, half[0], 0.01, half[2], 0.01) * 0 + dEll(px, py, pz / Math.max(0.35, k), 0, 0, 0, half[0] * 1.08, half[1] * 1.08, half[2]) + lump(x, y, z, 0.4, seed) * 0.3;
+    return dEll(px, py, pz / Math.max(0.35, k), 0, 0, 0, half[0] * 1.08, half[1] * 1.08, half[2]) + lump(x, y, z, 0.4, seed) * 0.3;
   }, [c], Math.max(...half) + 3, (x, y, z, d) => col(x - c[0], y - c[1], d), VF.SOFTAO);
 }
 
@@ -952,7 +952,7 @@ export function photoFrame(seed = 13): StaticModel & { meta: { photo: V3; size: 
 
 /** a tall cheval mirror — 1/48: turned uprights with finials on scrolled splayed feet, a stretcher, an oval
  *  carved walnut frame pivoted between them and tilted back a little. The glass is a live reflection placed by the
- *  scene. meta: glass (centre, m), radii (m), tilt (rad, top leans back towards -Z). */
+ *  scene. meta: glass (centre, m), radii (m), tilt (rad about X: the top leans towards +Z, facing a little down). */
 export function chevalMirror(seed = 14): StaticModel & { meta: { glass: V3; radii: [number, number]; tilt: number } } {
   const m = new VoxelModel('cheval_mirror');
   const UX = 17, PY = 50, RX = 13.5, RY = 26.5, tilt = 0.09;

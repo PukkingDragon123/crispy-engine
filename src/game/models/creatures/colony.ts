@@ -44,9 +44,12 @@ export const WARREN_STALL = { x: 1.66, z: 1.08, rot: -0.14 };
 const SHAFT_DEPTH = 0.31;
 const SHAFT_R = 0.094;
 
+/** soft max whose blend radius shrinks to 0 near the ground, so empty desert never inflates */
 const smaxP = (a: number, b: number, k: number) => {
-  const h = Math.max(k - Math.abs(a - b), 0) / k;
-  return Math.max(a, b) + h * h * k * 0.25;
+  const kk = Math.min(k, 2 * Math.min(a, b));
+  if (kk <= 1e-6) return Math.max(a, b);
+  const h = Math.max(kk - Math.abs(a - b), 0) / kk;
+  return Math.max(a, b) + h * h * kk * 0.25;
 };
 function segDist(px: number, pz: number, ax: number, az: number, bx: number, bz: number) {
   const dx = bx - ax, dz = bz - az;
@@ -57,7 +60,7 @@ function segDist(px: number, pz: number, ax: number, az: number, bx: number, bz:
 /** analytic mound height (metres) before voxelisation and shaft carving */
 export function warrenHeight(x: number, z: number) {
   // the main dome: a low, wobbly-edged mound
-  const dx = (x + 0.35) / 1.85, dz = (z + 0.45) / 1.38;
+  const dx = (x + 0.4) / 1.62, dz = (z + 0.42) / 1.22;
   const ang = Math.atan2(dz, dx);
   const wob = 1 + 0.1 * noise.n2(Math.cos(ang) * 1.4 + 3, Math.sin(ang) * 1.4) + 0.05 * noise.n2(Math.cos(ang) * 3, Math.sin(ang) * 3 + 7);
   const rr = Math.hypot(dx, dz) / wob;
@@ -71,13 +74,16 @@ export function warrenHeight(x: number, z: number) {
   // spoil heaps around every hole, with the kicked-out sand fan
   for (const q of WARREN_HOLES) {
     const ex = x - q.x, ez = z - q.z, d = Math.hypot(ex, ez);
-    let y = d < 0.17 ? q.peak : q.peak * Math.exp(-(((d - 0.17) / 0.34) ** 2));
+    let y = d < 0.2 ? q.peak : q.peak * Math.exp(-(((d - 0.2) / 0.4) ** 2));
     y += 0.022 * Math.exp(-(((d - 0.13) / 0.03) ** 2)); // crumbly lip
     const fx = Math.sin(q.fan), fz = Math.cos(q.fan);
     const along = ex * fx + ez * fz, side = -ex * fz + ez * fx;
-    if (along > 0) y = Math.max(y, q.peak * 0.56 * Math.exp(-(((along - 0.33) / 0.27) ** 2) - (side / 0.21) ** 2));
+    if (along > 0) y = Math.max(y, q.peak * 0.6 * Math.exp(-(((along - 0.38) / 0.28) ** 2) - (side / 0.22) ** 2));
+    y *= sstep(0.98, 0.62, d); // every heap fades out within a metre of its hole
     h = smaxP(h, y, 0.06);
   }
+  // keep the ground under the stall flat
+  h *= sstep(0.5, 0.85, Math.hypot(x - WARREN_STALL.x, z - WARREN_STALL.z));
   // hand-placed undulation (only on the mound)
   h += (0.012 * noise.n2(x * 2.6, z * 2.6) + 0.005 * noise.n2(x * 8.5 + 3, z * 8.5)) * sstep(0.01, 0.06, h);
   return h;
@@ -86,7 +92,7 @@ export function warrenHeight(x: number, z: number) {
 // ================================================================ warren model
 const WVS = 1 / 32;
 const SKIRT = 6; // voxels below ground so the mound sits into slopes
-const SAND = { packed: 0xe4c28c, fresh: 0xd4a268, damp: 0xb98a58, edge: 0xe0b373, deep: 0xb48c5c, grainD: 0xc49660, grainL: 0xf2dcae };
+const SAND = { packed: 0xd2a66c, fresh: 0xc58f58, damp: 0xa87a50, edge: 0xd6a466, deep: 0xa88050, grainD: 0xb48450, grainL: 0xe2c08a };
 const STONES = [0x9b8b78, 0x7d6b5a, 0xb9a688, 0x6b5444, 0xc8b49a, 0xa08c70];
 
 function buildWarren() {
@@ -101,8 +107,8 @@ function buildWarren() {
   // ---- columns
   const top = new Map<number, number>();
   const ck = (i: number, k: number) => (i + 512) * 2048 + (k + 512);
-  for (let i = Math.floor(-2.6 * f); i <= Math.ceil(2.1 * f); i++)
-    for (let k = Math.floor(-2.25 * f); k <= Math.ceil(2.15 * f); k++) {
+  for (let i = Math.floor(-2.9 * f); i <= Math.ceil(2.3 * f); i++)
+    for (let k = Math.floor(-2.5 * f); k <= Math.ceil(2.7 * f); k++) {
       const x = (i + 0.5) * vs, z = (k + 0.5) * vs;
       const H = warrenHeight(x, z);
       if (H < 0.012) continue;
@@ -120,8 +126,8 @@ function buildWarren() {
           if (dh < 0.24) c = mixc(c, SAND.damp, sstep(0.24, 0.12, dh) * 0.6);
           c = mixc(c, SAND.edge, edge);
           const g = h01(i, j, k, 7);
-          if (g < 0.035) c = SAND.grainD;
-          else if (g > 0.975) c = SAND.grainL;
+          if (g < 0.014) c = mixc(c, SAND.grainD, 0.7);
+          else if (g > 0.988) c = mixc(c, SAND.grainL, 0.7);
           else c = mulc(c, 0.97 + n01(i, j, k, 0.35, 2) * 0.06 - depth * 0.03);
         }
         m.set(i, j, k, c);

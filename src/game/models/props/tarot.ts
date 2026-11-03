@@ -84,14 +84,14 @@ class Relief {
     return this.in(x, y) ? this.h[y * this.w + x] : -9;
   }
   /** write into the model: the slab top sits at z = zTop, relief grows along dir */
-  emit(vm: VoxelModel, zTop: number, dir: 1 | -1, mirror: boolean, gemFlags: number) {
+  emit(vm: VoxelModel, zTop: number, dir: 1 | -1, mirror: boolean, gemFlags: number, pal: (Ramp4 | null)[] = MAT, glowIds: number[] = []) {
     for (let y = 0; y < this.hh; y++)
       for (let x = 0; x < this.w; x++) {
         const i = y * this.w + x;
         const id = this.m[i];
         if (!id) continue;
         const h = this.h[i];
-        const ramp = MAT[id]!;
+        const ramp = pal[id]!;
         // light from the viewer's upper left (mirrored on the back)
         const lx = mirror ? x + 1 : x - 1, rx = mirror ? x - 1 : x + 1;
         const litEdge = this.H(lx, y) < h || this.H(x, y + 1) < h;
@@ -104,7 +104,7 @@ class Relief {
         // gentle hand-rubbed wear on the gilt (worn high points shine)
         if (id === M.GILT && !deep && hash2(x * 7 + (mirror ? 999 : 0), y * 3) < 0.07) top = mixc(top, ramp.hi, 0.6);
         if ((id === M.IVORY || id === M.PARCH) && !deep) top = mixc(top, ramp.shade, sstep(0.25, 0.9, noise.fbm2(x * 0.09, y * 0.07, 3) * 0.5 + 0.5) * 0.35);
-        const fl = id === M.CARN ? gemFlags : id === M.GILT ? VF.SOLID | VF.METAL : VF.SOLID;
+        const fl = id === M.CARN ? gemFlags : glowIds.includes(id) ? VF.SOLID | VF.EMISSIVE : id === M.GILT ? VF.SOLID | VF.METAL : VF.SOLID;
         if (h <= 0) {
           vm.set(x, y, zTop, top, fl);
           continue;
@@ -684,7 +684,7 @@ export function sunflower(seed = 1, hM = 1.25) {
 const SANDR = R(0xe9c48c, 0xd3a76c, 0xf6dcac, 0xb0844e);
 
 /** a dune bed for a diorama: rolling sand with wind ripples, pebbles and twigs. Pivot = centre of the patch at y=0. */
-export function duneBed(wM: number, dM: number, seed = 1, tint = 0, crestM = 0) {
+export function duneBed(wM: number, dM: number, seed = 1, tint = 0, crestM = 0, flatR = 0) {
   const vs = 1 / 16;
   const m = new VoxelModel('tarot_dunes');
   const W = Math.round(wM / vs), D = Math.round(dM / vs);
@@ -695,7 +695,9 @@ export function duneBed(wM: number, dM: number, seed = 1, tint = 0, crestM = 0) 
     const back = Math.max(0, -v) * 10; // dunes rise behind
     // an optional dune crest along the back (and a little at the sides) hides the bed's edge
     const crest = crestM > 0 ? (crestM / vs) * (sstep(0.06, 0.48, -v) ** 1.6 + sstep(0.34, 0.5, Math.abs(u)) * 0.45) * (0.85 + noise.n2(x * 0.03 + seed, 7) * 0.15) : 0;
-    return big + back + crest;
+    // a level patch where the subjects stand (still props sit at y = 0)
+    const flat = flatR > 0 ? sstep(flatR, flatR * 2.4, Math.hypot(x, z) * vs) : 1;
+    return (big + back) * flat + crest;
   };
   for (let z = -D / 2; z < D / 2; z++)
     for (let x = -W / 2; x < W / 2; x++) {
@@ -834,4 +836,300 @@ export function embers(seed = 1, count = 22, wM = 3, hM = 4) {
     }
   }
   return { model: m, voxelSize: vs, pivot: 'center' as const };
+}
+
+// ============================================================== skill (upgrade) cards
+// 72 × 108 voxels at 1 cm: a sculpted frame per rarity tier — bronze (common /
+// uncommon), silver (rare), gold (epic / legendary), divine white-gold (mythic).
+// Front: art window, name plaque, recessed description panel, five level-gem
+// sockets on a rail, tier ornaments. Back: lacquer lattice, ledger plaque and a
+// big recessed parchment panel for the stat rows.
+
+export type SkillRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic';
+const SW = 72, SH = 108;
+export const SKILL_CARD = {
+  W: SW,
+  H: SH,
+  voxelSize: 0.01,
+  win: { x0: 6, y0: 51, x1: 65, y1: 100 },
+  name: { x0: 7, y0: 40, x1: 64, y1: 47 },
+  desc: { x0: 8, y0: 11, x1: 63, y1: 36 },
+  crest: { x0: 24, y0: 102, x1: 47, y1: 106 },
+  gems: [20, 28, 36, 44, 52].map((x) => [x, 4.5] as [number, number]),
+  back: { plaque: { x0: 13, y0: 94, x1: 58, y1: 101 }, panel: { x0: 8, y0: 11, x1: 63, y1: 87 } },
+};
+
+const BRONZE = R(0xbf8446, 0x8e5a2c, 0xe8b070, 0x4e2c12);
+const SILVER = R(0xc6cad6, 0x8e94a6, 0xf4f6fc, 0x4a5066);
+const WGOLD = R(0xf2e2b6, 0xd2b880, 0xfffaea, 0x8e7a50);
+const WALNUT = R(0x5a3a22, 0x452a18, 0x6e4a2e, 0x2a180c);
+const ENAMEL_BLUE = R(0x22346a, 0x182650, 0x34508e, 0x0e1630);
+const ENAMEL_GREEN = R(0x23472c, 0x183420, 0x356a40, 0x0c1c10);
+const ROYAL = R(0x3a2458, 0x2a1840, 0x543680, 0x160c24);
+const MALACHITE = R(0x4aa868, 0x2e7a48, 0x7ad69a, 0x1a4a2a);
+const LEATHER = R(0x8a5a36, 0x6a4226, 0xa8764a, 0x3a2414);
+
+interface SkillTier {
+  metal: Ramp4;
+  body: Ramp4;
+  inlay: Ramp4;
+  inlay2: Ramp4;
+  gem: Ramp4;
+  lacquer: Ramp4;
+  level: 0 | 1 | 2 | 3;
+  glow: boolean;
+}
+const SKILL_TIERS: Record<SkillRarity, SkillTier> = {
+  common: { metal: BRONZE, body: WALNUT, inlay: LEATHER, inlay2: BRONZE, gem: R(0xe0d2b0, 0xb8a888, 0xfff6e0, 0x7a6a50), lacquer: WALNUT, level: 0, glow: false },
+  uncommon: { metal: BRONZE, body: ENAMEL_GREEN, inlay: MALACHITE, inlay2: TURQ, gem: R(0x8fc45a, 0x5e9a32, 0xc8f08a, 0x2e5418), lacquer: ENAMEL_GREEN, level: 0, glow: false },
+  rare: { metal: SILVER, body: ENAMEL_BLUE, inlay: LAPIS, inlay2: TURQ, gem: R(0x4fb3c9, 0x2e7e98, 0x9ae6f6, 0x164a5a), lacquer: ENAMEL_BLUE, level: 1, glow: false },
+  epic: { metal: GILT, body: OXBLOOD, inlay: CARN, inlay2: LAPIS, gem: R(0xe0603a, 0xa8401e, 0xff9a70, 0x5a1a0a), lacquer: OXBLOOD, level: 2, glow: false },
+  legendary: { metal: GILT, body: ROYAL, inlay: TURQ, inlay2: CARN, gem: R(0xf5c84a, 0xc8962a, 0xfff0a0, 0x6a4a10), lacquer: ROYAL, level: 2, glow: false },
+  mythic: { metal: WGOLD, body: IVORY, inlay: TURQ, inlay2: GILT, gem: R(0xfff3d6, 0xe8d4a8, 0xffffff, 0xa89070), lacquer: R(0xe8dcc0, 0xd0c09c, 0xfaf2de, 0x9a8a68), level: 3, glow: true },
+};
+
+function skillMolding(rf: Relief, d: number, x: number, y: number) {
+  const along = d === Math.min(x, SW - 1 - x) ? y : x;
+  if (d === 0) rf.put(x, y, 2, M.GILT);
+  else if (d === 1 || d === 2) rf.put(x, y, 3, M.GILT);
+  else if (d === 3) rf.put(x, y, along % 3 === 1 ? 1 : 2, along % 3 === 1 ? M.INK : M.GILT);
+}
+
+function stud(rf: Relief, cx: number, cy: number, r: number, h: number, m: number) {
+  for (let y = Math.floor(cy - r); y <= cy + r; y++)
+    for (let x = Math.floor(cx - r); x <= cx + r; x++) {
+      const d = Math.hypot(x - cx, y - cy) / r;
+      if (d <= 1) rf.up(x, y, Math.max(1, Math.round(h * Math.sqrt(1 - d * d) + 1)), m);
+    }
+}
+
+/** a little filigree scroll: an Archimedean spiral of raised wire */
+function filigree(rf: Relief, cx: number, cy: number, sx: number, sy: number) {
+  for (let t = 0; t < Math.PI * 3.2; t += 0.12) {
+    const r = 0.5 + t * 0.55;
+    rf.up(cx + sx * Math.cos(t) * r, cy + sy * Math.sin(t) * r, 3, M.GILT);
+  }
+}
+
+/** the 3D upgrade card for a rarity. Pivot = card centre, front faces +Z; 1 voxel = 1 cm. */
+export function skillFrame(rarity: SkillRarity) {
+  const T = SKILL_TIERS[rarity];
+  const pal: (Ramp4 | null)[] = [null, T.metal, T.body, T.inlay, T.inlay2, T.gem, R(INK, INK, 0x3a2416, INK), T.lacquer, PARCH];
+  const vm = new VoxelModel('skill_frame_' + rarity);
+  const C = SKILL_CARD;
+  for (let y = 0; y < SH; y++)
+    for (let x = 0; x < SW; x++) {
+      vm.set(x, y, -1, T.body.shade);
+      vm.set(x, y, -2, T.lacquer.base);
+      vm.set(x, y, 0, T.body.base);
+    }
+  const inR = (x: number, y: number, r: { x0: number; y0: number; x1: number; y1: number }) => x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1;
+  const ringD = (x: number, y: number, r: { x0: number; y0: number; x1: number; y1: number }) => Math.max(x < r.x0 ? r.x0 - x : x > r.x1 ? x - r.x1 : 0, y < r.y0 ? r.y0 - y : y > r.y1 ? y - r.y1 : 0);
+  // ---------------- front
+  const f = new Relief(SW, SH);
+  for (let y = 0; y < SH; y++)
+    for (let x = 0; x < SW; x++) {
+      if (inR(x, y, C.win)) continue;
+      f.put(x, y, 1, M.IVORY);
+      const d = Math.min(x, SW - 1 - x, y, SH - 1 - y);
+      if (d <= 3) {
+        skillMolding(f, d, x, y);
+        continue;
+      }
+      // inlay band just inside the molding (silver and up)
+      if (d === 4 && T.level >= 1) f.put(x, y, 1, (x + y) % 4 === 0 ? M.GILT : M.LAPIS);
+      // the window lip
+      const cd = ringD(x, y, C.win);
+      if (cd === 1) f.put(x, y, 3, M.GILT);
+      else if (cd === 2) f.put(x, y, 2, M.GILT);
+      // name plaque: parchment, metal rim
+      const nd = ringD(x, y, C.name);
+      if (nd === 0) f.put(x, y, 2, M.PARCH);
+      else if (nd === 1) f.put(x, y, 3, M.GILT);
+      // description panel: recessed parchment in a thin metal frame
+      const dd = ringD(x, y, C.desc);
+      if (dd === 0) f.put(x, y, 1, M.PARCH);
+      else if (dd === 1) f.put(x, y, 2, M.GILT);
+      else if (dd === 2 && T.level >= 2) f.put(x, y, 1, M.TURQ);
+    }
+  // crest plaque for the category label, with rolled ends
+  for (let y = C.crest.y0 - 1; y <= C.crest.y1 + 1; y++)
+    for (let x = C.crest.x0 - 5; x <= C.crest.x1 + 5; x++) {
+      const inside = inR(x, y, C.crest);
+      const rim = ringD(x, y, C.crest) === 1;
+      if (inside) f.put(x, y, 2, M.PARCH);
+      else if (rim) f.put(x, y, 3, M.GILT);
+      else {
+        const u = x < C.crest.x0 ? (C.crest.x0 - 1 - x) / 4 : (x - C.crest.x1 - 1) / 4;
+        if (u >= 0 && u <= 1) f.put(x, y, Math.round(2 + Math.sin(u * Math.PI) * 1.6), (y === C.crest.y0 - 1 || y === C.crest.y1 + 1) && u > 0.2 && u < 0.8 ? M.INK : M.PARCH);
+      }
+    }
+  // gem rail with five sockets
+  for (let y = 1; y <= 8; y++)
+    for (let x = 14; x <= 57; x++) {
+      let best = 99;
+      for (const [gx, gy] of C.gems) best = Math.min(best, Math.hypot(x - gx, y - gy));
+      if (best <= 1.9) f.put(x, y, 1, M.INK);
+      else if (best <= 3.1) f.put(x, y, 3, M.GILT);
+      else if (y >= 2 && y <= 7) f.put(x, y, 2, (x + y) % 2 ? M.LAPIS : M.GILT);
+    }
+  // corner ornaments by tier
+  const corners: [number, number, number, number][] = [[5.5, 5.5, 1, 1], [SW - 6.5, 5.5, -1, 1], [5.5, SH - 6.5, 1, -1], [SW - 6.5, SH - 6.5, -1, -1]];
+  for (const [cx, cy] of corners) stud(f, cx, cy, 2.2, 2.6, M.GILT);
+  if (T.level >= 1) for (const [cx, cy, sx, sy] of [[9, 49.5, 1, -1], [SW - 10, 49.5, -1, -1], [9, 38.5, 1, 1], [SW - 10, 38.5, -1, 1]] as [number, number, number, number][]) filigree(f, cx, cy, sx * 0.9, sy * 0.6);
+  if (T.level >= 2) {
+    for (const [cx, cy] of [[C.win.x0 - 0.5, C.win.y0 - 0.5], [C.win.x1 + 0.5, C.win.y0 - 0.5], [C.win.x0 - 0.5, C.win.y1 + 0.5], [C.win.x1 + 0.5, C.win.y1 + 0.5]]) {
+      for (let y = Math.floor(cy - 4); y <= cy + 4; y++)
+        for (let x = Math.floor(cx - 4); x <= cx + 4; x++) {
+          const dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy);
+          if (d > 3.4) continue;
+          const a = Math.atan2(dy, dx);
+          if (d < 1.4) f.put(x, y, 4, M.CARN);
+          else if (Math.cos(a * 4) > 0.1 - d * 0.04) f.put(x, y, d < 2.6 ? 3 : 2, M.GILT);
+          else f.put(x, y, 2, M.LAPIS);
+        }
+    }
+  }
+  if (T.level >= 3) {
+    // a sunburst crown rising behind the crest
+    const cx = 35.5, cy = 100;
+    for (let i = 0; i < 13; i++) {
+      const a = Math.PI * (0.12 + (i / 12) * 0.76);
+      for (let r = 7; r < 11 + (i % 2 ? 0 : 3); r += 0.5) f.up(cx + Math.cos(a) * r * 1.6, cy + Math.sin(a) * r * 0.45, 2, i % 2 ? M.TURQ : M.GILT);
+    }
+  }
+  f.emit(vm, 0, 1, false, VF.SOLID | VF.EMISSIVE, pal, T.glow ? [M.TURQ] : []);
+  // ---------------- back
+  const b = new Relief(SW, SH);
+  for (let y = 0; y < SH; y++)
+    for (let x = 0; x < SW; x++) {
+      const d = Math.min(x, SW - 1 - x, y, SH - 1 - y);
+      if (d <= 3) {
+        skillMolding(b, d, x, y);
+        continue;
+      }
+      const lattice = (x + y) % 8 === 0 || (((x - y) % 8) + 8) % 8 === 0;
+      b.put(x, y, lattice ? 2 : 1, lattice ? M.GILT : M.OX);
+      const pd = ringD(x, y, C.back.plaque);
+      if (pd === 0) b.put(x, y, 2, M.PARCH);
+      else if (pd === 1) b.put(x, y, 3, M.GILT);
+      const qd = ringD(x, y, C.back.panel);
+      if (qd === 0) b.put(x, y, 1, M.PARCH);
+      else if (qd === 1) b.put(x, y, 2, M.GILT);
+      else if (qd === 2) b.put(x, y, 1, M.INK);
+    }
+  for (const [cx, cy] of corners) stud(b, cx, cy, 2.2, 2.6, M.GILT);
+  b.emit(vm, -2, -1, true, VF.SOLID | VF.EMISSIVE, pal);
+  return { model: vm, voxelSize: C.voxelSize, pivot: [SW / 2, SH / 2, 0] as [number, number, number] };
+}
+
+/** a cut level gem (cabochon with facets) for the card's sockets; lit gems glow. Pivot = base centre. */
+export function levelGem(color: number, lit: boolean) {
+  const m = new VoxelModel('level_gem');
+  const base = lit ? color : mixc(color, 0x1a120c, 0.72);
+  const hi = lit ? mixc(color, 0xffffff, 0.55) : mixc(color, 0x3a2a20, 0.55);
+  const sh = mixc(base, 0x000000, 0.35);
+  const fl = lit ? VF.SOLID | VF.EMISSIVE : VF.SOLID | VF.METAL;
+  for (let y = -3; y <= 3; y++)
+    for (let x = -3; x <= 3; x++) {
+      const d = Math.hypot(x, y) / 3.3;
+      if (d > 1) continue;
+      const h = Math.max(1, Math.round(Math.sqrt(1 - d * d) * 3));
+      for (let z = 0; z < h; z++) {
+        const top = z === h - 1;
+        let c = base;
+        if (top && x <= 0 && y >= 0) c = hi;
+        else if (top && x > 0 && y < 0) c = sh;
+        if (top && x === -1 && y === 1) c = 0xffffff;
+        m.set(x, y, z, c, fl);
+      }
+    }
+  return { model: m, voxelSize: 0.0055, pivot: [0, 0, 0] as [number, number, number] };
+}
+
+/**
+ * a slash of light: a crescent ribbon spiralling from radius r0 at angle a0 to r1 at a1
+ * (radians, in the XY plane, facing +Z). Thin at the tail, full near the head, a hot
+ * white inner edge fading to gold, with a few speed streaks. Pivot = the arc centre.
+ */
+export function slashArc(r0M: number, r1M: number, a0: number, a1: number, widthM = 0.18) {
+  const vs = 1 / 48;
+  const m = new VoxelModel('tarot_slash');
+  const glow = VF.SOLID | VF.EMISSIVE | VF.GLOW, emit = VF.SOLID | VF.EMISSIVE;
+  const steps = Math.ceil((Math.abs(a1 - a0) * Math.max(r0M, r1M)) / vs) * 3;
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const a = a0 + (a1 - a0) * t;
+    const r = (r0M + (r1M - r0M) * t) / vs;
+    // crescent profile: hair-thin at the cut, fullest at ~70 %, a sharp tip at the board
+    const w = (widthM / vs) * Math.pow(Math.sin(Math.PI * Math.pow(t, 0.62)), 0.8) + 0.6;
+    for (let k = 0; k <= w; k += 0.5) {
+      const e = k / Math.max(1, w); // 0 inner (hot) → 1 outer
+      const rr = r - w * 0.35 + k;
+      const c = e < 0.3 ? 0xffffff : e < 0.62 ? 0xfff2c0 : e < 0.85 ? 0xffd070 : 0xf2a040;
+      const x = Math.round(Math.cos(a) * rr), y = Math.round(Math.sin(a) * rr);
+      m.set(x, y, 0, c, e < 0.62 ? glow : emit);
+      if (e < 0.5) m.set(x, y, 1, c, glow);
+    }
+  }
+  // speed streaks trailing inside the arc
+  for (let s = 0; s < 3; s++) {
+    const off = (0.12 + s * 0.07) / vs;
+    const t0 = 0.25 + s * 0.12, t1 = 0.75 + s * 0.06;
+    for (let t = t0; t <= t1; t += 0.004) {
+      const a = a0 + (a1 - a0) * t;
+      const r = (r0M + (r1M - r0M) * t) / vs - off;
+      m.set(Math.round(Math.cos(a) * r), Math.round(Math.sin(a) * r), 0, s === 0 ? 0xfff6d8 : 0xffe0a0, emit);
+    }
+  }
+  return { model: m, voxelSize: vs, pivot: [0, 0, 0] as [number, number, number] };
+}
+
+/**
+ * a frozen spray of sand grains, bone shards and soft dust puffs bursting from the
+ * origin along `dir` within a cone (`spread`), drooping a little under gravity.
+ */
+export function dustSpray(seed = 1, count = 60, dir: [number, number, number] = [1, 0.6, 0], spread = 0.5, lenM = 0.9) {
+  const vs = 1 / 48;
+  const m = new VoxelModel('tarot_spray');
+  const dl = Math.hypot(...dir) || 1;
+  const d = [dir[0] / dl, dir[1] / dl, dir[2] / dl];
+  // an orthonormal basis around the spray axis
+  const up = Math.abs(d[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+  const u = [d[1] * up[2] - d[2] * up[1], d[2] * up[0] - d[0] * up[2], d[0] * up[1] - d[1] * up[0]];
+  const ul = Math.hypot(u[0], u[1], u[2]);
+  u[0] /= ul;
+  u[1] /= ul;
+  u[2] /= ul;
+  const v = [d[1] * u[2] - d[2] * u[1], d[2] * u[0] - d[0] * u[2], d[0] * u[1] - d[1] * u[0]];
+  const SAND = [0xf0d2a0, 0xe2b880, 0xcfa068], BONE = [0xf4ead4, 0xe2d6bc, 0xc8b898];
+  for (let k = 0; k < count; k++) {
+    const t = Math.pow(hash2(k, seed), 0.75);
+    const r = (t * lenM) / vs;
+    const th = hash2(k + 50, seed) * Math.PI * 2;
+    const cr = spread * r * Math.sqrt(hash2(k + 90, seed));
+    const p = [0, 1, 2].map((i) => d[i] * r + (u[i] * Math.cos(th) + v[i] * Math.sin(th)) * cr);
+    p[1] -= t * t * (lenM / vs) * 0.22; // the heavier bits fall away
+    const kind = hash2(k + 7, seed);
+    if (kind < 0.3) {
+      // a bone shard: a short splinter along the flight
+      const len = 2 + Math.round(hash2(k + 3, seed) * 2);
+      for (let i = 0; i < len; i++) m.set(Math.round(p[0] + d[0] * i), Math.round(p[1] + d[1] * i), Math.round(p[2] + d[2] * i), BONE[(k + i) % 3]);
+    } else if (kind < 0.78 || t > 0.55) {
+      // a sand grain or two
+      m.set(Math.round(p[0]), Math.round(p[1]), Math.round(p[2]), SAND[k % 3]);
+      if (kind > 0.6) m.set(Math.round(p[0] + 1), Math.round(p[1]), Math.round(p[2]), SAND[(k + 1) % 3]);
+    } else {
+      // a soft dust puff near the cut
+      const pr = 1.4 + hash2(k + 11, seed) * 1.6;
+      for (let x = -2; x <= 2; x++)
+        for (let y = -2; y <= 2; y++)
+          for (let z = -2; z <= 2; z++) {
+            const q = (x * x + y * y + z * z) / (pr * pr);
+            if (q > 1 || hash3(x + k, y, z + seed) < q * 0.5) continue;
+            m.set(Math.round(p[0] + x), Math.round(p[1] + y), Math.round(p[2] + z), y > 0 ? 0xf6e2c0 : 0xe0c49a, VF.SOLID | VF.SOFTAO);
+          }
+    }
+  }
+  return { model: m, voxelSize: vs, pivot: [0, 0, 0] as [number, number, number] };
 }

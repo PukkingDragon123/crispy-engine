@@ -287,8 +287,8 @@ export function shirtG(F: Fig, col: number, seed = 0) {
   for (let y = 31; y <= 37; y += 3) s.m.set(-1, y, 4, 0xe8dcc0);
 }
 
-/** stiff duster: shoulders, back, side panels and lapels on the torso; long tails as the swaying `coat` part */
-export function dusterG(F: Fig, col: number, trim: number, o: { seed?: number; len?: number } = {}) {
+/** stiff duster: shoulders, back, side panels and lapels on the torso; long tails as the swaying `coat` part (null without tails) */
+export function dusterG(F: Fig, col: number, trim: number, o: { seed?: number; len?: number; tails?: boolean } = {}) {
   const s = F.s('torso');
   const C = clothC(col, o.seed ?? 6, { fold: 4, crease: mulRGB(col, 0.78), stain: mix(col, 0x3a2a1a, 0.25) });
   for (let y = 29; y <= 44; y++)
@@ -310,6 +310,7 @@ export function dusterG(F: Fig, col: number, trim: number, o: { seed?: number; l
   // back yoke seam
   for (let x = -7; x <= 6; x++) if (s.m.has(x, 41, -8)) s.m.set(x, 41, -8, mulRGB(col, 0.82));
   // coat tails
+  if (o.tails === false) return null;
   const cp = F.part('coat', 'pelvis', [0, 29.5, -6.5]);
   const yBot = 29 - (o.len ?? 14);
   for (let y = yBot; y <= 29; y++)
@@ -498,6 +499,49 @@ export function boardG(F: Fig, wood: number, trim: number, stripe: number, o: { 
   for (const zb of [-14, 13]) for (let x = -6; x < 6; x++) s.m.set(x, 2, zb, METAL.iron[0], VF.METAL);
   for (const zf of [-7, 6]) for (let x = -5; x < 5; x++) if (Math.abs(x + 0.5) >= 3) s.m.set(x, 2, zf, 0x3a2414).set(x, 2, zf + 1, 0x3a2414);
   return s;
+}
+
+/** broad usekh collar: concentric bands of beads laid over the shoulders, chest and upper back */
+export function usekhG(s: Sc, bands: number[], o: { neck?: G; rMax?: number; y0?: number; drops?: number } = {}) {
+  const neck = o.neck ?? [0, 46.5, -0.8];
+  const rMax = o.rMax ?? 10.5, y0 = o.y0 ?? 38;
+  const bw = rMax / bands.length;
+  const dist = (x: number, y: number, z: number) => Math.hypot(x + 0.5 - neck[0], (y + 0.5 - neck[1]) * 1.25, (z + 0.5 - neck[2]) * 0.95);
+  const add = new Map<string, [number, number, number]>();
+  s.m.forEach((x, y, z) => {
+    if (y < y0) return;
+    for (const [dx, dy, dz] of [[0, 1, 0], [0, 0, 1], [0, 0, -1], [1, 0, 0], [-1, 0, 0]] as G[]) {
+      const X = x + dx, Y = y + dy, Z = z + dz;
+      if (s.m.has(X, Y, Z) || dist(X, Y, Z) > rMax || dist(X, Y, Z) < 2.6) continue;
+      add.set(`${X},${Y},${Z}`, [X, Y, Z]);
+    }
+  });
+  const gold = new Set([METAL.gold[0], METAL.gold[1], METAL.gold[2]]);
+  for (const [X, Y, Z] of add.values()) {
+    const c = bands[Math.min(bands.length - 1, Math.floor(dist(X, Y, Z) / bw))];
+    s.m.set(X, Y, Z, c, gold.has(c) ? VF.METAL : VF.SOLID);
+  }
+  // teardrop beads along the lower front edge
+  if (o.drops !== 0)
+    for (let x = -7; x <= 6; x += 2)
+      for (let y = 44; y >= y0 - 2; y--) {
+        const z = frontZ(s.m, x, y);
+        if (dist(x, y, z) > rMax - bw * 0.5 && dist(x, y, z) <= rMax + 0.6 && s.m.has(x, y, z)) {
+          s.m.set(x, y - 1, z, METAL.gold[0], VF.METAL);
+          break;
+        }
+      }
+}
+
+/** rescale a finished figure rig to a bigger voxel size (bosses): pivots stay in voxels, metric meta follows */
+export function rescaleRig(spec: import('../../../../engine/voxel/Rig').RigSpec, vs: number) {
+  const k = vs / spec.voxelSize;
+  spec.voxelSize = vs;
+  const M = spec.meta ?? {};
+  for (const key of ['height', 'skullTop', 'hatTop', 'hipY', 'kneeY', 'shoulderY', 'elbowY', 'handY', 'upperArmLen', 'foreArmLen', 'legLen', 'headY'])
+    if (typeof M[key] === 'number') M[key] *= k;
+  if (M.facePivots) for (const n of Object.keys(M.facePivots)) M.facePivots[n] = (M.facePivots[n] as number[]).map((v) => v * k);
+  return spec;
 }
 
 export { res as resolveC };

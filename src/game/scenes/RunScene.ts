@@ -50,6 +50,14 @@ import { nav } from '../Nav';
 import { awardRun, loadSave, GunLoadout, gunMods } from '../meta/Save';
 import * as CH from '../models/characters';
 import { FaceQuads } from '../fx/FaceFx';
+import { MeerkatColony, findClearSpot } from '../run/MeerkatColony';
+import { JerboaDance } from '../run/JerboaDance';
+import { FrogFamily } from '../run/FrogFamily';
+import { TravelerEscort } from '../run/TravelerEscort';
+import { WagonRepair } from '../run/WagonRepair';
+import { NeckSlicer } from '../player/NeckSlicer';
+import { unlock, technique } from '../player/Techniques';
+import { KhonsuAvatar } from '../bosses/Khonsu';
 import { ULT_INFO } from '../player/Ultimate';
 
 export interface RunOptions {
@@ -149,6 +157,13 @@ export class RunScene implements GameScene {
   private stormLoop: any = null;
   private lastTrack = new THREE.Vector3();
   private hasTrack = false;
+  private gustT = 3;
+  colony: MeerkatColony | null = null;
+  jerboa: JerboaDance | null = null;
+  frogs: FrogFamily | null = null;
+  escort: TravelerEscort | null = null;
+  wagon: WagonRepair | null = null;
+  slicer!: NeckSlicer;
   private waveIntroT = 0;
   private gameOver = false;
   ready = false;
@@ -171,6 +186,12 @@ export class RunScene implements GameScene {
     this.scene.add(this.debris.mesh);
     this.marks = new GroundMarks(e.renderer);
     this.world.terrain.setMarks(this.marks.rt.texture, MARK_AREA);
+    // living sand: travelling crests throw pixel sand forward and up
+    this.world.sand.onSpray = (x, y, z, dx, dz, k) => {
+      const SAND = [0xf0d29a, 0xe3bd80, 0xd6a968, 0xfbe6b8];
+      this.particles.emit({ pos: { x, y, z }, count: 2 + Math.round(k * 3), vel: { x: dx * (4 + k * 6), y: 3 + k * 5, z: dz * (4 + k * 6) }, spread: 1.6, jitter: 0.8, gravity: 9, drag: 0.8, life: [0.5, 1.1], size: [0.06, 0.13], sprite: ['dot3', 'dot3', 'puff0'], color: SAND, ground: true });
+      if (Math.random() < 0.35) this.particles.emit({ pos: { x, y: y + 0.4, z }, count: 1, vel: { x: dx * 2, y: 1.2, z: dz * 2 }, spread: 0.6, life: [0.8, 1.5], size: [0.8, 1.6], sprite: ['puff0', 'puff1'], color: 0xe6cf9f, alpha: 0.45, drag: 1.5 });
+    };
     this.cloth = new ClothRenderer();
     this.scene.add(this.cloth.mesh);
     this.particles.groundAt = this.world.groundAt;
@@ -224,6 +245,14 @@ export class RunScene implements GameScene {
     this.hud3d.setBust(vis.rig, vis.rig.name + ':player', vis.gun);
     if (this.opts.gun) this.player.stats.add(gunMods(this.opts.gun) as any);
     this.enemies = new Enemies(this.ctx, this.player as any);
+    this.slicer = new NeckSlicer({
+      engine: e, ctx: this.ctx, player: this.player, enemies: this.enemies, cam: this.camRig,
+      cutIn: (t, c) => this.hud3d.cutIn(t, c, 'determined'),
+      onStyle: (v) => {
+        this.run.style += v;
+        this.addBounty(4);
+      },
+    });
     this.ctx.enemies = this.enemies;
     this.qte = new Qte(e.overlay, e.input, e.audio);
     this.skills = new Skills(this.ctx, this.player, e.input);
@@ -246,6 +275,7 @@ export class RunScene implements GameScene {
     });
     this.populateZone(this.world.sa.zones[0]);
     if (this.world.sa.zones[1]) this.populateZone(this.world.sa.zones[1]);
+    this.spawnQuests();
     this.ledger = new Ledger(e.overlay, this.player.stats);
     if (isTouchDevice()) {
       this.touch = new TouchControls(e.overlay, e.input, this.qte);
@@ -326,6 +356,12 @@ export class RunScene implements GameScene {
     this.touch?.dispose();
     this.shop?.dispose();
     this.picker?.dispose();
+    this.colony?.dispose();
+    this.jerboa?.dispose();
+    this.frogs?.dispose();
+    this.escort?.dispose();
+    this.wagon?.dispose();
+    this.slicer?.cancel();
     this.engine.paused = false;
     this.engine.post.u.uDesat.value = 0;
     this.qte.dispose();
@@ -337,6 +373,12 @@ export class RunScene implements GameScene {
   private wireEvents() {
     const ev = this.events;
     const ctx = this.ctx;
+    // a bell snake coils around the board: mash to break free
+    ev.on('snakeWrap', async (sn: any) => {
+      const r = await this.qte.run({ kind: 'mash', key: 'KeyE', label: 'BREAK FREE', duration: 2.2, target: 12 });
+      if (this.enemies.wrapping !== sn) return;
+      ev.emit(r === 'fail' ? 'snakeWrapCrush' : 'snakeWrapBreak', sn, r === 'perfect' ? 1.8 : 1);
+    });
     this.props.onBreak = (p: PropInst, spd: number, dir?: THREE.Vector3) => this.onPropBroken(p, spd, dir);
     ev.on('explosion', (pos: { x: number; y: number; z: number }, r: number) => {
       this.world.colliders.query(pos.x, pos.z, r + 1, (c) => {
@@ -406,6 +448,7 @@ export class RunScene implements GameScene {
       this.run.ultCharge = Math.min(1, this.run.ultCharge + 0.002);
     });
     ev.on('groundMark', (x: number, z: number, r: number, ch: MarkChannel) => this.marks.splat(x, z, r, ch));
+    ev.on('gibs', (x: number, y: number, z: number, n: number, size: number, cols: number[], speed: number, up: number) => this.debris.burst(x, y, z, n, size, cols, speed, up));
     ev.on('plow', (c: any, spd: number) => this.breakProp(c, spd));
     ev.on('propShot', (c: any, p: THREE.Vector3, d: THREE.Vector3) => {
       if (c?.data?.destructible) {
@@ -440,12 +483,51 @@ export class RunScene implements GameScene {
       (window as any).__music?.setMood('explore');
       if (!escaped) this.bossNames.push(bb.name);
       this.events.emit('bossDefeated', bb, escaped);
+      // beating the Avatar of Khonsu teaches the Neck Slicer (kept forever)
+      if (!escaped && bb instanceof KhonsuAvatar && unlock('neck_slicer')) {
+        this.engine.tweens.after(3.2, () => {
+          this.hud3d.cutIn('MOVE UNLOCKED', '#ffd36b', 'determined');
+          this.hud.toast('THE NECK SLICER', '#ffd36b', technique('neck_slicer').how, true);
+          this.ctx.sfx('qte_perfect', null, 0.8);
+        }, true);
+      }
     };
     void b.start();
     return b;
   }
 
   /** chests and the dumb scarab live outside the prop batches */
+  /** side quests: the rain-frog family, a broken wagon, a traveler who needs an escort */
+  private spawnQuests() {
+    const pp = this.player.pos;
+    const chest = (x: number, z: number, t: any) => this.spawnChest(x, z, t);
+    if (!this.frogs) {
+      const at = FrogFamily.findSpot(this.ctx, pp);
+      if (at) this.frogs = new FrogFamily({ ctx: this.ctx, player: this.player, inter: this.inter, addBounty: (v) => this.addBounty(v), chest }, at);
+    }
+    if (!this.wagon) {
+      const at = WagonRepair.findSpot(this.ctx, pp);
+      if (at) this.wagon = new WagonRepair({ ctx: this.ctx, player: this.player, enemies: this.enemies, inter: this.inter, qte: this.qte, cloth: this.cloth, addBounty: (v) => this.addBounty(v), chest }, at);
+    }
+    if (!this.escort) {
+      const route = TravelerEscort.findRoute(this.ctx, this.props, pp, ['tradingPost', 'saloon', 'ranchBarn']);
+      if (route)
+        this.escort = new TravelerEscort(
+          { ctx: this.ctx, player: this.player, enemies: this.enemies, inter: this.inter, choice: this.choice, items: this.items, cloth: this.cloth, addBounty: (v) => this.addBounty(v), card: () => this.picker.request() },
+          route.start, route.dest, route.name
+        );
+    }
+  }
+
+  private questHud() {
+    if (!this.missions.active)
+      for (const q of [this.escort, this.wagon, this.frogs]) {
+        const h = q?.hud();
+        if (h) return h;
+      }
+    return this.missions.hud();
+  }
+
   private populateZone(z: ZoneDef) {
     if (this.populated.has(z.index)) return;
     this.populated.add(z.index);
@@ -456,6 +538,22 @@ export class RunScene implements GameScene {
       } else if (a.kind === 'dumbScarab' && this.scarabs.length < 3) {
         this.scarabs.push(new DumbScarab(this.ctx, this.enemies, new THREE.Vector3(a.x, 0, a.z)));
       }
+    }
+    // the meerkat colony (traders + their band) lives in the second zone
+    if (!this.colony && z.index === 1) {
+      const sp = findClearSpot(this.ctx, z);
+      if (sp)
+        this.colony = new MeerkatColony({ ctx: this.ctx, player: this.player, inter: this.inter, items: this.items, cam: this.camRig, input: this.engine.input, x: sp.x, z: sp.z, rot: sp.rot });
+    }
+    // now and then a giant jerboa wants to dance
+    if (!this.jerboa && z.index >= 1 && (rnd.chance(0.15) || new URLSearchParams(location.search).has('jerboa'))) {
+      const sp = findClearSpot(this.ctx, z, 3);
+      if (sp)
+        this.jerboa = new JerboaDance({
+          ctx: this.ctx, player: this.player, inter: this.inter, qte: this.qte, cam: this.camRig, items: this.items,
+          pickups: { drop: (k: any, v: number, at: any, n?: number) => this.pickups?.drop(k, v, at, n) },
+          x: sp.x, z: sp.z,
+        });
     }
   }
 
@@ -586,6 +684,7 @@ export class RunScene implements GameScene {
     if (nextZ) this.engine.tweens.after(0.2, () => {
       this.props.buildZone(nextZ);
       this.populateZone(nextZ);
+      this.spawnQuests();
     });
     const prev = this.world.activeZone;
     this.engine.tweens.run(4, (k) => this.world.setTransform(zone, k), (t) => t * t * (3 - 2 * t));
@@ -755,12 +854,18 @@ export class RunScene implements GameScene {
       e.input.setWantLock(false);
       e.audio.play('book_open', { volume: 0.6 });
     }
-    const modal = this.choice.active || this.shop.active || this.ledger.open;
+    const modal = this.choice.active || this.shop.active || this.ledger.open || !!this.colony?.modal || !!this.jerboa?.modal;
     if (!modal && !this.picker.active && e.input.hit('pause')) this.setPaused(!this.pausedByUser);
     this.qte.update(rdt);
     this.picker.update(rdt);
     this.choice.update(rdt);
     this.shop.update(rdt);
+    this.colony?.update(dt, rdt);
+    this.jerboa?.update(dt, rdt);
+    if (this.jerboa?.done) {
+      this.jerboa.dispose();
+      this.jerboa = null;
+    }
     this.hud.suppressHint = this.picker.active || this.ult.active || modal || this.pausedByUser;
     if (modal) {
       this.cloth.update(rdt * 0.2, e.realTime);
@@ -775,7 +880,9 @@ export class RunScene implements GameScene {
     }
     this.faces.begin();
     if (e.input.hit('ultimate') && this.run.ultCharge >= 1 && this.player.alive && !this.ult.active) this.ult.trigger();
+    this.slicer.update(rdt);
     this.player.update(dt);
+    if (!e.paused) this.slicer.post(rdt);
     this.skills.update(dt);
     this.items.update(dt, e.input);
     this.upFx.update(dt);
@@ -789,6 +896,21 @@ export class RunScene implements GameScene {
       this.trail.push({ x: this.player.pos.x, z: this.player.pos.z });
     }
     this.inter.update(e.input);
+    this.frogs?.update(dt);
+    if (this.frogs?.finished) {
+      this.frogs.dispose();
+      this.frogs = null;
+    }
+    this.escort?.update(dt);
+    if (this.escort?.finished) {
+      this.escort.dispose();
+      this.escort = null;
+    }
+    this.wagon?.update(dt);
+    if (this.wagon?.finished) {
+      this.wagon.dispose();
+      this.wagon = null;
+    }
     this.missions.update(dt);
     for (const s of this.scarabs) s.update(dt, this.player);
     for (let i = this.bosses.length - 1; i >= 0; i--) {
@@ -819,7 +941,8 @@ export class RunScene implements GameScene {
     this.slideLoop?.setRate(0.8 + clamp(sp / 40, 0, 0.6));
     // board tracks in sand
     if (this.player.board.grounded && sp > 2 && this.player.board.lastSurface.kind !== 'water') {
-      if (this.hasTrack) this.marks.segment(this.lastTrack.x, this.lastTrack.z, pp.x, pp.z, 0.42, 0);
+      const carveW = 0.4 + Math.min(0.22, Math.abs(this.player.board.lean) * 0.25) + (this.player.board.drifting ? 0.18 : 0);
+      if (this.hasTrack) this.marks.segment(this.lastTrack.x, this.lastTrack.z, pp.x, pp.z, carveW, 0);
       this.lastTrack.copy(pp);
       this.hasTrack = true;
     } else this.hasTrack = false;
@@ -873,6 +996,36 @@ export class RunScene implements GameScene {
       const a = Math.random() * Math.PI * 2, r = 3 + Math.random() * 16;
       const x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
       pa.emit({ pos: { x, y: this.world.groundAt(x, z) + 0.06, z }, count: 3, spread: 0.6, vel: { x: (w.x / wl) * 4.5, y: 0.2, z: (w.z / wl) * 4.5 }, jitter: 0.6, gravity: 1.5, drag: 0.3, life: [0.6, 1.3], size: [0.04, 0.07], sprite: 'dot3', color: SAND, ground: true });
+    }
+    // a dust curtain hangs behind the rider and drifts off with the wind
+    if (b.grounded && sp > 9 && b.lastSurface.kind !== 'water' && Math.random() < dt * (sp * 0.45)) {
+      const f = b.forward;
+      pa.emit({ pos: { x: p.x - f.x * 1.2, y: p.y + 0.35, z: p.z - f.z * 1.2 }, count: 1, vel: { x: (w.x / wl) * 1.6 - f.x * 1.5, y: 0.5, z: (w.z / wl) * 1.6 - f.z * 1.5 }, spread: 0.5, jitter: 0.4, gravity: -0.15, drag: 0.9, life: [1.6, 2.8], size: [0.7, 2.2], sprite: ['puff0', 'puff1'], color: [0xe9d3a4, 0xdcc08c], alpha: 0.32 });
+    }
+    // spindrift: sand streaming off nearby crests, downwind
+    if (Math.random() < dt * 9) {
+      const a = Math.random() * Math.PI * 2, r = 6 + Math.random() * 30;
+      const x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+      const ux = w.x / wl, uz = w.z / wl;
+      const h = this.world.groundSmooth(x, z);
+      const crest = h - Math.max(this.world.groundSmooth(x - ux * 2.5, z - uz * 2.5), this.world.groundSmooth(x + ux * 2.5, z + uz * 2.5));
+      if (crest > 0.12) {
+        const k = Math.min(1, crest / 0.8);
+        pa.emit({ pos: { x, y: h + 0.08, z }, count: 4 + Math.round(k * 8), vel: { x: ux * (5 + k * 4), y: 0.9 + k * 1.2, z: uz * (5 + k * 4) }, spread: 0.9, jitter: 1.6, gravity: 2.2, drag: 0.5, life: [0.7, 1.5], size: [0.04, 0.08], sprite: 'dot3', color: SAND });
+        if (Math.random() < 0.5) pa.emit({ pos: { x: x + ux, y: h + 0.4, z: z + uz }, count: 1, vel: { x: ux * 3, y: 0.4, z: uz * 3 }, spread: 0.4, life: [1.0, 1.8], size: [0.6, 1.4], sprite: ['puff0', 'puff1'], color: 0xeedbb0, alpha: 0.28, drag: 0.8 });
+      }
+    }
+    // gusts: a sheet of skimming sand sweeps across the dunes every few seconds
+    this.gustT -= dt;
+    if (this.gustT <= 0) {
+      this.gustT = 3 + Math.random() * 5;
+      const ux = w.x / wl, uz = w.z / wl;
+      const up = 14 + Math.random() * 10;
+      for (let i = 0; i < 26; i++) {
+        const l = (Math.random() * 2 - 1) * 26;
+        const x = p.x - ux * up - uz * l, z = p.z - uz * up + ux * l;
+        pa.emit({ pos: { x, y: this.world.groundAt(x, z) + 0.05 + Math.random() * 0.25, z }, count: 3, vel: { x: ux * (8 + Math.random() * 4), y: 0.25, z: uz * (8 + Math.random() * 4) }, spread: 0.8, jitter: 1.2, gravity: 1.2, drag: 0.25, life: [1.6, 3.2], size: [0.04, 0.07], sprite: 'dot3', color: SAND, ground: true, delay: Math.random() * 0.6 });
+      }
     }
     // dust motes hanging in the sun
     if (Math.random() < dt * 5) {
@@ -931,8 +1084,8 @@ export class RunScene implements GameScene {
       locked: this.engine.input.lookActive,
       aiming: p.aiming,
       zone: this.world.zone.name,
-      prompt: this.picker.active || this.choice.active || this.shop.active ? null : this.inter.prompt(),
-      ...this.missions.hud(),
+      prompt: this.picker.active || this.choice.active || this.shop.active || this.colony?.modal || this.jerboa?.modal ? null : this.inter.prompt(),
+      ...this.questHud(),
     };
     this.hud.update(rdt, st);
   }

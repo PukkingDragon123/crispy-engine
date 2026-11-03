@@ -2,6 +2,7 @@
 import type { ModelEntry } from './registryCharacters';
 import * as Pr from './props';
 import * as Hx from './props/hideout';
+import * as Ws from './props/workshop';
 import * as Hud from './props/hud';
 
 export const PROP_MODELS: Record<string, ModelEntry> = {
@@ -178,6 +179,34 @@ export const PROP_MODELS: Record<string, ModelEntry> = {
   ...seeds('keg', 2, (i) => Hx.keg(i)),
   ...seeds('grass_tuft', 3, (i) => Hx.grassTuft(i)),
   boardwalk_10m: () => Hx.boardwalk(10, 1),
+  // --- hideout v3: the pine workshop-house (cabin shell + furniture + rigs)
+  cabin_floor: () => Hx.cabinFloor(1),
+  cabin_walls: () => Hx.cabinWalls(1),
+  cabin_roof: () => Hx.cabinRoof(1),
+  cabin_fireplace: () => Hx.fireplaceCraft(1),
+  workshop_weapon_bench: () => Ws.weaponBench(),
+  workshop_board_rack: () => Ws.boardRack(),
+  workshop_sawhorse: () => Ws.sawhorse(),
+  workshop_wax_kit: () => Ws.waxKit(),
+  workshop_wax_bench: () => Ws.waxBench(),
+  workshop_lectern: () => Ws.lectern(),
+  workshop_open_tome: () => Ws.openTome(),
+  workshop_futon: () => Ws.futon(),
+  workshop_coffee_table: () => Ws.coffeeTable(),
+  workshop_table_clutter: () => Ws.tableClutter(),
+  workshop_plaid_chair: () => Ws.plaidChair(),
+  workshop_braided_rug: () => Ws.braidedRug(),
+  workshop_side_cabinet: () => Ws.sideCabinet(),
+  workshop_knitting_basket: () => Ws.knittingBasket(),
+  workshop_guitar: () => Ws.guitar(),
+  workshop_landscape_frame: () => Ws.landscapeFrame(),
+  workshop_photo_frame: () => Ws.photoFrame(),
+  workshop_cheval_mirror: () => Ws.chevalMirror(),
+  workshop_rocking_chair: () => Ws.rockingChairRig(),
+  workshop_barn_door: () => Ws.barnDoorRig(false),
+  workshop_z_door: () => Ws.zDoorRig(),
+  workshop_clock: () => Ws.clockRig(),
+  workshop_crane: () => Ws.craneRig(),
   // --- 3D HUD hero models (viewer previews; the game calls props/hud.ts directly)
   hud_cylinder: () => Hud.hudCylinderPreview(6),
   hud_cylinder_8: () => Hud.hudCylinderPreview(8),

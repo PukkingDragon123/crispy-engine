@@ -1,124 +1,108 @@
-// The Pharaoh (STYLE v2 boss, 1/20): an undead king. Toon skull face under a
-// striped gold-and-lapis nemes with a cobra uraeus, braided false beard,
-// bandage-wrapped body, a huge usekh collar, white kilt, a gold crook
-// (`weapon`, fore_r, `crook_tip` socket) and his own sarcophagus lid as a
-// shield (`shield`, fore_l, facing +X — the front guard). Cape is engine cloth
-// from `cape_anchor` (meta.cloth.cape).
+// The Pharaoh (boss): an undead king on Sundown's skeleton figure
+// (characters/skeleton.ts: same parts, joints and proportions), scaled to boss
+// size with bigger voxels (1/22). A weathered skull face with cold embers under a
+// striped gold-and-lapis nemes with a cobra uraeus, a braided gold false beard,
+// a body swaddled in burial bandages, a huge usekh collar, a pleated kilt with a
+// gold belt and apron, gold arm rings, a gold crook (`weapon`, fore_r,
+// `crook_tip` socket) and his own sarcophagus lid as a shield (`shield`, fore_l,
+// facing +X — the front guard). The cape is engine cloth from `cape_anchor`.
 import type { RigSpec } from '../../../engine/voxel/Rig';
-import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
-import { TOON } from '../style';
-import { skeletonParts, buildHumanoid, defaultExpressions, sleeve, JOINT, mirrorV3 } from '../toon/humanoid';
-import { roundBox, autoShade, mirrored } from './human';
-import { wrapBands } from './mummy';
-import { BOSS_EXPR } from './marshal';
+import { defaultExpressions } from '../toon/humanoid';
+import { Fig, finish, figMeta, VoxelModel, VF, mix, wrapShell, G } from './figure/fig';
+import { ageBones, emberEyes, addHat, frontZ, METAL, rescaleRig } from './figure/gear';
+import { mummyBody } from './mummy';
+import { BOSS_EXPR, BOSS_VS } from './marshal';
 
-export function pharaohRig(): RigSpec {
-  const B = TOON.bone, G = TOON.gold, L = TOON.lapis, W = TOON.bandage;
-  const P = skeletonParts({ ramp: B, skull: { mouth: 'smile' }, handR: { pose: 'fist' }, handL: { pose: 'fist' } });
-  const H = P.head;
-  // ---------------------------------------------------------------- nemes headdress
-  const stripe = (y: number) => ((y >> 1) % 2 === 0 ? G : L);
-  for (let y = 43; y <= 54; y++) {
-    const hx = y >= 53 ? 6 : y >= 51 ? 7 : 8 + (y <= 46 ? 1 : 0);
-    const zb = y >= 53 ? -6 : -8, zf = y >= 53 ? 4 : y >= 48 ? 6 : 1;
-    for (let x = -hx; x <= hx; x++)
-      for (let z = zb; z <= zf; z++) {
-        if (H.has(x, y, z) && z >= 2) continue; // keep the face
-        const shell = Math.abs(x) >= hx - 1 || z <= zb + 1 || y >= 52 || (y >= 48 && z >= 2);
-        if (!shell) continue;
-        const r = stripe(y);
-        H.set(x, y, z, r.base, r === G ? VF.METAL : VF.SOLID);
+const LAP = 0x2a4a9a;
+
+/** nemes headdress: flat crown, striped side panels flaring behind the ears, lappets over the chest, a tail */
+function nemes() {
+  const m = new VoxelModel('hat');
+  const G0 = METAL.gold;
+  const stripe = (y: number) => ((y >> 1) & 1 ? G0[0] : LAP);
+  const flag = (c: number) => (c === LAP ? VF.SOLID : VF.METAL);
+  for (let y = 46; y <= 64; y++) {
+    const top = y >= 62;
+    const hx = top ? 6.6 - (y - 62) * 0.5 : y >= 56 ? 7.6 : 7.6 + (56 - y) * 0.28;
+    const zb = top ? -7.6 : -8.8, zf = top ? 5.6 : y >= 57 ? 6.6 : 0.6;
+    for (let x = -11; x < 11; x++)
+      for (let z = -10; z <= 7; z++) {
+        const gx = Math.abs(x + 0.5), gz = z + 0.5;
+        const u = gx / hx, v = Math.abs(gz - (zf + zb) / 2) / ((zf - zb) / 2);
+        if (u ** 2.6 + v ** 2.6 > 1) continue;
+        const inner = (gx / (hx - 1.1)) ** 2.6 + (Math.abs(gz - (zf + zb) / 2) / ((zf - zb) / 2 - 1.1)) ** 2.6 <= 1;
+        if (inner && !top) continue;
+        const c = stripe(y);
+        m.set(x, y, z, c, flag(c));
       }
   }
-  // brow band across the forehead
-  for (let x = -7; x <= 7; x++) H.set(x, 48, 7, G.base, VF.METAL);
-  // lappets falling in front of the shoulders
-  for (const s of [1, -1])
-    for (let y = 33; y <= 44; y++)
-      for (let x = 6; x <= 9; x++)
-        for (let z = 1; z <= 3; z++) {
-          const r = stripe(y);
-          H.set(s * x, y, z, r.base, r === G ? VF.METAL : VF.SOLID);
+  // brow band + uraeus cobra with a carnelian eye
+  for (let x = -7; x <= 6; x++) m.set(x, 57, 7, G0[2], VF.METAL);
+  for (const [x, y, z, c] of [[-1, 58, 8, 0], [0, 58, 8, 0], [-1, 59, 8, 2], [0, 59, 8, 0], [-1, 60, 9, 0], [0, 60, 9, 2], [-1, 61, 9, 1], [0, 61, 9, 1]] as number[][]) m.set(x, y, z, G0[c], VF.METAL);
+  m.set(-1, 60, 10, 0xa8321e).set(0, 60, 10, 0xa8321e);
+  // lappets falling over the front of the shoulders
+  for (const s1 of [1, -1])
+    for (let y = 36; y <= 50; y++)
+      for (let x = 7; x <= 9; x++)
+        for (let z = 0; z <= 3; z++) {
+          const c = stripe(y);
+          m.set(s1 > 0 ? x : -1 - x, y, z, y === 36 ? G0[1] : c, y === 36 ? VF.METAL : flag(c));
         }
-  // uraeus cobra
-  roundBox(H, -1, 49, 7, 1, 52, 8, G.base, 0, VF.METAL);
-  H.set(0, 53, 8, G.hi, VF.METAL).set(0, 51, 9, TOON.red.base).set(-1, 52, 9, G.base, VF.METAL).set(1, 52, 9, G.base, VF.METAL);
-  autoShade(H, [G, L]);
-  // ---------------------------------------------------------------- braided false beard on the jaw
-  const J = P.jaw!;
-  for (let y = 30; y <= 35; y++) for (let x = -1; x <= 1; x++) for (let z = 5; z <= 7; z++) J.set(x, y, z, y % 2 === 0 ? G.base : L.base, y % 2 === 0 ? VF.METAL : VF.SOLID);
-  // ---------------------------------------------------------------- body: wraps + usekh + kilt
-  const T = P.torso;
-  roundBox(T, -6, 24, -4, 6, 33, 3, W.base, 2);
-  for (let y = 29; y <= 35; y++)
-    for (let x = -9; x <= 9; x++) {
-      const r = 35 - y;
-      if (Math.abs(x) > 3 + r * 1.2) continue;
-      for (const z of [4, 5]) if (z === 4 || r <= 4) T.set(x, y, z, r % 3 === 0 ? G.base : r % 3 === 1 ? L.base : TOON.turquoise.base, r % 3 === 0 ? VF.METAL : VF.SOLID);
-    }
-  roundBox(T, -1, 26, 5, 1, 28, 5, TOON.red.base, 0); // heart scarab
-  T.set(0, 27, 6, G.hi, VF.METAL);
-  wrapBands(T, W);
-  autoShade(T, [W]);
-  const PV = P.pelvis;
-  roundBox(PV, -6, 15, -4, 6, 23, 3, TOON.white.base, 2);
-  for (let x = -6; x <= 6; x++) for (let z = -4; z <= 3; z++) if (PV.has(x, 23, z)) PV.set(x, 23, z, G.base, VF.METAL);
-  for (let y = 14; y <= 22; y++) for (let x = -2; x <= 2; x++) PV.set(x, y, 4, y % 2 ? G.base : L.base, y % 2 ? VF.METAL : VF.SOLID);
-  autoShade(PV, [TOON.white]);
-  for (const [name, s] of [['arm_l', 1], ['arm_r', -1]] as const) {
-    const m = P[name];
-    sleeve(m, s > 0 ? 6 : -9, s > 0 ? 9 : -6, 25, 32, -2, 1, W);
-    roundBox(m, s > 0 ? 6 : -9, 29, -2, s > 0 ? 9 : -6, 30, 1, G.base, 0, VF.METAL);
-    wrapBands(m, W);
-  }
-  for (const [name, s] of [['fore_l', 1], ['fore_r', -1]] as const) {
-    const m = P[name];
-    roundBox(m, s > 0 ? 6 : -9, 18, -2, s > 0 ? 9 : -6, 22, 1, G.base, 0, VF.METAL);
-  }
-  for (const [name] of [['thigh_l'], ['thigh_r'], ['shin_l'], ['shin_r']] as const) wrapBands(P[name], W);
-  // ---------------------------------------------------------------- crook (right hand, hanging, hook at the bottom)
-  const hr = mirrorV3(JOINT.hand);
-  const hx = Math.round(hr[0] - 0.5), hz = Math.round(hr[2] - 0.5);
-  const crook = new VoxelModel('weapon');
-  for (let y = -4; y <= 16; y++) for (let x = hx - 1; x <= hx; x++) crook.set(x, y, hz, (y >> 1) % 2 ? L.base : G.base, (y >> 1) % 2 ? VF.SOLID : VF.METAL);
-  const hook: [number, number][] = [[-5, 0], [-6, 1], [-6, 2], [-6, 3], [-5, 4], [-4, 4], [-3, 4]];
-  for (const [y, dz] of hook) for (let x = hx - 1; x <= hx; x++) crook.set(x, y, hz + dz, G.base, VF.METAL);
-  // ---------------------------------------------------------------- sarcophagus lid shield (left forearm, outer side)
-  const lid = new VoxelModel('shield');
-  const sx = 12;
-  for (let y = 2; y <= 34; y++) {
-    const hw = y >= 28 ? 6 - Math.round((y - 28) * 0.8) : y <= 6 ? 4 + Math.round((y - 2) * 0.5) : 6;
-    for (let z = -hw; z <= hw; z++) {
-      const rim = Math.abs(z) === hw;
-      const c = rim ? G.dark : y >= 26 ? G.base : y >= 22 ? (Math.abs(z) <= 2 ? G.hi : L.base) : (y + Math.abs(z)) % 4 === 0 ? G.base : L.base;
-      lid.set(sx, y, z, c, c === L.base ? VF.SOLID : VF.METAL);
-      lid.set(sx - 1, y, z, TOON.wood.shade);
-    }
-  }
-  // the lid's own face
-  for (const zz of [-2, 2]) for (let y = 29; y <= 30; y++) lid.set(sx + 1, y, zz, TOON.black.base);
-  lid.set(sx + 1, 27, 0, G.dark, VF.METAL);
-  for (let y = 22; y <= 26; y++) lid.set(sx + 1, y, 0, L.base); // beard
-  for (let z = -4; z <= 4; z++) lid.set(sx + 1, 18 + Math.round(Math.abs(z) * 0.5), z, TOON.red.base); // crossed arms
-  autoShade(lid, [L]);
-  const VS = 1 / 20;
-  return buildHumanoid({
-    name: 'pharaoh',
-    parts: P,
-    voxelSize: VS,
-    extra: [
-      { name: 'weapon', model: crook, parent: 'fore_r', joint: hr },
-      { name: 'shield', model: lid, parent: 'fore_l', joint: [10.5, 20, 0.5] },
-    ],
-    sockets: {
-      cape_anchor: { part: 'torso', at: [0.5, 33, -5] },
-      crook_tip: { part: 'weapon', at: [hx + 0.5, -2.5, hz + 4.5] },
-      head_top: { part: 'head', at: [0.5, 55, 0.5] },
-    },
-    topY: 55,
-    radius: 0.36 * 1.5,
-    expressions: defaultExpressions(BOSS_EXPR),
-    meta: { kind: 'pharaoh', boss: true, headY: 44 * VS, defaultExpression: 'judging', frontGuard: true, cloth: { cape: [0x2c56b3, 0x1b3a80, G.base] } },
-  });
+  // the queue at the back
+  for (let y = 40; y <= 50; y++) for (let x = -2; x <= 1; x++) m.set(x, y, -10, stripe(y), flag(stripe(y)));
+  return { model: m, top: 66 };
 }
-void mirrored;
+
+export function pharaohRig(): RigSpec {
+  const F = new Fig();
+  F.boneMirror('fore_r', 'fore_l'); // fists: the crook and the lid
+  ageBones(F, { seed: 71, tint: 0x9a8058, amt: 0.3 });
+  mummyBody(F, { variant: 2, headWrap: false });
+  emberEyes(F, 0x7fe0ff, { orb: 0x0a1418 });
+  const G0 = METAL.gold;
+  // braided false beard under the chin
+  const jw = F.s('jaw');
+  for (let y = 38; y <= 44; y++) for (const x of [-1, 0]) for (const z of [3, 4]) jw.m.set(x, y, z, (y & 1) ? G0[0] : LAP, (y & 1) ? VF.METAL : VF.SOLID);
+  jw.m.set(-1, 37, 4, G0[2], VF.METAL).set(0, 37, 4, G0[2], VF.METAL);
+  // gold arm rings and bracelets
+  for (const s1 of [1, -1]) {
+    wrapShell(F.s(s1 > 0 ? 'arm_l' : 'arm_r'), 38, 39, (x: number, y: number) => (y === 39 ? G0[2] : G0[0]), () => true, VF.METAL);
+    wrapShell(F.s(s1 > 0 ? 'fore_l' : 'fore_r'), 26, 27, (x: number, y: number) => (y === 27 ? LAP : G0[0]), () => true, VF.METAL);
+  }
+  const top = addHat(F, nemes());
+  // the crook (heka): banded staff hanging from the right fist, hook curling forward at the bottom
+  const wp = F.part('weapon', 'fore_r', F.J.hand_r);
+  for (let y = 5; y <= 25; y++) for (const x of [-10, -9]) wp.m.set(x, y, 0, (y >> 1) & 1 ? LAP : G0[0], (y >> 1) & 1 ? VF.SOLID : VF.METAL);
+  const hook: [number, number][] = [[4, 0], [3, 1], [3, 2], [3, 3], [4, 4], [5, 5], [6, 5], [7, 5], [8, 4]];
+  for (const [y, dz] of hook) for (const x of [-10, -9]) wp.m.set(x, y, dz, G0[dz === 5 ? 2 : 0], VF.METAL);
+  F.sock('crook_tip', 'weapon', [-9, 8.5, 4.5]);
+  // his own sarcophagus lid as a shield on the left forearm (outer side, faces +X)
+  const sd = F.part('shield', 'fore_l', [11, 27, 0]);
+  for (let y = 3; y <= 44; y++) {
+    const hw = y >= 37 ? 7 - Math.round((y - 37) * 0.75) : y <= 8 ? 4 + Math.round((y - 3) * 0.6) : 7;
+    for (let z = -hw; z < hw; z++) {
+      const rim = z === -hw || z === hw - 1;
+      const c = rim ? G0[1] : y >= 33 ? G0[0] : y >= 28 ? (Math.abs(z + 0.5) < 2.5 ? G0[2] : LAP) : (y + Math.abs(z)) % 4 === 0 ? G0[0] : LAP;
+      sd.m.set(12, y, z, c, c === LAP ? VF.SOLID : VF.METAL);
+      sd.m.set(11, y, z, 0x5a3a22);
+    }
+  }
+  for (const z of [-3, 2]) for (const y of [38, 39]) sd.m.set(13, y, z, 0x141012); // the lid's own kohl eyes
+  sd.m.set(13, 36, -1, G0[1], VF.METAL).set(13, 36, 0, G0[1], VF.METAL);
+  for (let y = 28; y <= 33; y++) sd.m.set(13, y, -1, LAP).set(13, y, 0, LAP); // beard
+  for (let z = -5; z <= 4; z++) sd.m.set(13, 22 + Math.round(Math.abs(z + 0.5) * 0.6), z, 0xa8321e); // crossed arms
+  F.sock('cape_anchor', 'torso', [0, 44, -8]);
+  finish(F);
+  const spec = F.build('pharaoh', figMeta(F, 'pharaoh', {
+    boss: true,
+    height: top * F.vs,
+    radius: 0.54,
+    defaultExpression: 'judging',
+    frontGuard: true,
+    expressions: defaultExpressions(BOSS_EXPR),
+    cloth: { cape: [0x2c56b3, 0x1b3a80, G0[0]] },
+  }));
+  return rescaleRig(spec, BOSS_VS);
+}
+void mix;
+void frontZ;

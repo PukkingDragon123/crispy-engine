@@ -2,18 +2,22 @@
 // spin into a hovering row; hover tilts them toward the cursor, right-drag
 // turns a card over to inspect its ledger, click (or 1–4) claims one; it flies
 // into the hero and the rest sink back into the dunes. R rerolls, B banishes.
+// Each card is a sculpted 3D frame for its rarity carrying a photographed
+// vignette of the upgrade (SkillArt, baked a slice per frame while it rises).
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Offer, UpgradeManager } from '../run/Upgrades';
 import { RARITY } from '../run/Upgrades';
-import { canvasTex, paintCardBack, paintCardFront } from './CardArt';
+import { makeSkillCard, SkillCard3D } from './SkillCards';
+import { SkillArt } from './SkillArt';
 import { Ease } from '../../engine/Tween';
 import type { Input } from '../../engine/Input';
 import { damp } from '../../engine/math/rand';
 
 interface Card {
   offer: Offer;
-  mesh: THREE.Mesh;
+  card: SkillCard3D;
+  mesh: THREE.Group;
   home: THREE.Vector3;
   hover: number;
   flip: number; // target flip (0 front, PI back)
@@ -35,6 +39,8 @@ export class CardPicker {
   private hint: HTMLDivElement;
   private queue = 0;
   private busy = false;
+  /** vignette photos per upgrade family (cached across picks) */
+  private art = new SkillArt();
 
   constructor(private ctx: Ctx, private up: UpgradeManager, private input: Input, private getHero: () => THREE.Vector3) {
     ctx.scene.add(this.group);
@@ -46,6 +52,9 @@ export class CardPicker {
 
   dispose() {
     this.hint.remove();
+    for (const c of this.cards) c.card.dispose();
+    this.cards = [];
+    this.art.dispose();
   }
 
   /** queue a pick (multiple rank-ups) */
@@ -90,18 +99,10 @@ export class CardPicker {
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
     const center = cam.position.clone().addScaledVector(fwd, 2.05).addScaledVector(up, -0.02);
     const spacing = offers.length > 3 ? 0.78 : 0.95;
+    this.art.request(offers.map((o) => o.def));
     this.cards = offers.map((o, i) => {
-      const front = canvasTex(paintCardFront(o));
-      const back = canvasTex(paintCardBack(o, this.up.preview(o)));
-      const edge = new THREE.MeshBasicMaterial({ color: RARITY[o.def.rarity].hex, toneMapped: false });
-      const face = (t: THREE.Texture) => new THREE.MeshBasicMaterial({ map: t, toneMapped: false, transparent: true, depthTest: false, depthWrite: false, fog: false });
-      edge.transparent = true;
-      edge.depthTest = false;
-      edge.depthWrite = false;
-      const mats = [edge, edge, edge, edge, face(front), face(back)];
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.72, 1.08, 0.02), mats);
-      mesh.renderOrder = 999;
-      mesh.castShadow = true;
+      const card3 = makeSkillCard(o, this.up.preview(o));
+      const mesh = card3.group;
       const home = center.clone().addScaledVector(right, (i - (offers.length - 1) / 2) * spacing);
       // erupt from the sand below the home spot
       const start = home.clone().addScaledVector(fwd, 0.6);
@@ -109,7 +110,7 @@ export class CardPicker {
       mesh.position.copy(start);
       mesh.quaternion.copy(cam.quaternion);
       this.group.add(mesh);
-      const card: Card = { offer: o, mesh, home, hover: 0, flip: 0, flipCur: Math.PI * 4, tiltX: 0, tiltY: 0, ready: false };
+      const card: Card = { offer: o, card: card3, mesh, home, hover: 0, flip: 0, flipCur: Math.PI * 4, tiltX: 0, tiltY: 0, ready: false };
       const delay = 0.12 + i * 0.16;
       eng.tweens.after(delay, () => {
         ctx.fx.sandBurst({ x: start.x, y: start.y + 0.6, z: start.z }, 1.3);
@@ -151,7 +152,7 @@ export class CardPicker {
           done: () => {
             ctx.fx.sandBurst(hero, 0.8);
             ctx.fx.sparkle(hero, RARITY[c.offer.def.rarity].hex, 16, 0.5);
-            this.group.remove(m);
+            c.card.dispose();
           },
         });
       } else {
@@ -160,7 +161,7 @@ export class CardPicker {
         eng.tweens.run(0.5, (k) => {
           m.position.lerpVectors(from, to, k);
           m.rotateZ(0.05);
-        }, Ease.inBack, { real: true, done: () => this.group.remove(m) });
+        }, Ease.inBack, { real: true, done: () => c.card.dispose() });
         ctx.fx.dust(from, 0.5, 0xe6cf9f, 2);
       }
     }
@@ -176,6 +177,12 @@ export class CardPicker {
 
   update(rdt: number) {
     if (!this.active) return;
+    // develop the vignette photos a slice per frame; each card fades its art in when ready
+    this.art.step(this.ctx.engine.renderer, 9);
+    for (const c of this.cards) {
+      if (!c.card.hasArt) c.card.setArt(this.art.texture(c.offer.def));
+      c.card.update(rdt, c.hover);
+    }
     const inp = this.input;
     const cam = this.ctx.camera;
     // keyboard picks
@@ -185,14 +192,14 @@ export class CardPicker {
       this.ctx.toast('REROLL', '#c9a97c', `${this.up.rerolls} left`);
       const res = this.resolve;
       this.resolve = null;
-      for (const c of this.cards) this.group.remove(c.mesh);
+      for (const c of this.cards) c.card.dispose();
       this.show(this.up.roll(this.cards.length)).then((o) => res(o));
       return;
     }
     // raycast hover
     this.ray.setFromCamera(new THREE.Vector2(inp.ndcX, inp.ndcY), cam);
-    const hits = this.ray.intersectObjects(this.cards.map((c) => c.mesh), false);
-    const h = hits.length ? this.cards.find((c) => c.mesh === hits[0].object) ?? null : null;
+    const hits = this.ray.intersectObjects(this.cards.map((c) => c.card.hit), false);
+    const h = hits.length ? this.cards.find((c) => c.card.hit === hits[0].object) ?? null : null;
     if (h !== this.hovered) {
       if (h) this.ctx.sfx('card_hover', null, 0.5);
       this.hovered = h;

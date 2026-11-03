@@ -2,6 +2,7 @@
 // procedural animation (anticipation, squash/stretch, recoil, jaw screams),
 // damage pipeline hookup, limb loss, ragdoll death pieces, ramming + counters.
 import * as THREE from 'three';
+import { Gore, fluidFor } from '../fx/Gore';
 import type { Ctx, EnemyApi, EnemyLike, RayHit } from '../Ctx';
 import { ENEMIES, EnemyDef, AttackDef, waveScale } from './EnemyDefs';
 import { EnemyRender, RigBatch } from './EnemyRender';
@@ -295,6 +296,9 @@ export class Enemy implements EnemyLike {
   }
 }
 
+/** parts that can come off */
+const SEVERABLE = /^(arm|fore|hand|thigh|shin|leg|head|tail|claw|pincer|wing|ear|jaw|horn|stinger|mandible|antenna|paw|foot)/;
+
 interface RagPiece {
   batch: RigBatch;
   part: number;
@@ -314,6 +318,7 @@ export class Enemies implements EnemyApi {
   render: EnemyRender;
   proj: Projectiles;
   rag: RagPiece[] = [];
+  gore: Gore;
   /** enemies playing their procedural death before turning into ragdoll pieces */
   dying: Enemy[] = [];
   /** the bell snake currently coiled around the hunter */
@@ -328,6 +333,7 @@ export class Enemies implements EnemyApi {
   /** also ribbon-toast alpha moves (the world callout always shows) */
   skillToasts = true;
   private recentTitles = new Map<string, { t: number; x: number; z: number }>();
+  private lastCalloutT = -99;
   private now = 0;
   /** lingering acid pools */
   hazards: Hazard[] = [];
@@ -337,6 +343,13 @@ export class Enemies implements EnemyApi {
 
   constructor(private ctx: Ctx, private player: PlayerLink) {
     this.render = new EnemyRender(ctx.scene);
+    this.gore = new Gore(ctx);
+    this.gore.partWorld = (e: Enemy, part: number, out: THREE.Matrix4) => {
+      if (!e.alive && !this.dying.includes(e)) return false;
+      if (e.hidden[part]) return false;
+      out.copy(this.poseWorld(e)[part]);
+      return true;
+    };
     this.proj = new Projectiles(ctx, () => player as any);
     this.callouts = new SkillCallouts(ctx.scene);
     // alpha thorny-devil acid drops sometimes leave a small fizzing puddle
@@ -624,10 +637,20 @@ export class Enemies implements EnemyApi {
     ctx.events.emit('enemyHit', e, hit, amt, res);
     // harassers chasing an escort turn on the hunter who shoots them
     if (e.focus && hit.source !== 'poison' && hit.source !== 'bleed' && hit.source !== 'burn' && rnd.chance(0.45)) e.focus = null;
-    // limb loss
-    const part = hit.tags?.[0];
-    const limbs = ['arm_l', 'arm_r', 'head', 'thigh_l', 'thigh_r', 'fore_l', 'fore_r'];
-    if (part && limbs.includes(part) && (amt > e.maxHp * 0.4 || (e.hp <= 0 && rnd.chance(0.7)))) this.detach(e, part, e.hitX, e.hitZ);
+    // limb loss: killing blows always take the limb they hit, big hits usually do,
+    // crits sometimes; a headshot kill takes the head clean off
+    const dot = hit.source === 'poison' || hit.source === 'bleed' || hit.source === 'burn';
+    let part = hit.tags?.[0];
+    if (hit.headshot && e.hp <= 0) part = 'head';
+    const pi = part ? e.part(part) : -1;
+    if (!dot && part && pi >= 0 && e.batch.geo.parts[pi].parent >= 0 && SEVERABLE.test(part)) {
+      const chance = e.hp <= 0 ? 1 : amt >= e.maxHp * 0.25 ? 0.85 : res.crit ? 0.4 : 0;
+      if (chance > 0 && rnd.chance(chance)) {
+        this.detach(e, part, e.hitX, e.hitZ);
+        // a biped that loses a leg goes down
+        if (e.hp > 0 && e.skel === 'humanoid' && /^(thigh|shin|leg)/.test(part)) e.hp = 0;
+      }
+    }
     if (e.hp <= 0) this.kill(e, hit, e.hitX, e.hitZ, res.crit);
     return amt;
   }
@@ -667,41 +690,108 @@ export class Enemies implements EnemyApi {
     parts.forEach((_, j) => e.hidden[j] && before.add(j));
     const W = this.poseWorld(e);
     hideRec(i);
+    let limbPiece: RagPiece | null = null;
     parts.forEach((_, j) => {
       if (!e.hidden[j] || before.has(j)) return;
-      this.spawnPiece(e, j, dx * 6 + (rnd.next() - 0.5) * 3, 4 + rnd.next() * 3 + (partName === 'head' ? 4 : 0), dz * 6 + (rnd.next() - 0.5) * 3, W);
+      const r = this.spawnPiece(e, j, dx * 6 + (rnd.next() - 0.5) * 3, 4 + rnd.next() * 3 + (partName === 'head' ? 4 : 0), dz * 6 + (rnd.next() - 0.5) * 3, W);
+      r.life += 3.5; // severed limbs linger, tumbling and bleeding into the sand
+      if (j === i) limbPiece = r;
     });
+    this.goreCut(e, i, W, limbPiece, partName === 'head', null);
     const p = { x: e.pos.x, y: e.pos.y + e.height * (partName === 'head' ? 0.9 : 0.6), z: e.pos.z };
     this.ctx.fx.hit(p, { x: dx, y: 0.6, z: dz }, e.def.hitKind === 'flesh' ? 'flesh' : 'bone', 1.4);
     this.ctx.sfx('limb_off', p, 0.7);
     if (partName === 'head') this.ctx.events.emit('decap', e);
   }
 
+  /** wound caps, arterial jets, the splash: the satisfying part of losing a limb */
+  private goreCut(e: Enemy, j: number, W: THREE.Matrix4[], limbPiece: RagPiece | null, head: boolean, pieces: Map<number, RagPiece> | null) {
+    const parts = e.batch.geo.parts;
+    const p = parts[j];
+    const g = p.geo;
+    if (!g.boundingBox) g.computeBoundingBox();
+    const bb = g.boundingBox!;
+    const joint = new THREE.Vector3().setFromMatrixPosition(W[j]);
+    const dir = bb.getCenter(new THREE.Vector3()).applyMatrix4(W[j]).sub(joint);
+    if (dir.lengthSq() < 1e-8) dir.set(0, 1, 0);
+    dir.normalize();
+    const ext = bb.getSize(new THREE.Vector3());
+    const sc = new THREE.Vector3().setFromMatrixScale(W[j]).x;
+    const e3 = [ext.x, ext.y, ext.z].sort((a, b) => a - b);
+    const size = (head ? e3[0] * 0.55 : (e3[0] + e3[1]) * 0.4) * sc;
+    const holder = p.parent;
+    const fluid = fluidFor(e.def.id, e.def.hitKind, e.alpha);
+    this.gore.sever({
+      e,
+      holder,
+      holderW: holder >= 0 && !e.hidden[holder] ? W[holder] : null,
+      joint,
+      dir,
+      size,
+      fluid,
+      head,
+      piece: limbPiece,
+      pieceW: limbPiece ? W[j] : null,
+    });
+    if (pieces && holder >= 0) {
+      const hp = pieces.get(holder);
+      if (hp) this.gore.rehome(e, holder, hp);
+    }
+    this.ctx.sfx(fluid === 'blood' || fluid === 'ichor' || fluid === 'acid' ? 'gore_splat' : 'hit_bone', joint, head ? 0.9 : 0.6, head ? 0.85 : 1);
+    this.ctx.engine.hitStop(head ? 0.085 : 0.045);
+    if (head) this.ctx.shake(0.25);
+  }
+
+  /** the Neck Slicer (and anything else that wants a head): off it comes, the body stands a beat, then drops */
+  decapitate(e: Enemy, dx: number, dz: number) {
+    if (!e.alive || e.part('head') < 0 || e.hidden[e.part('head')]) return false;
+    this.detach(e, 'head', dx, dz);
+    e.hp = 0;
+    this.kill(e, null, dx * 0.3, dz * 0.3, true, true);
+    return true;
+  }
+
   private spawnPiece(e: Enemy, part: number, vx: number, vy: number, vz: number, pose?: THREE.Matrix4[]) {
     const W = pose ? pose[part] : this.poseWorld(e)[part];
     const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), sc = new THREE.Vector3();
     W.decompose(pos, quat, sc);
-    this.rag.push({ batch: e.batch, part, pos, quat, vel: new THREE.Vector3(vx, vy, vz), ang: new THREE.Vector3((rnd.next() - 0.5) * 16, (rnd.next() - 0.5) * 16, (rnd.next() - 0.5) * 16), life: 3.2 + rnd.next(), scale: sc.x, rest: false, tint: e.tint.clone() });
+    const r: RagPiece = { batch: e.batch, part, pos, quat, vel: new THREE.Vector3(vx, vy, vz), ang: new THREE.Vector3((rnd.next() - 0.5) * 16, (rnd.next() - 0.5) * 16, (rnd.next() - 0.5) * 16), life: 3.2 + rnd.next(), scale: sc.x, rest: false, tint: e.tint.clone() };
+    this.rag.push(r);
+    this.gore.rehome(e, part, r);
+    return r;
   }
 
-  kill(e: Enemy, hit: Hit | null, dx: number, dz: number, crit = false) {
+  kill(e: Enemy, hit: Hit | null, dx: number, dz: number, crit = false, collapse = false) {
     if (!e.alive) return;
     e.alive = false;
     const ctx = this.ctx;
     this.clearTelegraph(e);
     const c = { x: e.pos.x, y: e.pos.y + e.height * 0.5, z: e.pos.z };
+    const fluid = fluidFor(e.def.id, e.def.hitKind, e.alpha);
     // violent deaths send the bones flying; everything else collapses procedurally first
     const headI = e.part('head');
-    const violent = !hit || (hit.knock ?? 0) >= 9 || hit.source === 'explosion' || hit.source === 'board' || (crit && rnd.chance(0.35)) || (headI >= 0 && e.hidden[headI] === 1);
+    const violent = !collapse && (!hit || (hit.knock ?? 0) >= 9 || hit.source === 'explosion' || hit.source === 'board' || (crit && rnd.chance(0.35)) || (headI >= 0 && e.hidden[headI] === 1));
     if (violent) {
       const force = 5 + (hit?.knock ?? 2) * 1.5 + (crit ? 3 : 0);
       const W = this.poseWorld(e);
-      e.batch.geo.parts.forEach((p, j) => {
+      const pieces = new Map<number, RagPiece>();
+      const parts = e.batch.geo.parts;
+      parts.forEach((p, j) => {
         if (e.hidden[j]) return;
         const up = 2 + rnd.next() * 4 + (p.name === 'head' || p.name === 'hat' ? 3.5 : 0);
-        this.spawnPiece(e, j, dx * force * (0.5 + rnd.next() * 0.8) + e.vel.x * 0.5 + (rnd.next() - 0.5) * 3, up, dz * force * (0.5 + rnd.next() * 0.8) + e.vel.z * 0.5 + (rnd.next() - 0.5) * 3, W);
+        pieces.set(j, this.spawnPiece(e, j, dx * force * (0.5 + rnd.next() * 0.8) + e.vel.x * 0.5 + (rnd.next() - 0.5) * 3, up, dz * force * (0.5 + rnd.next() * 0.8) + e.vel.z * 0.5 + (rnd.next() - 0.5) * 3, W));
       });
+      // torn apart at a couple of joints (more for blasts), plus voxel gibs
+      const blast = hit?.source === 'explosion' || hit?.source === 'board';
+      const cuts = parts.map((p, j) => j).filter((j) => parts[j].parent >= 0 && !e.hidden[j] && SEVERABLE.test(parts[j].name));
+      for (let k = cuts.length - 1; k > 0; k--) {
+        const r = Math.floor(rnd.next() * (k + 1));
+        [cuts[k], cuts[r]] = [cuts[r], cuts[k]];
+      }
+      for (const j of cuts.slice(0, blast ? 3 : 2)) this.goreCut(e, j, W, pieces.get(j) ?? null, parts[j].name === 'head', pieces);
+      this.gore.gibs(c, fluid, blast ? 14 : 7, blast ? 1.4 : 1);
     } else {
+      this.gore.pool(e.pos.x, e.pos.z, 0.55 + e.radius * 1.1, fluid);
       // fall away from the shot (local push direction), sideways at random
       const lz = dx * Math.sin(e.yaw) + dz * Math.cos(e.yaw);
       const dur = e.skel === 'humanoid' ? 1.35 : e.skel === 'quad' ? 1.4 : e.skel === 'worm' ? 1.6 : e.skel === 'snake' ? 1.7 : e.skel === 'lizard' ? 1.15 : e.skel === 'bird' ? 1.3 : e.skel === 'beetle' ? 1.1 : e.skel === 'scorpion' ? 1.2 : 0.6;
@@ -989,6 +1079,7 @@ export class Enemies implements EnemyApi {
     this.updateHazards(dt);
     this.updateDying(dt, time);
     this.updateRag(dt);
+    this.gore.update(dt);
     this.callouts.update(dt, ctx.camera, ctx.engine.height);
     // render
     this.render.begin();
@@ -1148,10 +1239,11 @@ export class Enemies implements EnemyApi {
     const tier: 'normal' | 'elite' | 'alpha' = e.alpha ? 'alpha' : e.def.hp >= 120 ? 'elite' : 'normal';
     const pos = { x: e.pos.x, y: e.pos.y + e.height * e.scale * 0.5 + 0.35 + (e.skel === 'snake' ? 0.6 : 0), z: e.pos.z };
     ctx.events.emit('enemySkill', { title, enemy: e, pos, tier });
-    if (camD > 38 && !force) return;
+    if (camD > (tier === 'normal' ? 32 : 42) && !force) return;
     const prev = this.recentTitles.get(title);
-    if (!force && tier === 'normal' && prev && time - prev.t < 2.2 && Math.hypot(prev.x - e.pos.x, prev.z - e.pos.z) < 12) return;
-    if (!force && tier === 'normal' && this.callouts.active >= 5) return;
+    if (!force && tier === 'normal' && prev && time - prev.t < 2.4 && Math.hypot(prev.x - e.pos.x, prev.z - e.pos.z) < 14) return;
+    if (!force && tier === 'normal' && (this.callouts.active >= 4 || time - this.lastCalloutT < 0.3)) return;
+    this.lastCalloutT = time;
     this.recentTitles.set(title, { t: time, x: e.pos.x, z: e.pos.z });
     this.callout(title, pos, tier);
     if (this.skillToasts && e.alpha && time - this.lastTitleT > 2.6) {
@@ -1257,12 +1349,13 @@ export class Enemies implements EnemyApi {
     const n = wolves.length;
     wolves.forEach((w, i) => (w.slot = n === 1 ? 0.5 : i / (n - 1)));
     const tokens = n >= 5 ? 3 : 2;
-    const ready = wolves.filter((w) => Math.min(w.cds[0] ?? 9, w.cds[1] ?? 9) <= 0.15 || w.state !== 'move');
+    const busy = (w: Enemy) => w.state === 'windup' || w.state === 'strike' || w.state === 'leap';
+    const ready = wolves.filter((w) => w.state === 'move' && Math.min(w.cds[0] ?? 9, w.cds[1] ?? 9) <= 0.15);
     ready.sort((a, b) => a.pos.distanceToSquared(ppos) - b.pos.distanceToSquared(ppos));
     for (const w of wolves) w.biteToken = false;
     // wolves already mid-attack keep theirs; the rest go to the nearest ready ones
     let used = 0;
-    for (const w of wolves) if (w.state !== 'move') {
+    for (const w of wolves) if (busy(w)) {
       w.biteToken = true;
       used++;
     }
@@ -1996,6 +2089,7 @@ export class Enemies implements EnemyApi {
     this.dying.length = 0;
     this.wrapping = null;
     this.rag.length = 0;
+    this.gore.clear();
     this.hazards.length = 0;
     this.callouts.clear();
     this.proj.clear();

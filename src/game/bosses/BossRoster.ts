@@ -5,6 +5,7 @@ import type { Boss, BossDeps } from './Boss';
 import { BigBertha, DustMarshal, Sunroller, Pharaoh, Sandworm } from './Minibosses';
 import { Sethos } from './Sethos';
 import { KhonsuAvatar } from './Khonsu';
+import { Thornback } from './Thornback';
 
 export function makeBoss(d: BossDeps, wave: number): Boss {
   if (wave >= 100) return new Sethos(d, 3);
@@ -21,11 +22,13 @@ export function makeBoss(d: BossDeps, wave: number): Boss {
     case 40:
       return new DustMarshal(d, 3);
   }
-  const first: Record<number, string> = { 15: 'sunroller', 20: 'pharaoh', 30: 'sandworm', 45: 'bertha' };
-  const rot = ['bertha', 'sunroller', 'pharaoh', 'sandworm'];
+  // Thornback, the thorny-devil matriarch, debuts at 15 (thorny devils roam from wave 7)
+  const first: Record<number, string> = { 15: 'thornback', 20: 'pharaoh', 30: 'sandworm', 45: 'bertha', 55: 'sunroller' };
+  const rot = ['bertha', 'sunroller', 'pharaoh', 'sandworm', 'thornback'];
   const k = first[wave] ?? rot[Math.floor(wave / 5) % rot.length];
   if (k === 'sunroller') return new Sunroller(d, tier);
   if (k === 'pharaoh') return new Pharaoh(d, tier);
   if (k === 'sandworm') return new Sandworm(d, tier);
+  if (k === 'thornback') return new Thornback(d, tier);
   return new BigBertha(d, tier);
 }

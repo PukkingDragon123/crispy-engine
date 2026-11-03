@@ -1,4 +1,5 @@
-// The ability bar: six tarot cards floating at the bottom right of the HUD.
+// The ability bar: tarot cards floating at the bottom right of the HUD — the
+// three active skills (I Magician, XVI Tower, XIX Sun) and the big XIII Death ultimate.
 // Each card is a real 3D object in the HUD scene — the sculpted gilded relief
 // frame (props/tarot.ts) lit by the HUD lights and a little jeweller's studio
 // reflection, the art window carrying a CardStudio photograph of the card's
@@ -12,7 +13,7 @@ import type { RigSpec } from '../../engine/voxel/Rig';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { CardStudio } from './CardStudio';
-import { Kit, TAROT, TarotDef, TarotFx } from './TarotCards';
+import { Kit, TAROT_BAR, TarotDef, TarotFx } from './TarotCards';
 import { CARD, tarotFrame } from '../models/props/tarot';
 
 /** photo size of the 66×88-voxel art window */
@@ -275,14 +276,18 @@ export class TarotBar {
   private job: Generator<void, void, void> | null = null;
   private started = false;
   private frameGeo: THREE.BufferGeometry | null = null;
+  private coreMat: THREE.MeshStandardMaterial | null = null;
+  private coreGeo: THREE.PlaneGeometry | null = null;
   private env: THREE.WebGLRenderTarget | null = null;
   private add = new PixelSparks(700, true, 61);
   private norm = new PixelSparks(500, false, 60);
   private t = 0;
   private lastUlt = 0;
   private pr = 1;
-  /** time spent building the faces (ms), for diagnostics */
+  /** diagnostics: total ms spent building, the longest single step, frames used */
   buildMs = 0;
+  maxStepMs = 0;
+  slices = 0;
   done = false;
 
   constructor(private scene: THREE.Scene, private hud: Hud) {
@@ -299,9 +304,13 @@ export class TarotBar {
     }
     if (!this.job) return;
     const t0 = performance.now();
+    this.slices++;
     try {
       do {
-        if (this.job.next().done) {
+        const ts = performance.now();
+        const r = this.job.next();
+        this.maxStepMs = Math.max(this.maxStepMs, performance.now() - ts);
+        if (r.done) {
           this.job = null;
           this.done = true;
           break;
@@ -321,7 +330,7 @@ export class TarotBar {
     this.frameGeo = buildVoxelGeometry(fr.model, { voxelSize: 1, pivot: fr.pivot });
     yield;
     this.env = giltEnv(renderer);
-    TAROT.forEach((d, i) => this.cards.push(this.makeCard(d, i)));
+    TAROT_BAR.forEach((d, i) => this.cards.push(this.makeCard(d, i)));
     yield;
     const studio = new CardStudio(renderer);
     const kit = new Kit(hero, heroKey, gun);
@@ -364,6 +373,11 @@ export class TarotBar {
     frameMat.envMapIntensity = 1.15;
     const frame = new THREE.Mesh(this.frameGeo!, frameMat);
     tilt.add(frame);
+    // card-stock core inside the slab so sub-pixel cracks in the relief never show the game behind
+    this.coreMat ??= new THREE.MeshStandardMaterial({ color: 0xb8a078, roughness: 0.9, side: THREE.DoubleSide });
+    const core = new THREE.Mesh((this.coreGeo ??= new THREE.PlaneGeometry(FW - 0.6, FH - 0.6)), this.coreMat);
+    core.position.z = -0.5;
+    tilt.add(core);
     const artMat = new THREE.ShaderMaterial({
       uniforms: { map: { value: null }, uHas: { value: 0 }, uCd: { value: 0 }, uReady: { value: 0 }, uFlash: { value: 0 }, uT: { value: 0 }, uSeed: { value: i * 0.37 } },
       vertexShader: ART_VS,
@@ -396,7 +410,7 @@ export class TarotBar {
     this.norm.update(dt, s, this.pr);
     if (!st || !this.cards.length) return;
     const visible = hud.visible && hud.anchors.slide < 0.98;
-    const cw = 40 * s, ch = 65 * s;
+    const cw = 46 * s, ch = 74.75 * s;
     const n = this.cards.length;
     hud.cardAnchors.length = 0;
     this.cards.forEach((c, i) => {
@@ -610,6 +624,8 @@ export class TarotBar {
     }
     this.cards = [];
     this.frameGeo?.dispose();
+    this.coreGeo?.dispose();
+    this.coreMat?.dispose();
     this.env?.dispose();
     this.add.points.removeFromParent();
     this.norm.points.removeFromParent();

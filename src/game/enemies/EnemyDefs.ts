@@ -84,7 +84,7 @@ export const ENEMIES: Record<string, EnemyDef> = {
   },
   mummy: {
     id: 'mummy', name: 'Cursed Mummy', title: 'Wrapped in Spite', rig: 'mummy', rigAlpha: 'mummy_alpha',
-    hp: 120, armor: 45, physRes: 0.1, magicRes: 0.25, statusRes: { poison: 0.3, curse: 1, burn: -1 }, speed: 2.7, radius: 0.55, height: 1.95,
+    hp: 120, armor: 45, physRes: 0.1, magicRes: 0.25, statusRes: { poison: 0.3, curse: 1, burn: -1 }, speed: 2.7, radius: 0.55, height: 1.8,
     ai: 'tank', attacks: [{ kind: 'melee', range: 2.3, cooldown: 2, windup: 0.75, dmg: 18, status: [{ id: 'curse', stacks: 2, dur: 6 }] }, { kind: 'aura', range: 5, cooldown: 3, windup: 0.4, dmg: 3, radius: 5, status: [{ id: 'curse', stacks: 1, dur: 5 }] }],
     contact: 8, bounty: 12, gold: [2, 5], hitKind: 'linen', weakness: 'Heavily armored — break armor or set the linen on fire (burn ×2). Immune to curses.',
     firstWave: 6, weight: 4, burnMul: 2, lore: 'Sekhmet\'s rage sleeps in their linen. Their hearts still beat, glowing and wrong.',

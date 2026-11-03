@@ -1,4 +1,5 @@
-// The six tarot ability cards (Rider–Waite compositions) as real 3D dioramas:
+// The tarot cards (Rider–Waite compositions) as real 3D dioramas — the bar's
+// three skills + ultimate, and the two plain moves (grapple, kick):
 // the player's own Sundown rig posed for each card, the game's models as set
 // dressing, sculpted set pieces from props/tarot.ts, then photographed by the
 // CardStudio (painted sky, cel light, ink, bloom, grade).
@@ -596,6 +597,124 @@ function* death(k: Kit): Generator<void, Shot, void> {
   };
 }
 
+/** frame a box from yaw/pitch so it fills `fill` of an `aspect` (w/h) picture */
+export function fitCam(box: THREE.Box3, yaw: number, pitch: number, fov: number, aspect: number, fill: number): Shot['cam'] {
+  const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+  const w = Math.abs(size.x * Math.cos(yaw)) + Math.abs(size.z * Math.sin(yaw));
+  const d = Math.abs(size.x * Math.sin(yaw)) + Math.abs(size.z * Math.cos(yaw));
+  const h = size.y * Math.cos(pitch) + d * Math.abs(Math.sin(pitch));
+  const t = Math.tan((fov * Math.PI) / 360);
+  const dist = Math.max(h / (2 * t * fill), w / (2 * t * aspect * fill)) + d / 2;
+  return cam([c.x, c.y, c.z], yaw, pitch, dist, fov);
+}
+
+/**
+ * THE NECK SLICER (a board move): Sundown inverted mid-backflip above a husk, the
+ * sandboard's edge has carved a crescent of light round from the husk's neck, the
+ * head flies off in a spray of sand and bone dust. `aspect` = picture w/h
+ * (0.75 for a tarot window); 'scene' display for textures shown in the world.
+ */
+export function* neckSlicerShot(k: Kit, aspect = 66 / 88, display: 'screen' | 'scene' = 'screen'): Generator<void, Shot, void> {
+  if (!k.heroSpec) {
+    // baked outside a run (no player rig handed in): the default Sundown
+    k.heroSpec = (modelEntry('cowboy_stetson_duster')?.() as RigSpec | undefined) ?? null;
+    k.heroKey = 'cowboy_stetson_duster:player';
+  }
+  const root = new THREE.Group();
+  const bed = yield* ground(k, root, 10, 14, 17, 0x9a6a6a, 2, 0.3);
+  const focus: THREE.Object3D[] = [];
+  // the husk, recoiling, its head taken clean off
+  let N = new THREE.Vector3(0.45, 1.55, 0);
+  const hk = k.rig('husk', 0.86);
+  if (hk) {
+    const hp = new Poser(hk);
+    hp.rot('torso', -0.24, 0.12, 0.06);
+    hp.aim('arm_l', [0.78, 0.5, 0.3]).aim('fore_l', [0.42, 0.88, 0.2]);
+    hp.aim('arm_r', [-0.72, 0.42, 0.45]).aim('fore_r', [-0.3, 0.9, 0.3]);
+    hp.aim('thigh_l', [0.18, -0.9, 0.35]).aim('shin_l', [0.12, -0.95, -0.25]);
+    hp.aim('thigh_r', [-0.15, -0.95, -0.2]).aim('shin_r', [-0.1, -0.97, 0.1]);
+    hk.root.rotation.set(0, -0.55, 0);
+    root.add(hk.root);
+    hk.root.position.set(0.45, 0, 0);
+    hk.root.position.y = bed.heightAt(0.45, 0) - lowestY(hk.root);
+    root.updateMatrixWorld(true);
+    focus.push(hk.root);
+    const head = hk.nodes['head'];
+    if (head) {
+      N = head.getWorldPosition(new THREE.Vector3());
+      root.attach(head); // keeps its pose; now it flies on its own
+      head.position.add(new THREE.Vector3(0.78, 0.6, 0.5));
+      head.rotation.set(head.rotation.x + 0.8, head.rotation.y + 0.9, head.rotation.z - 1.4);
+      focus.push(head);
+    }
+  }
+  yield;
+  // sand and bone dust spray out of the stump after the head
+  place(k.mesh(TP.dustSpray(4, 80, [0.78, 0.6, 0.18], 0.55, 0.95)), root, [N.x, N.y - 0.02, N.z]);
+  place(k.mesh(TP.dustSpray(9, 40, [-0.3, 0.9, 0.1], 0.7, 0.55)), root, [N.x, N.y - 0.04, N.z]);
+  // Sundown, upside down over the top of the flip, the board on his boots
+  const C = new THREE.Vector3(N.x - 0.45, N.y + 1.28, N.z + 0.28);
+  let boardTip: THREE.Vector3 | null = null;
+  const h = k.hero(true);
+  if (h) {
+    const { rig, pose } = h;
+    pose.rot('torso', -0.2, 0.1, 0).rot('head', -0.42, 0.25, 0.12);
+    pose.aim('arm_r', [-0.9, 0.4, -0.12]).aim('fore_r', [-0.84, 0.52, 0.14]);
+    pose.aim('arm_l', [0.9, 0.36, -0.16]).aim('fore_l', [0.8, 0.56, 0.1]);
+    pose.aim('thigh_l', [0.14, -0.97, 0.14]).aim('shin_l', [0.1, -0.98, -0.06]);
+    pose.aim('thigh_r', [-0.14, -0.97, 0.14]).aim('shin_r', [-0.1, -0.98, -0.06]);
+    // the board rides crosswise under the boots, as on the dunes
+    const board = k.mesh('board_driftwood', 1);
+    if (board) {
+      board.rotation.y = Math.PI / 2;
+      board.position.set(0, -0.06, 0.03);
+      rig.root.add(board);
+    }
+    rig.root.rotation.set(0, 0.28, 2.75, 'ZYX');
+    root.add(rig.root);
+    const pel = pose.at('pelvis');
+    rig.root.position.set(C.x - pel.x, C.y - pel.y, C.z - pel.z);
+    root.updateMatrixWorld(true);
+    boardTip = rig.root.localToWorld(new THREE.Vector3(-0.66, -0.06, 0.03));
+    focus.push(rig.root);
+  }
+  yield;
+  // the slash: a crescent of light spiralling from the cut round to the board's edge
+  const a0 = Math.atan2(N.y - C.y, N.x - C.x);
+  let a1 = a0 + 2.5;
+  let r1 = 0.85;
+  if (boardTip) {
+    a1 = Math.atan2(boardTip.y - C.y, boardTip.x - C.x);
+    while (a1 < a0) a1 += Math.PI * 2;
+    r1 = Math.hypot(boardTip.x - C.x, boardTip.y - C.y);
+  }
+  const arc = k.mesh(TP.slashArc(Math.hypot(N.x - C.x, N.y - C.y) + 0.05, r1, a0 - 0.12, a1 - 0.05, 0.18), 1, k.glowMat(1.6));
+  place(arc, root, [C.x, C.y, C.z]);
+  if (arc) focus.push(arc);
+  yield;
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3();
+  for (const o of focus)
+    o.traverseVisible((c) => {
+      if ((c as THREE.Mesh).isMesh) box.expandByObject(c);
+    });
+  box.min.y = Math.max(box.min.y, bed.heightAt(0, 0) - 0.15);
+  const c = box.getCenter(new THREE.Vector3());
+  return {
+    root,
+    cam: fitCam(box, 0.14, -0.05, 32, aspect, aspect < 1 ? 0.92 : 0.86),
+    sky: { zenith: 0x170e2a, mid: 0x5e1e3e, horizon: 0xf07a36, ground: 0x5a3040, sunDir: [0.55, 0.05, -1], sunColor: 0xffa458, sunSize: 0.06, sunGlow: 0.3, sunGain: 1.3, clouds: 0.34, cloudLit: 0xff9a5a, cloudShade: 0x3a1a34, cloudScale: 1.1, seed: 17, gain: 0.82 },
+    key: { dir: [-0.55, 0.65, 0.8], color: 0xffd4b0, intensity: 2.6, center: [c.x, c.y, c.z], radius: 3.5 },
+    hemi: { sky: 0x6a4a8a, ground: 0x3a2028, intensity: 0.7 },
+    rim: { dir: [0.4, 0.3, -1], color: 0xff8a40, intensity: 3.2 },
+    lamps: [{ pos: [C.x + 0.9, C.y - 0.4, C.z + 0.8], color: 0xfff0c0, intensity: 5, distance: 3.5 }],
+    fog: { color: 0x7a3a4a, near: 14, far: 55 },
+    grade: { sat: 1.18, contrast: 1.1, shadowTint: 0xd6c8ff, highTint: 0xffe6cc, vignette: 0.56, bloom: [0.34, 0.35, 1.3] },
+    display,
+  };
+}
+
+/** every tarot card with a diorama: the bar's skills and ultimate, and the plain moves (the hideout book's Moves page looks moves up here by key) */
 export const TAROT: TarotDef[] = [
   { key: 'Q', num: 'XII', title: 'THE HANGED MAN', fx: 'rope', burst: [0xffd36b, 0xfff3d6, 0xc9a66b, 0x8a6a3a], scene: hangedMan },
   { key: 'E', num: 'I', title: 'THE MAGICIAN', fx: 'venom', burst: [0x9dff3a, 0xd8ff9a, 0xfff3d6, 0x3a8a1a], scene: magician },
@@ -603,4 +722,11 @@ export const TAROT: TarotDef[] = [
   { key: 'G', num: 'XIX', title: 'THE SUN', fx: 'sun', burst: [0xffe08a, 0xffc63c, 0xfff6d0, 0x7a5530], scene: sun },
   { key: 'F', num: 'VIII', title: 'STRENGTH', fx: 'kick', burst: [0xf6dcac, 0xe9c48c, 0xffd36b, 0xfff3d6], scene: strength },
   { key: 'Z', num: 'XIII', title: 'DEATH', fx: 'death', burst: [0x9dff3a, 0xfff3d6, 0x1a1418, 0xd8ccb0], scene: death },
+  { key: 'neck_slicer', num: '0', title: 'THE NECK SLICER', fx: 'kick', burst: [0xfff6d0, 0xffd36b, 0xe9c48c, 0xd8ccb0], scene: (k) => neckSlicerShot(k) },
 ];
+
+const byKey = (k: string) => TAROT.find((d) => d.key === k)!;
+/** the HUD ability bar: the three active skills (Magician, Tower, Sun), then the big Death ultimate */
+export const TAROT_BAR: TarotDef[] = ['E', 'C', 'G', 'Z'].map(byKey);
+/** plain moves (grapple XII, kick VIII, the Neck Slicer): their cards live on the hideout skills book's Moves page */
+export const TAROT_MOVES: TarotDef[] = ['Q', 'F', 'neck_slicer'].map(byKey);

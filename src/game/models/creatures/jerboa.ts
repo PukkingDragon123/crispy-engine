@@ -133,7 +133,7 @@ function buildJerboa(): RigSpec {
   // mouth line + a hint of pink inside
   const empty = (x: number, y: number, z: number) => !head.has(x, y, z) && !jaw.has(x, y, z);
   jaw.forEach((x, y, z) => {
-    if (!jaw.has(x, y + 1, z)) jaw.set(x, y, z, empty(x + 1, y, z) || empty(x - 1, y, z) || empty(x, y, z + 1) ? 0x6a4038 : 0xc86a6e);
+    if (!jaw.has(x, y + 1, z) && M(z) > 0.49) jaw.set(x, y, z, empty(x + 1, y, z) || empty(x - 1, y, z) || empty(x, y, z + 1) ? 0x8a5048 : 0xc86a6e);
   });
   // pink wet nose with a dark nostril line, buck teeth below it
   ell(head, P(0, 1.968, 0.6), P(0.07, 0.056, 0.048), (x, y) => (M(y) < 1.95 ? C.pinkD : C.nose), { fl: VF.METAL });
@@ -290,24 +290,26 @@ function buildJerboa(): RigSpec {
     }
     const t5 = rig.part('tail5', 'tail4', Pv(J.t5));
     tube(t5, [Pv(J.t5), Pv(J.tMid), Pv(J.tTip)], [U(0.04), U(0.034), U(0.026)], tCol);
-    // the flag: a flattened feathery brush, black band then a bright white tip
+    // the flag: one continuous feathery brush along the tail end, black band then a bright white tip
     const dir = norm3(sub3(J.tTip, J.tMid));
-    const rotY = Math.atan2(dir[0], dir[2]);
-    const pitch = -Math.asin(dir[1]);
+    const b0 = add3(J.tMid, scl3(dir, -0.04));
+    const b1 = add3(J.tMid, scl3(dir, 0.15));
+    const b2 = add3(J.tTip, scl3(dir, 0.1));
     blob(t5, [
-      { c: P(0, 0.19, -2.31), r: P(0.11, 0.07, 0.17), rot: [pitch * 0.6, rotY, 0] },
-      { c: P(0, 0.3, -2.52), r: P(0.13, 0.075, 0.2), rot: [pitch, rotY, 0] },
+      { a: Pv(b0), b: Pv(b1), r0: U(0.045), r1: U(0.095) },
+      { a: Pv(b1), b: Pv(b2), r0: U(0.105), r1: U(0.06) },
     ], (x, y, z) => {
       const along = dot3(sub3([M(x), M(y), M(z)], J.tMid), dir);
-      const black = along < 0.07;
+      const black = along < 0.13;
       const base = black ? C.tuftBlack : C.tuftWhite;
       return h01(x, y, z, 31) < 0.12 ? mixc(base, black ? 0x3a3430 : 0xe8e2d8, 0.6) : base;
-    }, { k: U(0.06), disp: (x, y, z) => (n01(x, y, z, 0.5, 41) - 0.5) * 1.2 });
+    }, { k: U(0.06), disp: (x, y, z) => (n01(x, y, z, 0.5, 41) - 0.5) * 1.1 });
     // feathered hair tips fanning off the flag
-    for (let h = 0; h < 9; h++) {
-      const a = -1 + h / 4;
-      const root = add3(J.tMid, add3(scl3(dir, 0.16 + Math.abs(a) * 0.02), [a * 0.1, 0.02, 0]));
-      const tip = add3(root, add3(scl3(dir, 0.14), [a * 0.08, 0.03 * (1 - Math.abs(a)), 0]));
+    for (let h = 0; h < 11; h++) {
+      const a = -1 + h / 5;
+      const side = norm3(cross3(dir, [0, 1, 0]));
+      const root = add3(add3(J.tMid, scl3(dir, 0.2 + Math.abs(a) * 0.04)), scl3(side, a * 0.07));
+      const tip = add3(add3(root, scl3(dir, 0.16 - Math.abs(a) * 0.05)), add3(scl3(side, a * 0.07), [0, 0.02 * (1 - Math.abs(a)), 0]));
       line(t5, [Pv(root), Pv(tip)], h % 3 === 0 ? 0xe8e2d8 : C.tuftWhite);
     }
   }

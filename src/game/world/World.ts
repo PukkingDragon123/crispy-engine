@@ -9,6 +9,7 @@ import { Colliders } from './Colliders';
 import { MAT } from './Heightfield';
 import type { SurfaceInfo } from '../player/Board';
 import { globalUniforms } from '../../engine/render/VoxelMaterial';
+import { SandWaves } from './SandWaves';
 
 const waterVert = /* glsl */ `
 varying vec3 vW; varying float vFog;
@@ -47,11 +48,15 @@ export class World {
   activeZone = 0;
   unlockedZone = 0;
   props: { update(dt: number, focus: THREE.Vector3): void; riseFor(stampId: string, k: number): void; group: THREE.Group } | null = null;
+  /** living sand: travelling dune waves, rings, swells (rendered + felt by every ground query) */
+  sand = new SandWaves();
+  private _g = { x: 0, z: 0 };
 
   constructor(public scene: THREE.Scene, key: 'A' | 'B' | 'C', seed: number) {
     this.sa = generateSubArea(key, seed);
     this.env = new Env(scene, this.sa.env, seed);
-    this.terrain = new Terrain(this.sa.field, this.sa.wind);
+    this.terrain = new Terrain(this.sa.field, this.sa.wind, this.sand);
+    this.sand.ground = (x, z) => this.sa.field.heightSmooth(x, z);
     this.group.add(this.terrain.group);
     this.storm = new Storm((x, z) => this.sa.field.heightAt(x, z));
     this.group.add(this.storm.group);
@@ -156,14 +161,28 @@ export class World {
     return out;
   };
 
-  groundAt = (x: number, z: number) => Math.max(this.sa.field.heightAt(x, z), this.sa.waterLevel);
-  groundSmooth = (x: number, z: number) => Math.max(this.sa.field.heightSmooth(x, z), this.sa.waterLevel);
+  groundAt = (x: number, z: number) => Math.max(this.sa.field.heightAt(x, z) + (this.sand.n ? this.sand.offset(x, z) : 0), this.sa.waterLevel);
+  groundSmooth = (x: number, z: number) => Math.max(this.sa.field.heightSmooth(x, z) + (this.sand.n ? this.sand.offset(x, z) : 0), this.sa.waterLevel);
   normal = (x: number, z: number, out: THREE.Vector3) => {
     if (this.sa.field.heightSmooth(x, z) < this.sa.waterLevel) return out.set(0, 1, 0);
     this.sa.field.normalAt(x, z, out);
+    if (this.sand.n) {
+      // tilt by the living-sand gradient: n = normalize(-(hx+gx), 1, -(hz+gz))
+      const g = this.sand.grad(x, z, this._g);
+      if (g.x !== 0 || g.z !== 0) {
+        const hx = -out.x / out.y + g.x,
+          hz = -out.z / out.y + g.z;
+        out.set(-hx, 1, -hz).normalize();
+      }
+    }
     return out;
   };
-  slope = (x: number, z: number) => this.sa.field.slopeAt(x, z);
+  slope = (x: number, z: number) => {
+    const s = this.sa.field.slopeAt(x, z);
+    if (!this.sand.n) return s;
+    const g = this.sand.grad(x, z, this._g);
+    return g.x === 0 && g.z === 0 ? s : Math.hypot(s, Math.hypot(g.x, g.z));
+  };
 
   /** sand physics: explosions dig craters & throw a rim; permanent for the run */
   deform(x: number, z: number, radius: number, depth: number) {
@@ -215,6 +234,7 @@ export class World {
   }
 
   update(dt: number, focus: THREE.Vector3, time: number, fx: any) {
+    this.sand.update(dt);
     this.terrain.update(focus, 4);
     this.env.update(focus, dt, time);
     this.storm.update(dt, fx);

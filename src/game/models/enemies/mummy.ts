@@ -14,7 +14,7 @@ import { toonSkull, toonPelvis, boneUpperArm, boneForearm, boneThigh, boneShin, 
 import { EnemyOpts, roundBox, roundBoxX, autoShade, mirrored, pickV } from './human';
 import type { HumanoidParts } from '../toon/humanoid';
 import { Fig, finish, figMeta, sections, limbG, lineG, cutG, wrapShell, frayStrip, clothC, ell, hornG, isSurf, mix, mulRGB, hash3, noise, CSpec, ColorFn, G } from './figure/fig';
-import { emberEyes, METAL, frontZ } from './figure/gear';
+import { emberEyes, METAL, frontZ, usekhG } from './figure/gear';
 
 
 const WRAP: Ramp[] = [
@@ -41,14 +41,14 @@ const FLESH = 0x3a2416;
 /** burial bandage: slanted strips with dark seams, alternating tones and old stains */
 export function wrapC(base: number, seed = 0, slope = 0.45): ColorFn {
   return (x, y, z) => {
-    const t = y + slope * x + 0.22 * z + noise.n3(x / 6, y / 6, z / 6 + seed) * 0.9;
-    const idx = Math.floor(t / 2.2);
-    const ph = t - idx * 2.2;
-    if (ph < 0.42) return mix(base, 0x4a3a26, 0.42); // seam between strips
+    const t = y + slope * x + 0.22 * z + noise.n3(x / 7, y / 7, z / 7 + seed) * 0.8;
+    const idx = Math.floor(t / 3.2);
+    const ph = t - idx * 3.2;
+    if (ph < 0.7) return mix(base, 0x5a4830, 0.3); // seam between strips
     const h = hash3(idx, seed, 3);
-    let c = h < 0.33 ? mulRGB(base, 0.93) : h > 0.75 ? mix(base, 0xfff6e0, 0.18) : base;
-    const st = noise.n3(x / 4 + seed, y / 5, z / 4 - seed);
-    if (st < -0.45) c = mix(c, 0x8a6a40, 0.3); // old stains
+    let c = h < 0.3 ? mulRGB(base, 0.94) : h > 0.8 ? mix(base, 0xfff6e0, 0.14) : base;
+    const st = noise.n3(x / 5 + seed, y / 6, z / 5 - seed);
+    if (st < -0.5) c = mix(c, 0x8a6a40, 0.26); // old stains
     return c;
   };
 }
@@ -64,11 +64,11 @@ const MUMMY_PELVIS: Record<number, [number, number, number]> = {
   26: [7.1, 3.0, -6.3], 27: [6.8, 2.8, -6.1], 28: [6.2, 2.6, -6.0], 29: [5.8, 2.6, -5.9],
 };
 
-export function mummyRig(o: EnemyOpts = {}): RigSpec {
+/** the wrapped mummy body on Sundown's figure (no variant marks). boneArmR: the right arm is left as bare bone. */
+export function mummyBody(F: Fig, o: { alpha?: boolean; variant?: number; boneArmR?: boolean; collar?: boolean; headWrap?: boolean } = {}) {
   const alpha = !!o.alpha;
   const v = (((o.variant ?? 0) % 3) + 3) % 3;
   const seed = 5 + v * 7 + (alpha ? 3 : 0);
-  const F = new Fig();
   const base = alpha ? 0xc4b48e : WRAP_C[v];
   const W = wrapC(base, seed);
   const Wd = wrapC(mulRGB(base, 0.9), seed + 1, -0.5);
@@ -88,12 +88,18 @@ export function mummyRig(o: EnemyOpts = {}): RigSpec {
   }, Wd);
   for (const s1 of [1, -1]) {
     const X = (x: number) => s1 * x;
-    if (s1 < 0) {
-      F.boneMirror('arm_l', 'arm_r');
-      F.boneMirror('fore_l', 'fore_r');
-      F.boneMirror('thigh_l', 'thigh_r');
-      F.boneMirror('shin_l', 'shin_r');
-    }
+    const th = F.s(s1 > 0 ? 'thigh_l' : 'thigh_r');
+    th.m.map.clear();
+    limbG(th, [X(3.8), 23.4, 0.1], [X(3.6), 16.8, 0.3], (t) => 2.85 - 0.5 * t, W);
+    ell(th, [X(3.6), 16.6, 0.4], [2.3, 1.5, 2.2], W);
+    const sh = F.s(s1 > 0 ? 'shin_l' : 'shin_r');
+    sh.m.map.clear();
+    ell(sh, [X(3.6), 14.6, 0.3], [2.25, 1.4, 2.1], W);
+    limbG(sh, [X(3.6), 13.8, -0.2], [X(3.7), 3.6, -0.2], (t) => 2.25 - 0.45 * t, W);
+    ell(sh, [X(3.8), 1.6, -1.5], [2.1, 1.6, 1.8], Wd); // heel
+    ell(sh, [X(3.9), 1.2, 1.9], [2.15, 1.25, 3.2], Wd); // wrapped foot
+    cutG(sh, (x, y) => y < 0);
+    if (s1 < 0 && o.boneArmR) continue;
     const a = F.s(s1 > 0 ? 'arm_l' : 'arm_r');
     a.m.map.clear();
     ell(a, [X(8.6), 41.3, 0.0], [2.6, 2.7, 2.6], W);
@@ -108,42 +114,33 @@ export function mummyRig(o: EnemyOpts = {}): RigSpec {
     ell(f, [X(9.0), 20.0, 0.9], [2.0, 1.7, 1.6], Wd);
     for (const x of [8, 9, 10]) lineG(f, [[X(x + 0.0), 21.5, 2.4], [X(x + 0.0), 18.8, 2.2]], mix(base, 0x4a3a26, 0.35));
     ell(f, [X(6.8), 22.6, 1.4], [0.9, 1.6, 0.9], Wd); // thumb
-    const th = F.s(s1 > 0 ? 'thigh_l' : 'thigh_r');
-    th.m.map.clear();
-    limbG(th, [X(3.8), 23.4, 0.1], [X(3.6), 16.8, 0.3], (t) => 2.85 - 0.5 * t, W);
-    ell(th, [X(3.6), 16.6, 0.4], [2.3, 1.5, 2.2], W);
-    const sh = F.s(s1 > 0 ? 'shin_l' : 'shin_r');
-    sh.m.map.clear();
-    ell(sh, [X(3.6), 14.6, 0.3], [2.25, 1.4, 2.1], W);
-    limbG(sh, [X(3.6), 13.8, -0.2], [X(3.7), 3.6, -0.2], (t) => 2.25 - 0.45 * t, W);
-    ell(sh, [X(3.8), 1.6, -1.5], [2.1, 1.6, 1.8], Wd); // heel
-    ell(sh, [X(3.9), 1.2, 1.9], [2.15, 1.25, 3.2], Wd); // wrapped foot
-    cutG(sh, (x, y) => y < 0);
   }
-  // ---------------------------------------------------------------- the wrapped skull: one layer of bandage over the bone, sockets left open
   const hd = F.s('head');
   const eyeHole = (x: number, y: number, z: number) => z > 1 && y > 51.5 && y < 56.5 && ((x > 0.6 && x < 5.2) || (x < -0.6 && x > -5.2));
-  wrapShell(hd, 47, 62, wrapC(base, seed + 2, -0.6), (x, y, z) => !eyeHole(x, y, z));
-  for (let x = -6; x <= 5; x++) for (let z = -7; z <= 5; z++) {
-    let topY = -1;
-    for (let y = 63; y >= 58; y--) if (hd.m.has(x, y, z)) {
-      topY = y;
-      break;
+  if (o.headWrap !== false) {
+    // ---------------------------------------------------------------- the wrapped skull: one layer of bandage over the bone, sockets left open
+    wrapShell(hd, 47, 62, wrapC(base, seed + 2, -0.6), (x, y, z) => !eyeHole(x, y, z));
+    for (let x = -6; x <= 5; x++) for (let z = -7; z <= 5; z++) {
+      let topY = -1;
+      for (let y = 63; y >= 58; y--) if (hd.m.has(x, y, z)) {
+        topY = y;
+        break;
+      }
+      if (topY >= 60) hd.m.set(x, topY + 1, z, res(W, x, topY + 1, z));
     }
-    if (topY >= 60) hd.m.set(x, topY + 1, z, res(W, x, topY + 1, z));
+    // fill the grin and the nose notch: the face is wrapped shut
+    for (let x = -5; x <= 4; x++) for (let y = 47; y <= 51; y++) for (let z = 3; z <= 6; z++) if (!hd.m.has(x, y, z) && !eyeHole(x + 0.5, y + 0.5, z + 0.5) && z <= 6 && (z < 6 || Math.abs(x + 0.5) < 5)) hd.m.set(x, y, z, res(Wd, x, y, z));
+    // socket rims: dark recesses
+    hd.m.forEach((x, y, z) => {
+      if (eyeHole(x + 0.5, y + 0.5, z + 0.5 + 1) && z <= 4 && z >= 1) hd.m.set(x, y, z, FLESH);
+    });
+    const jw = F.s('jaw');
+    wrapShell(jw, 43, 48, Wd);
+    for (let x = -5; x <= 4; x++) for (let y = 44; y <= 46; y++) jw.m.set(x, y, 6, res(Wd, x, y, 6));
   }
-  // fill the grin and the nose notch: the face is wrapped shut
-  for (let x = -5; x <= 4; x++) for (let y = 47; y <= 51; y++) for (let z = 3; z <= 6; z++) if (!hd.m.has(x, y, z) && !eyeHole(x + 0.5, y + 0.5, z + 0.5) && z <= 6 && (z < 6 || Math.abs(x + 0.5) < 5)) hd.m.set(x, y, z, res(Wd, x, y, z));
-  // socket rims: dark recesses
-  hd.m.forEach((x, y, z) => {
-    if (eyeHole(x + 0.5, y + 0.5, z + 0.5 + 1) && z <= 4 && z >= 1) hd.m.set(x, y, z, FLESH);
-  });
-  const jw = F.s('jaw');
-  wrapShell(jw, 43, 48, Wd);
-  for (let x = -5; x <= 4; x++) for (let y = 44; y <= 46; y++) jw.m.set(x, y, 6, res(Wd, x, y, 6));
   // cursed embers deep in the sockets
   emberEyes(F, alpha ? 0xff3a10 : 0xd84a1a, { orb: 0x241008 });
-  for (const n of ['brow_l', 'brow_r']) {
+  for (const n of o.headWrap === false ? [] : ['brow_l', 'brow_r']) {
     const b = F.s(n);
     const pts: G[] = [];
     b.m.forEach((x, y, z) => pts.push([x, y, z]));
@@ -164,37 +161,35 @@ export function mummyRig(o: EnemyOpts = {}): RigSpec {
     th.m.set(s1 > 0 ? 0 : -1, 14, 4, G[1], VF.METAL);
   }
   // ---------------------------------------------------------------- usekh collar over the shoulders, heart jewel
-  const ring = [G[0], LAP, G[2], TURQ, G[0], CARN];
-  const collar: [number, number, number, number][] = [];
-  tr.m.forEach((x, y, z) => {
-    if (y < 39 || y > 45) return;
-    const gx = x + 0.5, gz = z + 0.5;
-    const r = Math.hypot(gx * 0.9, (gz + 1.2) * 1.1) + (45 - y) * 0.85;
-    if (r > 11.5) return;
-    for (const [dx, dy, dz] of [[0, 1, 0], [0, 0, 1], [0, 0, -1], [1, 0, 0], [-1, 0, 0]] as [number, number, number][]) {
-      if (tr.m.has(x + dx, y + dy, z + dz)) continue;
-      const k = Math.floor(r / 1.6);
-      collar.push([x + dx, y + dy, z + dz, ring[((k % ring.length) + ring.length) % ring.length]]);
-    }
-  });
-  for (const [x, y, z, c] of collar) tr.m.set(x, y, z, c, c === G[0] || c === G[2] ? VF.METAL : VF.SOLID);
-  for (let x = -6; x <= 5; x += 2) {
-    const z = frontZ(tr.m, x, 39);
-    tr.m.set(x, 38, z, G[0], VF.METAL);
-  }
+  if (o.collar !== false) usekhG(tr, [G[0], LAP, G[0], TURQ, G[2], LAP, CARN], { rMax: 11.0, y0: 38 });
   const hz = frontZ(tr.m, 0, 35) + 1;
   for (const [x, y, c] of [[-1, 36, CARN], [0, 36, CARN], [-1, 35, 0x8a2414], [0, 35, 0x8a2414], [-1, 34, 0x6a1a10], [-2, 36, G[0]], [1, 36, G[0]], [-1, 37, G[0]], [0, 37, G[0]]] as [number, number, number][]) tr.m.set(x, y, hz, c, c === G[0] ? VF.METAL : VF.SOLID);
   tr.m.set(0, 36, hz + 1, 0xff6a4a, VF.EMISSIVE);
   F.sock('heart', 'torso', [0, 35.5, hz + 1]);
   // ---------------------------------------------------------------- torn gaps (dried flesh) and loose frayed ends
-  for (const [part, c] of [['torso', [-5.5, 31.5, 2.5]], ['thigh_r', [-5.6, 19.5, 0.5]], ['arm_l', [10.6, 37.5, 0.5]]] as [string, G][]) {
-    const s = F.s(part);
-    ell(s, c, [1.1, 1.3, 1.1], FLESH);
+  // torn gaps in the wrapping: short slanted slits showing the dried flesh beneath
+  for (const [part, x0, y0] of [['torso', -5, 31], ['thigh_r', -6, 19], ['arm_l', 10, 37]] as [string, number, number][]) {
+    const m = F.m(part);
+    for (let k = 0; k < 3; k++) {
+      const x = x0 + (x0 > 0 ? 0 : 0), y = y0 + k;
+      const z = frontZ(m, x + (k === 1 ? 1 : 0), y);
+      m.del(x + (k === 1 ? 1 : 0), y, z);
+      m.set(x + (k === 1 ? 1 : 0), y, z - 1, k === 1 ? FLESH : 0x5a3a24);
+    }
   }
   const loose = clothC(mulRGB(base, 0.95), seed + 4, { fold: 2 });
   frayStrip(F.s('fore_l'), 10, 10, -1, 27, 4, 7, loose, seed + 5);
   frayStrip(F.s('thigh_r'), -6, -6, -1, 19, 3, 6, loose, seed + 6);
-  frayStrip(hd, -2, 1, -9, 55, 5, 10, loose, seed + 7);
+  if (o.headWrap !== false) frayStrip(hd, -2, 1, -9, 55, 5, 10, loose, seed + 7);
+  return { base, seed, W, Wd, hd, tr, eyeHole };
+}
+
+export function mummyRig(o: EnemyOpts = {}): RigSpec {
+  const alpha = !!o.alpha;
+  const v = (((o.variant ?? 0) % 3) + 3) % 3;
+  const F = new Fig();
+  const { base, hd, tr, eyeHole } = mummyBody(F, { alpha, variant: v });
+  const G = METAL.gold, CARN = 0xa8321e;
   // ---------------------------------------------------------------- variant marks
   if (alpha) {
     // gold face mask with kohl-lined eyes

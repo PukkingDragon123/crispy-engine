@@ -422,7 +422,7 @@ export interface RootMotion {
 // =====================================================================================================
 // GIANT JERBOA
 // =====================================================================================================
-export type JerboaMode = 'idle' | 'hop' | 'curious' | 'dance' | 'happy' | 'sad' | 'startle' | 'bow';
+export type JerboaMode = 'idle' | 'hop' | 'curious' | 'dance' | 'groove' | 'happy' | 'sad' | 'startle' | 'bow';
 const JB_JOINTS = ['hips', 'chest', 'neck', 'head', 'jaw', 'ear_l', 'ear_l2', 'ear_r', 'ear_r2', 'arm_l', 'arm_r', 'paw_l', 'paw_r', 'thigh_l', 'thigh_r', 'shin_l', 'shin_r', 'foot_l', 'foot_r', 'tail1', 'tail2', 'tail3', 'tail4', 'tail5'];
 
 export class JerboaAnim {
@@ -540,6 +540,26 @@ export class JerboaAnim {
         earS = [0.2, 0.2];
         tailLift = 0.35;
         eye = 0.55;
+        l = 16;
+        break;
+      }
+      case 'groove': {
+        // watching you dance: bobbing to the beat, ears flopping, paws swaying
+        const b = this.beat, bob = Math.abs(Math.sin(Math.PI * b));
+        this.root.y = -0.07 * bob;
+        P.set('chest', -0.16 + 0.06 * bob);
+        P.set('head', 0.12 * bob - 0.05, 0, 0.12 * Math.sin((Math.PI * b) / 2));
+        P.set('arm_l', -0.55 + 0.3 * Math.sin(Math.PI * b), 0, 0.1);
+        P.set('arm_r', -0.55 - 0.3 * Math.sin(Math.PI * b), 0, -0.1);
+        P.set('thigh_l', -0.2 * bob);
+        P.set('thigh_r', -0.2 * bob);
+        P.set('shin_l', 0.36 * bob);
+        P.set('shin_r', 0.36 * bob);
+        P.set('foot_l', -0.16 * bob);
+        P.set('foot_r', -0.16 * bob);
+        earT = [0.25 * bob, 0.25 * bob, 0.3 * bob, 0.3 * bob];
+        tailLift = 0.15;
+        lookW = 0.6;
         l = 16;
         break;
       }
