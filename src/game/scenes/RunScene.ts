@@ -59,6 +59,7 @@ import { NeckSlicer } from '../player/NeckSlicer';
 import { ZoneCine } from './ZoneCine';
 import { Tutorial } from '../run/Tutorial';
 import { RuinNests } from '../run/RuinNests';
+import { Barks } from '../audio/Barks';
 import { Equipment } from '../player/Equipment';
 import { GearPickups } from '../run/GearLoot';
 import { GearHud } from '../ui/GearHud';
@@ -354,6 +355,7 @@ export class RunScene implements GameScene {
     this.pickups.onBounty = (v) => this.addBounty(v);
     this.director = new WaveDirector(this.ctx, this.enemies, () => this.player);
     this.wireEvents();
+    new Barks(this.ctx, this.player); // Sundown's voiced quips; tears itself down with the scene
 
     // place player
     const st = this.world.sa.start;
