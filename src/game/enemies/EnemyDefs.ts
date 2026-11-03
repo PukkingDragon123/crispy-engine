@@ -294,14 +294,17 @@ export function rosterFor(wave: number) {
   return Object.values(ENEMIES).filter((d) => d.firstWave <= wave && d.weight > 0);
 }
 
-/** difficulty multipliers per wave (1..100) */
+/** easier fights: every enemy blow is scaled by this (about 28% less damage than before) */
+export const ENEMY_DMG = 0.72;
+
+/** difficulty multipliers per wave (1..100) — a gentle ramp */
 export function waveScale(wave: number) {
   const w = wave - 1;
   return {
-    hp: 1 + w * 0.085 + Math.pow(w / 22, 2.2),
-    dmg: (1 + w * 0.03 + Math.pow(w / 40, 2)) * (wave <= 5 ? 0.75 + wave * 0.05 : 1),
-    speed: 1 + Math.min(0.35, w * 0.0045),
-    count: 1 + w * 0.06,
-    alphaChance: Math.min(0.08, 0.004 + w * 0.0011),
+    hp: 1 + w * 0.075 + Math.pow(w / 24, 2.2),
+    dmg: ENEMY_DMG * (1 + w * 0.024 + Math.pow(w / 46, 2)) * (wave <= 5 ? 0.75 + wave * 0.05 : 1),
+    speed: 1 + Math.min(0.25, w * 0.0035),
+    count: 1 + w * 0.045,
+    alphaChance: Math.min(0.06, 0.003 + w * 0.0008),
   };
 }

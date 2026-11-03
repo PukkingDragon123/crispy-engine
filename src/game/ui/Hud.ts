@@ -483,7 +483,8 @@ export class Hud {
         const jx = x - 11, jy = y - 15;
         const ready = s.ult >= 1;
         this.anchors.soul = { x: jx, y: jy, k, frac: s.ult, ready, heroX: hx, heroY: hy };
-        const tx = Math.round(jx + 22 * k), ty0 = Math.round(jy - 68 * k);
+        // beside the jar's shoulder, but always clear of the consumables' key caps below
+        const tx = Math.round(jx + 22 * k), ty0 = Math.round(Math.min(jy - 68 * k, y - 74));
         if (ready) {
           const kc = keycap('Z');
           const pulse = Math.round(Math.sin(this.t * 6) * 1.5);
@@ -602,10 +603,12 @@ export class Hud {
         const kc = keycap('T');
         const ringing = (s.bell ?? 0) > 0.02;
         const l1 = ringing ? 'RINGING' : 'HOLD TO RING', l2 = 'THE BELL';
-        const ex = Math.round(cx - 26 * k);
-        this.blit(kc, ex - kc.width, wy - 14);
-        text(c, l1, ex - kc.width - 4, wy - 13, ringing ? UI.brass.h : 'rgba(240,220,180,0.92)', 16, 'right');
-        text(c, l2, ex, wy + 1, ringing ? UI.brass.h : 'rgba(240,220,180,0.92)', 16, 'right');
+        const ex = Math.round(cx - 28 * k);
+        const col = ringing ? UI.brass.h : 'rgba(240,220,180,0.92)';
+        const w1 = Math.ceil(measure(c, l1, 16));
+        this.blit(kc, ex - w1 - kc.width - 4, wy - 15);
+        text(c, l1, ex, wy - 13, col, 16, 'right');
+        text(c, l2, ex, wy + 1, col, 16, 'right');
       } else text(c, s.zone, cx, Math.round(py + 15 * k + (tl < 900 ? 14 : 3) * k) + 4 - drop, 'rgba(240,220,180,0.85)', 16, 'center');
     } else if (!s.boss) {
       if (s.wave !== this.lastWave) {

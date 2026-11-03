@@ -18,14 +18,14 @@ export interface DodgeHunter {
 }
 
 export const DODGE_QTE = {
-  /** ring time (real seconds) */
-  window: 0.95,
+  /** ring time (real seconds) — generous */
+  window: 1.35,
   /** world speed while the ring closes */
-  slow: 0.12,
+  slow: 0.1,
   /** minimum real seconds between two offers */
-  cooldown: 6.5,
+  cooldown: 5,
   /** i-frames after a successful dodge (game seconds) */
-  iframes: 0.95,
+  iframes: 1.3,
   /** shove (m/s) sideways and up */
   side: 14,
   hop: 5,

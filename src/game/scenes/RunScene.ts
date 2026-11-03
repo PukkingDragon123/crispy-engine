@@ -116,6 +116,12 @@ function resolveStatic(keys: string[], fallback: () => { model: any; voxelSize: 
   return fallback();
 }
 
+/** bounty needed to clear a rank: slow early ranks (each one feels earned),
+ *  converging on the old curve from about rank 8 on */
+export function rankCost(rank: number) {
+  return Math.round(12 + rank * 9 + Math.pow(rank, 1.6) * 2 + 30 * Math.exp(-(rank - 1) / 4));
+}
+
 export class RunScene implements GameScene {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(72, 1, 0.08, 1400);
@@ -161,7 +167,7 @@ export class RunScene implements GameScene {
   garments!: Garments;
   props!: Props;
   events = new EventBus();
-  run: RunState = { wave: 0, bounty: 0, rank: 1, bountyToNext: 12, gold: 0, kills: 0, totalBounty: 0, totalGold: 0, time: 0, ultCharge: 0, revived: false, combo: 0, comboTimer: 0, style: 0 };
+  run: RunState = { wave: 0, bounty: 0, rank: 1, bountyToNext: rankCost(1), gold: 0, kills: 0, totalBounty: 0, totalGold: 0, time: 0, ultCharge: 0, revived: false, combo: 0, comboTimer: 0, style: 0 };
   private hitMarker = 0;
   private killMarker = 0;
   private windLoop: any = null;
@@ -640,7 +646,7 @@ export class RunScene implements GameScene {
     while (r.bounty >= r.bountyToNext) {
       r.bounty -= r.bountyToNext;
       r.rank++;
-      r.bountyToNext = Math.round(12 + r.rank * 9 + Math.pow(r.rank, 1.6) * 2);
+      r.bountyToNext = rankCost(r.rank);
       this.onRankUp();
     }
   }

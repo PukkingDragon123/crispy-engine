@@ -16,6 +16,7 @@ import type { RigSpec } from '../../../engine/voxel/Rig';
 import { RNG, Noise, hash3 } from '../../../engine/math/rand';
 import { PR } from './helpers';
 import { mix, mulRGB } from '../../../engine/voxel/VoxelModel';
+import { weathered, paintedWood, rustedIron, sandMat, timber, split } from '../materials';
 
 /** voxel flag (unused by the mesher): decor that never becomes a collider (sand, rubble, silk, cloth scraps) */
 export const NOCOL = 64;
@@ -706,32 +707,101 @@ export function eggSacs(seed = 0, burst = false): RuinModel {
   return { model: m, voxelSize: vs };
 }
 
-// =============================================================================== broken plank debris (1/16)
-export function plankDebris(seed = 0): RuinModel {
-  const vs = 1 / 16;
-  const rng = new RNG(5501 + seed * 7);
-  const m = new VoxelModel('plank_debris' + seed);
-  // low sand bank they lie in
-  for (let x = -14; x <= 14; x++) for (let z = -12; z <= 12; z++) {
-    const d = Math.hypot(x / 14, z / 12);
-    if (d > 1) continue;
-    const h = Math.round((1 - d) * 2.5);
-    for (let y = 0; y < h; y++) m.set(x, y, z, y === h - 1 ? DS.top : DS.mid, NOCOL);
-  }
-  const n = 3 + rng.int(0, 3);
-  for (let i = 0; i < n; i++) {
-    const a = rng.range(0, Math.PI);
-    const L = rng.range(12, 26), w = rng.chance(0.5) ? 2 : 3;
-    const ox = rng.range(-6, 6), oz = rng.range(-5, 5), y = 1 + (i % 3);
-    const base = mix(rng.pick([PR.wood.base, PR.woodGrey.base, PR.woodLight.base, PR.barnRed.base]), BLEACH, 0.55);
-    for (let s = -L / 2; s <= L / 2; s += 0.6) {
-      for (let q = 0; q < w; q++) {
-        const x = Math.round(ox + Math.cos(a) * s - Math.sin(a) * q), z = Math.round(oz + Math.sin(a) * s + Math.cos(a) * q);
-        const end = Math.abs(s) > L / 2 - 2 && hash3(x, q, z) < 0.5;
-        if (end && q === w - 1) continue; // splintered, jagged ends
-        m.set(x, y + (Math.abs(s) > L * 0.35 && i % 2 ? 1 : 0), z, end ? BLEACH : Math.abs(s % 8) < 0.6 ? 0x3a3434 : hash3(x, y, z) < 0.1 ? ROT : base, NOCOL);
+// =============================================================================== broken plank debris (1/32)
+/** rotate a model about the y axis by `ang` (inverse-mapped so there are no holes) */
+function rotYAny(src: VoxelModel, ang: number) {
+  const out = new VoxelModel(src.name);
+  const b = src.bounds();
+  const c = Math.cos(ang), s = Math.sin(ang);
+  const R = Math.ceil(Math.hypot(Math.max(Math.abs(b.minX), Math.abs(b.maxX)), Math.max(Math.abs(b.minZ), Math.abs(b.maxZ)))) + 1;
+  for (let x = -R; x <= R; x++)
+    for (let z = -R; z <= R; z++) {
+      const sx = Math.round(x * c + z * s), sz = Math.round(-x * s + z * c);
+      if (sx < b.minX || sx > b.maxX || sz < b.minZ || sz > b.maxZ) continue;
+      for (let y = b.minY; y <= b.maxY; y++) {
+        const v = src.get(sx, y, sz);
+        if (v !== undefined) out.map.set(K(x, y, z), v);
       }
     }
+  return out;
+}
+/**
+ * Broken planks half-sunk in a sand bank: bleached and grey boards with checks,
+ * splintered ends with pale fresh wood, bent nails sticking up, a split, one board
+ * with chipped barn-red paint, and a broken beam end with a mortise and an iron
+ * strap. Decor (never a collider).
+ */
+export function plankDebris(seed = 0): RuinModel {
+  const vs = 1 / 32;
+  const rng = new RNG(5501 + seed * 7);
+  const m = new VoxelModel('plank_debris' + seed);
+  const sand = sandMat({ seed, tones: [DS.low, DS.mid, DS.top, DS.ripple] });
+  for (let x = -28; x <= 28; x++)
+    for (let z = -24; z <= 24; z++) {
+      const d = Math.hypot(x / 28, z / 24);
+      if (d > 1) continue;
+      const h = Math.round((1 - d) * 4.2);
+      for (let y = 0; y < h; y++) m.set(x, y, z, y === h - 1 ? sand(x, y, z)! : DS.mid, NOCOL);
+    }
+  const n = 3 + rng.int(0, 2);
+  const nailM = rustedIron({ seed, rust: 0.7, streaks: false });
+  for (let i = 0; i < n; i++) {
+    const L = rng.int(26, 50), w = rng.int(5, 8), th = 2;
+    const kind = rng.next();
+    const along = 'x' as const;
+    const wood = kind < 0.35 ? weathered({ along, seed: seed * 17 + i, species: 'bleached', checks: 1, ends: [0, L - 1], figure: 0.6 })
+      : kind < 0.7 ? weathered({ along, seed: seed * 17 + i, checks: 1, ends: [0, L - 1], figure: 0.6 })
+      : paintedWood(0x9a3a2a, { along, seed: seed * 17 + i, chip: 0.6, fade: 0.3, ends: [0, L - 1] });
+    const pm = new VoxelModel('p');
+    timber(pm, [0, 0, 0, L - 1, th - 1, w - 1], 'x', { mat: wood, chamfer: 0, seed: seed + i });
+    const cxp = Math.floor(L / 2), czp = Math.floor(w / 2);
+    // splintered end(s): jagged teeth with pale fresh wood at the break
+    for (const end of i % 2 ? [L - 1] : [0, L - 1]) {
+      const dir = end === 0 ? 1 : -1;
+      for (let z = 0; z < w; z++) {
+        const bite = Math.floor(hash3(z, i, seed) * 6);
+        for (let k = 0; k < bite; k++) for (let y = 0; y < th; y++) pm.del(end + dir * k, y, z);
+        for (let y = 0; y < th; y++) if (pm.has(end + dir * bite, y, z)) pm.set(end + dir * bite, y, z, 0xe4cfa2);
+      }
+    }
+    if (rng.chance(0.6)) split(pm, [Math.floor(L * 0.6), th - 1, Math.floor(w / 2)], 'y+', [1, 0, 0], Math.floor(L * 0.35), { seed: seed + i, depth: 2 });
+    // nails: bent heads standing up through the board
+    for (const nx of [3, L - 4]) {
+      if (!rng.chance(0.7)) continue;
+      const nz = rng.int(1, w - 2);
+      pm.set(nx, th, nz, nailM, VF.METAL).set(nx, th + 1, nz, nailM, VF.METAL).set(nx + 1, th + 2, nz, nailM, VF.METAL);
+    }
+    // mostly near-axis angles: debris reads as fallen boards, and short staircases keep the mesh light
+    const ang = (i % 2 ? Math.PI / 2 : 0) + rng.range(-0.38, 0.38);
+    const centred = new VoxelModel('c');
+    pm.forEach((x, y, z, c, f) => centred.set(x - cxp, y, z - czp, c, f));
+    const rot = rotYAny(centred, ang);
+    const ox = rng.int(-9, 9), oz = rng.int(-8, 8);
+    const lift = 1 + (i % 3) * 2;
+    const tilt = i % 2 ? rng.range(0.05, 0.16) : 0;
+    rot.forEach((x, y, z, c, f) => {
+      const yy = lift + y + Math.round(x * tilt) - (tilt ? 2 : 0);
+      if (yy < 1) return; // the sunk part
+      m.set(ox + x, yy, oz + z, c, f | NOCOL);
+    });
+  }
+  // a broken beam end: thick timber, a mortise slot, an iron strap with bolts
+  {
+    const bm = new VoxelModel('b');
+    const BL = 24;
+    timber(bm, [-12, 0, -4, BL - 13, 7, 3], 'x', { mat: weathered({ along: 'x', seed: seed + 91, checks: 1, ends: [-12, BL - 13], species: 'walnut' }), chamfer: 1, seed });
+    bm.carveBox(-6, 7, -2, -1, 5, 1);
+    for (let z = -4; z < 4; z++) for (let k = 0; k < Math.floor(hash3(z, seed, 3) * 5); k++) for (let y = 0; y < 8; y++) bm.del(BL - 13 - k, y, z);
+    const strap = rustedIron({ seed: seed + 5, rust: 0.6 });
+    for (let x = 2; x <= 4; x++) for (let z = -5; z <= 4; z++) bm.set(x, 8, z, strap, VF.METAL);
+    for (let x = 2; x <= 4; x++) for (let y = 0; y <= 8; y++) bm.set(x, y, -5, strap, VF.METAL).set(x, y, 4, strap, VF.METAL);
+    bm.set(3, 9, -1, 0x5a5650, VF.METAL).set(3, 9, 0, 0x5a5650, VF.METAL);
+    const rot = rotYAny(bm, rng.range(-0.35, 0.35) + (seed % 2 ? Math.PI / 2 : 0));
+    const bx = rng.int(-10, 10), bz = rng.int(-9, 9);
+    rot.forEach((x, y, z, c, f) => {
+      const yy = y - 2 + Math.round(x * 0.08);
+      if (yy >= 0) m.set(bx + x, yy, bz + z, c, f | NOCOL);
+    });
   }
   return { model: m, voxelSize: vs };
 }

@@ -166,7 +166,8 @@ export class Ironclad extends Boss {
     this.setExpr('stunned');
   }
   private hunterHit(base: number, knock: number, from: THREE.Vector3, status?: Hit['status']) {
-    return this.player.takeHit({ base: base * (1 + (this.tier - 1) * 0.35), kind: 'phys', source: 'contact', knock, status }, from);
+    // easier fights: his blows land for ~25% less than the raw numbers below
+    return this.player.takeHit({ base: base * 0.75 * (1 + (this.tier - 1) * 0.35), kind: 'phys', source: 'contact', knock, status }, from);
   }
 
   // ------------------------------------------------------------------ intro: he comes in like a train
@@ -270,7 +271,7 @@ export class Ironclad extends Boss {
     const ctx = this.ctx;
     this.call('Locomotive');
     this.stop();
-    const W = this.enraged ? 0.75 : this.phase === 1 ? 0.95 : 1.15;
+    const W = this.enraged ? 0.9 : this.phase === 1 ? 1.1 : 1.35;
     this.faceTarget(this.playerPos());
     this.leanT = 0.6;
     this.crouchT = 0.5;
@@ -342,7 +343,7 @@ export class Ironclad extends Boss {
   private async dustNBones() {
     const n = this.enraged ? 3 : 1;
     for (let i = 0; i < n; i++) {
-      const dodged = await this.poundOnce(i === 0 ? 5.4 : 4.2, i === 0 ? 1.15 : 0.75, i === 0);
+      const dodged = await this.poundOnce(i === 0 ? 5.4 : 4.2, i === 0 ? 1.35 : 0.9, i === 0);
       if (dodged) {
         this.openUp(2.4);
         this.crouchT = 1;
@@ -418,7 +419,7 @@ export class Ironclad extends Boss {
     this.stop();
     this.faceTarget(this.playerPos());
     const base = this.yaw;
-    const W = this.enraged ? 0.65 : 0.9;
+    const W = this.enraged ? 0.8 : 1.1;
     this.aimT = 1;
     this.spinT = 1;
     this.warn.bang(this, { tier: 'heavy', life: W, y: this.height + 0.6 });
@@ -446,7 +447,7 @@ export class Ironclad extends Boss {
       const sp = 21;
       for (let k = 0; k < (this.enraged ? 2 : 1); k++) {
         const a = ang + (k ? 0.12 : 0);
-        this.d.enemies.proj.spawn({ kind: 'bullet', x: m.x, y: m.y, z: m.z, vx: Math.sin(a) * sp, vy: ((tgt.y - m.y) / flat) * sp, vz: Math.cos(a) * sp, dmg: 5 * (1 + (this.tier - 1) * 0.4), sourceId: this.id });
+        this.d.enemies.proj.spawn({ kind: 'bullet', x: m.x, y: m.y, z: m.z, vx: Math.sin(a) * sp, vy: ((tgt.y - m.y) / flat) * sp, vz: Math.cos(a) * sp, dmg: 4.5 * (1 + (this.tier - 1) * 0.4), sourceId: this.id });
       }
       if (n++ % 2 === 0) {
         ctx.fx.muzzle(m, { x: Math.sin(ang), y: 0, z: Math.cos(ang) }, 0xffd090);
@@ -468,7 +469,7 @@ export class Ironclad extends Boss {
     this.stop();
     for (let i = 0; i < 2; i++) {
       this.faceTarget(this.playerPos());
-      const W = i === 0 ? 0.55 : 0.42;
+      const W = i === 0 ? 0.7 : 0.55;
       this.warn.bang(this, { tier: i === 1 ? 'heavy' : 'tell', life: W, y: this.height + 0.6 });
       this.warn.wedge(this.pos.x, this.pos.z, this.yaw, 5.2, 0.85, W, i === 1 ? 'heavy' : 'tell');
       this.guard = 0.4;
@@ -503,7 +504,7 @@ export class Ironclad extends Boss {
     this.stop();
     this.crouchT = 0.6;
     const n = 3 + this.phase * 2 + (this.tier - 1);
-    const T = 1.2;
+    const T = 1.4;
     const from = this.sock('smoke', new THREE.Vector3());
     ctx.sfx('explosion', from, 0.5, 1.4);
     for (let i = 0; i < n; i++) {
@@ -535,7 +536,7 @@ export class Ironclad extends Boss {
     this.call('19th Nervous Breakdown');
     this.stop();
     const R = 9.5;
-    const W = 1.8;
+    const W = 2.1;
     const c = this.pos.clone();
     this.warn.circle(c.x, c.z, R, W + 0.2, 'grab');
     this.warn.bang(this, { tier: 'grab', life: W, y: this.height + 0.6 });

@@ -454,6 +454,7 @@ export class SoulBar {
   }
 
   update(dt: number, anchor: SoulAnchor | null, visible: boolean, s: number) {
+    dt = Math.min(dt, 0.1);
     this.t += dt;
     const a = anchor ? { ...anchor, k: anchor.k * SOUL_JAR_SCALE } : null;
     const show = !!a && visible;
@@ -500,8 +501,11 @@ export class SoulBar {
 
     // ---------------------------------------------------- pose
     // a damped slosh: the jar tilts with jolts, the smoke surface follows
-    this.tiltV += (-this.tilt * 60 - this.tiltV * 7) * dt;
-    this.tilt += this.tiltV * dt;
+    for (let i = 0, n = Math.ceil(dt * 120); i < n; i++) {
+      const h = dt / n;
+      this.tiltV += (-this.tilt * 60 - this.tiltV * 7) * h;
+      this.tilt += this.tiltV * h;
+    }
     const rattle = this.ready ? Math.sin(this.t * 47) * 0.012 * (0.5 + 0.5 * Math.sin(this.t * 3.1)) : 0;
     this.root.position.set(a.x * s, -a.y * s, 40);
     const pop = 1 + this.jolt * 0.06 * Math.sin(this.jolt * 12);

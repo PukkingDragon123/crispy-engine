@@ -1185,3 +1185,615 @@ export function arrowSign(dir: 1 | -1 = 1): StaticModel & { meta: { length: numb
   const b = out.bounds();
   return { model: out, voxelSize: DV, meta: { length: (b.maxX - b.minX + 1) * DV } };
 }
+
+// =====================================================================
+// THE HOUSE, MORE LIVED IN — and the toys (hub v4)
+// The back-yard target fence and what stands on it, the pet scorpion's tank,
+// herbs drying on a twine, the squeaky board, a cowhide, the trophy plaques and
+// the red paint that crosses out a paid bounty, Mama's card table and the
+// milking stool, the record crate and a shellac record, a picture light.
+// =====================================================================
+const TV = 1 / 96; // tiny / fine things
+const PV = 1 / 128; // paint, records
+/** pivot in a model's own voxel space that the scene meshes with when meta points must line up (centre of voxel 0) */
+export const ORIGIN_PIVOT: V3 = [0.5, 0, 0.5];
+const atO = (vs: number, p: V3): V3 => [(p[0] - 0.5) * vs, p[1] * vs, (p[2] - 0.5) * vs];
+const CEDAR = [0x8a7a62, 0x7e6e58, 0x968670, 0x766a56];
+const IRON = 0x34302c, IRON_RUST = 0x7a4a2a;
+
+/** a dirt mound / skirt of trodden earth, only above y=0 */
+function mound(m: VoxelModel, cx: number, cz: number, rx: number, rz: number, h: number, seed: number) {
+  for (let x = Math.floor(cx - rx - 1); x <= cx + rx + 1; x++)
+    for (let z = Math.floor(cz - rz - 1); z <= cz + rz + 1; z++) {
+      const d = Math.hypot((x + 0.5 - cx) / rx, (z + 0.5 - cz) / rz) + lump(x, 0, z, 0.7, seed) * 0.25;
+      if (d >= 1) continue;
+      const top = Math.round(h * (1 - d * d));
+      for (let y = 0; y <= top; y++) m.set(x, y, z, y === top ? (h01(x, seed, z) > 0.75 ? 0x9a7a52 : 0xa8885c) : 0x8a6a48);
+    }
+}
+/** a few dry grass blades fanning up from a foot point */
+function grassAt(m: VoxelModel, cx: number, cz: number, n: number, h: number, seed: number) {
+  for (let i = 0; i < n; i++) {
+    const a = h01(i, seed, 1) * Math.PI * 2, lean = 0.25 + h01(i, seed, 2) * 0.45, hh = h * (0.55 + h01(i, seed, 3) * 0.6);
+    const bx = cx + Math.cos(a) * 1.4, bz = cz + Math.sin(a) * 1.4;
+    tubeP(m, spline([[bx, 0, bz], [bx + Math.cos(a) * lean * hh * 0.4, hh * 0.55, bz + Math.sin(a) * lean * hh * 0.4], [bx + Math.cos(a) * lean * hh, hh, bz + Math.sin(a) * lean * hh]], 4), [0.55, 0.45, 0.3], (_x, y) => (y > hh * 0.7 ? 0xd8c080 : y < 2 ? 0x8a7a40 : 0xb8a058));
+  }
+}
+/** a splintered bullet hole punched into the first voxel met going -Z from the front (z0) */
+function shotHole(m: VoxelModel, x: number, y: number, z0: number, seed: number) {
+  let z = z0;
+  while (z > z0 - 12 && !m.has(x, y, z)) z--;
+  if (!m.has(x, y, z)) return;
+  m.set(x, y, z, 0x1a120c);
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1]]) if (h01(x + dx, y + dy, seed) > 0.35 && m.has(x + dx, y + dy, z)) m.set(x + dx, y + dy, z, 0xc8b898);
+}
+
+/** the back-yard target fence — 1/48, 3.1 m along X, front +Z: five hewn cedar posts each with its own lean, two
+ *  split-rail poles behind, a wide flat top plank nailed over the post tops (the shelf the bottles and cans stand
+ *  on), old bullet holes splintered through everything, a horseshoe nailed up for luck, a twist of baling wire round
+ *  a cracked post, a tin cup on a nail, dry grass and trodden dirt at every foot.
+ *  meta: slots (m, target spots on the shelf, bottom-centre pivot), top (m). */
+export function yardFence(seed = 31): StaticModel & { meta: { slots: V3[]; top: number } } {
+  const m = new VoxelModel('yard_fence');
+  const HL = 75, TOP = 47;
+  const POSTS = [-71, -35, 1, 36, 72];
+  POSTS.forEach((px, i) => {
+    const lean = (h01(i, 3, seed) - 0.5) * 2.6, leanZ = (h01(i, 5, seed) - 0.5) * 1.4;
+    mound(m, px, 0, 6, 5, 2, seed + i);
+    plank(m, [px, 0, 0], [px + lean, TOP - 1, leanZ], 6, 5.4, CEDAR[i % 4], seed + i * 7, { up: [0, 0, 1], r: 1.5, lumpy: 0.45, knots: true });
+    // a hewn chamfer at the head, checked end grain
+    egg(m, [px + lean, TOP - 1.5, leanZ], [3.2, 1.2, 2.8], mul(CEDAR[i % 4], 0.86));
+    grassAt(m, px + 3, 3.5, 5, 9, seed + i * 3);
+    grassAt(m, px - 4, -2, 3, 7, seed + i * 5);
+  });
+  // split-rail poles, low and middle, nailed to the posts' backs, bowed and barked in places
+  ([[13, 2.3], [29, 2.0]] as const).forEach(([y, r], k) => {
+    const pts: V3[] = [];
+    for (let i = 0; i <= 6; i++) pts.push([-HL - 4 + (i / 6) * (2 * HL + 8), y + Math.sin(i * 1.3 + k) * 0.8 + (i === 3 ? -0.6 : 0), -4.2 + Math.sin(i * 0.7) * 0.4]);
+    tubeP(m, spline(pts, 6), [r, r * 0.92, r * 1.05, r * 0.9], (x, yy, z) => {
+      const g = h01(Math.floor(x / 9), Math.floor(yy * 2 + z), seed + k);
+      if (g > 0.86) return 0x5a4a3a; // a strip of bark left on
+      return mul(CEDAR[(k + 1) % 4], 0.9 + h01(Math.floor(x / 5), Math.round(yy - y) + 3, k) * 0.16);
+    });
+  });
+  // the shelf: one long wide plank over the post heads, cupped and worn pale where things get set down
+  plank(m, [-HL - 4, TOP + 0.9, 0.6], [HL + 4, TOP + 0.4, 0.4], 10, 2.6, 0x9a8a70, seed + 50, { up: [0, 1, 0], r: 0.8, lumpy: 0.25, knots: true });
+  for (const px of POSTS) for (const nz of [-2.6, 2.6]) egg(m, [px, TOP + 2.2, nz], [0.8, 0.5, 0.8], (x, y, z) => (h01(x, y, z) > 0.5 ? IRON_RUST : IRON), VF.METAL);
+  // old target practice: holes through the shelf's front edge and the posts
+  for (let i = 0; i < 16; i++) shotHole(m, Math.round(-HL + h01(i, 7, seed) * 2 * HL), Math.round(TOP - 0.5 + h01(i, 8, seed) * 2), 8, i);
+  for (let i = 0; i < 10; i++) {
+    const px = POSTS[i % 5];
+    shotHole(m, px + Math.round((h01(i, 9, seed) - 0.5) * 3), Math.round(8 + h01(i, 10, seed) * 34), 6, i + 40);
+  }
+  // a horseshoe on the middle post, ends up so the luck stays in
+  const hx = POSTS[2] + 0.4, hy = 33;
+  const shoe: V3[] = [];
+  for (let a = -0.25; a <= Math.PI + 0.25; a += 0.2) shoe.push([hx + Math.cos(a) * 3.4, hy - Math.sin(a) * 3.9, 3.6]);
+  tubeP(m, shoe, [0.85], (x, y) => (h01(x, y, 3) > 0.6 ? IRON_RUST : IRON), VF.METAL);
+  egg(m, [hx, hy + 1, 3.8], [0.6, 0.6, 0.6], 0x2a2420, VF.METAL);
+  // baling wire round the cracked fourth post, the crack itself
+  for (let a = 0; a < Math.PI * 2 * 3; a += 0.12) m.set(Math.round(POSTS[3] + Math.cos(a) * 3.7), Math.round(19 + a * 0.32), Math.round(Math.sin(a) * 3.3), h01(Math.round(a * 4), 1, 2) > 0.7 ? IRON_RUST : 0x6a6660, VF.METAL);
+  for (let y = 10; y < 30; y++) m.set(POSTS[3] + (y % 3 === 0 ? 1 : 0), y, 3, 0x2a2018);
+  // a tin cup hanging by its handle from a nail on the first post
+  const cx = POSTS[0] + 0.5, cy = 22;
+  rod(m, [cx, cy + 6, 2.5], [cx, cy + 6, 5.5], 0.5, 0.45, IRON, VF.METAL);
+  lathe(m, cx, 7, cy, cy + 4, (t) => 2.1 - t * 0.2, (x, y, z, outer) => (!outer ? 0x2a2420 : h01(x, y, z) > 0.8 ? 0x6a6a68 : 0xa8aaa8), { hollow: true }, VF.METAL);
+  for (let a = -1.2; a <= 1.2; a += 0.25) m.set(Math.round(cx + Math.sin(a) * 1.4), Math.round(cy + 4.6 + Math.cos(a) * 1.4), 5, 0xa8aaa8, VF.METAL);
+  const slots: V3[] = [];
+  for (let i = 0; i < 9; i++) slots.push([-64 + i * 16 + Math.round((h01(i, 11, seed) - 0.5) * 3), TOP + 2, 0.5]);
+  return { model: m, voxelSize: FV, meta: { slots: slots.map((s) => pivotOf(m, FV, s)), top: pivotOf(m, FV, [0, TOP + 2, 0])[1] } };
+}
+
+/** the four bottles you can shoot — 1/64, hand-blown (off-centre, wobbling), real glass colours with a sheen and a
+ *  hard highlight streak: 0 an amber whiskey flask with a cork and a paper label, 1 a tall green wine bottle with a foil
+ *  neck, 2 a squat cobalt tonic with embossed ribs, 3 a brown beer bottle with a crimped cap and an oval label.
+ *  meta: h (m), glass (rgb for the shards), neckY (m, where it breaks). */
+export function targetBottle(kind = 0): StaticModel & { meta: { h: number; glass: number; neckY: number } } {
+  const m = new VoxelModel('target_bottle');
+  const K = [
+    { h: 18, r: 3.6, neck: 1.3, sh: 0.58, glass: 0x9a5a1a, hi: 0xf0b868, dk: 0x5a2c0c, sx: 1, sz: 0.74 },
+    { h: 21, r: 3.1, neck: 1.1, sh: 0.5, glass: 0x2e5a2a, hi: 0x8ac07a, dk: 0x16301a, sx: 1, sz: 1 },
+    { h: 13, r: 2.8, neck: 1.1, sh: 0.6, glass: 0x2a4aa0, hi: 0x8aaaf0, dk: 0x142450, sx: 1, sz: 1 },
+    { h: 16, r: 2.8, neck: 1.1, sh: 0.55, glass: 0x6a3814, hi: 0xc8884a, dk: 0x3a1a08, sx: 1, sz: 1 },
+  ][((kind % 4) + 4) % 4];
+  const prof = (t: number) => {
+    if (t < 0.05) return K.r - 0.55; // the heel
+    if (t < K.sh) return K.r + Math.sin(t * 9 + kind) * 0.12;
+    const u = Math.min(1, (t - K.sh) / 0.2);
+    const r = K.neck + (K.r - K.neck) * (1 - u * u * (3 - 2 * u));
+    return t > 0.93 ? K.neck + 0.55 : r; // the lip
+  };
+  const wob = (kind * 0.7) % 1;
+  lathe(m, 0, 0, 0, K.h, prof, (x, y, z, outer, ang, t) => {
+    if (!outer) return K.dk;
+    let c = K.glass;
+    if (Math.abs(ang + 2.3) < 0.28 || Math.abs(ang + 1.55) < 0.1) c = K.hi; // the window caught in the glass
+    else if (Math.abs(ang - 0.9) < 0.4) c = mul(K.glass, 0.72);
+    if (t < 0.08) c = mul(c, 0.8);
+    if (kind === 0 && t > 0.16 && t < 0.48 && ang > 0.4 && ang < 2.8) c = y === 3 || y === 8 ? 0xa8302a : h01(x, y, z) > 0.9 ? 0xc8b890 : 0xe8dcb8; // the label
+    if (kind === 1 && t > 0.82) c = mod(y, 2) ? 0x7a1a14 : 0x9a2a1e; // foil
+    if (kind === 1 && t > 0.12 && t < 0.38 && ang > 0.5 && ang < 2.6) c = y === 4 ? 0x2a2a2a : 0xd8c8a0;
+    if (kind === 2 && mod(Math.round(ang * 4), 3) === 0 && t < K.sh) c = mul(c, 0.82); // embossed ribs
+    if (kind === 3 && t > 0.18 && t < 0.45 && Math.abs(ang - 1.57) < 0.9 && Math.hypot((ang - 1.57) * 2.4, (t - 0.31) * 12) < 1.9) c = Math.hypot((ang - 1.57) * 2.4, (t - 0.31) * 12) > 1.5 ? 0x7a2a1a : 0xd8b060;
+    if (kind === 3 && t > 0.92) c = mod(Math.round(ang * 5), 2) ? 0xc8a040 : 0xa8802a; // crimped cap
+    return c;
+  }, { sx: K.sx, sz: K.sz, tiltX: wob * 0.04, dents: [{ a: 1 + kind, y0: 2, y1: Math.round(K.h * K.sh), depth: 0.3, width: 0.5 }] }, VF.METAL);
+  if (kind === 0) lathe(m, 0, 0, K.h + 1, K.h + 2, (t) => 1.1 - t * 0.2, (x, y, z) => (h01(x, y, z) > 0.6 ? 0xb08a5a : 0xc89a6a), { tiltX: wob * 0.04 }); // cork
+  return { model: m, voxelSize: DV, meta: { h: (K.h + 1) * DV, glass: K.glass, neckY: Math.round(K.h * (K.sh + 0.12)) * DV } };
+}
+
+/** the three tin cans — 1/64, rolled-seam rims, ribs, faded paper labels with a band, rust freckles and a dent, the
+ *  lid cut round and bent back on its hinge: 0 beans (red), 1 peaches (orange, green band), 2 coffee (tall, blue). */
+export function targetCan(kind = 0): StaticModel & { meta: { h: number } } {
+  const m = new VoxelModel('target_can');
+  const K = [
+    { r: 3.3, h: 8, label: 0xb0302a, band: 0xe8d8a8, rust: 0.12 },
+    { r: 3.4, h: 7, label: 0xe0902a, band: 0x3a6a2a, rust: 0.3 },
+    { r: 3.7, h: 10, label: 0x2a4a7a, band: 0xd8b050, rust: 0.18 },
+  ][((kind % 3) + 3) % 3];
+  lathe(m, 0, 0, 0, K.h, (t) => (t < 0.08 || t > 0.92 ? K.r + 0.25 : K.r), (x, y, z, outer, ang) => {
+    if (!outer) return y === K.h ? 0x6a6a68 : 0x9a9c9c;
+    if (y === 0 || y === K.h) return mod(Math.round(ang * 6), 2) ? 0xb8bab8 : 0x8a8c8c; // rolled seams
+    if (h01(x * 3, y, z * 3) < K.rust * 0.25) return h01(x, y, 9) > 0.5 ? 0x8a4a20 : 0x6a3418;
+    if (Math.abs(ang + 1.9) < 0.22) return 0xd8d8d0; // a scuff to the bare tin
+    if (y === 1 || y === K.h - 1) return 0x9a9c9c;
+    const mid = Math.round(K.h / 2);
+    return y === mid || (K.h > 8 && y === mid + 1) ? K.band : h01(Math.round(ang * 3), y, 4) > 0.9 ? mul(K.label, 0.85) : K.label;
+  }, { dents: [{ a: 2.2 + kind, y0: 2, y1: K.h - 2, depth: 0.7, width: 0.6 }] }, VF.METAL);
+  // the open top (dark inside) and the lid bent up on its hinge at the back
+  for (let x = -3; x <= 3; x++) for (let z = -3; z <= 3; z++) if (Math.hypot(x, z) < K.r - 0.6) m.set(x, K.h, z, 0x3a3634, VF.METAL);
+  for (let x = -3; x <= 3; x++)
+    for (let s = 0; s <= 6; s++) {
+      const zz = -K.r + s * Math.cos(1.1), yy = K.h + 1 + s * Math.sin(1.1);
+      if (Math.hypot(x, s - 3.2) < K.r - 0.4) m.set(x, Math.round(yy), Math.round(zz), mod(x + s, 3) ? 0xc0c2c0 : 0x9a9c9c, VF.METAL);
+    }
+  return { model: m, voxelSize: DV, meta: { h: (K.h + 1) * DV } };
+}
+
+/** the pet scorpion's tank — 1/64, meshed with ORIGIN_PIVOT (glass is a separate model on the same grid): a walnut
+ *  plinth with a moulded lip, slim walnut corner posts and top frame, a rippled sand floor with a slate slab, a
+ *  bleached little cow skull, a terracotta water dish, a dead mesquite twig, a barrel cactus and a burrow mouth;
+ *  a hinged iron-mesh lid with a brass heat lamp clamped to the back corner (bulb aglow).
+ *  meta: floor (m), half (m, walkable half extents), lamp (m). */
+export function terrarium(seed = 32): StaticModel & { meta: { floor: number; half: [number, number]; lamp: V3 } } {
+  const m = new VoxelModel('terrarium');
+  const HX = 20, HZ = 12, B = 5, TOPY = 30;
+  fill(m, (x, y, z) => dRBox(x + 0.5, y + 0.5, z + 0.5, 0.5, B / 2 + 0.5, 0.5, HX + 2.5, B / 2 + 0.5, HZ + 2.5, 1.4), [[-HX - 4, 0, -HZ - 4], [HX + 4, B + 1, HZ + 4]], 1, (x, y, z, d) => {
+    if (y >= B) return d > -1 ? 0x7a4a26 : 0x6a3e1e; // the lip
+    if (y === 2 && d > -1) return 0x3e2412; // moulding groove
+    return h01(x >> 2, y, z >> 2) > 0.8 ? 0x4e2e16 : WALNUT;
+  });
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) plank(m, [0.5 + sx * (HX + 1), B, 0.5 + sz * (HZ + 1)], [0.5 + sx * (HX + 1), TOPY, 0.5 + sz * (HZ + 1)], 2.4, 2.4, WALNUT, seed + sx * 3 + sz, { r: 0.6, lumpy: 0.1 });
+  for (const sz of [-1, 1]) plank(m, [-HX - 1.5, TOPY, 0.5 + sz * (HZ + 1)], [HX + 2.5, TOPY, 0.5 + sz * (HZ + 1)], 2.4, 2, 0x6a3e1e, seed + 9 + sz, { r: 0.6 });
+  for (const sx of [-1, 1]) plank(m, [0.5 + sx * (HX + 1), TOPY, -HZ - 1.5], [0.5 + sx * (HX + 1), TOPY, HZ + 2.5], 2.4, 2, 0x6a3e1e, seed + 12 + sx, { r: 0.6 });
+  // sand, rippled by the wind that never gets in here
+  const FY = B + 3;
+  for (let x = -HX; x <= HX; x++)
+    for (let z = -HZ; z <= HZ; z++) {
+      const rip = Math.sin(x * 0.7 + z * 0.25 + Math.sin(z * 0.4)) > 0.55 ? 1 : 0;
+      const h = FY + rip + (Math.hypot(x - 12, z + 5) < 5 ? 1 : 0);
+      for (let y = B + 1; y <= h; y++) m.set(x, y, z, y === h ? (rip ? 0xe2c08a : h01(x, 7, z) > 0.85 ? 0xc8a070 : 0xd8b07c) : 0xb8925e);
+    }
+  // a burrow mouth under the slab
+  for (let x = -14; x <= -9; x++) for (let z = -8; z <= -5; z++) if (Math.hypot(x + 11.5, (z + 6.5) * 1.4) < 2.6) for (let y = FY - 1; y <= FY + 1; y++) m.del(x, y, z);
+  for (let x = -14; x <= -9; x++) for (let z = -8; z <= -5; z++) if (Math.hypot(x + 11.5, (z + 6.5) * 1.4) < 2.6) m.set(x, FY - 2, z, 0x3a2414);
+  // the slate slab leaning over the burrow
+  fill(m, (x, y, z) => dRBox(x + 0.5, y + 0.5 - (z + 0.5 + 6) * 0.25, z + 0.5, -11, FY + 2.5, -4, 7, 1.1, 5, 0.8) + lump(x, y, z, 0.6, seed) * 0.4, [[-19, FY, -11], [-3, FY + 6, 3]], 1, (x, y, z, d) => (d > -0.8 && y > FY + 2 ? 0x6a7078 : h01(x >> 1, y, z >> 1) > 0.7 ? 0x4a5058 : 0x565c64));
+  // a little bleached cow skull, half sunk
+  egg(m, [9, FY + 1.5, -6], [2.6, 1.8, 3.2], (x, y, z) => (h01(x, y, z) > 0.85 ? 0xc8b898 : 0xeee2c8), 0, 0.2, 3);
+  for (const sx of [-1, 1]) {
+    tubeP(m, spline([[9 + sx * 2, FY + 2.5, -7], [9 + sx * 4.5, FY + 3.5, -7.5], [9 + sx * 5.5, FY + 5.5, -6.5]], 4), [0.8, 0.6, 0.35], 0xe8dcc0);
+    m.set(9 + sx, FY + 2, -4, 0x2a1c12); // eye sockets
+  }
+  m.set(9, FY + 1, -3, 0x2a1c12);
+  // a terracotta water dish, a dead mesquite twig, a barrel cactus in the far corner
+  lathe(m, 13, 7, FY, FY + 2, (t) => 3.8 - t * 0.4, (x, y, z, outer) => (!outer ? (y === FY + 2 ? 0x4a6a7a : 0x8a3a1e) : y === FY + 2 ? 0xc0603a : 0xa84a28), {});
+  for (let x = 11; x <= 15; x++) for (let z = 5; z <= 9; z++) if (Math.hypot(x - 13, z - 7) < 2.4) m.set(x, FY + 2, z, h01(x, 1, z) > 0.7 ? 0x7a9aa8 : 0x5a7a8a, VF.METAL);
+  const twig = spline([[-2, FY + 1, 6], [3, FY + 4, 4], [8, FY + 9, 3], [10, FY + 13, 1]], 5);
+  tubeP(m, twig, [1.1, 0.9, 0.6, 0.35], (x, y) => (mod(y, 5) === 0 ? 0x5a4632 : 0x7a6248));
+  tubeP(m, spline([[5, FY + 6, 3.6], [3, FY + 10, 2], [2, FY + 12, 3]], 3), [0.55, 0.35], 0x6a5440);
+  lathe(m, -16, 8, FY, FY + 6, (t) => 2.6 + Math.sin(t * Math.PI) * 0.8 - (t > 0.85 ? 1.2 : 0), (x, y, z, outer, ang) => (y === FY + 6 ? 0xd85a8a : outer && mod(Math.round(ang * 12 / Math.PI), 2) === 0 ? 0x5a8a4a : 0x4a7a3c), {});
+  // the lid: a hinged frame of iron mesh, a brass heat lamp clamped at the back-left
+  for (let x = -HX - 1; x <= HX + 2; x++)
+    for (let z = -HZ - 1; z <= HZ + 2; z++) {
+      const edge = x === -HX - 1 || x === HX + 2 || z === -HZ - 1 || z === HZ + 2;
+      if (edge) m.set(x, TOPY + 1, z, 0x2a2826, VF.METAL);
+      else if (mod(x, 3) === 0 || mod(z, 3) === 0) m.set(x, TOPY + 1, z, h01(x >> 2, 1, z >> 2) > 0.85 ? IRON_RUST : 0x4a4644, VF.METAL);
+    }
+  const LX = -HX + 5, LZ = -HZ + 4, LY = TOPY + 6;
+  rod(m, [LX, TOPY + 2, LZ], [LX, LY - 1, LZ], 0.7, 0.6, 0x3a3634, VF.METAL);
+  lathe(m, LX, LZ, LY, LY + 4, (t) => 4.4 - t * 3, (x, y, z, outer, ang) => (!outer ? 0xf0dca8 : mod(Math.round(ang * 4), 2) ? BRASS : mul(BRASS, 0.82)), { hollow: true }, VF.METAL);
+  egg(m, [LX + 0.5, LY + 0.6, LZ + 0.5], [1.6, 1.3, 1.6], 0xfff0c8, VF.GLOW);
+  return { model: m, voxelSize: DV, meta: { floor: (FY + 1) * DV, half: [(HX - 3) * DV, (HZ - 3) * DV], lamp: atO(DV, [LX, LY, LZ]) } };
+}
+
+/** the tank's four panes on the terrarium grid (mesh it with ORIGIN_PIVOT and a glass material): faintly green, a
+ *  water-spot haze low down, a smeared nose print, a clean diagonal glint */
+export function terrariumGlass(): StaticModel {
+  const m = new VoxelModel('terrarium_glass');
+  const HX = 20, HZ = 12, B = 5, TOPY = 30;
+  const pane = (x: number, y: number, z: number, u: number) => {
+    let c = 0xc8dcd2;
+    if (Math.abs(u * 0.6 - y + 14) < 1.2) c = 0xffffff;
+    else if (y < B + 7 && h01(u, y, 3) > 0.6) c = 0xa8b8a4;
+    else if (Math.hypot(u - 6, y - 18) < 2.5) c = 0xb8c4b8;
+    m.set(x, y, z, c, VF.METAL | VF.SOFTAO);
+  };
+  for (let y = B + 1; y < TOPY; y++) {
+    for (let x = -HX; x <= HX + 1; x++) {
+      pane(x, y, HZ + 1, x);
+      pane(x, y, -HZ, x + 40);
+    }
+    for (let z = -HZ + 1; z <= HZ; z++) {
+      pane(HX + 1, y, z, z + 80);
+      pane(-HX, y, z, z + 120);
+    }
+  }
+  return S(m, DV);
+}
+
+/** a scorpion-sized slice of a cowboy's kitchen: a twine of drying things between two forged nails — 1/64 rig.
+ *  'line' (root: nails, the sagging twine) → 'b1'…'b5' (each hangs from its tie point, pivot there, swings):
+ *  a long red chile ristra, a sage bundle, lavender, a garlic braid, a short ristra. Runs along X, hangs -Y, front +Z. */
+export function herbRig(seed = 33): RigSpec {
+  const line = new VoxelModel('herb_line');
+  const HL = 30, SAG = 5;
+  const sagY = (t: number) => -Math.sin(t * Math.PI) * SAG;
+  const twine: V3[] = [];
+  for (let i = 0; i <= 12; i++) twine.push([-HL + (i / 12) * 2 * HL, sagY(i / 12), 1.5]);
+  tubeP(line, spline(twine, 5), [0.5], (x, y) => (mod(x + y, 3) === 0 ? 0x9a8458 : 0xc8b07a), VF.SOFTAO);
+  for (const sx of [-1, 1]) {
+    rod(line, [sx * (HL + 1), 0.5, -1], [sx * (HL + 1), 0.5, 2.5], 0.7, 0.6, IRON, VF.METAL);
+    egg(line, [sx * (HL + 1), 0.5, 2.8], [1.2, 1.2, 0.6], IRON_RUST, VF.METAL);
+    egg(line, [sx * (HL - 0.5), -0.3, 1.5], [1.3, 1, 1.1], 0xb8a070, VF.SOFTAO); // the knot
+  }
+  const ties = [0.14, 0.32, 0.5, 0.68, 0.86].map((t): V3 => [-HL + t * 2 * HL, sagY(t), 1.5]);
+  // ---- bundles, each tied at (0,0,0), hanging -Y
+  const tie = (b: VoxelModel, y0: number, r: number) => {
+    for (let y = y0; y >= y0 - 2; y--) for (let a = 0; a < Math.PI * 2; a += 0.3) b.set(Math.round(Math.cos(a) * r), y, Math.round(Math.sin(a) * r), mod(y, 2) ? 0xb8a070 : 0xd2bc86, VF.SOFTAO);
+    rod(b, [0, 0, 0], [0, y0, 0], 0.5, 0.5, 0xc8b07a, VF.SOFTAO);
+  };
+  const ristra = (n: number, sd: number) => {
+    const b = new VoxelModel('ristra');
+    rod(b, [0, 0, 0], [0, -4 - n * 1.25, 0], 0.7, 0.6, 0xa89058, VF.SOFTAO);
+    const CH = [0x9a1a10, 0xb02414, 0x7a1410, 0xc0301a, 0xa02016];
+    for (let i = 0; i < n; i++) {
+      const a = i * 2.4 + sd, y = -4 - i * 1.25, out = 1.4 + Math.sin(i * 0.9) * 0.3;
+      const len = 4.4 + h01(i, sd, 1) * 1.6, droop = 2.6 + h01(i, sd, 2) * 1.2;
+      const c = CH[Math.floor(h01(i, sd, 3) * CH.length)];
+      const p0: V3 = [Math.cos(a) * out, y, Math.sin(a) * out];
+      const p1: V3 = [Math.cos(a) * (out + len * 0.55), y - droop * 0.5, Math.sin(a) * (out + len * 0.55)];
+      const p2: V3 = [Math.cos(a) * (out + len), y - droop, Math.sin(a) * (out + len) + 0.4];
+      tubeP(b, [p0, p1, p2], [1.3, 1.0, 0.35], (x, yy, z) => (h01(x * 2, yy * 3, z * 2) > 0.82 ? mul(c, 0.72) : h01(x, yy, z + 7) > 0.93 ? mul(c, 1.25) : c));
+      egg(b, p0, [0.7, 0.6, 0.7], 0x4a6a2a); // the stem cap
+    }
+    tie(b, -1, 1.4);
+    return b;
+  };
+  const sprig = (cols: number[], spread: number, len: number, leaf: [number, number, number], heads: number | null, sd: number) => {
+    const b = new VoxelModel('sprig');
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 9) * Math.PI * 2 + h01(i, sd, 0), sp = spread * (0.5 + h01(i, sd, 1) * 0.5);
+      const top: V3 = [Math.cos(a) * 0.8, -3, Math.sin(a) * 0.8];
+      const end: V3 = [Math.cos(a) * sp, -3 - len * (0.8 + h01(i, sd, 2) * 0.3), Math.sin(a) * sp + 0.3];
+      rod(b, top, end, 0.45, 0.35, 0x6a7a4a);
+      for (let k = 1; k <= 6; k++) {
+        const t = k / 7;
+        const p: V3 = [top[0] + (end[0] - top[0]) * t, top[1] + (end[1] - top[1]) * t, top[2] + (end[2] - top[2]) * t];
+        const c = cols[Math.floor(h01(i, k, sd) * cols.length)];
+        if (heads === null) egg(b, [p[0] + Math.cos(a + k) * 0.8, p[1], p[2] + Math.sin(a + k) * 0.8], leaf, c, VF.SOFTAO);
+        else if (t > 0.55) egg(b, p, [0.9, 1.4, 0.9], c, VF.SOFTAO);
+      }
+      // stalk ends cut square at the top
+      egg(b, [Math.cos(a) * 0.6, -1.2, Math.sin(a) * 0.6], [0.5, 1.2, 0.5], 0x8a9a5a);
+    }
+    tie(b, -2, 1.6);
+    return b;
+  };
+  const garlic = () => {
+    const b = new VoxelModel('garlic');
+    const braid: V3[] = [];
+    for (let i = 0; i <= 10; i++) braid.push([Math.sin(i * 1.4) * 0.9, -2 - i * 1.6, Math.cos(i * 1.4) * 0.6]);
+    tubeP(b, spline(braid, 3), [1.2, 1.0, 0.8], (x, y) => (mod(y + x, 3) === 0 ? 0xb8a068 : 0xd8c48a), VF.SOFTAO);
+    for (let i = 0; i < 6; i++) {
+      const a = i * 2.2, y = -5 - i * 2.4;
+      const c: V3 = [Math.cos(a) * 2.6, y, Math.sin(a) * 2.6 + 0.6];
+      egg(b, c, [2.1, 2.3, 2.1], (x, yy, z) => {
+        const ang = Math.atan2(z - c[2], x - c[0]);
+        if (mod(Math.round(ang * 6 / Math.PI), 2) === 0 && h01(x, yy, z) > 0.4) return 0xd8ccb4; // clove seams
+        return yy < c[1] - 1 ? (h01(x, yy, z) > 0.5 ? 0xa86a8a : 0xe8dcc8) : 0xf2ead8;
+      }, VF.SOFTAO, 0.15, i);
+      egg(b, [c[0], y - 2.4, c[2]], [0.8, 0.6, 0.8], 0x8a7a5a); // roots
+    }
+    tie(b, -1, 1.4);
+    return b;
+  };
+  const bundles = [
+    ristra(14, seed),
+    sprig([0x8a9a7a, 0x7a8a6a, 0xa0ac8a, 0x96a484], 2.6, 10, [1.2, 0.5, 0.8], null, seed + 1),
+    sprig([0x7a5aa8, 0x9a7ac0, 0x6a4a96], 2.0, 12, [0.6, 0.6, 0.6], 1, seed + 2),
+    garlic(),
+    ristra(9, seed + 5),
+  ];
+  const parts: RigSpec['parts'] = [{ name: 'line', model: line, pivot: [0.5, 0.5, 0.5], attach: [0, 0, 0] }];
+  bundles.forEach((b, i) => parts.push({ name: 'b' + (i + 1), model: b, pivot: [0.5, 0.5, 0.5], attach: [ties[i][0] + 0.5, ties[i][1] + 0.5, ties[i][2] + 0.5], parent: 'line' }));
+  return { name: 'herb_line', voxelSize: DV, parts, meta: { bundles: bundles.length, length: (2 * HL + 4) * DV } };
+}
+
+/** the squeaky board — rig 'board' (pivot at its -X end, on the underside): a short patch board in the living-room
+ *  pine, 1.15 m × 0.1 m, cupped and lifted a hair at the far end, worn pale down the middle by boots, a split near
+ *  one end, two square nails (one backed out proud). 1/96. */
+export function looseBoardRig(seed = 34): RigSpec {
+  const m = new VoxelModel('loose_board');
+  const L = 110, W = 10;
+  for (let x = 0; x < L; x++)
+    for (let z = 0; z < W; z++) {
+      const lifted = x > L - 22 ? 1 : 0;
+      const edge = z === 0 || z === W - 1;
+      let c = mul(0x9c5e2e, 0.95 + h01(Math.floor(x / 13), z >> 1, seed) * 0.1);
+      if (h01(Math.floor((x + z * 5) / 9), z, seed + 3) > 0.82) c = mul(c, 0.88); // grain
+      if (!edge && Math.abs(z - W / 2 + 0.5) < 2.5 && x > 20 && x < 90) c = mixRGB(c, 0xc08a56, 0.28); // worn by boots
+      if (edge) c = mul(c, 0.72);
+      if (x === 0 || x === L - 1) c = 0x3a2414;
+      if (x > 8 && x < 26 && z === 4 + (x % 5 === 0 ? 1 : 0)) c = 0x2a1a10; // the split
+      m.set(x, lifted, z, c);
+      if (lifted && x > L - 18) m.set(x, 0, z, mul(c, 0.6));
+    }
+  for (const [nx, proud] of [[6, 0], [L - 7, 1]] as const) for (const nz of [2, W - 3]) {
+    const y = (nx > L - 22 ? 1 : 0) + 1 + proud;
+    m.set(nx, y, nz, 0x2a2622, VF.METAL).set(nx + 1, y, nz, 0x2a2622, VF.METAL);
+    if (proud) m.set(nx, y - 1, nz, 0x4a4440, VF.METAL);
+  }
+  return { name: 'loose_board', voxelSize: TV, parts: [{ name: 'board', model: m, pivot: [0, 0, W / 2], attach: [0, 0, 0] }], meta: { length: L * TV, width: W * TV } };
+}
+
+/** a cowhide rug — 1/48, about 1.7 × 1.25 m: the flat outline of a hide (four leg flaps, the neck, a tail strip) with a
+ *  wavy cut edge, big brown and black patches on cream, the hair laying one way, scuffed thin in the middle. */
+export function cowhideRug(seed = 35): StaticModel {
+  const m = new VoxelModel('cowhide');
+  const RX = 30, RZ = 21;
+  const e2 = (x: number, z: number, cx: number, cz: number, rx: number, rz: number, a = 0) => {
+    const dx = x - cx, dz = z - cz, c = Math.cos(a), s = Math.sin(a);
+    return Math.hypot((dx * c + dz * s) / rx, (-dx * s + dz * c) / rz) - 1;
+  };
+  for (let x = -46; x <= 46; x++)
+    for (let z = -36; z <= 36; z++) {
+      const px = x + 0.5, pz = z + 0.5;
+      let d = e2(px, pz, 0, 0, RX, RZ);
+      for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) d = smin(d, e2(px, pz, sx * 25, sz * 21, 14, 5.2, sx * sz * 0.9), 0.25);
+      d = smin(d, e2(px, pz, 33, 0, 9, 7.5), 0.3); // the neck
+      d = smin(d, e2(px, pz, -36, 1.5, 9, 1.8, 0.08), 0.2); // the tail
+      d += Math.sin(px * 0.9 + pz * 0.3) * 0.025 + lump(x, 0, z, 0.5, seed) * 0.04;
+      if (d >= 0) continue;
+      const pat = Math.sin(px * 0.11 + 1.3) * Math.sin(pz * 0.15 + 0.4) + Math.sin(px * 0.07 - pz * 0.09 + 2) * 0.7 + lump(x, 0, z, 0.12, seed + 4) * 0.5;
+      let c = pat > 0.55 ? 0x5a3418 : pat < -0.75 ? 0x2a2018 : h01(x >> 1, 2, z >> 1) > 0.8 ? 0xe2d6bc : 0xeee4cc;
+      if (pat > 0.55 && pat < 0.68) c = 0x7a4e2a; // patch rims blend a little
+      if (d > -0.05) c = mul(c, 0.78); // the cut edge
+      if (Math.hypot(px / RX, pz / RZ) < 0.35) c = mul(c, 0.93); // scuffed thin
+      if (mod(x + Math.round(pz * 0.3), 4) === 0 && c > 0x800000) c = mul(c, 0.96); // hair laying one way
+      m.set(x, 0, z, c, VF.SOFTAO);
+      if (d < -0.18 && h01(x, 5, z) > 0.55) m.set(x, 1, z, mul(c, 1.03), VF.SOFTAO);
+    }
+  return S(m, FV);
+}
+
+/** a carved walnut trophy plaque — 1/96, 0.24 × 0.33 m, front +Z: an escutcheon (ogee-notched top, a pointed foot), a
+ *  bevelled rim, a raised oval boss to mount on, acanthus curls carved over the top, a polished brass name plate with
+ *  two screws. meta: mount (m, the boss front), plate [x0, y0, x1, y1, z] (voxels, for engraving). */
+export function trophyPlaque(seed = 36): StaticModel & { meta: { mount: V3; plate: [number, number, number, number, number] } } {
+  const m = new VoxelModel('trophy_plaque');
+  const HW = 11.5, HT = 16, T = 3;
+  const half = (y: number) => {
+    const u = (y + HT) / (2 * HT); // 0 foot … 1 top
+    if (u > 0.9) return HW - 2.5 + Math.cos((u - 0.9) * 31) * 1.6; // the ogee top
+    if (u > 0.34) return HW;
+    return HW * Math.sqrt(Math.max(0, 1 - Math.pow((0.34 - u) / 0.34, 1.6)));
+  };
+  const tone = mul(WALNUT, 0.92 + h01(seed, 1, 2) * 0.18);
+  for (let y = -HT; y <= HT; y++)
+    for (let x = -12; x <= 12; x++) {
+      const hw = half(y + 0.5), ax = Math.abs(x + 0.5);
+      if (ax > hw) continue;
+      const inset = Math.min(hw - ax, HT - Math.abs(y + 0.5));
+      const boss = Math.hypot((x + 0.5) / 7.5, (y + 0.5 - 2) / 9.5);
+      const zt = inset < 1.2 ? T - 1 : boss < 1 ? T + 2 : T;
+      for (let z = 0; z <= zt; z++) {
+        let c = h01(x >> 1, Math.floor((y + 40) / 5), seed) > 0.78 ? mul(tone, 0.85) : tone;
+        if (z === zt && inset < 2.4 && inset >= 1.2) c = mul(tone, 1.25); // the polished bevel catches light
+        if (z === zt && boss < 1 && boss > 0.86) c = mul(tone, 0.7); // the boss's shadow line
+        if (z < T - 1) c = mul(tone, 0.65);
+        m.set(x, y, z, c);
+      }
+    }
+  // acanthus curls over the top corners
+  for (const sx of [-1, 1])
+    for (let a = 0; a < Math.PI * 3.2; a += 0.22) {
+      const r = 3.6 - a * 0.32;
+      m.set(Math.round(sx * (6 + Math.cos(a) * r)), Math.round(12 + Math.sin(a) * r), T + 1, mul(tone, a < 1 ? 1.2 : 1.05));
+    }
+  // the brass name plate and its screws
+  const plate: [number, number, number, number, number] = [-8, -12, 8, -7, T + 1];
+  for (let x = plate[0]; x <= plate[2]; x++)
+    for (let y = plate[1]; y <= plate[3]; y++) {
+      const rim = x === plate[0] || x === plate[2] || y === plate[1] || y === plate[3];
+      m.set(x, y, T + 1, rim ? mul(BRASS, 0.8) : y === plate[3] - 1 ? BRASS_HI : BRASS, VF.METAL);
+    }
+  for (const sx of [plate[0] + 1, plate[2] - 1]) m.set(sx, plate[1] + 2, T + 2, 0x8a6a30, VF.METAL);
+  // a hanging slot cut in the back
+  for (let x = -2; x <= 2; x++) m.del(x, 11, 0);
+  const b = m.bounds();
+  const cx = (b.minX + b.maxX + 1) / 2, cz = (b.minZ + b.maxZ + 1) / 2;
+  return { model: m, voxelSize: TV, meta: { mount: [(0.5 - cx) * TV, (2.5 - b.minY) * TV, (T + 3 - cz) * TV], plate } };
+}
+
+/** a paid bounty, crossed out — 1/128, about 0.3 × 0.36 m, two loaded brush strokes in barn red laid over a poster:
+ *  each one fat and wet where the brush landed, bristle streaks running the length, dry-brushed and broken where it
+ *  left, a raised ridge of paint along the edges and drips running down to fat beads. Front +Z, centre pivot-ready. */
+export function paintCross(seed = 37): StaticModel {
+  const m = new VoxelModel('paint_x');
+  const RED0 = 0xb41e14, RED_DK = 0x7a1008, RED_HI = 0xe0402a;
+  const stroke = (ax: number, ay: number, bx: number, by: number, w0: number, sd: number) => {
+    const L = Math.hypot(bx - ax, by - ay), ux = (bx - ax) / L, uy = (by - ay) / L, nx = -uy, ny = ux;
+    for (let s = 0; s <= L; s += 0.4) {
+      const t = s / L;
+      const wob = Math.sin(t * 5 + sd) * 1.1;
+      const w = w0 * (t < 0.12 ? 1.25 - t : 1 - t * 0.35) * (1 + Math.sin(t * 13 + sd) * 0.06);
+      for (let k = -w; k <= w; k += 0.4) {
+        const lane = Math.round(k * 1.6);
+        const dry = t > 0.78 ? (t - 0.78) * 4.2 : 0;
+        if (dry > 0 && h01(lane, Math.floor(s * 0.6), sd) < dry) continue;
+        const x = Math.round(ax + ux * s + nx * (k + wob)), y = Math.round(ay + uy * s + ny * (k + wob));
+        const st = h01(lane, sd, 7);
+        let c = st > 0.8 ? RED_DK : st < 0.15 ? RED_HI : RED0;
+        const rim = Math.abs(k) > w - 0.9;
+        if (rim) c = mul(RED0, 0.85);
+        m.set(x, y, 0, c);
+        if ((rim && t < 0.85) || (t < 0.1 && Math.abs(k) < w * 0.6) || st > 0.88) m.set(x, y, 1, rim ? mul(RED0, 0.92) : c);
+      }
+    }
+  };
+  stroke(-17, 20, 16, -19, 3.3, seed);
+  stroke(17, 18, -15, -20, 3.0, seed + 3);
+  // drips, each from a heavy spot to a fat bead
+  for (const [x, y, len] of [[-12, 13, 9], [6, -6, 7], [12, 12, 5], [-4, -9, 11], [0, 1, 6]] as const) {
+    for (let k = 0; k < len; k++) m.set(x + (k > len * 0.6 ? 1 : 0), y - k, 0, k % 3 ? RED0 : RED_DK).set(x, y - k, 1, RED0);
+    egg(m, [x + 1, y - len, 1], [1.2, 1.5, 1], RED_DK);
+  }
+  return S(m, PV);
+}
+
+/** Mama's card table — 1/48: an old whiskey keg (bulging staves, three iron hoops, a bung) under a round top of
+ *  planks bound with an iron band, a square of worn green baize, three stacks of clay chips, a candle stub in a
+ *  tin saucer. meta: top (m, baize surface), candle (m, flame). */
+export function cardTable(seed = 38): StaticModel & { meta: { top: number; candle: V3 } } {
+  const m = new VoxelModel('card_table');
+  const H = 24, R = 16;
+  lathe(m, 0, 0, 0, H - 1, (t) => 7.6 + Math.sin(t * Math.PI) * 1.6, (x, y, z, outer, ang, t) => {
+    if (!outer) return 0x4a2e18;
+    if (Math.abs(t - 0.1) < 0.05 || Math.abs(t - 0.9) < 0.05 || Math.abs(t - 0.5) < 0.04) return h01(x, y, z) > 0.75 ? IRON_RUST : IRON;
+    const stave = Math.floor(((ang + Math.PI) / (Math.PI * 2)) * 14);
+    if (mod((ang + Math.PI) / (Math.PI * 2) * 14, 1) < 0.1) return 0x3a2210;
+    return mul(0x8a5a30, 0.88 + h01(stave, Math.floor(y / 6), seed) * 0.2);
+  }, {}, 0);
+  egg(m, [0, 12, 9], [1.4, 1.4, 0.8], 0x5a3418);
+  // the top: planks across X, an iron band round the rim
+  for (let x = -R; x <= R; x++)
+    for (let z = -R; z <= R; z++) {
+      const d = Math.hypot(x + 0.5, z + 0.5);
+      if (d > R) continue;
+      const band = d > R - 1.2;
+      for (let y = H; y <= H + 1; y++) {
+        let c = mul(0x9a6a3a, 0.9 + h01(Math.floor((z + 40) / 6), 2, seed) * 0.18);
+        if (mod(z + 40, 6) === 0) c = 0x3a2412;
+        if (band) c = y === H + 1 && h01(x, y, z) > 0.8 ? IRON_RUST : IRON;
+        m.set(x, y, z, c, band ? VF.METAL : 0);
+      }
+    }
+  // green baize, a little skewed, edges frayed, worn bare in an arc where hands rest
+  const ca = Math.cos(0.32), sa = Math.sin(0.32);
+  for (let x = -R; x <= R; x++)
+    for (let z = -R; z <= R; z++) {
+      const u = x * ca + z * sa, v = -x * sa + z * ca;
+      if (Math.abs(u) > 10.5 || Math.abs(v) > 10.5) continue;
+      if ((Math.abs(u) > 10 || Math.abs(v) > 10) && h01(x, 3, z) > 0.5) continue;
+      if (Math.hypot(x, z) > R - 1.5) continue;
+      let c = h01(x >> 1, 4, z >> 1) > 0.7 ? 0x2e5a3a : 0x2a5234;
+      if (Math.abs(Math.hypot(u, v + 6) - 7) < 1.2) c = 0x3e6a48; // worn
+      m.set(x, H + 2, z, c, VF.SOFTAO);
+    }
+  // clay chips
+  ([[-9, 8, 4, 0xb02a1a], [-11.5, 4.5, 3, 0xe8dcc0], [-7, 11, 5, 0x2a4a8a]] as const).forEach(([cx, cz, n, c], i) => {
+    for (let k = 0; k < n; k++) lathe(m, cx + (k % 2 ? 0.3 : 0), cz, H + 3 + k, H + 3 + k, () => 1.9, (x, y, z, outer) => (outer && mod(Math.round(Math.atan2(z, x) * 3), 2) ? 0xf0e6d0 : mul(c, 0.95 + h01(i, k, 1) * 0.1)), {});
+  });
+  // a candle stub in a tin saucer
+  lathe(m, 10, -8, H + 3, H + 3, () => 3, (x, y, z, outer) => (outer ? 0x8a8c8c : 0x6a6c6c), {}, VF.METAL);
+  lathe(m, 10, -8, H + 4, H + 7, (t) => 1.3 - t * 0.2, (x, y, z) => (y === H + 7 ? 0xf0e0b0 : h01(x, y, z) > 0.7 ? 0xe8d8a8 : 0xf4ead0), {});
+  for (let k = 0; k < 3; k++) m.set(11, H + 6 - k, -8 + (k > 1 ? 1 : 0), 0xf4ead0); // a run of wax
+  m.set(10, H + 8, -8, 0x2a2018).set(10, H + 9, -8, 0xffd890, VF.GLOW);
+  return { model: m, voxelSize: FV, meta: { top: (H + 3) * FV, candle: pivotOf(m, FV, [10, H + 9.5, -8]) } };
+}
+
+/** a three-legged milking stool — 1/48: a thick round seat dished by years of sitting, a check crack, the leg tenons
+ *  wedged through and showing as dark end grain on top, splayed legs, one rung. meta.seat (m). */
+export function milkStool(seed = 39): StaticModel & { meta: { seat: number } } {
+  const m = new VoxelModel('milk_stool');
+  const SY = 16, R = 8.5;
+  const legs: V3[] = [0, 1, 2].map((i) => [Math.cos(i * 2.094 + 0.5) * 5, SY, Math.sin(i * 2.094 + 0.5) * 5]);
+  legs.forEach((p, i) => rod(m, [p[0] * 1.9, 0, p[2] * 1.9], [p[0], SY, p[2]], 1.5, 1.3, (x, y, z) => mul(0x8a5a30, 0.9 + h01(x, y >> 2, z + i) * 0.16)));
+  rod(m, [legs[0][0] * 1.5, 6, legs[0][2] * 1.5], [legs[1][0] * 1.5, 6, legs[1][2] * 1.5], 0.9, 0.9, 0x7a4a26);
+  fill(m, (x, y, z) => dRBox(x + 0.5, y + 0.5, z + 0.5, 0, SY + 1.2, 0, R, 1.3, R, 1.2) + (Math.hypot(x + 0.5, z + 0.5) > R ? 9 : 0) + lump(x, y, z, 0.5, seed) * 0.2, [[-R - 1, SY - 1, -R - 1], [R + 1, SY + 4, R + 1]], 1, (x, y, z) => {
+    if (y >= SY + 2 && legs.some((p) => Math.hypot(x + 0.5 - p[0], z + 0.5 - p[2]) < 1.2)) return 0x3a2412; // wedged tenons
+    if (y >= SY + 2 && Math.abs(z - x * 0.3 - 2) < 0.5 && x > -2 && x < 6) return 0x2a1a10; // the check
+    const dish = Math.hypot(x + 0.5, z + 0.5) < 4.5 && y >= SY + 2;
+    return dish ? 0xb88250 : mul(0xa06a38, 0.92 + h01(Math.floor((z + 20) / 4), y, seed) * 0.14);
+  });
+  return { model: m, voxelSize: FV, meta: { seat: (SY + 3) * FV } };
+}
+
+/** the record crate — 1/64: a slatted fruit crate (hand-holds cut in the ends, a split slat) full of 78s in kraft and
+ *  printed sleeves, standing and leaning, one pulled half out. Front +Z. */
+export function recordCrate(seed = 40): StaticModel {
+  const m = new VoxelModel('record_crate');
+  const HX = 11, HZ = 9, H = 14;
+  const slat = (a: V3, b: V3, up: V3, i: number) => plank(m, a, b, 4.4, 1.1, 0xb08250, seed + i, { up, r: 0.4, lumpy: 0.15, knots: i % 3 === 0 });
+  for (let k = 0; k < 3; k++) {
+    const y = 2.5 + k * 5;
+    slat([-HX, y, HZ], [HX, y, HZ], [0, 0, 1], k);
+    slat([-HX, y, -HZ], [HX, y, -HZ], [0, 0, 1], k + 3);
+  }
+  for (const sx of [-1, 1]) {
+    fill(m, (x, y, z) => Math.max(dRBox(x + 0.5, y + 0.5, z + 0.5, sx * HX, H / 2, 0, 0.7, H / 2, HZ, 0.3), -dRBox(x + 0.5, y + 0.5, z + 0.5, sx * HX, H - 3, 0, 2, 1.1, 3.4, 1)), [[sx * HX - 1, 0, -HZ - 1], [sx * HX + 1, H, HZ + 1]], 1, (x, y, z) => mul(0xa87848, 0.9 + h01(y >> 2, z >> 2, sx) * 0.16));
+    for (const sz of [-1, 1]) rod(m, [sx * (HX - 1), 0, sz * (HZ - 1)], [sx * (HX - 1), H, sz * (HZ - 1)], 1, 1, 0x8a6038);
+  }
+  for (let x = -HX; x <= HX; x++) for (let z = -HZ; z <= HZ; z++) m.set(x, 0, z, 0x8a6038);
+  m.set(-3, 7, HZ + 1, 0x2a1a10).set(-2, 7, HZ + 1, 0x2a1a10).set(-1, 8, HZ + 1, 0x2a1a10); // the split
+  const SLEEVE = [0xb89a6a, 0xa88a5a, 0xe2d6b8, 0x8a2a1e, 0x2a5a6a, 0xc8a040, 0xb89a6a, 0x3a3a5a, 0xa88a5a];
+  for (let i = 0; i < 9; i++) {
+    const x = -HX + 2 + i * 2.2, lean = i === 6 ? 0.7 : (h01(i, 1, seed) - 0.5) * 0.4, rise = i === 4 ? 6 : 0;
+    const c = SLEEVE[i];
+    for (let y = 1; y <= 17 + rise; y++)
+      for (let z = -8; z <= 8; z++) {
+        if (Math.hypot(z, y - 9 - rise) > 8.6) continue;
+        const hole = Math.hypot(z, y - 9 - rise) < 2.2 && (c === 0xb89a6a || c === 0xa88a5a);
+        const xx = Math.round(x + (y - 1) * lean * 0.5);
+        m.set(xx, y, z, hole ? 0x1a1614 : y > 15 + rise && h01(xx, y, z) > 0.6 ? mul(c, 0.8) : mod(y + z, 9) === 0 ? mul(c, 0.92) : c, VF.SOFTAO);
+      }
+  }
+  return S(m, DV);
+}
+
+/** a shellac 78 — 1/128, 0.25 m across: the grooves in bands of black and near-black with a soft sheen ring, a raised
+ *  rim, the paper label in two colours split by a gilt line (so you can see it turn) with the spindle hole. */
+export function shellacRecord(label = 0xb02a1a, label2 = 0xe8d8b0): StaticModel {
+  const m = new VoxelModel('shellac_78');
+  const R = 16;
+  for (let x = -R; x <= R; x++)
+    for (let z = -R; z <= R; z++) {
+      const d = Math.hypot(x + 0.5, z + 0.5);
+      if (d > R) continue;
+      const a = Math.atan2(z + 0.5, x + 0.5);
+      let c = mod(Math.round(d * 1.6), 3) === 0 ? 0x2a2624 : 0x141210;
+      if (Math.abs(a + 2.2) < 0.25 && d > 7) c = 0x5a5450; // the sheen
+      let y = 0;
+      if (d > R - 1) y = 1;
+      if (d < 6) c = d < 0.9 ? 0x0a0a0a : Math.abs(a) < 0.12 || Math.abs(a - Math.PI) < 0.12 ? BRASS_HI : a > 0 ? label : label2;
+      m.set(x, 0, z, c, d < 6 ? 0 : VF.METAL);
+      if (y) m.set(x, 1, z, 0x1e1a18, VF.METAL);
+    }
+  return S(m, PV);
+}
+
+/** a brass picture light — 1/64: a wall plate, a swan-neck arm and a long hooded shade throwing light down on what
+ *  hangs under it, the bulb aglow inside. Mounts on a wall facing +Z. meta.bulb (m). */
+export function pictureLight(): StaticModel & { meta: { bulb: V3 } } {
+  const m = new VoxelModel('picture_light');
+  fill(m, (x, y, z) => dRBox(x + 0.5, y + 0.5, z + 0.5, 0, 0, 0.5, 2.6, 3.6, 0.6, 0.5), [[-4, -5, -1], [4, 5, 2]], 1, (_x, y) => (y > 2 ? BRASS_HI : BRASS), VF.METAL);
+  tubeP(m, spline([[0, 1, 1], [0, 4, 4], [0, 6, 8], [0, 5.5, 11]], 5), [0.8], BRASS, VF.METAL);
+  fill(m, (x, y, z) => {
+    const px = x + 0.5, py = y + 0.5 - 5, pz = z + 0.5 - 12;
+    const outer = Math.hypot(py / 2.6, pz / 3.2) - 1;
+    return Math.max(outer, Math.abs(px) - 13, -(Math.hypot(py / 2.0, pz / 2.6) - 1), py - 2.2 + Math.abs(px) * 0.02 > 0 ? -1 : py < -1.6 ? 1 : -1);
+  }, [[-14, 1, 8], [14, 8, 16]], 1, (x, y, z) => (Math.abs(x) > 12 ? mul(BRASS, 0.8) : y > 6 ? BRASS_HI : mod(x, 5) === 0 ? mul(BRASS, 0.9) : BRASS), VF.METAL);
+  for (let x = -10; x <= 10; x++) m.set(x, 4, 12, 0xfff0c8, VF.GLOW);
+  return { model: m, voxelSize: DV, meta: { bulb: pivotOf(m, DV, [0, 4, 12]) } };
+}

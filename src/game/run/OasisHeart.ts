@@ -134,7 +134,7 @@ void main(){
   #include <fog_vertex>
 }`;
 const waterFrag = /* glsl */ `
-uniform float uTime, uLevel, uMurk, uAlpha;
+uniform float uTime, uLevel, uMurk, uAlpha, uDepthK;
 uniform vec3 uMurkDeep, uMurkShallow, uScum, uClearDeep, uClearShallow, uSky;
 uniform sampler2D uHeight; uniform vec2 uSize;
 uniform vec4 uMask;
@@ -157,7 +157,8 @@ void main(){
     q = uVortex.xy + vec2(c * d.x - s * d.y, s * d.x + c * d.y);
   }
   float g = uBowl.z > 0.0 ? uBowl.w + pow(clamp(length(vW.xz - uBowl.xy) / uBowl.z, 0.0, 2.0), 3.0) * 5.5 : texture2D(uHeight, vW.xz / uSize).r;
-  float depth = clamp((uLevel - g) / 2.2, 0.0, 1.0);
+  float wd = uLevel - g;
+  float depth = clamp(wd / uDepthK, 0.0, 1.0);
   vec3 murk = mix(uMurkShallow, uMurkDeep, smoothstep(0.0, 0.6, depth));
   float n = vn(q * 0.32 + vec2(uTime * 0.05, uTime * 0.03)) * 0.65 + vn(q * 1.25 - uTime * 0.07) * 0.35;
   murk = mix(murk, uScum, step(0.6, n) * 0.8);
@@ -169,8 +170,10 @@ void main(){
   vec3 col = mix(clear, murk, uMurk);
   col += vH * 0.4;
   col = mix(col, col * 0.3, vk * smoothstep(uVortex.z * 0.4, 0.0, length(px - uVortex.xy)));
-  float foam = smoothstep(0.07, 0.0, depth) * (0.55 + 0.45 * step(0.5, fract(w1 * 2.0 + uTime * 0.3)));
-  foam = max(foam, smoothstep(0.08, 0.2, vH) * 0.7);
+  // a lacy line of foam where the water laps the bank, and on the crests of ripples
+  float lace = step(0.42, vn(px * 1.6 + vec2(uTime * 0.25, -uTime * 0.18)));
+  float foam = smoothstep(0.05, 0.0, wd) * (0.35 + 0.65 * lace);
+  foam = max(foam, smoothstep(0.08, 0.22, vH) * 0.75 * lace);
   col = mix(col, mix(vec3(0.94, 0.97, 0.9), vec3(0.78, 0.82, 0.62), uMurk), foam);
   float fr = pow(1.0 - clamp(normalize(cameraPosition - vW).y, 0.0, 1.0), 4.0);
   col = mix(col, uSky, (0.08 + 0.45 * fr) * (1.0 - uMurk * 0.55));
@@ -197,6 +200,7 @@ class OasisWater {
       uLevel: { value: level },
       uMurk: { value: 1 },
       uAlpha: { value: 1 },
+      uDepthK: { value: bowl ? 0.75 : 2.2 },
       uMurkDeep: { value: new THREE.Color(0x1c3420) },
       uMurkShallow: { value: new THREE.Color(0x56692e) },
       uScum: { value: new THREE.Color(0x6e7c32) },

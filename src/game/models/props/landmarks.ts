@@ -112,7 +112,7 @@ export function outlawFort(seed = 0): Landmark {
   }
   // gate beam with a skull and sign
   board(m, -gateHalf - 4, WH + v(2.6), HZ - 1, gateHalf + 4, WH + v(2.6) + 4, HZ + 1, PR.woodDark, 'x', seed);
-  signPanel(m, 0, WH + v(0.6), HZ + 2, ['RED SAND GANG'], { bg: PR.woodLight, ink: PR.red.dark, scale: 2 });
+  signPanel(m, 0, WH + v(0.6), HZ + 2, ['RED SAND GANG'], { bg: PR.woodLight, ink: PR.red.dark, scale: 2, weathered: true });
   // open gate doors swung inward
   for (const sx of [-1, 1]) {
     for (let k = 0; k <= gateHalf - 2; k++) {
@@ -175,8 +175,8 @@ export function tradingPost(seed = 0): Landmark {
   for (let x = b.x0 - 2; x <= b.x1 + 2; x++)
     for (let y = b.top + 3; y <= b.top + 9; y++) if (y === b.top + 9 || mod(x, 3) === 0) m.set(x, y, b.z1 + 21, y === b.top + 9 ? PR.paintWhite.hi : PR.paintWhite.base);
   // big sign across the balcony
-  signPanel(m, cx, fy2 + v(2.8) + 2, b.z1 + 2, ['TRADING POST'], { bg: PR.paintWhite, ink: PR.red.dark, scale: 2 });
-  signPanel(m, cx, b.top + 11, b.z1 + 22, ['GOODS & GUNS'], { bg: PR.woodLight, ink: PR.ink.base });
+  signPanel(m, cx, fy2 + v(2.8) + 2, b.z1 + 2, ['TRADING POST'], { bg: PR.paintWhite, ink: PR.red.dark, scale: 2, weathered: true });
+  signPanel(m, cx, b.top + 11, b.z1 + 22, ['GOODS & GUNS'], { bg: PR.woodLight, ink: PR.ink.base, weathered: true });
   // goods on the porch: barrels, crates, hanging rug
   barrelBody(m, b.x0 + 5, b.z1 + 12, b.fy + 1, 12, 5, PR.wood);
   barrelBody(m, b.x0 + 15, b.z1 + 14, b.fy + 1, 12, 5, PR.woodDark);
@@ -261,7 +261,7 @@ export function mineHeadframe(seed = 0): Landmark {
   for (let x = ox - 9; x <= ox + 9; x++) for (let y = 0; y <= 30; y++) m.set(x, y, pz - 11, PR.socket.base);
   for (const x of [ox - 12, ox + 9]) post(m, x, pz - 1, 0, 31, 3, PR.woodDark, x);
   board(m, ox - 13, 32, pz - 2, ox + 13, 35, pz + 1, PR.woodDark, 'x', seed);
-  signPanel(m, ox, 37, pz + 2, ['LUCKY SCARAB', 'MINE'], { bg: PR.woodLight, ink: PR.ink.base });
+  signPanel(m, ox, 37, pz + 2, ['LUCKY SCARAB', 'MINE'], { bg: PR.woodLight, ink: PR.ink.base, weathered: true });
   sandDrift(m, v(14), v(4), 14, 20, 6, 0, seed);
   return finish(m, vs, [0, 0, v(14)]);
 }
@@ -347,7 +347,7 @@ export function sheriffOffice(seed = 0): Landmark {
   }
   shedRoof(m, b, 8, { tin: true, seed });
   const cx = Math.round((b.x0 + b.x1) / 2);
-  signPanel(m, cx, b.top + 3, b.z1 + 2, ['SHERIFF'], { bg: PR.paintWhite, ink: PR.ink.base, scale: 2 });
+  signPanel(m, cx, b.top + 3, b.z1 + 2, ['SHERIFF'], { bg: PR.paintWhite, ink: PR.ink.base, scale: 2, weathered: true });
   doorW(m, b.front, cx - 5, b.fy + 1, 10, 26, { trim: PR.paintWhite });
   windowW(m, b.front, b.x0 + 6, b.fy + 9, 11, 12, { frame: PR.paintWhite, shutters: PR.paintBlue });
   // star on the front
@@ -405,7 +405,7 @@ export function saloon(seed = 0): Landmark {
     for (let y = top.top + 1; y <= FT + step; y++) m.set(x, y, b.z1, mod(y, 3) === 0 ? PR.barnRed.dark : PR.barnRed.base).set(x, y, b.z1 - 1, PR.barnRed.shade);
     m.set(x, FT + step + 1, b.z1 + 1, PR.paintWhite.base).set(x, FT + step + 2, b.z1, PR.paintWhite.hi);
   }
-  signPanel(m, cx, top.top + 4, b.z1 + 2, ['SALOON'], { bg: PR.paintYellow, ink: PR.red.dark, pad: 3, scale: 3 });
+  signPanel(m, cx, top.top + 4, b.z1 + 2, ['SALOON'], { bg: PR.paintYellow, ink: PR.red.dark, pad: 3, scale: 3, weathered: true });
   // batwing doors + windows
   doorW(m, b.front, cx - 7, b.fy + 1, 14, 30, { batwing: true, trim: PR.paintWhite });
   for (const sx of [-1, 1]) windowW(m, b.front, sx < 0 ? b.x0 + 8 : b.x1 - 22, b.fy + 9, 14, 14, { frame: PR.paintWhite });

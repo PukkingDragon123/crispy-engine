@@ -311,8 +311,9 @@ export class WaveDirector {
     // pacing: surges and breathers (~14 s cycle) instead of a flat trickle
     const ph = (this.timer % PULSE) / PULSE;
     const pulse = bossWave ? 0.5 : ph < 0.45 ? Math.sin((ph / 0.45) * Math.PI * 0.5) : 1 - smooth01((ph - 0.45) / 0.55);
-    const target = Math.min(this.cap, Math.round((10 + n * 1.7) * (this.spec.theme?.mult ?? 1) * (bossWave ? 0.45 : 1) * (0.78 + 0.34 * pulse)));
-    const rate = (0.9 + n * 0.09) * (bossWave ? 0.4 : 1) * (0.45 + 1.1 * pulse);
+    // a gentle ramp (easier fights): fewer bodies alive at once and a slower trickle
+    const target = Math.min(this.cap, Math.round((8 + n * 1.35) * (this.spec.theme?.mult ?? 1) * (bossWave ? 0.45 : 1) * (0.78 + 0.34 * pulse)));
+    const rate = (0.75 + n * 0.07) * (bossWave ? 0.4 : 1) * (0.45 + 1.1 * pulse);
     if (this.enemies.alive < target) this.spawnAcc += rate * dt;
     while (this.spawnAcc >= 1) {
       this.spawnAcc -= 1;
@@ -377,7 +378,7 @@ export class WaveDirector {
     // weights fade early types slightly as waves progress; a type new this wave gets the spotlight
     const def = rnd.weighted(roster, (d) => d.weight * (d.firstWave === 1 ? clamp(1.4 - n * 0.008, 0.6, 1.4) : 1) * (d.firstWave === n && d.id !== 'goldenScarab' ? 4 : 1));
     const [g0, g1] = def.group ?? [1, 2];
-    const count = Math.round(rnd.range(g0, g1) * (1 + n * 0.012));
+    const count = Math.round(rnd.range(g0, g1) * (1 + n * 0.009));
     const open = this.groups++ < 2 && def.ai !== 'sniper';
     const minR = def.ai === 'sniper' ? 34 : open ? 17 : 24, maxR = def.ai === 'sniper' ? 52 : open ? 28 : 46;
     const p = this.bearingGroups-- > 0 ? this.spawnToward(minR, maxR) : this.spawnPoint(minR, maxR);

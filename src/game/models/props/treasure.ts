@@ -380,9 +380,7 @@ export function parchmentSheet(w = 120, d = 74, seed = 1): PivotModel {
     const u = Math.abs(x) / (w / 2), v = Math.abs(z) / (d / 2);
     const a = Math.atan2(z, x);
     const k = Math.pow(Math.pow(u, 8) + Math.pow(v, 8), 1 / 8);
-    // a bite out of one corner
-    const bite = Math.hypot(x - w * 0.42, z + d * 0.4) < 9;
-    return k <= torn(a) && !bite;
+    return k <= torn(a);
   }, (x, y, z) => {
     const u = Math.abs(x) / (w / 2), v = Math.abs(z) / (d / 2);
     const e = Math.max(u, v);

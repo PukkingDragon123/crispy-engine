@@ -3,13 +3,15 @@
 // 1/12 m (wagon & gallows 1/16 m). Fronts face +Z.
 import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
 import { Ramp } from '../style';
-import { S, StaticModel, V3, PR, rngOf, meters, board, post, seg, cylY, inCircle, chunk, sandDrift, rope, sagPoints, Wall, plankWall, windowW, doorW, tinRoof, shingleRoof, stampText, textWidth, toMeters, masonry, mod, mixRGB } from './helpers';
+import { S, StaticModel, V3, PR, rngOf, meters, board, post, seg, cylY, cylH, inCircle, chunk, sandDrift, rope, sagPoints, Wall, plankWall, windowW, doorW, tinRoof, shingleRoof, stampText, textWidth, toMeters, masonry, mod, mixRGB } from './helpers';
 import { cowSkullModel } from './nature';
 import { NOCOL } from './ruins';
 import { hash3, noise as noiseField } from '../../../engine/math/rand';
-import { WOOD, WoodName, WoodSpecies, agedPaper, blackIron, rustedIron, tin, brass, leather, weathered, darkWood, timber, split, wrapBand, nailHead, ironStrap, knotHole, wormHoles, bulletHole, bolt, chainLinks, sandMat, fieldStone, sandstone } from '../materials';
+import { WOOD, WoodName, WoodSpecies, Mat, Axis, woodGrain, oak, pine, scratches, agedPaper, blackIron, rustedIron, tin, brass, leather, weathered, darkWood, paintedWood, timber, split, wrapBand, nailHead, ironStrap, knotHole, wormHoles, bulletHole, bolt, chainLinks, sandMat, fieldStone, sandstone, chipEdges, chipPaint, horseshoe, ropeLashing, ropeLine } from '../materials';
 
 const VS = 1 / 20;
+/** seeded 2D noise helper (-1..1) for the props in this file */
+const n3s = (x: number, z: number, seed: number) => noiseField.n2(x * 0.21 + seed * 3.1, z * 0.21 - seed * 1.7);
 const BVS = 1 / 12;
 
 // ---------------------------------------------------------------------------
@@ -120,8 +122,12 @@ export function porchFront(m: VoxelModel, b: Bldg, u0: number, u1: number, depth
   }
 }
 
-/** sign board (planks + frame) with painted text, front face at zf (facing +Z). returns width */
-export function signPanel(m: VoxelModel, cx: number, yBot: number, zf: number, lines: string[], o: { bg?: Ramp; ink?: number; pad?: number; thick?: number; scale?: number } = {}) {
+/**
+ * Sign board (planks + frame) with painted text, front face at zf (facing +Z). returns width.
+ * weathered: true paints it with the material library instead of flat ramps: sun-faded
+ * chipped paint over grey planks with seams, a grained frame, chipped lettering, nail heads.
+ */
+export function signPanel(m: VoxelModel, cx: number, yBot: number, zf: number, lines: string[], o: { bg?: Ramp; ink?: number; pad?: number; thick?: number; scale?: number; weathered?: boolean; seed?: number } = {}) {
   const bg = o.bg ?? PR.paintWhite;
   const ink = o.ink ?? PR.ink.base;
   const pad = o.pad ?? 2;
@@ -130,12 +136,25 @@ export function signPanel(m: VoxelModel, cx: number, yBot: number, zf: number, l
   const W = tw + pad * 2 + 2, H = lines.length * 6 * sc - sc + pad * 2 + 2;
   const x0 = cx - Math.floor(W / 2);
   const th = o.thick ?? 2;
+  const seed = o.seed ?? cx * 7 + yBot;
+  const wet = o.weathered ? weathered({ along: 'x', seed, checks: 0.8, figure: 0.6 }) : null;
+  const paint = o.weathered ? paintedWood(bg.base, { along: 'x', seed: seed + 1, chip: 0.32, fade: 0.25, under: wet! }) : null;
+  const frameM = o.weathered ? weathered({ along: 'x', seed: seed + 2, species: 'walnut', checks: 0.5, figure: 0.6 }) : null;
   for (let x = x0; x < x0 + W; x++)
     for (let y = yBot; y < yBot + H; y++) {
       const frame = x === x0 || x === x0 + W - 1 || y === yBot || y === yBot + H - 1;
-      for (let d = 0; d < th; d++) m.set(x, y, zf - d, frame ? PR.woodDark.base : mod(y - yBot, 4) === 0 ? bg.shade : bg.base);
+      const seam = mod(y - yBot, 4) === 0;
+      for (let d = 0; d < th; d++) {
+        if (!o.weathered) m.set(x, y, zf - d, frame ? PR.woodDark.base : seam ? bg.shade : bg.base);
+        else m.set(x, y, zf - d, frame ? frameM! : seam && d === 0 ? 0x2e241c : paint!);
+      }
     }
   lines.forEach((l, i) => stampText(m, 'z+', l, cx - Math.floor(textWidth(l, 1, sc) / 2), yBot + H - 2 - pad - i * 6 * sc, zf + 1, { color: ink, scale: sc }));
+  if (o.weathered) {
+    chipPaint(m, [x0, yBot, zf - th + 1, x0 + W - 1, yBot + H - 1, zf], ink, paint!, { chip: 0.24, seed });
+    const nm = blackIron(seed, 0.6);
+    for (const [x, y] of [[x0, yBot], [x0 + W - 1, yBot], [x0, yBot + H - 1], [x0 + W - 1, yBot + H - 1]]) m.set(x, y, zf + 1, nm, VF.METAL);
+  }
   return W;
 }
 
@@ -144,6 +163,7 @@ export function signPanel(m: VoxelModel, cx: number, yBot: number, zf: number, l
 // ---------------------------------------------------------------------------
 /** crate body: frame boards on every edge, horizontal planks, optional X-brace on sides */
 function crateBody(m: VoxelModel, x0: number, y0: number, z0: number, s: number, panel: Ramp, frame: Ramp, brace: 'x' | '/' | 'none', seed: number) {
+  if (s >= 16) return crateBodyHD(m, x0, y0, z0, s, panel, frame, brace, seed);
   const x1 = x0 + s - 1, y1 = y0 + s - 1, z1 = z0 + s - 1;
   const fw = 2;
   const rng = rngOf(seed, 7);
@@ -196,50 +216,155 @@ function crateBody(m: VoxelModel, x0: number, y0: number, z0: number, s: number,
     }
 }
 
+const CVS = 1 / 32; // crates & barrels
+
+/** grain material for a crate panel / barrel stave from the old ramp choice */
+function woodFor(r: Ramp, along: Axis, seed: number, figure = 0.55): Mat {
+  if (r === PR.barnRed) return paintedWood(0xa8402e, { along, seed, chip: 0.42, fade: 0.25, under: pine({ along, seed: seed + 1, bleach: 0.3, figure }) });
+  if (r === PR.woodLight) return pine({ along, seed, figure, bleach: 0.12, knots: 0.5 });
+  if (r === PR.woodDark) return darkWood({ along, seed, figure });
+  if (r === PR.woodGrey) return weathered({ along, seed, figure, checks: 0.6 });
+  return oak({ along, seed, figure, bleach: 0.15, knots: 0.5 });
+}
+
+/**
+ * Detailed crate body (s >= 16): proud frame battens on all twelve edges with
+ * bevelled outer corners, recessed plank panels with seams, an optional diagonal
+ * brace board on the four sides, nail heads on the battens, a solid dark core.
+ */
+function crateBodyHD(m: VoxelModel, x0: number, y0: number, z0: number, s: number, panel: Ramp, frame: Ramp, brace: 'x' | '/' | 'none', seed: number) {
+  const x1 = x0 + s - 1, y1 = y0 + s - 1, z1 = z0 + s - 1;
+  const fw = Math.max(2, Math.round(s / 9.5));
+  const pw = Math.max(4, Math.round(s / 5.5));
+  const frameSp: WoodName = frame === PR.woodDark ? 'walnut' : 'oak';
+  const fm = { x: woodGrain({ along: 'x', seed: seed + 11, species: frameSp, figure: 0.5 }), y: woodGrain({ along: 'y', seed: seed + 12, species: frameSp, figure: 0.5 }), z: woodGrain({ along: 'z', seed: seed + 13, species: frameSp, figure: 0.5 }) };
+  const cache = new Map<string, Mat>();
+  const plankMat = (face: string, along: Axis, i: number) => {
+    const k = face + i;
+    let mt = cache.get(k);
+    if (!mt) cache.set(k, (mt = woodFor(panel, along, seed * 31 + i * 7 + face.charCodeAt(0))));
+    return mt;
+  };
+  const SEAM = 0x24180f, CORE = 0x2e2216;
+  for (let x = x0; x <= x1; x++)
+    for (let y = y0; y <= y1; y++)
+      for (let z = z0; z <= z1; z++) {
+        const dx = Math.min(x - x0, x1 - x), dy = Math.min(y - y0, y1 - y), dz = Math.min(z - z0, z1 - z);
+        const d = Math.min(dx, dy, dz);
+        if (d > 2) {
+          m.set(x, y, z, CORE);
+          continue;
+        }
+        if ((dx === 0 && dy === 0) || (dx === 0 && dz === 0) || (dy === 0 && dz === 0)) continue; // bevelled outer edges
+        const ex = dx < fw, ey = dy < fw, ez = dz < fw;
+        if ((ex ? 1 : 0) + (ey ? 1 : 0) + (ez ? 1 : 0) >= 2) {
+          m.set(x, y, z, !ex ? fm.x : !ez ? fm.z : fm.y);
+          continue;
+        }
+        if (d === 0) continue; // panels sit one voxel behind the battens
+        const face = dx === d ? 'x' : dz === d ? 'z' : 'y';
+        const row = face === 'y' ? z - z0 - fw : y - y0 - fw;
+        const seam = mod(row, pw) === pw - 1;
+        if (seam && d === 1) continue;
+        if (seam) {
+          m.set(x, y, z, SEAM);
+          continue;
+        }
+        m.set(x, y, z, plankMat(face + (face === 'x' ? (x > x0 ? '+' : '-') : face === 'z' ? (z > z0 ? '+' : '-') : y > y0 ? '+' : '-'), face === 'x' ? 'z' : 'x', Math.floor(row / pw)));
+      }
+  // diagonal brace boards across the four side panels (flush with the battens)
+  if (brace !== 'none') {
+    const L = s - fw * 2;
+    const bm = fm.x;
+    for (let k = 0; k < L; k++)
+      for (let w = -1; w <= 1; w++) {
+        const a = fw + k, b = fw + Math.round((k * (L - 1)) / Math.max(1, L - 1)) + w;
+        if (b < fw || b > s - fw - 1) continue;
+        const bs = brace === 'x' ? [b, s - 1 - b] : [b];
+        for (const bb of bs) {
+          m.set(x0 + a, y0 + bb, z1, bm).set(x0 + a, y0 + bb, z0, bm);
+          m.set(x1, y0 + bb, z0 + a, bm).set(x0, y0 + bb, z0 + a, bm);
+        }
+      }
+  }
+  // nails down the side battens, two per plank
+  const nm = blackIron(seed, 0.5);
+  const cB = Math.floor(fw / 2);
+  for (let j = 0; j * pw + fw + 1 < s - fw; j++) {
+    const y = y0 + fw + j * pw + Math.floor(pw / 2) - 1;
+    for (const x of [x0 + cB, x1 - cB]) {
+      m.set(x, y, z1 + 1, nm, VF.METAL).set(x, y, z0 - 1, nm, VF.METAL);
+    }
+    for (const z of [z0 + cB, z1 - cB]) m.set(x1 + 1, y, z, nm, VF.METAL).set(x0 - 1, y, z, nm, VF.METAL);
+  }
+  for (const x of [x0 + fw + 2, x1 - fw - 2]) for (const z of [z0 + cB, z1 - cB]) m.set(x, y1 + 1, z, nm, VF.METAL);
+}
+
+const CRATE_WORDS = ['FLOUR', 'BEANS', 'NAILS', 'AMMO', 'SALT', 'TOOLS', 'COFFEE'];
+/** supply crate (1/32): seeds 0..3 = X-braced oak, /-braced, AMMO stencil pine, a small crate stacked on top */
 export function crate(seed = 0): StaticModel {
   const m = new VoxelModel('crate');
   const r = rngOf(seed, 3);
   const k = mod(seed, 4);
-  const panel = k === 2 ? PR.woodLight : PR.wood;
-  const s = 18;
-  crateBody(m, -9, 0, -9, s, panel, PR.woodDark, k === 1 ? '/' : k === 3 ? 'none' : 'x', seed);
-  if (k === 2) {
-    // stencilled SUPPLY + arrow on the front panel
-    for (let x = -6; x <= 5; x++) for (let y = 5; y <= 12; y++) m.set(x, y, 8, panel.base);
-    stampText(m, 'z+', 'AMMO', -7, 11, 10, { color: PR.ink.shade });
-    for (let x = -6; x <= 5; x++) m.set(x, 5, 9, PR.ink.shade);
+  const panel = k === 2 ? PR.woodLight : k === 1 ? PR.woodGrey : PR.wood;
+  const s = 29, h = -14;
+  crateBody(m, h, 0, h, s, panel, PR.woodDark, k === 1 ? '/' : k === 3 ? 'none' : 'x', seed);
+  const front = h + s - 1;
+  if (k === 2 || k === 3) {
+    const word = k === 2 ? 'AMMO' : r.pick(CRATE_WORDS);
+    const tw = textWidth(word, 1, k === 2 ? 2 : 1);
+    stampText(m, 'z+', word, -Math.floor(tw / 2), k === 2 ? 20 : 17, front + 1, { color: 0x2a2018, scale: k === 2 ? 2 : 1 });
+    chipPaint(m, [h, 0, front - 2, h + s, s, front], 0x2a2018, woodFor(panel, 'x', seed), { chip: 0.35, seed });
   }
-  if (k === 3) {
-    // a smaller crate stacked on top, rotated a little by offset
-    crateBody(m, -6 + r.int(-1, 1), s, -5, 12, PR.woodLight, PR.woodDark, 'none', seed + 9);
+  // wear: scratches on the lid, a split plank, a burst-out board on one side
+  scratches(m, [h + 3, s - 1, h + 3, h + s - 4, s - 1, h + s - 4], 'y+', { n: 5, seed, len: 6, tone: 0xe8d0a0, amount: 0.35 });
+  if (r.chance(0.6)) split(m, [h + s - 2, 3 + r.int(0, 3) * 5, h + 8], 'x+', [0, 0, 1], 10, { seed, depth: 2 });
+  if (k === 0) {
+    const hy = 8 + r.int(0, 2) * 5;
+    for (let z = h + 9; z <= h + 16 + r.int(0, 3); z++) for (let y = hy; y <= hy + 3; y++) if (hash3(z, y, seed) < 0.85 || (y > hy && y < hy + 3)) for (const x of [h - 0, h + 1]) m.del(x, y, z);
   }
-  return S(m, VS);
+  if (k === 3) crateBody(m, -9 + r.int(-2, 2), s, -10, 19, PR.woodLight, PR.woodDark, 'none', seed + 9);
+  return S(m, CVS);
 }
 
+/** TNT crate (1/32): chipped barn-red crate, cream TNT stencils, a hazard band, a burst lid with dynamite sticks and straw */
 export function tntCrate(seed = 0): StaticModel {
   const m = new VoxelModel('tnt_crate');
-  const s = 18;
-  crateBody(m, -9, 0, -9, s, PR.barnRed, PR.woodDark, 'none', seed);
-  // cream TNT stencil on all four sides
-  const tw = textWidth('TNT');
-  stampText(m, 'z+', 'TNT', -Math.floor(tw / 2), 11, 10, { color: PR.paintWhite.base });
-  stampText(m, 'z-', 'TNT', Math.floor(tw / 2) - 1, 11, -11, { color: PR.paintWhite.base });
-  stampText(m, 'x+', 'TNT', Math.floor(tw / 2) - 1, 11, 10, { color: PR.paintWhite.base });
-  stampText(m, 'x-', 'TNT', -Math.floor(tw / 2), 11, -11, { color: PR.paintWhite.base });
-  // warning stripe band under the text
-  for (let x = -7; x <= 6; x++) m.set(x, 4, 9, mod(x, 4) < 2 ? PR.paintYellow.base : PR.ink.base);
-  // dynamite sticks poking out of the lid
-  const sticks: [number, number, number][] = seed % 2 ? [[-5, -3, 7], [-1, 1, 9], [3, -4, 6], [2, 3, 8]] : [[-4, 0, 8], [0, -3, 6], [3, 2, 9]];
-  for (const [x, z, h] of sticks) {
-    for (let y = s - 2; y < s + h; y++) m.box(x, y, z, x + 1, y, z + 1, y === s + h - 1 ? PR.red.hi : mod(y, 5) === 0 ? PR.paintWhite.shade : PR.red.base);
-    // fuse
-    m.set(x, s + h, z, PR.ink.base).set(x, s + h + 1, z + 1, PR.ink.base).set(x + 1, s + h + 2, z + 1, PR.rope.shade);
+  const s = 29, h = -14, f = h + s - 1;
+  crateBody(m, h, 0, h, s, PR.barnRed, PR.woodDark, 'none', seed);
+  const cream = 0xeee2c4;
+  const tw = textWidth('TNT', 1, 2);
+  stampText(m, 'z+', 'TNT', -Math.floor(tw / 2), 19, f + 1, { color: cream, scale: 2 });
+  stampText(m, 'z-', 'TNT', Math.floor(tw / 2) - 1, 19, h - 1, { color: cream, scale: 2 });
+  stampText(m, 'x+', 'TNT', Math.floor(tw / 2) - 1, 19, f + 1, { color: cream, scale: 2 });
+  stampText(m, 'x-', 'TNT', -Math.floor(tw / 2), 19, h - 1, { color: cream, scale: 2 });
+  // hazard band under the lettering (painted on the front panel)
+  for (let x = h + 4; x <= f - 4; x++) for (const y of [6, 7]) {
+    let z = f;
+    while (z > f - 3 && !m.has(x, y, z)) z--;
+    if (m.has(x, y, z)) m.set(x, y, z, mod(x + y, 6) < 3 ? 0xe0b040 : 0x2a2018);
   }
-  return S(m, VS);
+  chipPaint(m, [h - 1, 0, h - 1, f + 1, s, f + 1], cream, woodFor(PR.barnRed, 'x', seed), { chip: 0.32, seed });
+  // the lid: one plank prised up and gone, straw packing and dynamite sticks poking out
+  for (let x = h + 4; x <= f - 4; x++) for (let z = -3; z <= 3; z++) for (let y = s - 3; y < s; y++) m.del(x, y, z);
+  for (let x = h + 4; x <= f - 4; x++) for (let z = -3; z <= 3; z++) if (hash3(x, z, seed) < 0.7) m.set(x, s - 3 + (hash3(z, x, seed) < 0.3 ? 1 : 0), z, hash3(x, z, 9) < 0.5 ? 0xd8b866 : 0xc09a4a, VF.SOFTAO);
+  const sticks: [number, number, number][] = seed % 2 ? [[-7, -1, 9], [-2, 1, 12], [3, -2, 8], [8, 1, 10]] : [[-6, 0, 11], [-1, -2, 8], [4, 1, 12]];
+  const paper = (y: number, top: number) => (y === top ? 0xd8c8a0 : mod(y, 6) === 0 ? 0xe6dcc0 : 0xb2321e);
+  for (const [x, z, hgt] of sticks) {
+    const top = s - 3 + hgt;
+    for (let y = s - 4; y <= top; y++) for (const [dx, dz] of [[0, 0], [1, 0], [0, 1], [1, 1], [-1, 0], [-1, 1], [0, -1], [1, -1], [2, 0], [2, 1], [0, 2], [1, 2]]) {
+      const ring = dx === -1 || dx === 2 || dz === -1 || dz === 2;
+      if (ring && (dx === -1 || dx === 2) && (dz === -1 || dz === 2)) continue;
+      m.set(x + dx, y, z + dz, ring ? mixRGB(paper(y, top), 0x6a1a10, 0.25) : paper(y, top));
+    }
+    ropeLine(m, [[x, top + 1, z], [x + 1, top + 3, z + 1], [x + 3, top + 4, z + 1]], { tones: [0x2a2420, 0x3a332c, 0x4a4238, 0x5a5044] });
+  }
+  return S(m, CVS);
 }
 
 /** stave barrel body: bulging stepped cylinder, stave seams, 3 iron hoops, lid with chime */
-function barrelBody(m: VoxelModel, cx: number, cz: number, y0: number, H: number, R: number, wood: Ramp, o: { band?: Ramp; lid?: boolean } = {}) {
+function barrelBody(m: VoxelModel, cx: number, cz: number, y0: number, H: number, R: number, wood: Ramp, o: { band?: Ramp; lid?: boolean; seed?: number; bung?: boolean } = {}) {
+  if (R >= 9) return barrelBodyHD(m, cx, cz, y0, H, R, wood, o);
   const staves = 12;
   const hoops = [y0 + 2, y0 + Math.round(H * 0.5), y0 + H - 3];
   for (let y = y0; y <= y0 + H; y++) {
@@ -274,134 +399,357 @@ function barrelBody(m: VoxelModel, cx: number, cz: number, y0: number, H: number
   }
 }
 
+/**
+ * Detailed stave barrel (R >= 9): 18 staves each its own board (tone + grain line),
+ * dark seams, a belly bulge, four proud hoops (rusted iron, or chipped painted bands),
+ * a chime rising over a recessed head of three boards, a bung with a stain trail,
+ * a damp dark foot. Solid core.
+ */
+function barrelBodyHD(m: VoxelModel, cx: number, cz: number, y0: number, H: number, R: number, wood: Ramp, o: { band?: Ramp; lid?: boolean; seed?: number; bung?: boolean } = {}) {
+  const seed = o.seed ?? 0;
+  const staves = Math.max(14, Math.round(R * 1.4));
+  const hoops: [number, number][] = [[y0 + 2, y0 + 3], [y0 + 8, y0 + 9], [y0 + H - 9, y0 + H - 8], [y0 + H - 3, y0 + H - 2]];
+  const sp = wood === PR.woodDark ? WOOD.walnut : wood === PR.woodLight ? WOOD.pine : wood === PR.woodGrey ? WOOD.weathered : WOOD.oak;
+  const rust = rustedIron({ seed, rust: 0.5, streaks: false, pitting: 0.4 });
+  const band = o.band ? paintedWood(o.band.base, { along: 'y', seed: seed + 3, chip: 0.45, under: rust }) : rust;
+  const stTone = (i: number) => sp.tones[1 + Math.floor(hash3(i, seed, 3) * 2.99)];
+  const radius = (y: number) => R - 1.6 + Math.sin(((y - y0) / H) * Math.PI) * 1.8;
+  for (let y = y0; y <= y0 + H; y++) {
+    const rr = radius(y);
+    const hoop = hoops.some(([a, b]) => y >= a && y <= b);
+    const RR = Math.ceil(rr) + 2;
+    for (let x = -RR; x <= RR; x++)
+      for (let z = -RR; z <= RR; z++) {
+        const inSt = inCircle(x, z, rr);
+        if (!inSt && !(hoop && inCircle(x, z, rr + 0.9))) continue;
+        if (!inSt) {
+          m.set(cx + x, y, cz + z, band, o.band ? 0 : VF.METAL);
+          continue;
+        }
+        const outer = !inCircle(x, z, rr - 1.1);
+        if (!outer) {
+          m.set(cx + x, y, cz + z, 0x4a3422);
+          continue;
+        }
+        const a = (Math.atan2(z, x) / (Math.PI * 2) + 0.5) * staves;
+        const i = Math.floor(a), fr = a - i;
+        let c = fr < 0.09 ? 0x2a1e14 : fr > 0.46 && fr < 0.56 && i % 3 === 0 ? sp.late : stTone(i);
+        if (y < y0 + 2) c = mixRGB(c, 0x2a1e14, 0.35); // damp foot
+        m.set(cx + x, y, cz + z, c);
+      }
+  }
+  if (o.lid ?? true) {
+    const top = y0 + H;
+    const rt = radius(top);
+    // chime: the staves stand two voxels proud of the head
+    for (let y = top + 1; y <= top + 2; y++)
+      for (let x = -R; x <= R; x++)
+        for (let z = -R; z <= R; z++) if (inCircle(x, z, rt) && !inCircle(x, z, rt - 1.3)) m.set(cx + x, y, cz + z, stTone(Math.floor((Math.atan2(z, x) / (Math.PI * 2) + 0.5) * staves)));
+    // the head: three boards across x with seams, end-grain-ish tone, a bung plug
+    const headW = Math.ceil((rt * 2) / 3);
+    for (let x = -R; x <= R; x++)
+      for (let z = -R; z <= R; z++) {
+        if (!inCircle(x, z, rt - 1.3)) continue;
+        const bi = Math.floor((z + rt) / headW);
+        const seamZ = mod(Math.round(z + rt), headW) === 0;
+        m.set(cx + x, top, cz + z, seamZ ? 0x3a2a1c : sp.end[(bi + seed) % 3]);
+      }
+    for (const [x, z] of [[2, -3], [3, -3], [2, -2], [3, -2]]) m.set(cx + x, top + 1, cz + z, 0x6a4a2c);
+  }
+  if (o.bung ?? true) {
+    // side bung between the belly hoops, with a dark trickle stain below it
+    const by = y0 + Math.round(H / 2), bz = Math.round(radius(by));
+    for (const [x, y] of [[0, 0], [1, 0], [0, 1], [1, 1]]) m.set(cx + x, by + y, cz + bz + 1, 0x7a5432);
+    for (let k = 1; k <= 6; k++) {
+      const zz = Math.round(radius(by - k));
+      const v = m.get(cx, by - k, cz + zz);
+      if (v !== undefined) m.set(cx, by - k, cz + zz, mixRGB(v & 0xffffff, 0x2a1a10, 0.4 - k * 0.04));
+    }
+  }
+}
+
+/** standing barrel (1/32): seed 0 oak with rusted hoops, seed 1 dark staves with chipped red bands */
 export function barrel(seed = 0): StaticModel {
   const m = new VoxelModel('barrel');
   const k = mod(seed, 2);
-  barrelBody(m, 0, 0, 0, 20, 8, k ? PR.woodDark : PR.wood, k ? { band: PR.red } : {});
-  return S(m, VS);
+  barrelBody(m, 0, 0, 0, 33, 13, k ? PR.woodDark : PR.wood, { ...(k ? { band: PR.red } : {}), seed });
+  return S(m, CVS);
 }
 
-/** whiskey barrel lying in a cradle with a brass spigot (seed 2: standing with a tap and tin cup) */
+/** whiskey barrel (1/32): even seeds stand with a brass tap and a tin cup; odd seeds lie in a chocked cradle with a spigot. XXX brand burnt in */
 export function whiskeyBarrel(seed = 0): StaticModel {
   const m = new VoxelModel('whiskey_barrel');
-  const R = 7, L = 18;
+  const bm = brass({ seed, patina: 0.3, polish: 0.5 });
+  const burnt = 0x2a1a10;
   if (mod(seed, 2) === 0) {
-    barrelBody(m, 0, 0, 0, 19, 7, PR.wood);
-    stampText(m, 'z+', 'XXX', -5, 13, 9, { color: PR.ink.base });
-    m.box(-1, 5, 8, 0, 6, 10, PR.brass.base, VF.METAL);
-    m.set(-1, 4, 10, PR.brass.shade, VF.METAL);
-    // tin cup hanging on the hoop
-    m.box(4, 9, 7, 5, 11, 8, PR.tin.base, VF.METAL);
-    return S(m, VS);
+    barrelBody(m, 0, 0, 0, 30, 12, PR.wood, { seed, bung: false });
+    stampText(m, 'z+', 'XXX', -5, 22, 15, { color: burnt });
+    // brass tap low on the front: flange, body, spout, handle
+    const fz = 12;
+    for (const [x, y] of [[-1, 7], [0, 7], [-1, 8], [0, 8]]) m.set(x, y, fz, bm, VF.METAL);
+    for (let z = fz + 1; z <= fz + 3; z++) m.set(-1, 7, z, bm, VF.METAL).set(0, 7, z, bm, VF.METAL);
+    m.set(-1, 6, fz + 3, bm, VF.METAL).set(-1, 5, fz + 3, bm, VF.METAL);
+    m.set(-1, 8, fz + 2, bm, VF.METAL).set(-1, 9, fz + 2, bm, VF.METAL).set(-2, 9, fz + 2, bm, VF.METAL);
+    // tin cup hanging by its handle from the tap
+    const cup = tin({ seed: seed + 2, rust: 0.25 });
+    for (let y = 1; y <= 4; y++) for (let x = 2; x <= 5; x++) for (let z = 14; z <= 16; z++) if (!(y > 1 && x > 2 && x < 5 && z === 15)) m.set(x, y, z, cup, VF.METAL);
+    m.set(1, 4, 15, cup, VF.METAL).set(1, 3, 15, cup, VF.METAL);
+    return S(m, CVS);
   }
-  // lying along z: a standing barrel rotated onto its side, axis at y = cy
-  const cy = R + 3;
+  // lying along z in a cradle: a standing barrel turned on its side, axis at y = cy
+  const R = 12, L = 30, cy = R + 4;
   const tmp = new VoxelModel('t');
-  barrelBody(tmp, 0, 0, 0, L, R, PR.wood);
+  barrelBody(tmp, 0, 0, 0, L, R, PR.wood, { seed, bung: true });
   tmp.forEach((x, y, z, c, f) => m.set(x, cy + z, y - L / 2, c, f));
-  // spigot on the front end
-  m.box(-1, cy - 3, L / 2 + 2, 0, cy - 2, L / 2 + 4, PR.brass.base, VF.METAL);
-  m.set(-1, cy - 4, L / 2 + 4, PR.brass.shade, VF.METAL);
-  m.box(-1, cy - 1, L / 2 + 3, 0, cy - 1, L / 2 + 3, PR.brass.hi, VF.METAL);
-  stampText(m, 'x+', 'XXX', 5, cy + 2, R + 3, { color: PR.ink.base });
-  // cradle saddles
-  for (const z of [-6, 5]) {
-    m.box(-9, 0, z, 8, 2, z + 1, PR.woodDark.base);
-    for (let x = -8; x <= 7; x++) {
-      const yTop = cy - Math.round(Math.sqrt(Math.max(0, R * R - x * x)));
-      for (let y = 3; y < yTop; y++) m.set(x, y, z, PR.woodDark.base);
+  // spigot on the front head
+  const fz = L / 2 + 3;
+  for (let z = fz; z <= fz + 2; z++) m.set(-1, cy - 5, z, bm, VF.METAL).set(0, cy - 5, z, bm, VF.METAL);
+  m.set(-1, cy - 6, fz + 2, bm, VF.METAL).set(-1, cy - 7, fz + 2, bm, VF.METAL);
+  m.set(0, cy - 4, fz + 1, bm, VF.METAL).set(1, cy - 3, fz + 1, bm, VF.METAL);
+  stampText(m, 'x+', 'XXX', 5, cy + 3, R + 4, { color: burnt });
+  // cradle: two chocked saddles with concave tops, wedges under them
+  for (const z0 of [-10, 7]) {
+    const sm = weathered({ along: 'x', seed: seed + z0, ends: [-12, 11], species: 'walnut' });
+    for (let x = -12; x <= 11; x++) {
+      const yTop = cy - Math.round(Math.sqrt(Math.max(0, R * R - x * x))) + 1;
+      for (let y = 0; y < Math.min(yTop, cy); y++) for (let z = z0; z <= z0 + 3; z++) m.set(x, y, z, sm);
     }
+    for (const sx of [-1, 1]) for (let y = 0; y <= 2; y++) for (let k = 0; k <= 2 - y; k++) m.set(sx * (13 + k), y, z0 + 1, WOOD.weathered.tones[2]);
   }
-  return S(m, VS);
+  return S(m, CVS);
 }
 
 // ---------------------------------------------------------------------------
 // fences, posts & signs (1/20)
 // ---------------------------------------------------------------------------
+const PVS = 1 / 40; // fences, signposts, hitching posts
+
+/** copy src into dst through a warp (sheared lean, sag, crooked hang) */
+function pasteWarp(dst: VoxelModel, src: VoxelModel, f: (x: number, y: number, z: number) => V3) {
+  src.forEach((x, y, z, c, fl) => {
+    const [X, Y, Z] = f(x, y, z);
+    dst.set(X, Y, Z, c, fl);
+  });
+  return dst;
+}
+/** a weathered fence/sign post in its own model: hewn, chamfered, a sloped (weather-shedding) top, a drying split */
+function postModel(h: number, seed: number, o: { w?: number; slope?: boolean; split?: number; hewn?: number; figure?: number } = {}) {
+  const t = new VoxelModel('post');
+  const w = o.w ?? 6;
+  const lo = -Math.floor(w / 2), hi = lo + w - 1;
+  timber(t, [lo, 0, lo, hi, h, hi], 'y', { mat: weathered({ along: 'y', seed: seed * 7 + 3, ends: [0, h], checks: 1, rotBelow: 6, rotFrom: 0, figure: o.figure ?? 0.6 }), chamfer: 1, hewn: o.hewn ?? 0, seed });
+  if (o.slope ?? true) t.carveWhere((_x, y, z) => y > h - 3 + Math.round(((z - lo) / (hi - lo)) * 2.5));
+  split(t, [hash3(seed, 1, 2) < 0.5 ? lo + 1 : hi - 1, h - 1, hi], 'z+', [0, -1, 0], o.split ?? 12, { seed, depth: 2 });
+  return t;
+}
+/** low sand mound (decor, never a collider) round a post foot */
+function footMound(m: VoxelModel, cx: number, cz: number, rx: number, rz: number, h: number, seed: number) {
+  const sand = sandMat({ seed });
+  for (let x = -rx; x <= rx; x++)
+    for (let z = -rz; z <= rz; z++) {
+      const d = Math.hypot(x / rx, z / rz);
+      if (d > 1) continue;
+      const top = Math.round(h * Math.pow(1 - d, 1.3) + n3s(cx + x, cz + z, seed) * 0.7);
+      for (let y = 0; y < top; y++) if (!m.has(cx + x, y, cz + z)) m.set(cx + x, y, cz + z, sand, NOCOL);
+    }
+}
+
+/**
+ * Split-rail ranch fence (1/40): weathered hewn posts with sloped tops every 1.5 m,
+ * two plank rails per bay butted at the post centres, sagging a touch, nailed with
+ * rust-bleeding nails (some lashed with rope). damage 1: a top rail snapped, one
+ * half hanging off its last nail, the other lying in the sand; damage 2: a post
+ * leaning over with its rails dragged down and one fallen.
+ */
 function fenceCore(len: number, seed: number, damage: 0 | 1 | 2) {
   const m = new VoxelModel('fence');
-  const L = Math.round(len / VS);
+  const L = Math.round(len / PVS);
   const r = rngOf(seed, 17);
-  const step = 30;
+  const step = 60;
   const xs: number[] = [];
   for (let x = -Math.floor(L / 2); x <= Math.floor(L / 2); x += step) xs.push(x);
-  if (xs[xs.length - 1] < Math.floor(L / 2) - 4) xs.push(Math.floor(L / 2));
-  const lean = damage === 2 ? r.int(1, xs.length - 2) : -1;
+  if (xs[xs.length - 1] < Math.floor(L / 2) - 8) xs.push(Math.floor(L / 2));
+  const lean = damage === 2 ? r.int(1, Math.max(1, xs.length - 2)) : -1;
+  const leanK = 0.3;
+  const postX = (i: number, y: number) => xs[i] + (i === lean ? Math.round(y * leanK) : 0);
   xs.forEach((x, i) => {
-    if (i === lean) {
-      seg(m, [x, 0, 0], [x + 9, 20, 0], 3, PR.woodGrey.base);
-      m.box(x + 8, 20, -1, x + 10, 21, 1, PR.woodGrey.hi);
-      return;
-    }
-    post(m, x - 1, -1, 0, 24, 3, PR.woodGrey, seed + i);
-    m.set(x, 25, 0, PR.woodGrey.hi);
+    const pm = postModel(50 - (i === lean ? 4 : 0), seed * 5 + i);
+    pasteWarp(m, pm, (px, py, pz) => [postX(i, py) + px, py, pz]);
+    footMound(m, x, 0, 6, 6, 3, seed + i);
   });
+  const RY = [14, 33];
   for (let i = 0; i < xs.length - 1; i++) {
-    for (const [y, ri] of [[8, 0], [17, 1]] as const) {
-      const a = xs[i] - 1, b = xs[i + 1] + 1;
-      const broken = (damage === 1 && i === 1 && ri === 1) || (damage === 2 && (i === lean || i + 1 === lean) && ri === 0) || (damage === 2 && i === lean - 1);
-      if (broken) {
-        // splintered halves hanging down
-        const mid = Math.round((a + b) / 2);
-        for (let x = a; x < mid - 2; x++) m.box(x, y - Math.max(0, Math.floor((x - (mid - 8)) / 2)), 2, x, y + 1 - Math.max(0, Math.floor((x - (mid - 8)) / 2)), 2, PR.woodGrey.base);
-        m.set(mid - 2, y, 2, PR.woodGrey.hi).set(mid - 3, y + 1, 2, PR.woodGrey.hi);
+    for (let ri = 0; ri < 2; ri++) {
+      const y0 = RY[ri];
+      const a = xs[i], b = xs[i + 1] - 1;
+      const rail = new VoxelModel('rail');
+      const sp: WoodName | WoodSpecies = hash3(i, ri, seed) < 0.4 ? 'bleached' : BROWN_GREY;
+      timber(rail, [a, 0, 0, b, 5, 1], 'x', { mat: weathered({ along: 'x', seed: seed * 13 + i * 3 + ri, ends: [a, b], checks: 0.7, species: sp, knots: 0.5, figure: 0.45 }), chamfer: 0, seed: seed + i });
+      const snapped = (damage === 1 && i === Math.min(1, xs.length - 2) && ri === 1) || (damage === 2 && i === lean - 1 && ri === 0);
+      const dragged = damage === 2 && (i === lean - 1 || i === lean) && !snapped;
+      if (snapped) {
+        // left half hangs from its last nail; right half lies in the sand
+        const mid = Math.round((a + b) / 2) + r.int(-4, 4);
+        const left = new VoxelModel('l'), right = new VoxelModel('r');
+        rail.forEach((x, y, z, c, f) => {
+          const tooth = Math.floor(hash3(y, z, seed + i) * 4);
+          if (x < mid - 2 + tooth) left.set(x, y, z, c, f);
+          else if (x > mid + 2 - tooth) right.set(x, y, z, c, f);
+        });
+        const pivot = a + 3;
+        pasteWarp(m, left, (x, y, z) => [x, y0 + y - Math.max(0, Math.round((x - pivot) * 0.55)), z + 3]);
+        nailHead(m, [a + 2, y0 + 3, 4], 'z+', { rust: 0.8, streak: 0 });
+        // lying flat: thickness -> y, height -> z, settled into the drift in front
+        pasteWarp(m, right, (x, y, z) => [x - 3, z, 6 + y + Math.round((x - mid) * 0.08)]);
         continue;
       }
-      board(m, a, y, 2, b, y + 2, 3, PR.woodGrey, 'x', seed * 7 + i * 3 + ri);
-      for (const x of [xs[i], xs[i + 1]]) m.set(x, y + 1, 4, PR.iron.dark, VF.METAL);
+      // sag in the middle; dragged rails slope down toward the leaning post
+      const sag = (x: number) => {
+        const t = (x - a) / Math.max(1, b - a);
+        let d = Math.round(Math.sin(t * Math.PI) * 1.2);
+        if (dragged) d += i === lean - 1 ? Math.round(t * t * 9) : Math.round((1 - t) * (1 - t) * 9);
+        return d;
+      };
+      pasteWarp(m, rail, (x, y, z) => [x, y0 + y - sag(x), z + 3]);
+      // fixings at both ends: nails, or a rope lashing round the post now and then
+      for (const [ex, side] of [[a, 1], [b, -1]] as [number, number][]) {
+        const pi = side > 0 ? i : i + 1;
+        if (pi === lean && dragged) continue;
+        if (hash3(i, ri, seed + side) < 0.15) ropeLashing(m, 'x', [y0 - sag(ex), -3, y0 - sag(ex) + 5, 4], Math.min(ex + side, ex + side * 3), Math.max(ex + side, ex + side * 3), { seed: seed + i, tail: 4 });
+        else for (const dy of [1, 4]) nailHead(m, [ex + side * 2, y0 + dy - sag(ex), 4], 'z+', { rust: 0.7, streak: hash3(i, dy, side) < 0.4 ? 2 : 0 });
+      }
     }
   }
   return m;
 }
 export function fence(len = 4, seed = 0): StaticModel {
-  return S(fenceCore(len, seed, 0), VS);
+  return S(fenceCore(len, seed, 0), PVS);
 }
 export function fenceBroken(seed = 0, len = 4, damage: 1 | 2 = 1): StaticModel {
-  return S(fenceCore(len, seed, damage), VS);
+  return S(fenceCore(len, seed, damage), PVS);
 }
 
 const SIGN_WORDS = ['TOWN', 'MINE', 'GOLD', 'WATER', 'FORT', 'DANGER', 'RANCH', 'BOOT HILL', 'SALOON', 'NO HOPE'];
+/** paint schemes for arrow boards: [paint (null = bare wood), lettering] */
+const SIGN_PAINT: [number | null, number][] = [[0xe0d2b0, 0x2a1d14], [0x9a3a2a, 0xf0e4c8], [0x4e6a4c, 0xf0e4c8], [null, 0x2a1d14], [0x2f3a46, 0xe8d8a8]];
+/**
+ * Crossroads signpost (1/40): a hewn weathered post (tin cap or carved pyramid top,
+ * a drying split), one to three arrow boards with painted, chipped lettering and a
+ * swallowtail end, nailed on (one hangs crooked off a lost nail), sometimes a lucky
+ * horseshoe or a rope lashing, sand and stones at the foot.
+ */
 export function signpost(seed = 0): StaticModel {
   const r = rngOf(seed, 23);
   const m = new VoxelModel('signpost');
-  post(m, -1, -1, 0, 50, 3, PR.woodGrey, seed);
-  m.box(-2, 51, -2, 2, 51, 2, PR.woodGrey.dark);
+  const H = 100;
+  pasteWarp(m, postModel(H, seed * 3 + 1, { slope: false, split: 18, hewn: 0.1, figure: 0.8 }), (x, y, z) => [x, y, z]);
+  if (mod(seed, 2) === 0) {
+    const cap = tin({ seed, rust: 0.6 });
+    for (let k = 0; k <= 3; k++) for (let x = -4 + k; x <= 3 - k; x++) for (let z = -4 + k; z <= 3 - k; z++) m.set(x, H + 1 + k, z, cap, VF.METAL);
+  } else {
+    const end = weathered({ along: 'y', seed, species: 'bleached' });
+    for (let k = 0; k < 3; k++) for (let x = -3 + k; x <= 2 - k; x++) for (let z = -3 + k; z <= 2 - k; z++) m.set(x, H + 1 + k, z, end);
+  }
   const n = r.int(1, 3);
   const words = [...SIGN_WORDS].sort(() => r.next() - 0.5).slice(0, n);
+  const crooked = n > 1 ? r.int(0, n - 1) : -1;
   words.forEach((w, i) => {
     const dir = r.pick([-1, 1]);
-    const tw = textWidth(w);
-    const L = tw + 6;
-    const y0 = 40 - i * 9;
-    const x0 = dir > 0 ? 1 : -L;
-    const x1 = dir > 0 ? L : -1;
-    const ramp = i % 2 ? PR.woodLight : PR.wood;
+    const [paint, ink] = SIGN_PAINT[(seed * 3 + i * 2 + (dir > 0 ? 1 : 0)) % SIGN_PAINT.length];
+    const tw = textWidth(w, 1, 2);
+    const Lb = tw + 14, Hh = 14;
+    const yb = 76 - i * 19;
+    const x0 = dir > 0 ? -2 : -Lb + 2, x1 = x0 + Lb - 1;
+    const wood = weathered({ along: 'x', seed: seed * 11 + i, ends: [x0, x1], checks: 0.8, species: BROWN_GREY, figure: 0.7 });
+    const mat = paint === null ? wood : paintedWood(paint, { along: 'x', seed: seed * 7 + i, chip: 0.38 + r.next() * 0.2, fade: 0.2, under: wood, ends: [x0, x1] });
+    const bm = new VoxelModel('arrow');
     for (let x = x0; x <= x1; x++) {
-      // arrow tip: taper the last 3 columns
-      const tipD = dir > 0 ? x1 - x : x - x0;
-      const shrink = tipD < 3 ? 3 - tipD : 0;
-      for (let y = y0 + shrink; y <= y0 + 6 - shrink; y++) for (const z of [1, 2]) m.set(x, y, z, y === y0 + 6 - shrink ? ramp.hi : y === y0 + shrink ? ramp.shade : ramp.base);
+      const tipD = dir > 0 ? x1 - x : x - x0, tailD = dir > 0 ? x - x0 : x1 - x;
+      const shrink = tipD < 7 ? Math.round(((7 - tipD) * 6.4) / 7) : 0;
+      for (let row = shrink; row < Hh - shrink; row++) {
+        if (tailD < 3 && Math.abs(row - 6.5) < 3 - tailD) continue; // swallowtail end
+        for (const z of [3, 4]) bm.set(x, yb + row, z, mat);
+      }
     }
-    stampText(m, 'z+', w, dir > 0 ? 2 : -L + 1, y0 + 5, 3, { color: PR.ink.base });
-    m.set(dir > 0 ? 2 : -2, y0 + 3, 3, PR.iron.dark, VF.METAL);
+    chipEdges(bm, [x0, yb, 3, x1, yb + Hh, 4], { amount: 0.18, seed: seed + i });
+    const u0 = dir > 0 ? x0 + 4 : x0 + 9;
+    stampText(bm, 'z+', w, u0, yb + 11, 4, { color: ink, scale: 2 });
+    chipPaint(bm, [x0, yb, 4, x1, yb + Hh, 4], ink, mat, { chip: 0.22, seed: seed + i * 5 });
+    if (r.chance(0.45)) bulletHole(bm, [Math.round(u0 + r.next() * tw), yb + 2 + r.int(0, 9), 4], 'z+', { through: 2, seed: seed + i });
+    // crooked: lost its outer nail and swung on the inner one
+    const slope = i === crooked ? (dir > 0 ? -0.13 : 0.13) : (r.next() - 0.5) * 0.03;
+    pasteWarp(m, bm, (x, y, z) => [x, y + Math.round(x * slope), z]);
+    for (const dy of i === crooked ? [7] : [3, 10]) nailHead(m, [dir > 0 ? 0 : -1, yb + dy, 4], 'z+', { rust: 0.7, streak: 2 });
   });
-  sandDrift(m, 0, 0, 4, 4, 2, 0, seed);
-  return S(m, VS);
+  if (mod(seed, 2) === 0) horseshoe(m, [-1, 30, 2], 'z+');
+  if (mod(seed, 3) === 1) ropeLashing(m, 'y', [-3, -3, 2, 2], 20, 24, { seed, tail: 7 });
+  footMound(m, 0, 0, 10, 9, 4, seed);
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3 + hash3(seed, k, 4) * 0.25) * Math.PI * 2;
+    fieldStone(m, [Math.round(Math.cos(a) * 5), 2, Math.round(Math.sin(a) * 5)], [2 + hash3(k, seed, 1) * 1.5, 1.6 + hash3(k, seed, 2), 2 + hash3(k, seed, 3)], { seed: seed * 7 + k, mat: sandstone({ seed: seed + k, bed: 2 }), flags: NOCOL });
+  }
+  return S(m, PVS);
 }
 
+/**
+ * Hitching rail (1/40): two weathered posts carrying a half-peeled log rail bolted
+ * down, iron tie rings on staples with a lead rope knotted to one and trailing into
+ * the sand, a staved water bucket with iron hoops, a horseshoe on a post.
+ */
 export function hitchingPost(seed = 0): StaticModel {
   const m = new VoxelModel('hitching_post');
-  for (const x of [-20, 18]) post(m, x, -1, 0, 22, 3, PR.woodGrey, seed + x);
-  board(m, -21, 20, -1, 21, 22, 1, PR.woodGrey, 'x', seed);
-  // rope tied loosely
-  rope(m, sagPoints([-8, 20, 2], [-2, 20, 2], 5, 6));
-  m.box(-9, 18, 2, -8, 21, 2, PR.rope.base);
-  // water bucket
-  cylY(m, 8, 6, 0, 6, 3.4, PR.wood.base);
-  cylY(m, 8, 6, 1, 6, 2.4, PR.water.base);
-  for (const y of [1, 5]) for (let x = -4; x <= 4; x++) for (let z = -4; z <= 4; z++) if (inCircle(x, z, 3.4) && !inCircle(x, z, 2.4)) m.set(8 + x, y, 6 + z, PR.iron.base, VF.METAL);
-  rope(m, sagPoints([5, 7, 6], [11, 7, 6], -3, 6), PR.iron.dark);
-  return S(m, VS);
+  const PXs = [-40, 38];
+  PXs.forEach((x, i) => {
+    pasteWarp(m, postModel(40, seed * 3 + i, { slope: false, split: 10 }), (px, py, pz) => [x + px, py, pz]);
+    footMound(m, x, 0, 7, 7, 3, seed + i);
+  });
+  // the log rail: round, bark still on the underside, notched over the posts
+  const bark = darkWood({ along: 'x', seed: seed + 5, knots: 0.4 });
+  const logW = weathered({ along: 'x', seed: seed + 6, checks: 1, ends: [-45, 44], figure: 0.6 });
+  cylH(m, 'x', -45, 44, 44, 0, (t) => 3.2 + Math.sin(t * 9 + seed) * 0.3, (x, y, z) => (y < 42 || (y === 42 && n3s(x * 0.15, z, seed) > 0) ? bark(x, y, z) : logW(x, y, z)));
+  for (const x of PXs) bolt(m, [x, 47, 0], 'y+', { size: 2, mat: rustedIron({ seed: seed + x, rust: 0.6 }) });
+  // tie rings hanging from staples
+  const iron = blackIron(seed + 3, 0.45);
+  for (const rx of [-16, 14]) {
+    m.set(rx - 1, 43, 4, iron, VF.METAL).set(rx + 1, 43, 4, iron, VF.METAL).set(rx, 43, 5, iron, VF.METAL);
+    for (let a = 0; a < 20; a++) {
+      const t = (a / 20) * Math.PI * 2;
+      m.set(Math.round(rx + Math.cos(t) * 2.6), Math.round(39.5 + Math.sin(t) * 2.6), 5, iron, VF.METAL);
+    }
+  }
+  // lead rope knotted to the left ring, trailing into the sand
+  ropeLine(m, [[-16, 37, 5], [-17, 35, 6]], { r: 0 });
+  for (const [dx, dy] of [[0, 0], [1, 0], [0, -1], [-1, -1]]) m.set(-17 + dx, 36 + dy, 6, 0x94764a, VF.SOFTAO);
+  ropeLine(m, sagPoints([-17, 35, 6], [-30, 1, 12], 3, 6), { r: 0 });
+  ropeLine(m, [[-30, 1, 12], [-35, 0, 15], [-39, 0, 13], [-36, 0, 10]], { r: 0 });
+  // staved water bucket with two iron hoops and a wire bail
+  {
+    const cx = 16, cz = 12;
+    const staves = 14;
+    for (let y = 0; y <= 13; y++) {
+      const rr = 5.6 + y * 0.1;
+      for (let x = -7; x <= 7; x++)
+        for (let z = -7; z <= 7; z++) {
+          if (!inCircle(x, z, rr)) continue;
+          const outer = !inCircle(x, z, rr - 1.2);
+          if (!outer && y > 0) {
+            if (y === 10) m.set(cx + x, y, cz + z, mod(x + z, 5) === 0 ? 0x5aa8b6 : 0x3e8a9c, VF.SOFTAO); // water
+            continue;
+          }
+          const st = Math.floor(((Math.atan2(z, x) / (Math.PI * 2)) + 0.5) * staves);
+          const seam = mod(((Math.atan2(z, x) / (Math.PI * 2)) + 0.5) * staves, 1) < 0.12;
+          const hoop = y === 2 || y === 3 || y === 10 || y === 11;
+          if (hoop && outer) m.set(cx + x, y, cz + z, iron, VF.METAL);
+          else m.set(cx + x, y, cz + z, seam ? 0x3a2c22 : WOOD.oak.tones[1 + (hash3(st, seed, 1) * 3.99) | 0]);
+        }
+    }
+    for (let k = 0; k <= 12; k++) {
+      const t = k / 12;
+      m.set(Math.round(cx - 6 + t * 12), Math.round(14 + Math.sin(t * Math.PI) * 6), cz, iron, VF.METAL);
+    }
+  }
+  horseshoe(m, [-40, 24, 2], 'z+');
+  return S(m, PVS);
 }
 
 /** wagon wheel model in the XY plane centred at origin (radius in voxels) */
@@ -549,7 +897,7 @@ export function railSegment(len = 4, seed = 0): StaticModel {
     const z = -Math.floor(L / 2) + 2;
     for (const x of [-18, 15]) post(m, x, z - 1, 0, 50, 4, PR.woodDark, seed + x);
     board(m, -20, 51, z - 2, 20, 55, z + 2, PR.woodDark, 'x', seed);
-    signPanel(m, 0, 44, z + 3, ['MINE'], { bg: PR.woodLight, ink: PR.ink.base });
+    signPanel(m, 0, 44, z + 3, ['MINE'], { bg: PR.woodLight, ink: PR.ink.base, weathered: true });
     for (let x = -14; x <= 14; x++) for (let y = 0; y <= 50; y++) m.set(x, y, z - 3, PR.socket.base);
   }
   return S(m, VS);
@@ -673,7 +1021,7 @@ export function gallows(seed = 0): StaticModel {
   }
   m.box(1, PR.rope ? PH + 40 : 0, -1, 3, PH + 42, 1, PR.rope.shade);
   // sign
-  signPanel(m, -24, PH + 6, s + 2, ['HANGIN', 'TODAY'], { bg: PR.parchment, ink: PR.red.dark });
+  signPanel(m, -24, PH + 6, s + 2, ['HANGIN', 'TODAY'], { bg: PR.parchment, ink: PR.red.dark, weathered: true });
   sandDrift(m, 0, 0, 30, 30, 4, 0, seed);
   return S(m, vs);
 }
@@ -850,7 +1198,7 @@ export function shack(seed = 0): StaticModel & { meta: { entrance: [number, numb
   windowW(m, b.left, b.z0 + 12, b.fy + 9, 9, 9, { frame: PR.paintWhite });
   porchFront(m, b, b.x0 - 1, b.x1 + 1, 14, b.top - 1, { tin: true, seed, steps: true });
   const sign = SHACK_SIGNS[mod(seed * 3 + 1, SHACK_SIGNS.length)];
-  signPanel(m, Math.round((b.x0 + b.x1) / 2), b.top + 6, b.z1 + 2, sign, { bg: PR.paintWhite, ink: PR.ink.base });
+  signPanel(m, Math.round((b.x0 + b.x1) / 2), b.top + 6, b.z1 + 2, sign, { bg: PR.paintWhite, ink: PR.ink.base, weathered: true });
   // stovepipe
   m.box(b.x1 - 10, b.top - 2, b.z0 + 8, b.x1 - 8, b.top + v(1.9), b.z0 + 10, PR.coal.hi, VF.METAL);
   m.box(b.x1 - 11, b.top + v(1.9) + 1, b.z0 + 7, b.x1 - 7, b.top + v(1.9) + 1, b.z0 + 11, PR.coal.base, VF.METAL);
@@ -1124,7 +1472,7 @@ export function wantedBoard(seed = 0): StaticModel {
   // ---- posts (after the roof so they pierce it cleanly), tin-capped, bolted to the lintel
   for (const sx of [-1, 1]) {
     const cx = sx * PX;
-    timber(m, [cx - 3, 0, -3, cx + 3, 99, 3], 'y', { mat: weathered({ along: 'y', seed: seed * 5 + sx + 2, ends: [0, 99], checks: 0.9, rotBelow: 7, rotFrom: 0 }), chamfer: 1, hewn: 0.14, seed: seed + sx });
+    timber(m, [cx - 3, 0, -3, cx + 3, 99, 3], 'y', { mat: weathered({ along: 'y', seed: seed * 5 + sx + 2, ends: [0, 99], checks: 0.9, rotBelow: 7, rotFrom: 0 }), chamfer: 1, seed: seed + sx });
     split(m, [cx + 1, 99, 3], 'z+', [0, -1, 0], 14, { seed: seed + sx * 3, depth: 2 });
     const cap = tin({ seed: seed + sx, rust: 0.55 });
     for (let k = 0; k <= 3; k++) {
@@ -1245,8 +1593,7 @@ export function wantedBoard(seed = 0): StaticModel {
   for (let x = 0; x < 6; x++) for (let z = 0; z < 4; z++) if (x + z < 7 && hash3(x, z, seed + 5) > 0.15) m.set((flip ? 6 : -10) + x, 0, 9 + z - (x >> 2), mixRGB(0xd2bc90, 0xfff2da, 0.2), NOCOL | VF.SOFTAO);
   return S(m, WVS);
 }
-/** seeded 2D noise helper (-1..1) for the props in this file */
-const n3s = (x: number, z: number, seed: number) => noiseField.n2(x * 0.21 + seed * 3.1, z * 0.21 - seed * 1.7);
+
 
 /** stone well with a little gable roof, crank, rope and bucket. 1/20 */
 export function well(seed = 0): StaticModel {
@@ -1377,7 +1724,7 @@ function facade(name: string, seed: number, wM: number, dM: number, hM: number, 
   for (let x = b.x0 - 2; x <= b.x1 + 2; x++) m.set(x, b.top + 1, b.z1 + 1, PR.woodDark.base);
   // big painted sign on the false front
   const cx = Math.round((b.x0 + b.x1) / 2);
-  signPanel(m, cx, b.top + 3, b.z1 + 2, sign, { bg: signBg, ink: signBg === PR.paintWhite ? PR.red.dark : PR.paintWhite.hi, pad: 2, thick: 2, scale: sign[0].length > 10 ? 1 : 2 });
+  signPanel(m, cx, b.top + 3, b.z1 + 2, sign, { bg: signBg, ink: signBg === PR.paintWhite ? PR.red.dark : PR.paintWhite.hi, pad: 2, thick: 2, scale: sign[0].length > 10 ? 1 : 2, weathered: true, seed });
   const doorW0 = opts.batwing ? 12 : 10;
   doorW(m, b.front, cx - Math.floor(doorW0 / 2), b.fy + 1, doorW0, 26, { batwing: opts.batwing, r: PR.woodDark, trim: PR.paintWhite });
   for (const sx of [-1, 1]) windowW(m, b.front, sx < 0 ? b.x0 + 6 : b.x1 - 17, b.fy + 8, 11, 12, { frame: PR.paintWhite, cross: true });

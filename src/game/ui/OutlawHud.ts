@@ -293,25 +293,34 @@ function watchModel() {
   return sculpt('hud_watch', [-40, -40, -8, 40, 64, 8], sd, paint);
 }
 
-/** the hunter lid, sprung open (its inside engraved with a guilloché rosette); hinge at x = 0 */
+/** the hunter lid, sprung open: its inside is a sunk field engraved with a guilloché rosette round a sheriff-star boss; hinge at x = 0 */
 function lidModel() {
+  const guil = (X: number, Y: number) => {
+    const r = len2(X, Y), a = Math.atan2(Y, X);
+    return sstep(0.15, 0.85, 0.5 + 0.5 * Math.sin(r * 2.3 + Math.sin(a * 12) * 1.5));
+  };
   const sd = (x: number, y: number, z: number) => {
     const X = x / V2 - WR, Y = y / V2, Z = z / V2;
     const r = len2(X, Y);
     const rr = 1.4;
     const qx = r - (WR - rr), qz = Math.abs(Z - 0.5) - (1.5 - rr);
     let d = len2(Math.max(qx, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qz), 0) - rr;
-    if (r < WR - 2 && Z > 0.4) {
-      const g = Math.sin(r * 2.2 + Math.sin(Math.atan2(Y, X) * 12) * 1.2);
-      d += 0.25 * sstep(0.3, 1, g);
+    if (Z > 0.5 && r < WR - 3.0) {
+      const star = sdStar2(X, Y, 4.2, 6, 3.2);
+      if (star < 0) d -= 0.45 * sstep(0, -1.2, star); // the raised star boss
+      else d += 0.55 + 0.45 * (1 - guil(X, Y)); // sunk, engraved field
     }
     d = Math.min(d, len3(X + WR, Y, Z - 0.5) - 1.6); // hinge knuckle
     return d * V2;
   };
   const paint = (x: number, y: number, z: number, s: Surf): [number, number] => {
+    const X = x / V2 - WR, Y = y / V2, Z = z / V2;
+    const r = len2(X, Y);
     const lit = s.nx * -0.45 + s.ny * 0.6 + s.nz * 0.66;
     let c = lit > 0.82 ? 0xfff0b0 : lit > 0.5 ? 0xe0ae48 : lit > 0.15 ? 0xb07c22 : 0x6e4810;
+    if (Z > 0.2 && r < WR - 3.0 && sdStar2(X, Y, 4.2, 6, 3.2) > 0) c = mixc(c, 0x5a3a0c, (1 - guil(X, Y)) * 0.7); // engraved grooves hold the dark
     if (s.exp < 0.3) c = mixc(c, 0x5a3a0c, 0.45);
+    if (s.exp > 0.5) c = mixc(c, 0xfff0b0, 0.4);
     return [mulc(c, 0.94 + h3(x, y, z, 12) * 0.1), METAL];
   };
   return sculpt('hud_watch_lid', [-4, -40, -2, 80, 40, 6], sd, paint);
@@ -399,9 +408,15 @@ interface Swing {
   a: number;
   v: number;
 }
+/** a damped spring, sub-stepped so a long frame can never blow it up */
 const swing = (s: Swing, dt: number, k = 40, c = 2.2) => {
-  s.v += (-s.a * k - s.v * c) * dt;
-  s.a += s.v * dt;
+  const n = Math.min(12, Math.ceil(dt / (1 / 120)));
+  const h = Math.min(dt, 0.1) / Math.max(1, n);
+  for (let i = 0; i < n; i++) {
+    s.v += (-s.a * k - s.v * c) * h;
+    s.a += s.v * h;
+  }
+  s.a = Math.max(-3, Math.min(3, s.a));
 };
 
 export class OutlawHud {
@@ -543,6 +558,7 @@ export class OutlawHud {
   }
 
   update(dt: number, A: OutlawAnchors, visible: boolean, s: number) {
+    dt = Math.min(dt, 0.1);
     this.t += dt;
     const k = A.k;
     const q = Math.max(1, Math.round(s * k));
@@ -573,9 +589,9 @@ export class OutlawHud {
       const spin = this.starSpin > 0 ? (1 - Math.pow(sp, 3)) * TAU * 2 : 0;
       const bounce = Math.sin(this.starSpin * Math.PI) * 4;
       this.star.position.set(st.x * s, -(st.y - bounce) * s, 30);
-      this.star.scale.setScalar(s * k * (1 + Math.sin(this.starSpin * Math.PI) * 0.25));
+      this.star.scale.setScalar(s * k * 1.12 * (1 + Math.sin(this.starSpin * Math.PI) * 0.25));
       this.star.rotation.set(0.12 + Math.sin(this.t * 0.7) * 0.05, spin + Math.sin(this.t * 0.9) * 0.28, Math.sin(this.t * 0.5) * 0.04);
-      this.starNum.draw(`${st.rank}`, q, (c, qq) => inkText(c, qq, { text: String(st.rank), x: 7, y: -0.5, color: '#2c241c', align: 'center', style: 'emboss', alt: 'rgba(255,255,255,0.55)' }));
+      this.starNum.draw(`${st.rank}`, q, (c, qq) => inkText(c, qq, { text: String(st.rank), x: 7, y: -0.5, color: '#120c08', align: 'center', style: 'emboss', alt: 'rgba(255,252,240,0.95)' }));
     }
 
     // ---------------------------------------------------- tally board
@@ -674,7 +690,7 @@ export class OutlawHud {
       this.watchBody.rotation.set(0.1, 0.32 + Math.sin(this.t * 0.6) * 0.06, 0);
       for (let i = 0; i < this.watchChain.length; i++) this.watchChain[i].position.set(0, -2.15 - i * 4.3, 0.5);
       const rx = pq.x - Math.sin(ang) * drop * k * WATCH_S, ry = top + Math.cos(ang) * drop * k * WATCH_S;
-      this.watchLid.rotation.y = -Math.PI + 0.02 + this.lidOpen * (Math.PI - 0.62);
+      this.watchLid.rotation.y = -Math.PI + 0.02 + this.lidOpen * (Math.PI - 0.8);
       // the hand points at the seconds left (one turn = the whole break)
       const frac = clamp01(left / total);
       this.hand.rotation.z = -(1 - frac) * TAU;

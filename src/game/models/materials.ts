@@ -131,6 +131,8 @@ export interface GrainOpts {
   ends?: [number, number];
   /** 0..1 mix toward silver-grey sun-weathering */
   bleach?: number;
+  /** 0..1 grain figure strength (default 1). Lower = calmer boards, fewer quads: use ~0.5 for scatter props */
+  figure?: number;
 }
 
 function speciesOf(s: WoodName | WoodSpecies | undefined): WoodSpecies {
@@ -156,6 +158,8 @@ export function woodGrain(o: GrainOpts): Mat {
   const grey = 0xa49a8a;
   const fin = (c: number) => (bleach > 0 ? mix(c, grey, bleach) : c);
   const ends = o.ends;
+  const fig = o.figure ?? 1;
+  const lateW = 0.17 * fig, fibHi = 0.46 + (1 - fig) * 0.35, fibLo = -0.55 - (1 - fig) * 0.35;
   return (x, y, z) => {
     const [a, u, v] = frameOf(o.along, x, y, z);
     // ---- end grain
@@ -185,14 +189,14 @@ export function woodGrain(o: GrainOpts): Mat {
     }
     // ---- rings
     const r = Math.hypot(u - pu + a * drift + swirl, v - pv) + n3(a * 0.035, u * 0.12, v * 0.12, seed) * 1.6;
-    const ph = fract(r / ring);
-    if (ph < 0.17) return fin(sp.late);
+    const ph = fract(r / (ring * (fig < 1 ? 1.5 - fig * 0.5 : 1)));
+    if (ph < lateW) return fin(sp.late);
     // ---- earlywood: broad figure + fibre streaks (long along the grain)
     const broad = n3(a * 0.02, u * 0.1, v * 0.1, seed + 9) * 0.5;
     const fib = n3(a * 0.045, u * 0.6, v * 0.6, seed + 4);
     let t = 0.55 + broad;
-    if (fib > 0.46) t += 0.22;
-    else if (fib < -0.55) t -= 0.25;
+    if (fib > fibHi) t += 0.22;
+    else if (fib < fibLo) t -= 0.25;
     return fin(tone(sp.tones, t));
   };
 }
@@ -1074,6 +1078,49 @@ export function hewn(m: VoxelModel, box: Box, axis: Axis, o: { seed?: number; am
     if (sc > 0.62 - amt * 0.6) del.push([x, y, z]);
   });
   for (const [x, y, z] of del) m.del(x, y, z);
+  return m;
+}
+
+/**
+ * Chip painted lettering / trim: voxels of colour `ink` inside box lose their paint
+ * where the (grain-stretched) peel field says so, showing `under` instead.
+ */
+export function chipPaint(m: VoxelModel, box: Box, ink: number, under: Mat, o: { chip?: number; seed?: number; along?: Axis } = {}) {
+  const chip = o.chip ?? 0.3;
+  const seed = o.seed ?? 0;
+  const along = o.along ?? 'x';
+  const thr = -0.62 + chip * 1.1;
+  return applyMat(m, (x, y, z) => {
+    const [a, u, v] = frameOf(along, x, y, z);
+    const c = fbm(a * 0.05, u * 0.3, v * 0.3, seed + 17) + n3(a * 0.3, u * 0.9, v * 0.9, seed + 18) * 0.12;
+    return c < thr ? under(x, y, z) : ink;
+  }, box, (_x, _y, _z, c) => c === (ink & 0xffffff));
+}
+
+/** a horseshoe nailed to a face, open end up (it holds the luck): 7 wide, 8 tall, with nail heads */
+export function horseshoe(m: VoxelModel, p: V3, face: Face, o: { mat?: Mat; up?: boolean } = {}) {
+  const n = normalOf(face);
+  const [tu, tv] = tangentsOf(face);
+  const mat = o.mat ?? rustedIron({ rust: 0.6, streaks: false });
+  const up = o.up ?? true;
+  const pts: [number, number][] = [];
+  for (let i = -3; i <= 3; i++)
+    for (let j = 0; j <= 7; j++) {
+      const jj = up ? j : 7 - j;
+      // U: arc at the closed end, two arms
+      const arc = jj <= 3 ? Math.hypot(i, (3 - jj) * 1.1) : Math.abs(i);
+      const inArm = jj > 3 && Math.abs(i) >= 2 && Math.abs(i) <= 3;
+      const inArc = jj <= 3 && arc >= 1.9 && arc <= 3.3;
+      if (inArm || inArc) pts.push([i, j]);
+    }
+  for (const [i, j] of pts) {
+    const q = add(add(add(p, n), tu, i), tv, j - 4);
+    m.set(q[0], q[1], q[2], mat, VF.METAL);
+  }
+  for (const [i, j] of [[-3, up ? 5 : 2], [3, up ? 5 : 2]] as [number, number][]) {
+    const q = add(add(add(p, n, 2), tu, i), tv, j - 4);
+    m.set(q[0], q[1], q[2], 0x3a3634, VF.METAL);
+  }
   return m;
 }
 

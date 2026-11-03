@@ -113,7 +113,8 @@ export class KhonsuAvatar extends Boss {
   }
   /** speed factor for wind-ups and gaps: faster per phase and per return */
   private get haste() {
-    return (1 - this.phase * 0.12) * (1 - (this.tier - 1) * 0.08);
+    // hard but fair: he speeds up per phase / return, never below readable wind-ups
+    return (1 - this.phase * 0.08) * (1 - (this.tier - 1) * 0.06);
   }
 
   protected hitKind() {
@@ -266,7 +267,7 @@ export class KhonsuAvatar extends Boss {
     this.anim.wind = 1;
     this.ctx.sfx('divine_whisper', this.pos, 0.8, 1.25);
     this.moonLight.intensity = 6;
-    const W = Math.max(0.38, (0.6 - this.phase * 0.08) * this.haste);
+    const W = Math.max(0.55, (0.75 - this.phase * 0.06) * this.haste);
     this.warn.bang(this, { tier: 'tell', life: W, y: this.height + 0.5 });
     this.warn.wedge(this.pos.x, this.pos.z, this.yaw, 5.2, 1.0, W, 'heavy');
     await this.wait(W);
@@ -306,7 +307,7 @@ export class KhonsuAvatar extends Boss {
       x = this.pos.x;
       z = this.pos.z;
     }
-    const lead = Math.max(0.32, 0.45 * this.haste);
+    const lead = Math.max(0.5, 0.62 * this.haste);
     this.warn.circle(x, z, 2.2, lead + 0.15, 'heavy');
     this.warn.bang({ x, y: this.ground(x, z), z }, { tier: 'tell', life: lead, y: this.height * 0.9 });
     await this.wait(lead);
@@ -334,7 +335,7 @@ export class KhonsuAvatar extends Boss {
     this.anim.aimL = 1;
     this.setExpr('smug');
     const c = { x: this.pos.x, y: this.pos.y + 0.2, z: this.pos.z };
-    const W = 0.84 * this.haste;
+    const W = 1.05 * this.haste;
     this.warn.bang(this, { tier: 'heavy', life: W, y: this.height + 0.5 });
     this.warn.circle(c.x, c.z, 10, W, 'heavy');
     for (let i = 0; i < 3; i++) {
@@ -366,8 +367,8 @@ export class KhonsuAvatar extends Boss {
     const hits: Promise<void>[] = [];
     for (let i = 0; i < n; i++) {
       const at = this.predicted(0.5 + rnd.next() * 0.4).add(_w.set((rnd.next() - 0.5) * 7, 0, (rnd.next() - 0.5) * 7));
-      hits.push(this.slam(at, 2.6, 18, 0.7, 'curse'));
-      await this.wait(0.17 * this.haste);
+      hits.push(this.slam(at, 2.6, 18, 0.9, 'curse'));
+      await this.wait(0.2 * this.haste);
     }
     await Promise.all(hits);
     this.anim.aimL = this.anim.aimR = 0;
@@ -459,7 +460,7 @@ export class KhonsuAvatar extends Boss {
     this.warn.bang(this, { tier: 'tell', life: 0.9, y: this.height + 0.5 });
     this.moonLight.intensity = 8;
     this.taunt(rnd.pick(['Wake, my faithful.', 'The moon calls the roll.', 'Rise and serve.']), MOON);
-    await this.ritual(this.riteSites(2, 7, 11), 1.0 * this.haste, this.courtFor(false));
+    await this.ritual(this.riteSites(2, 7, 11), 1.2 * this.haste, this.courtFor(false));
     this.riteCd = (this.phase >= 2 ? 10 : 13) + rnd.next() * 3;
     this.moonLight.intensity = 0;
     this.anim.aimL = this.anim.aimR = 0;
@@ -512,10 +513,10 @@ export class KhonsuAvatar extends Boss {
       while (true) {
         await this.wait((2.6 - (this.tier - 1) * 0.3) * (this.frac < 0.15 ? 0.75 : 1));
         if (this.invulnerable) continue;
-        this.warn.bang(this, { tier: 'tell', life: 0.4, y: this.height + 0.5 });
+        this.warn.bang(this, { tier: 'tell', life: 0.55, y: this.height + 0.5 });
         const from = this.socketWorld('head_top', new THREE.Vector3());
         this.ctx.particles.emit({ pos: from, count: 1, life: [0.24, 0.24], size: [0.75, 0.15], sprite: 'star4', additive: true, color: 0xd8b0ff, screen: true, sizeJitter: 0, rot: 0.4 });
-        await this.wait(0.4);
+        await this.wait(0.55);
         if (k++ % 2 === 0) this.fire('fan', { count: 11 + this.tier * 2, spread: 2.0, speed: 10, dmg: 8, proj: 'curse' }, from);
         else this.fire('ring', { count: 16 + this.tier * 4, speed: 8, dmg: 8, proj: 'curse', phase: rnd.next() }, from);
         if (k === 1) this.callout('Out of Time');
@@ -626,8 +627,8 @@ export class KhonsuAvatar extends Boss {
     this.handT.thumb = 0.05;
     this.warn.bang({ x: at.x, y: g, z: at.z }, { tier: 'heavy', life: 1.3 * this.haste + 0.2, y: 6 });
     await this.wait(0.5 * this.haste);
-    const slam = this.slam(at, 4.8, 34, 0.95, 'curse');
-    await this.wait(0.72);
+    const slam = this.slam(at, 4.8, 34, 1.15, 'curse');
+    await this.wait(0.92);
     this.handRate = 14;
     this.handT.pos.y = g + 0.6;
     const pl = this.player;
@@ -687,7 +688,7 @@ export class KhonsuAvatar extends Boss {
     } else if (d < 3.4 && this.player.pos.y < palm.y + 2.5) {
       this.caught = true;
       this.taunt(rnd.pick(['Mine.', 'Struggle. It amuses the moon.', 'Your bones belong to the night.']), MOON);
-      const r = await this.qte({ kind: 'mash', key: 'KeyE', label: 'BREAK FREE', duration: 2.4, target: 15 + this.phase * 2 });
+      const r = await this.qte({ kind: 'mash', key: 'KeyE', label: 'BREAK FREE', duration: 2.8, target: 12 + this.phase });
       this.caught = false;
       if (r !== 'fail') {
         this.handT.curl = -0.3;
@@ -730,9 +731,9 @@ export class KhonsuAvatar extends Boss {
     this.handT.curl = 0.2;
     // telegraph along the line
     this.warn.lane(a.x, a.z, b.x - a.x, b.z - a.z, 28, 3.6, 1.0 * this.haste + 0.6, 'heavy');
-    this.warn.bang({ x: pp.x, y: g, z: pp.z }, { tier: 'heavy', life: 1.0 * this.haste, y: 3.2 });
+    this.warn.bang({ x: pp.x, y: g, z: pp.z }, { tier: 'heavy', life: 1.2 * this.haste, y: 3.2 });
     this.ctx.toast('JUMP!', '#ffffff');
-    await this.wait(1.0 * this.haste);
+    await this.wait(1.2 * this.haste);
     this.ctx.sfx('quake_rumble', this.pos, 1, 1.3);
     const dur = 1.25 * (1 - this.phase * 0.05);
     let hit = false, jumped = false, offered = false;
@@ -771,8 +772,8 @@ export class KhonsuAvatar extends Boss {
     this.handT.curl = 1.5;
     this.handT.thumb = 1.2;
     this.warn.circle(at.x, at.z, 3.6, 0.8 * this.haste + 2.4, 'heavy');
-    this.warn.bang({ x: at.x, y: g, z: at.z }, { tier: 'heavy', life: 0.8 * this.haste, y: 8.5 });
-    await this.wait(0.8 * this.haste);
+    this.warn.bang({ x: at.x, y: g, z: at.z }, { tier: 'heavy', life: 1.0 * this.haste, y: 8.5 });
+    await this.wait(1.0 * this.haste);
     for (let i = 0; i < 3; i++) {
       this.handRate = 12;
       this.handT.pos.y = g + 1.2;

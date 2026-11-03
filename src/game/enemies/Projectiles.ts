@@ -62,11 +62,21 @@ export class Projectiles {
    * easy to read and side-step. Arcing shots keep their solved trajectories.
    */
   speedMul = 1;
+  /**
+   * Easier fights: trash volleys are thinned by `countMul` (set per wave by the enemy
+   * manager; bosses are never thinned), boss shots hit for `bossDmgMul`, and a shot that
+   * lands grants the hunter a short grace (`graceIframes`) so a stream can't shred them.
+   */
+  countMul = 1;
+  bossDmgMul = 0.8;
+  graceIframes = 0.45;
 
   spawn(p: Partial<Proj> & { kind: ProjKind; x: number; y: number; z: number; vx: number; vy: number; vz: number; dmg: number }) {
     if (this.list.length > 2200) this.list.shift();
     const L = LOOK[p.kind];
     const q = { r: L.size * 0.45, life: 6, grav: L.grav, owner: 'enemy', grazed: false, spin: 0, ...p } as Proj;
+    // boss ids start at 900000 (Boss.ts)
+    if (q.owner === 'enemy' && (q.sourceId ?? 0) >= 900000) q.dmg *= this.bossDmgMul;
     if (q.owner === 'enemy' && q.grav === 0 && this.speedMul !== 1) {
       q.vx *= this.speedMul;
       q.vy *= this.speedMul;
@@ -84,7 +94,8 @@ export class Projectiles {
     const flat = Math.hypot(dx, dz) || 1;
     const base = Math.atan2(dx, dz);
     const dy = target.y - from.y;
-    const n = o.count ?? 1;
+    const boss = (o.sourceId ?? 0) >= 900000;
+    const n = boss || kind === 'snipe' || kind === 'stream' ? o.count ?? 1 : Math.max(1, Math.round((o.count ?? 1) * this.countMul));
     const mk = (ang: number, sp: number, vy: number, delay = 0) => {
       const fire = () => this.spawn({ kind: proj, x: from.x, y: from.y, z: from.z, vx: Math.sin(ang) * sp, vy, vz: Math.cos(ang) * sp, dmg: o.dmg, status: o.status, sourceId: o.sourceId, acid: o.acid });
       if (delay > 0) this.ctx.engine.tweens.after(delay, fire);
@@ -207,6 +218,8 @@ export class Projectiles {
         if (dh < q.r + 0.42 && Math.abs(dy) < 1.0 + q.r) {
           const dealt = pl.takeHit({ base: q.dmg, kind: q.kind === 'curse' || q.kind === 'venom' ? 'magic' : 'phys', source: 'projectile', status: q.status, knock: q.kind === 'dynamite' ? 8 : 1.5 }, new THREE.Vector3(q.x - q.vx * 0.05, q.y, q.z - q.vz * 0.05));
           if (dealt > 0 && q.status) for (const s of q.status) pl.status.apply(s.id, s.stacks, s.dur, 2, 30, {});
+          const hp = pl as { invuln?: number };
+          if (dealt > 0 && hp.invuln !== undefined) hp.invuln = Math.max(hp.invuln, this.graceIframes);
           dead = true;
           this.impact(q, q.x, q.y, q.z, true);
         } else if (!q.grazed && dh < q.r + 1.4 && Math.abs(dy) < 1.6) {

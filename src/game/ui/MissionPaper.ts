@@ -30,13 +30,13 @@ export interface PaperQuest {
 
 /** rewards the quest givers promise (used when a quest does not say) */
 const REWARDS: [RegExp, string][] = [
-  [/^escort/i, 'Reward: bounty, gold & snake oil'],
-  [/wagon/i, 'Reward: bounty, gold & a strongbox'],
+  [/^escort/i, 'Reward: bounty & snake oil'],
+  [/wagon/i, 'Reward: bounty & gold'],
   [/rain frog/i, "Reward: a mother's thanks"],
-  [/clear the fort/i, 'Reward: Gold Strongbox & bounty'],
+  [/clear the fort/i, 'Reward: a gold strongbox'],
   [/strike it rich/i, 'Reward: bounty for the ore'],
   [/camel rustlers/i, "Reward: Humphrey's swift legs"],
-  [/^wanted/i, 'Reward: bounty & Silver Strongbox'],
+  [/^wanted/i, 'Reward: bounty & a strongbox'],
   [/showdown/i, 'Stakes: double or nothing'],
 ];
 
@@ -660,6 +660,7 @@ export class MissionPaper {
   }
 
   update(dt: number, quests: PaperQuest[], pa: PaperAnchor, visible: boolean, s: number, recent: { text: string; age: number }[]) {
+    dt = Math.min(dt, 0.1);
     this.t += dt;
     const k = pa.k;
     const topW = this.notes.find((n) => !n.ending)?.w ?? 150;
@@ -834,7 +835,7 @@ export class MissionPaper {
       n.state = 'stamp';
       n.simT = 0;
       const u = n.mat.uniforms;
-      u.uStampXf.value.set(0.62, 0.36, -0.2 - Math.random() * 0.12, Math.min(0.42, 30 / n.h));
+      u.uStampXf.value.set(0.6, 0.4, -0.2 - Math.random() * 0.12, Math.min(0.5, 38 / n.h));
       if (n.mat.uniforms.uCheck.value.z <= 0 && n.mat.uniforms.uStroke.value.x > 0) {
         n.strokeT = 0;
         n.checkT = 0;

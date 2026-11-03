@@ -1008,7 +1008,8 @@ export class Wildlife {
     // sitting on the hunter's head, legs paddling
     const head = pl.rig.nodes['head'];
     if (head) head.getWorldPosition(_v);
-    else _v.set(pl.pos.x, pl.pos.y + 1.6, pl.pos.z);
+    // (a stale pose, e.g. right after a teleport: sit on the board's position instead)
+    if (!head || Math.hypot(_v.x - pl.pos.x, _v.z - pl.pos.z) > 1.5 || Math.abs(_v.y - pl.pos.y - 1.5) > 1) _v.set(pl.pos.x, pl.pos.y + 1.6, pl.pos.z);
     b.pos.set(_v.x, _v.y + 0.18, _v.z);
     b.yaw = dampAngle(b.yaw, pl.board.heading + Math.sin(this.t * 1.7) * 0.4, 6, dt);
     b.rig.root.position.copy(b.pos);

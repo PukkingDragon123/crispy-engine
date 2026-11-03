@@ -20,6 +20,10 @@ import type { Qte } from '../ui/Qte';
 
 /** attacks that fire something: they wind up with a muzzle glint and share the ranged fairness cap */
 const RANGED = new Set(['burst', 'fan', 'ring', 'spiral', 'snipe', 'lob', 'volley', 'stream']);
+/** easier fights: every wind-up is stretched by this (early waves stretch further), and a blow
+ *  that lands gives the hunter at least HIT_GRACE seconds of i-frames before the next one */
+const TELEGRAPH = 1.25;
+const HIT_GRACE = 0.55;
 /** hit sources that are damage-over-time ticks (no flinch, no poise, no impact fx) */
 const DOT = new Set(['poison', 'bleed', 'burn']);
 /** loose gear and cloth the scarab swarm gnaws off first */
@@ -1670,14 +1674,16 @@ export class Enemies implements EnemyApi {
             ctx.events.emit('ram', e);
           } else if (e.contactCd <= 0 && e.def.contact > 0) {
             e.contactCd = 0.9;
-            pl.takeHit({ base: e.def.contact * e.dmgMul, kind: 'phys', source: 'contact', knock: 3 }, e.pos);
+            this.hitHunter({ base: e.def.contact * e.dmgMul, kind: 'phys', source: 'contact', knock: 3 }, e.pos);
             if (e.def.thorns) pl.takeHit({ base: e.def.thorns, kind: 'phys', source: 'thorns' }, e.pos);
           }
         }
       }
       this.animate(e, dt, time);
     }
-    this.proj.speedMul = clamp(0.78 + this.wave * 0.022, 0.78, 1);
+    // easier fights: early / mid-wave shots fly slower and volleys are thinner (bosses keep their full patterns)
+    this.proj.speedMul = clamp(0.68 + this.wave * 0.008, 0.68, 1);
+    this.proj.countMul = clamp(0.6 + this.wave * 0.01, 0.6, 1);
     this.proj.update(dt);
     this.updateHazards(dt);
     this.updateDying(dt, time);
@@ -1805,7 +1811,7 @@ export class Enemies implements EnemyApi {
     if (e.state !== 'wrap') return;
     const ctx = this.ctx;
     const bite = e.def.attacks[1]?.dmg ?? 12;
-    this.player.takeHit({ base: bite * 2.6 * e.dmgMul * clamp(mult, 0, 3), kind: 'phys', source: 'contact', knock: 7, status: [{ id: 'poison', stacks: 2, dur: 4 }] }, e.pos);
+    this.hitHunter({ base: bite * 2.6 * e.dmgMul * clamp(mult, 0, 3), kind: 'phys', source: 'contact', knock: 7, status: [{ id: 'poison', stacks: 2, dur: 4 }] }, e.pos);
     ctx.sfx('hit_bone', e.pos, 1, 0.7);
     ctx.sfx('skeleton_rattle', e.pos, 1, 0.8);
     ctx.shake(0.55);
@@ -1831,7 +1837,7 @@ export class Enemies implements EnemyApi {
     this.wrapTick -= dt;
     if (this.wrapTick <= 0) {
       this.wrapTick = 0.55;
-      pl.takeHit({ base: (e.def.attacks[1]?.dmg ?? 12) * 0.45 * e.dmgMul, kind: 'phys', source: 'contact', knock: 0 }, e.pos);
+      this.hitHunter({ base: (e.def.attacks[1]?.dmg ?? 12) * 0.45 * e.dmgMul, kind: 'phys', source: 'contact', knock: 0 }, e.pos);
       pl.status.apply('slow', 1, 0.6, 0, 1, {});
       this.ctx.sfx('hit_bone', e.pos, 0.35, 0.8);
       e.squash.kick(-2.5);
@@ -2147,7 +2153,7 @@ export class Enemies implements EnemyApi {
         ctx.fx.sandBurst({ x: e.pos.x, y: ground, z: e.pos.z }, 1.2);
         const hd = Math.hypot(hunter.x - e.pos.x, hunter.z - e.pos.z);
         if (hd < 2.8 + e.radius && Math.abs(hunter.y - e.pos.y) < 2.5) {
-          const dealt = this.player.takeHit({ base: (d.attacks[0]?.dmg ?? 14) * e.dmgMul * 1.25, kind: 'phys', source: 'contact', knock: 9, status: [{ id: 'bleed', stacks: 2, dur: 3 }] }, e.pos);
+          const dealt = this.hitHunter({ base: (d.attacks[0]?.dmg ?? 14) * e.dmgMul * 1.25, kind: 'phys', source: 'contact', knock: 9, status: [{ id: 'bleed', stacks: 2, dur: 3 }] }, e.pos);
           if (dealt > 0) this.player.board.impulse.y += 6;
         }
         if (foc && Math.hypot(foc.pos.x - e.pos.x, foc.pos.z - e.pos.z) < 2.8 + e.radius + foc.radius) foc.hurt((d.attacks[0]?.dmg ?? 14) * e.dmgMul * 1.25, e.pos, 'contact');
@@ -2214,7 +2220,7 @@ export class Enemies implements EnemyApi {
       if (rnd.chance(0.8)) ctx.fx.sandSpray({ x: e.pos.x, y: ground, z: e.pos.z }, { x: -wantX * 0.1, y: 0, z: -wantZ * 0.1 }, 1.5);
       if (dist < e.radius + 0.8 && e.contactCd <= 0 && !e.dodged) {
         e.contactCd = 1;
-        this.player.takeHit({ base: (e.atk?.dmg ?? 20) * e.dmgMul, kind: 'phys', source: 'contact', knock: 12 }, e.pos);
+        this.hitHunter({ base: (e.atk?.dmg ?? 20) * e.dmgMul, kind: 'phys', source: 'contact', knock: 12 }, e.pos);
         ctx.shake(0.4);
       }
       if (e.stateT > 1.2 || ctx.world.storm.sdf(e.pos.x, e.pos.z) < 2) {
@@ -2244,14 +2250,14 @@ export class Enemies implements EnemyApi {
         if (e.state === 'recover' && (d.ai === 'leaper' || d.ai === 'pack')) {
           ctx.fx.sandBurst(p, 1);
           ctx.sfx('board_land', p, 0.6);
-          if (this.player.pos.distanceTo(e.pos) < 3.2) this.player.takeHit({ base: (e.atk?.dmg ?? 15) * e.dmgMul, kind: 'phys', source: 'contact', knock: 8, status: [{ id: 'bleed', stacks: 2, dur: 3 }] }, e.pos);
+          if (this.player.pos.distanceTo(e.pos) < 3.2) this.hitHunter({ base: (e.atk?.dmg ?? 15) * e.dmgMul, kind: 'phys', source: 'contact', knock: 8, status: [{ id: 'bleed', stacks: 2, dur: 3 }] }, e.pos);
         }
         if (e.state === 'recover' && d.ai === 'constrictor') {
           ctx.fx.sandBurst(p, 1.1);
           ctx.shake(Math.max(0, 0.3 - this.player.pos.distanceTo(e.pos) * 0.02));
           const pd = this.player.pos.distanceTo(e.pos);
           if (pd < 2.6 && this.player.alive && !this.wrapping && !foc) this.startWrap(e, time);
-          else if (pd < 3.2) this.player.takeHit({ base: (e.atk?.dmg ?? 15) * e.dmgMul, kind: 'phys', source: 'contact', knock: 6, status: [{ id: 'poison', stacks: 3, dur: 4 }] }, e.pos);
+          else if (pd < 3.2) this.hitHunter({ base: (e.atk?.dmg ?? 15) * e.dmgMul, kind: 'phys', source: 'contact', knock: 6, status: [{ id: 'poison', stacks: 3, dur: 4 }] }, e.pos);
         }
         if (e.state === 'recover' && foc && foc.pos.distanceTo(e.pos) < 2.4 + foc.radius) foc.hurt((e.atk?.dmg ?? 15) * e.dmgMul, e.pos, 'leap');
       }
@@ -2432,13 +2438,13 @@ export class Enemies implements EnemyApi {
         if (a.kind !== 'melee' && a.kind !== 'explode' && a.kind !== 'aura' && a.kind !== 'music' && a.kind !== 'howl' && !this.lineOfSight(e, ppos)) continue;
         // fairness: only so many swings / shots wind up at once, and nobody fires the moment it arrives
         const ranged = RANGED.has(a.kind);
-        if (!foc && a.kind === 'melee' && this.busyMelee >= Math.min(6, 2 + Math.floor(this.wave / 7))) continue;
-        if (!foc && ranged && (this.busyRanged >= Math.min(9, 3 + Math.floor(this.wave / 5)) || e.life < 1.3)) continue;
+        if (!foc && a.kind === 'melee' && this.busyMelee >= Math.min(5, 2 + Math.floor(this.wave / 10))) continue;
+        if (!foc && ranged && (this.busyRanged >= Math.min(7, 2 + Math.floor(this.wave / 7)) || e.life < 1.6)) continue;
         if (a.kind === 'melee') this.busyMelee++;
         else if (ranged) this.busyRanged++;
         // wind-up: early waves telegraph a little longer while the tells are learned; shots, pounces and
         // charges from outside the view wind up longer still (the glint / click / marker give time to react)
-        let W = a.windup * (1 + Math.max(0, 6 - this.wave) * 0.04);
+        let W = a.windup * (TELEGRAPH + Math.max(0, 10 - this.wave) * 0.03);
         if (ranged || a.kind === 'leap' || a.kind === 'charge') {
           const cx = e.pos.x - ctx.camera.position.x, cz = e.pos.z - ctx.camera.position.z;
           if ((cx * this.camFX + cz * this.camFZ) / (Math.hypot(cx, cz) || 1) < 0.55) W *= 1.4;
@@ -2472,6 +2478,13 @@ export class Enemies implements EnemyApi {
         break;
       }
     }
+  }
+
+  /** every enemy blow on the hunter goes through here: a landed hit grants a short grace (easier fights) */
+  private hitHunter(h: Hit, from?: THREE.Vector3) {
+    const dealt = this.player.takeHit(h, from);
+    if (dealt > 0 && this.player.invuln !== undefined && h.source !== 'thorns') this.player.invuln = Math.max(this.player.invuln, HIT_GRACE);
+    return dealt;
   }
 
   // ------------------------------------------------------------- warnings, QTE dodges, openings
@@ -2679,7 +2692,7 @@ export class Enemies implements EnemyApi {
         }
         const hd = Math.hypot(ppos.x - e.pos.x, ppos.z - e.pos.z);
         if (hd < 2.3 && Math.abs(ppos.y + 0.9 - e.pos.y) < 2.6 && this.player.alive) {
-          const dealt = this.player.takeHit({ base: a.dmg * e.dmgMul, kind: 'phys', source: 'contact', knock: 3, status: [{ id: 'bleed', stacks: 1, dur: 3 }] }, e.pos);
+          const dealt = this.hitHunter({ base: a.dmg * e.dmgMul, kind: 'phys', source: 'contact', knock: 3, status: [{ id: 'bleed', stacks: 1, dur: 3 }] }, e.pos);
           ctx.sfx('hit_flesh', e.pos, 0.8, 1.2);
           const canSnatch = dealt > 0 && !this.snatching && !this.wrapping && !!this.qte && !this.qte.active && rnd.chance(e.alpha ? 1 : 0.6);
           if (canSnatch) this.startSnatch(e, time);
@@ -2741,7 +2754,7 @@ export class Enemies implements EnemyApi {
     let diving = 0;
     for (const o of this.list) if (o.skel === 'bird' && (o.state === 'windup' || o.state === 'dive')) diving++;
     if (diving >= (this.wave >= 20 ? 2 : 1)) return;
-    const W = a.windup * (1 + Math.max(0, 8 - this.wave) * 0.04) * (e.alpha ? 0.9 : 1);
+    const W = a.windup * (TELEGRAPH + Math.max(0, 10 - this.wave) * 0.03) * (e.alpha ? 0.9 : 1);
     e.wind = W;
     e.atk = a;
     e.cds[0] = a.cooldown * (0.85 + rnd.next() * 0.3);
@@ -2781,7 +2794,7 @@ export class Enemies implements EnemyApi {
     ctx.events.emit('vultureSnatch', e);
     const q = this.qte;
     if (!q) return;
-    void q.run({ kind: 'mash', key: 'KeyF', label: 'SHAKE IT OFF', duration: 2.3, target: e.alpha ? 13 : 10 }).then((r) => {
+    void q.run({ kind: 'mash', key: 'KeyF', label: 'SHAKE IT OFF', duration: 2.8, target: e.alpha ? 10 : 8 }).then((r) => {
       if (this.snatching !== e) return;
       this.releaseSnatch(e, r !== 'fail', r === 'perfect' ? 1.6 : 1);
     });
@@ -2817,14 +2830,14 @@ export class Enemies implements EnemyApi {
     this.snatchTick -= dt;
     if (this.snatchTick <= 0) {
       this.snatchTick = 0.6;
-      pl.takeHit({ base: (e.def.attacks[0]?.dmg ?? 10) * 0.35 * e.dmgMul, kind: 'phys', source: 'contact', knock: 0 }, e.pos);
+      this.hitHunter({ base: (e.def.attacks[0]?.dmg ?? 10) * 0.35 * e.dmgMul, kind: 'phys', source: 'contact', knock: 0 }, e.pos);
       ctx.sfx('hit_flesh', e.pos, 0.4, 1.3);
       e.squash.kick(-3);
     }
     if (rnd.chance(dt * 14)) ctx.fx.dust({ x: b.pos.x, y: g + 0.2, z: b.pos.z }, 1.1, P.sand0, 2);
     if (rnd.chance(dt * 6)) ctx.particles.emit({ pos: { x: e.pos.x, y: e.pos.y, z: e.pos.z }, count: 1, spread: 1.5, up: 0.4, life: [0.8, 1.4], size: [0.1, 0.07], sprite: 'twig', color: [0x45301f, 0x5a3e2c], gravity: 1.5, drag: 2.5, rot: 6, rotSpeed: 3 });
     // no QTE overlay to answer it: it drops its prey on its own
-    if (e.stateT > (this.qte ? 2.9 : 1.6)) this.releaseSnatch(e, false);
+    if (e.stateT > (this.qte ? 3.3 : 1.6)) this.releaseSnatch(e, false);
   }
 
   /** end a snatch. broke: the hunter shook it off (the bird is hurt and tumbles); else it drops its prey */
@@ -2851,7 +2864,7 @@ export class Enemies implements EnemyApi {
       e.state = 'climb';
       e.stateT = 0;
       if (hurtBird && pl.alive) {
-        pl.takeHit({ base: (e.def.attacks[0]?.dmg ?? 10) * 1.3 * e.dmgMul, kind: 'phys', source: 'contact', knock: 6 }, e.pos);
+        this.hitHunter({ base: (e.def.attacks[0]?.dmg ?? 10) * 1.3 * e.dmgMul, kind: 'phys', source: 'contact', knock: 6 }, e.pos);
         ctx.sfx('vulture_screech', e.pos, 0.8, 1.1);
       }
     }
@@ -2934,7 +2947,7 @@ export class Enemies implements EnemyApi {
         if (foc) {
           if (dist < a.range + 0.7 + foc.radius) foc.hurt(dmg, e.pos, 'melee');
         } else if (dist < a.range + 0.7 && Math.abs(ppos.y - e.pos.y) < 2) {
-          const dealt = this.player.takeHit({ base: dmg, kind: 'phys', source: 'contact', knock: 5, status: a.status as any }, e.pos);
+          const dealt = this.hitHunter({ base: dmg, kind: 'phys', source: 'contact', knock: 5, status: a.status as any }, e.pos);
           if (dealt > 0 && rnd.chance(0.3)) {
             e.anim.tauntT = 0;
             e.anim.tauntKind = rnd.chance(0.5) ? 2 : 0;
@@ -3000,7 +3013,7 @@ export class Enemies implements EnemyApi {
         e.leapTo.set(ppos.x, ppos.y + 0.8, ppos.z);
         ctx.sfx('vulture_screech', e.pos, 0.8);
         ctx.engine.tweens.after(0.55, () => {
-          if (e.alive && this.player.pos.distanceTo(e.pos) < 2.6) this.player.takeHit({ base: dmg, kind: 'phys', source: 'contact', knock: 4 }, e.pos);
+          if (e.alive && this.player.pos.distanceTo(e.pos) < 2.6) this.hitHunter({ base: dmg, kind: 'phys', source: 'contact', knock: 4 }, e.pos);
         });
         break;
       case 'explode': {
@@ -3013,7 +3026,7 @@ export class Enemies implements EnemyApi {
       case 'aura': {
         const r = a.radius ?? 5;
         ctx.fx.ring({ x: e.pos.x, y: e.pos.y + 0.2, z: e.pos.z }, 0x8a5aa0, r * 2, 0.6);
-        if (dist < r) this.player.takeHit({ base: dmg, kind: 'magic', source: 'curse', status: a.status as any }, e.pos);
+        if (dist < r) this.hitHunter({ base: dmg, kind: 'magic', source: 'curse', status: a.status as any }, e.pos);
         break;
       }
       case 'music': {
@@ -3028,7 +3041,7 @@ export class Enemies implements EnemyApi {
         ctx.sfx('whoosh', e.pos, 0.8, 0.8);
         const px = ppos.x - e.pos.x, pz = ppos.z - e.pos.z;
         const along = px * fx + pz * fz, lat = Math.abs(-px * fz + pz * fx);
-        if (along > 0 && along < a.range + 0.5 && lat < 1.3) this.player.takeHit({ base: dmg, kind: 'phys', source: 'contact', knock: 6, status: a.status as any }, e.pos);
+        if (along > 0 && along < a.range + 0.5 && lat < 1.3) this.hitHunter({ base: dmg, kind: 'phys', source: 'contact', knock: 6, status: a.status as any }, e.pos);
         break;
       }
       case 'lasso': {
@@ -3037,7 +3050,7 @@ export class Enemies implements EnemyApi {
           this.player.status.apply('slow', 1, 1.5, 0, 1, {});
           const pull = new THREE.Vector3(e.pos.x - ppos.x, 0, e.pos.z - ppos.z).normalize().multiplyScalar(9);
           this.player.board.impulse.add(pull);
-          this.player.takeHit({ base: dmg, kind: 'phys', source: 'contact' }, e.pos);
+          this.hitHunter({ base: dmg, kind: 'phys', source: 'contact' }, e.pos);
           ctx.toast('LASSOED!', '#e0a060');
         }
         break;
