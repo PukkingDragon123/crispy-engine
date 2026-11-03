@@ -60,7 +60,7 @@ export const AIM_ASSIST = {
   snapCone: 9,
   snapPull: 0.72,
   snapTime: 0.15,
-  touchMul: 1.7,
+  touchMul: 2.2,
 };
 
 /** revolver handling */
@@ -396,8 +396,14 @@ export class Player {
     this.board.boostMeter = Math.min(1, this.board.boostMeter + 0.03 * this.stats.get('boostRegen') * dt);
 
     // input → board
-    const fx = inp.axis('left', 'right');
-    const fz = inp.axis('back', 'forward');
+    let fx = inp.axis('left', 'right');
+    let fz = inp.axis('back', 'forward');
+    // touch: the gesture layer steers with an analog left thumb (game/ui/TouchControls)
+    const st = inp.stick;
+    if (st.active) {
+      fx = clamp(fx + st.x, -1, 1);
+      fz = clamp(fz + st.y, -1, 1);
+    }
     const cf = this.cam.forward();
     // W rides where you look and A / D carve across it (right = (-cf.z, cf.x)); S only
     // sits back on the heel edge to brake, it never swings the board around
@@ -420,13 +426,16 @@ export class Player {
       drift: !stunned && inp.held('drift'),
       boost: !stunned && inp.held('boost'),
       push: !stunned && inp.hit('push'),
+      pushLead: inp.pushLead,
       fwdTap: !stunned && inp.hit('forward'),
+      // auto-push (touch, or the desktop opt-in): kick on his own while a direction is held, never while braking
+      autoPush: !stunned && inp.autoPush && (st.active ? fz > -0.25 : fz > 0 || fx !== 0),
       fx,
       fz,
     };
     if (!this.alive) {
       bi.dirX = bi.dirZ = bi.throttle = 0;
-      bi.jumpHeld = bi.jumpPressed = bi.jumpReleased = bi.drift = bi.boost = bi.push = bi.fwdTap = false;
+      bi.jumpHeld = bi.jumpPressed = bi.jumpReleased = bi.drift = bi.boost = bi.push = bi.fwdTap = bi.autoPush = false;
     }
     // mid power-slide, JUMP is a spin launch (Board), not the dodge below
     const sliding = this.board.drifting;
@@ -476,6 +485,7 @@ export class Player {
     this.cam.aim = damp(this.cam.aim, this.aiming ? 1 : 0, this.aiming ? 14 : 9, dt);
     this.updateAim();
     this.updateAssist(dt, this.aiming && !wasAiming);
+    if (inp.touchMode) this.touchAssist(dt);
     if (this.alive) {
       this.weapons.preUpdate(dt);
       // a dig (treasure hunt) puts the gun away: no shooting with a shovel in hand
@@ -596,6 +606,55 @@ export class Player {
 
   private assistMul() {
     return AIM_ASSIST.strength * (this.input.touchMode ? AIM_ASSIST.touchMul : 1);
+  }
+
+  /**
+   * Touch play: the gun fires itself (aimed shots, as fast as the hammer comes back)
+   * while the assisted reticle is on a body in sight, and the view eases round
+   * behind the ride whenever the aiming thumb rests.
+   */
+  private touchAssist(dt: number) {
+    const inp = this.input;
+    const w = this.weapons;
+    const can = this.alive && inp.enabled && !w.dig && !w.swap && !this.reload.active && this.ammo > 0;
+    const on = can && this.autoTarget();
+    const hold = on && w.current === 'tommy';
+    if (hold !== this.autoHold) {
+      inp.touchHold('fire', hold);
+      this.autoHold = hold;
+    }
+    if (on && !hold && this.fireCd <= 0.02 && !inp.held('fire')) inp.touchTap('fire');
+    const b = this.board;
+    const idle = performance.now() - inp.touchAimAt;
+    if (this.alive && idle > 650 && !this.aiming && !this.stickE && b.speed > 2.2 && !b.wall.on) {
+      const want = b.drifting || !b.grounded ? Math.atan2(b.vel.x, b.vel.z) : b.heading;
+      const k = 1 - Math.exp(-dt * (b.grounded ? 1.7 : 0.7) * clamp((idle - 650) / 700, 0, 1));
+      this.cam.nudge(wrapAngle(want - this.cam.yaw) * k, 0);
+    }
+  }
+  private autoHold = false;
+
+  /** touch auto-fire: a body inside the bullet-magnetism cone, in range and in clear sight */
+  private autoTarget() {
+    const A = AIM_ASSIST;
+    const S = this.assistMul();
+    if (S <= 0) return false;
+    const o = _o.copy(this.ctx.camera.position);
+    const d = this.ray.d;
+    for (const e of this.ctx.enemies.list) {
+      if (!this.targetable(e)) continue;
+      const q = this.bodyNear(e, o, d, _pt);
+      if (!q || q.dist > 60) continue;
+      const far = clamp((q.dist - A.nearDist) / (A.farDist - A.nearDist), 0, 1);
+      const cone = (A.coneNear + (A.coneFar - A.coneNear) * far * far * (3 - 2 * far)) * DEG * S;
+      if (q.ang - q.angR > cone) continue;
+      _v2.copy(_pt).sub(o);
+      const L = _v2.length();
+      _v2.divideScalar(L);
+      if (this.ctx.world.field.raycast(o.x, o.y, o.z, _v2.x, _v2.y, _v2.z, L - 0.6) >= 0) continue;
+      return true;
+    }
+    return false;
   }
 
   /** look friction over a body, keeping a target you are already on, and the ADS ease-in */

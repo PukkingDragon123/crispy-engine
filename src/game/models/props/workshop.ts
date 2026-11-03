@@ -1964,3 +1964,25 @@ export function benchWrench(): StaticModel {
   rod(m, [7.5, -0.8, 1.2], [10.5, -0.8, 1.2], 0.7, 0.7, (x) => (mod(x, 2) ? 0x9a9ca0 : 0x6a6c70), VF.METAL);
   return S(m, DV);
 }
+
+/** the back yard's ground — 1/16, lenM along +X from the cabin wall, widthM across Z, centred on z=0 and starting at
+ *  x=0: packed dusty sand with wind ripples, a path worn from the back door out to the fence, pebbles, old spent
+ *  brass and glints of broken bottle glass from years of practice. Pivot with ORIGIN_PIVOT (top surface at y=0). */
+export function yardGround(lenM = 9, widthM = 12, seed = 47): StaticModel {
+  const m = new VoxelModel('yard_ground');
+  const V = 1 / 16, L = Math.round(lenM / V), HW = Math.round(widthM / V / 2);
+  for (let x = 0; x < L; x++)
+    for (let z = -HW; z < HW; z++) {
+      const rip = Math.sin(x * 0.55 + Math.sin(z * 0.21) * 2.2 + z * 0.1) > 0.72;
+      const path = Math.abs(z - Math.sin(x * 0.06) * 4) < 7 - x * 0.02;
+      let c = rip ? 0xd8b07a : h01(x >> 2, seed, z >> 2) > 0.8 ? 0xc29a68 : 0xcca474;
+      if (path) c = mixRGB(c, 0xb08a5e, 0.5);
+      const near = x > L * 0.62 && x < L * 0.8;
+      const r = h01(x, z, seed);
+      if (r > 0.993) c = 0x8a8278; // pebbles
+      else if (near && r > 0.986) c = h01(x, z, 3) > 0.5 ? 0xd8a848 : 0x2e5a2a; // brass and bottle glass
+      m.set(x, 0, z, c, near && r > 0.986 ? VF.METAL : 0);
+      m.set(x, -1, z, 0xa8845a);
+    }
+  return S(m, V);
+}

@@ -231,6 +231,8 @@ export class OasisKing extends Boss {
   private floodCd = 4;
   private army: Enemy[] = [];
   private lastCallout = '';
+  /** what it is doing (dev / tests) */
+  dbg = '';
   private rest: Record<string, THREE.Vector3> = {};
   private bodyPivot = new THREE.Vector3(0, 1.95, 0.4);
 
@@ -277,6 +279,7 @@ export class OasisKing extends Boss {
     return (1 - this.phase * 0.13) * (1 - (this.tier - 1) * 0.08);
   }
   private callout(song: string, big = true) {
+    this.dbg = song;
     const pos = { x: this.pos.x, y: this.pos.y + this.height + 1.2, z: this.pos.z };
     this.d.enemies.callout(song, pos, 'boss');
     this.ctx.events.emit('enemySkill', { title: song, enemy: this, pos, tier: 'boss' });
@@ -629,6 +632,7 @@ export class OasisKing extends Boss {
     this.pitchO = 0;
     this.root.visible = false;
     // the hunt: a hump that homes on the hunter, then a ring that locks
+    this.dbg = 'og:hunt';
     const hunt = (1.8 + rnd.next() * 0.8) * (this.phase >= 2 ? 0.8 : 1);
     const sp = 11 + this.phase * 2.5;
     let t = 0;
@@ -668,6 +672,7 @@ export class OasisKing extends Boss {
       this.pos.x = c.x;
       this.pos.z = c.z;
       const lead = Math.max(0.45, 0.75 * this.haste);
+      this.dbg = 'og:lock';
       this.warn.circle(c.x, c.z, 5.2, lead + 0.1, 'heavy');
       this.warn.bang({ x: c.x, y: this.ground(c.x, c.z), z: c.z }, { tier: 'heavy', life: lead, y: 3 });
       a.bulge(0, c.x, c.z, 5, 0.9);
@@ -679,6 +684,7 @@ export class OasisKing extends Boss {
       if (mound) ctx.world.sand.remove(mound);
     }
     // ERUPT: straight up out of the water / sand, mouth wide
+    this.dbg = 'og:erupt';
     const g = this.ground(this.pos.x, this.pos.z);
     this.root.visible = true;
     this.invulnerable = false;
