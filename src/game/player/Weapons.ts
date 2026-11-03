@@ -69,7 +69,7 @@ export const LONG_FEEL = {
     minFall: 0.25,
     range: 40,
     /** knockback per pellet that lands (scaled by falloff and the knockback stat) */
-    knock: 1.25,
+    knock: 0.9,
     reload: 1.3,
     swap: 0.42,
     /** view punch (rad), screen trauma */
@@ -1104,7 +1104,7 @@ export class Weapons {
       }
       // grip high (D-handle, right hand), the left hand down the shaft
       const G0 = new THREE.Vector3(S_R.x + 0.16 * sc, S_R.y - 0.12 * sc, S_R.z + 0.3 * sc);
-      const L = 0.62;
+      const L = 0.66; // D-grip to blade tip on the shovel model
       const G = tip.clone().add(G0.clone().sub(tip).normalize().multiplyScalar(L));
       const shaft = tip.clone().sub(G).normalize();
       this.solveArm(armR, foreR, S_R, G, _v.set(-0.8, -0.5, -0.4), this.upT, l1, l2, this.digW);

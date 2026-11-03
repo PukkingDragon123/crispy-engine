@@ -9,6 +9,12 @@
 import { atlas } from '../fx/PixelArt';
 import { STATUS_INFO, StatusId } from '../combat/Status';
 import { UI, FONT, woodPanel, ironPlate, slot, parchment, ribbon, barFrame, drawBarFill, keycap, starBadge, chain, text, measure, px } from './PixelUI';
+import type { PaperQuest } from './MissionPaper';
+import type { SoulAnchor } from './SoulBar';
+import type { OutlawAnchors } from './OutlawHud';
+
+/** one quest note on the mission paper stack */
+export type HudQuest = PaperQuest;
 
 export interface HudState {
   hp: number;
@@ -49,6 +55,19 @@ export interface HudState {
   objective?: { text: string; sub: string } | null;
   /** world-space objective marker */
   marker?: { x: number; y: number; z: number } | null;
+  /**
+   * every quest/mission in hand, newest last (the 3D HUD pins each on the mission
+   * paper stack). Without it the stack shows `objective` as a single note.
+   */
+  quests?: HudQuest[];
+  /** seconds left in the break between waves (undefined while a wave runs) */
+  intermission?: number;
+  /** the break's full length (default 30) */
+  intermissionTotal?: number;
+  /** 0..1 hold progress of ringing the bell to start the next wave early */
+  bell?: number;
+  /** Sundown's chest in the world: the soul pours into him when the ultimate is unleashed */
+  heroWorld?: { x: number; y: number; z: number } | null;
 }
 
 /** where the 3D HUD layer (Hud3D) should place its models, in HUD pixels */
@@ -59,6 +78,12 @@ export interface HudAnchors {
   ult: { x: number; y: number; frac: number; ready: boolean };
   heart: { x: number; y: number; frac: number };
   slide: number;
+  /** the soul jar (3D layer) */
+  soul: SoulAnchor | null;
+  /** tin star, tally board, wave plaque, stopwatch (3D layer) */
+  outlaw: OutlawAnchors | null;
+  /** the mission paper's nail */
+  paper: { x: number; y: number; k: number; compact: boolean; speed: number };
 }
 
 interface Toast {
@@ -116,6 +141,10 @@ export class Hud {
   private lastRank = 1;
   private parts: HP[] = [];
   private signSwing = 0;
+  private lastCombo = 0;
+  private streakPop = 0;
+  /** the 3D outlaw pieces' layout, rebuilt each frame */
+  private outlawBase: OutlawAnchors = { k: 1, star: { x: 0, y: 0, rank: 1 }, tally: { x: 0, y: 0, amount: 0 }, plaque: null, watch: null };
   private lastWave = 0;
   private waveDrop = 1;
   /** 3D layer draws the cylinder, coin, item models and Pinch idol; 2D skips those */
@@ -133,7 +162,18 @@ export class Hud {
     ult: { x: 0, y: 0, frac: 0, ready: false },
     heart: { x: 0, y: 0, frac: 1 },
     slide: 0,
+    soul: null,
+    outlaw: null,
+    paper: { x: 0, y: 0, k: 1, compact: false, speed: 0 },
   };
+  /** recent toasts (the mission paper reads them to tell a finished quest from a failed one) */
+  recent: { text: string; sub?: string; at: number }[] = [];
+  /** explicit quest endings queued for the mission paper: id -> completed? */
+  questEnds = new Map<string, boolean>();
+  /** bottom of the mission paper stack (HUD px), set by the 3D layer; toasts line up below it */
+  paperBottom = 0;
+  /** size factor for the 3D pieces on small screens */
+  uiK = 1;
   /** world -> screen (css px) projector, set by RunScene */
   project: ((p: { x: number; y: number; z: number }) => { x: number; y: number; visible: boolean }) | null = null;
 
@@ -162,6 +202,8 @@ export class Hud {
 
   // ------------------------------------------------------------------ API
   toast(t: string, color = UI.text, sub?: string, big = false) {
+    this.recent.push({ text: t, sub, at: this.t });
+    if (this.recent.length > 12) this.recent.shift();
     const ex = this.toasts.find((x) => x.text === t && x.t < 0.5);
     if (ex) {
       ex.t = 0.05;
@@ -204,6 +246,10 @@ export class Hud {
   }
   setVisible(v: boolean) {
     this.visible = v;
+  }
+  /** a quest ended: the mission paper stamps it DONE (ok) or burns it (failed) */
+  questEnd(id: string, ok = true) {
+    this.questEnds.set(id, ok);
   }
 
   private spr(name: string, x: number, y: number, s = 1, alpha = 1, rot = 0) {
@@ -372,6 +418,8 @@ export class Hud {
     const slide = (1 - e) * (1 - e);
     this.anchors.slide = slide;
     const cx = Math.round(W / 2);
+    // the 3D pieces shrink a little on small screens (phones), never below 60%
+    const k = (this.uiK = Math.max(0.6, Math.min(1, W / 560, H / 300)));
 
     // ---------------------------------------------------------- crosshair
     {
@@ -416,6 +464,37 @@ export class Hud {
       drawBarFill(c, x + 18 + sx, y + sy, bw, bh, frac, this.hpFlash > 0.5 ? { o: '#fff', d: '#fff', m: '#ffe0d0', l: '#fff', h: '#fff' } : low && Math.sin(this.t * 9) > 0 ? { ...UI.blood, m: '#ff5a3a' } : UI.blood, this.hpTrail);
       if (s.shield > 0) drawBarFill(c, x + 18 + sx, y - 6 + sy, bw, 9, Math.min(1, s.shield / s.maxHp), UI.sky);
       this.anchors.heart = { x: x - 12, y: y + 4, frac };
+      if (this.use3D) {
+        // Serket's soul jar stands on the heart's shoulder; the streak and the unleash call sit beside it
+        let hx = W / 2, hy = H * 0.6;
+        if (s.heroWorld && this.project) {
+          const hp = this.project(s.heroWorld);
+          if (hp.visible) {
+            hx = hp.x / this.scale;
+            hy = hp.y / this.scale;
+          }
+        }
+        const jx = x - 11, jy = y - 15;
+        const ready = s.ult >= 1;
+        this.anchors.soul = { x: jx, y: jy, k, frac: s.ult, ready, heroX: hx, heroY: hy };
+        const tx = Math.round(jx + 17 * k), ty0 = Math.round(jy - 50 * k);
+        if (ready) {
+          const kc = keycap('Z');
+          const pulse = Math.round(Math.sin(this.t * 6) * 1.5);
+          this.blit(kc, tx, ty0 - 2 + pulse);
+          text(c, 'UNLEASH', tx + kc.width + 4, ty0 + pulse, Math.sin(this.t * 6) > 0 ? '#c8ffe0' : UI.venom.l, 16);
+        }
+        if (s.combo > 1) {
+          const hot = Math.min(1, s.combo / 40);
+          const col = s.combo >= 25 ? '#eafff2' : s.combo >= 10 ? UI.venom.h : UI.venom.l;
+          const bump = Math.round(this.streakPop * 3);
+          text(c, `x${s.combo}`, tx, ty0 + 16 - bump, col, 16);
+          text(c, 'STREAK', tx + measure(c, `x${s.combo}`) + 4, ty0 + 16, `rgba(201,169,124,${0.6 + hot * 0.4})`, 16);
+        }
+        if (s.combo > this.lastCombo) this.streakPop = 1;
+        this.lastCombo = s.combo;
+        this.streakPop = Math.max(0, this.streakPop - dt * 5);
+      } else this.anchors.soul = null;
       if (!this.use3D) this.spr('skullIcon', x - 2 + sx, y - 1 + sy + (low ? Math.round(Math.sin(this.t * 9)) : 0));
       text(c, `${Math.ceil(s.hp)}`, x + 26 + sx, y + 1 + sy, UI.text, 16);
       text(c, `/${Math.round(s.maxHp)}`, x + 26 + measure(c, `${Math.ceil(s.hp)}`) + sx, y + 1 + sy, UI.textDim, 16);
@@ -456,32 +535,72 @@ export class Hud {
         this.lastRank = s.rank;
       }
       this.rankPop = Math.max(0, this.rankPop - dt * 2.5);
-      const star = starBadge(15);
-      const bounce = Math.round(Math.sin(this.rankPop * Math.PI) * 4);
-      this.blit(star, x, y - bounce);
-      text(c, String(s.rank), x + star.width / 2, y + 8 - bounce, UI.wood.o, 16, 'center', false);
-      // the bounty is a purse of reward money, counted up like a wanted poster's figure
-      const bt = Math.round(s.bountyTotal ?? 0);
-      if (bt > this.bountyShown + 0.5) this.bountyPop = 1;
-      this.bountyShown += (bt - this.bountyShown) * Math.min(1, dt * 7);
-      if (Math.abs(bt - this.bountyShown) < 0.5) this.bountyShown = bt;
-      this.bountyPop = Math.max(0, this.bountyPop - dt * 3);
-      text(c, 'BOUNTY', x + 38, y + 1, UI.textDim, 16);
-      const lift = Math.round(this.bountyPop * 3);
-      text(c, '$' + Math.round(this.bountyShown).toLocaleString('en-US'), x + 38, y + 14 - lift, this.bountyPop > 0.2 ? '#fff3d6' : UI.brass.h, 16);
+      if (this.use3D) {
+        // the tin star and the nailed tally board (3D layer) — this side only lays them out
+        const bt = Math.round(s.bountyTotal ?? 0);
+        this.outlawBase.star = { x: x + 16 * k, y: y + 16 * k, rank: s.rank };
+        this.outlawBase.tally = { x: x + (37 + BOARD_HALF) * k, y: y + 15 * k, amount: bt };
+      } else {
+        const star = starBadge(15);
+        const bounce = Math.round(Math.sin(this.rankPop * Math.PI) * 4);
+        this.blit(star, x, y - bounce);
+        text(c, String(s.rank), x + star.width / 2, y + 8 - bounce, UI.wood.o, 16, 'center', false);
+        // the bounty is a purse of reward money, counted up like a wanted poster's figure
+        const bt = Math.round(s.bountyTotal ?? 0);
+        if (bt > this.bountyShown + 0.5) this.bountyPop = 1;
+        this.bountyShown += (bt - this.bountyShown) * Math.min(1, dt * 7);
+        if (Math.abs(bt - this.bountyShown) < 0.5) this.bountyShown = bt;
+        this.bountyPop = Math.max(0, this.bountyPop - dt * 3);
+        text(c, 'BOUNTY', x + 38, y + 1, UI.textDim, 16);
+        const lift = Math.round(this.bountyPop * 3);
+        text(c, '$' + Math.round(this.bountyShown).toLocaleString('en-US'), x + 38, y + 14 - lift, this.bountyPop > 0.2 ? '#fff3d6' : UI.brass.h, 16);
+      }
       // gold purse
       this.goldShown += (s.gold - this.goldShown) * Math.min(1, dt * 8);
       if (Math.abs(s.gold - this.goldShown) < 0.5) this.goldShown = s.gold;
       this.goldPop = Math.max(0, this.goldPop - dt * 4);
-      const gy = y + 30;
-      this.anchors.coin = { x: x + 44, y: gy + 6, pop: this.goldPop };
-      if (!this.use3D) this.spr('coinBig', x + 38, gy - Math.round(this.goldPop * 3));
-      text(c, String(Math.round(this.goldShown)), x + 54, gy - 1, UI.brass.l, 16);
-      if (s.combo > 2) text(c, `${s.combo} KILL STREAK`, x + 2, gy + 16, s.combo > 25 ? UI.blood.h : UI.brass.h, 16);
+      if (this.use3D) {
+        const gy = Math.round(y + 38 * k);
+        this.anchors.coin = { x: x + 12, y: gy + 6, pop: this.goldPop };
+        text(c, String(Math.round(this.goldShown)), x + 22, gy - 1, UI.brass.l, 16);
+      } else {
+        const gy = y + 30;
+        this.anchors.coin = { x: x + 44, y: gy + 6, pop: this.goldPop };
+        this.spr('coinBig', x + 38, gy - Math.round(this.goldPop * 3));
+        text(c, String(Math.round(this.goldShown)), x + 54, gy - 1, UI.brass.l, 16);
+        if (s.combo > 2) text(c, `${s.combo} KILL STREAK`, x + 2, gy + 16, s.combo > 25 ? UI.blood.h : UI.brass.h, 16);
+      }
     }
 
     // ---------------------------------------------------------- wave sign / boss banner (top center)
-    if (!s.boss) {
+    if (this.use3D) {
+      this.outlawBase.plaque = null;
+      this.outlawBase.watch = null;
+    }
+    if (!s.boss && this.use3D) {
+      // the branded leather plaque on its chains (3D layer); the stopwatch hangs under it in the break
+      if (s.wave !== this.lastWave) {
+        this.lastWave = s.wave;
+        this.waveDrop = 0;
+      }
+      this.waveDrop = Math.min(1, this.waveDrop + dt * 2);
+      const drop = (1 - easeOutBounce(this.waveDrop)) * 40 + slide * 70;
+      const tl = Math.ceil(s.waveTime);
+      const brk = s.intermission !== undefined && s.intermission > 0;
+      const py = 8 + 15 * k;
+      this.outlawBase.plaque = { x: cx, y: py, label: s.waveLabel, time: tl < 900 ? `${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}` : null, drop };
+      this.outlawBase.watch = brk ? { left: s.intermission!, total: s.intermissionTotal ?? 30, bell: s.bell ?? 0 } : null;
+      if (brk) {
+        // under the watch: how to cut the break short
+        const wy = Math.round(py + 15 * k + 47 * k * 0.95 + 21 * k) - drop;
+        const kc = keycap('T');
+        const label = (s.bell ?? 0) > 0.02 ? 'RINGING THE BELL…' : 'HOLD TO RING THE BELL';
+        const tw = Math.ceil(measure(c, label, 16));
+        const bx = cx - (tw + kc.width + 5) / 2;
+        this.blit(kc, bx, wy + 2);
+        text(c, label, bx + kc.width + 5, wy + 3, (s.bell ?? 0) > 0.02 ? UI.brass.h : 'rgba(240,220,180,0.9)', 16);
+      } else text(c, s.zone, cx, Math.round(py + 15 * k + (tl < 900 ? 14 : 3) * k) + 4 - drop, 'rgba(240,220,180,0.85)', 16, 'center');
+    } else if (!s.boss) {
       if (s.wave !== this.lastWave) {
         this.lastWave = s.wave;
         this.waveDrop = 0;
@@ -619,7 +738,8 @@ export class Hud {
       }
     }
     // ---------------------------------------------------------- objective + marker
-    if (s.objective) {
+    this.anchors.paper = { x: W - 10 - 78 * k + slide * 220, y: 10 * k, k, compact: H < 250 || W < 520, speed: s.speed };
+    if (s.objective && !this.use3D) {
       const ow = Math.max(150, Math.ceil(Math.max(measure(c, s.objective.text, 16), measure(c, s.objective.sub, 16))) + 20);
       const ox = W - ow - 8 + slide * 200, oy = 8;
       this.blit(parchment(ow, 38, 7), ox, oy);
@@ -645,7 +765,7 @@ export class Hud {
     }
 
     // ---------------------------------------------------------- toasts (ribbons)
-    let ty = Math.round(H * 0.3);
+    let ty = Math.round(Math.max(H * 0.3, this.use3D ? this.paperBottom + 8 : 0));
     for (let i = this.toasts.length - 1; i >= 0; i--) {
       const tt = this.toasts[i];
       tt.t += dt;
@@ -679,9 +799,14 @@ export class Hud {
       c.globalAlpha = 1;
       ty += tt.sub ? 36 : 22;
     }
+    this.outlawBase.k = k;
+    this.anchors.outlaw = this.use3D ? this.outlawBase : null;
     void FONT;
   }
 }
+
+/** half the tally board's width (HUD px) — OutlawHud's BOARD_W / 2 */
+const BOARD_HALF = 44;
 
 function easeOutBack(t: number) {
   const c1 = 1.70158, c3 = c1 + 1;

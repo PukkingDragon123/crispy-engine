@@ -77,7 +77,7 @@ export function blueprintPhoto(renderer: THREE.WebGLRenderer, id: string): THREE
   if (!def) return null;
   mat ??= makeVoxelMaterial();
   const root = new THREE.Group();
-  const sheet = parchmentSheet(140, 92, id.length * 7 + 3);
+  const sheet = parchmentSheet(124, 80, id.length * 7 + 3);
   const sheetMesh = new THREE.Mesh(buildVoxelGeometry(sheet.model, { voxelSize: sheet.voxelSize, pivot: sheet.pivot }), mat);
   root.add(sheetMesh);
   const item = blueprintItem(def, mat);
@@ -102,7 +102,7 @@ export function blueprintPhoto(renderer: THREE.WebGLRenderer, id: string): THREE
     const c = box.getCenter(new THREE.Vector3());
     holder.position.set(-c.x, 0.03 - box.min.y + 0.012, -c.z - 0.02);
   }
-  const dist = 1.32;
+  const dist = 1.36;
   const pitch = 1.22;
   const shot: Shot = {
     root,
@@ -235,7 +235,7 @@ export class BlueprintReveal {
     const cam = ctx.camera;
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
-    const home = cam.position.clone().addScaledVector(fwd, 1.28).addScaledVector(up, -0.02);
+    const home = cam.position.clone().addScaledVector(fwd, 1.2).addScaledVector(up, 0.1);
     const start = job.from ?? cam.position.clone().addScaledVector(fwd, 2).addScaledVector(up, -1.2);
     this.group.visible = true;
     this.group.position.copy(start);
@@ -247,11 +247,11 @@ export class BlueprintReveal {
     this.ui.innerHTML =
       `<div style="position:absolute;left:0;right:0;top:6vh;font-size:46px;color:${col};opacity:0" data-a>BLUEPRINT FOUND</div>` +
       `<div style="position:absolute;left:0;right:0;top:calc(6vh + 54px);font-size:17px;opacity:0" data-a>${def.line}</div>` +
-      `<div style="position:absolute;left:50%;transform:translateX(-50%);bottom:15vh;width:min(760px,90vw);opacity:0" data-b>` +
+      `<div style="position:absolute;left:50%;transform:translateX(-50%);bottom:9vh;width:min(760px,90vw);opacity:0" data-b>` +
       `<div style="font-size:34px;color:${col}">${def.name.toUpperCase()}</div>` +
       `<div style="font-size:17px;margin-top:8px;line-height:1.35;color:#f6e8c8">${def.desc}</div>` +
       `<div style="font-size:15px;margin-top:10px;color:#e0b373">PERMANENTLY UNLOCKED · ${cnt.found} / ${cnt.total} BLUEPRINTS</div></div>` +
-      `<div style="position:absolute;left:0;right:0;bottom:6vh;font-size:16px;opacity:0" data-b>E · CLICK · SPACE to roll it up</div>`;
+      `<div style="position:absolute;left:0;right:0;bottom:3vh;font-size:16px;opacity:0" data-b>E · CLICK · SPACE to roll it up</div>`;
     this.ui.style.display = 'block';
     const fade = (sel: string, d: number) => eng.tweens.after(d, () => this.ui.querySelectorAll<HTMLElement>(sel).forEach((e) => {
       e.style.transition = 'opacity .35s';

@@ -210,27 +210,32 @@ export class TreasureHunt {
   }
 
   // ------------------------------------------------------------------ placement
-  /** an open, dry, gentle spot in the zone, clear of solids and of other finds */
+  /** an open, dry, gentle spot in the zone, clear of solids and of other finds (claimed in the world) */
   private spot(z: ZoneDef, clear = 3, rMin = 0.2, rMax = 0.85): THREE.Vector3 | null {
     const ctx = this.d.ctx;
-    const w = ctx.world as unknown as { findOpenSpot?: (zone: ZoneDef, clear: number) => { x: number; z: number } | null; sa?: { waterLevel?: number; field?: { heightAt(x: number, z: number): number } } };
-    for (let tries = 0; tries < 40; tries++) {
-      let x: number, zz: number;
-      const o = tries < 6 ? w.findOpenSpot?.(z, clear) : null;
-      if (o) {
-        x = o.x;
-        zz = o.z;
-      } else {
-        const a = rnd.next() * Math.PI * 2, r = z.r * (rMin + rnd.next() * (rMax - rMin));
-        x = z.cx + Math.cos(a) * r;
-        zz = z.cz + Math.sin(a) * r;
+    const w = ctx.world as unknown as {
+      findOpenSpot?: (zone: ZoneDef, radius: number, opts?: { minDist?: number; maxDist?: number; maxSlope?: number; strict?: boolean; tries?: number }) => { x: number; y: number; z: number } | null;
+      claimSpot?: (zone: ZoneDef, x: number, z: number, r: number, owner?: string) => unknown;
+      sa?: { waterLevel?: number; field?: { heightAt(x: number, z: number): number } };
+    };
+    const free = (x: number, zz: number) => !this.sites.some((s) => Math.hypot(s.pos.x - x, s.pos.z - zz) < 9) && !this.healers.some((h) => Math.hypot(h.pos.x - x, h.pos.z - zz) < 6);
+    if (w.findOpenSpot) {
+      for (let i = 0; i < 5; i++) {
+        const p = w.findOpenSpot(z, clear, { minDist: z.r * rMin, maxDist: z.r * rMax, maxSlope: 0.45, strict: true, tries: 40 });
+        if (!p) break;
+        if (!free(p.x, p.z)) continue;
+        w.claimSpot?.(z, p.x, p.z, clear, 'treasure');
+        return new THREE.Vector3(p.x, ctx.world.groundAt(p.x, p.z), p.z);
       }
+    }
+    for (let tries = 0; tries < 40; tries++) {
+      const a = rnd.next() * Math.PI * 2, r = z.r * (rMin + rnd.next() * (rMax - rMin));
+      const x = z.cx + Math.cos(a) * r, zz = z.cz + Math.sin(a) * r;
       let blocked = false;
       ctx.world.colliders.query(x, zz, clear + 3, (c) => {
         if (c.enabled && c.solid && Math.hypot(c.x - x, c.z - zz) < c.r + clear) blocked = true;
       });
-      if (blocked) continue;
-      if (this.sites.some((s) => s.pos.distanceTo(_v.set(x, s.pos.y, zz)) < 9) || this.healers.some((h) => Math.hypot(h.pos.x - x, h.pos.z - zz) < 6)) continue;
+      if (blocked || !free(x, zz)) continue;
       let lo = 1e9, hi = -1e9, wet = false;
       for (const [ox, oz] of [[0, 0], [1.6, 0], [-1.6, 0], [0, 1.6], [0, -1.6]]) {
         const g = ctx.world.groundAt(x + ox, zz + oz);
@@ -244,19 +249,42 @@ export class TreasureHunt {
     return null;
   }
 
+  /** the world's reserved dig spots in this zone (RegionGen digSpot anchors), near sights first */
+  private digSpots(z: ZoneDef): { p: THREE.Vector3; near?: string }[] {
+    const ground = this.d.ctx.world.groundAt;
+    return z.anchors
+      .filter((a) => a.kind === 'digSpot')
+      .sort((a, b) => (b.data?.near ? 1 : 0) - (a.data?.near ? 1 : 0))
+      .map((a) => ({ p: new THREE.Vector3(a.x, ground(a.x, a.z), a.z), near: a.data?.near as string | undefined }));
+  }
+
   populateZone(z: ZoneDef) {
     if (this.zones.has(z.index)) return;
     this.zones.set(z.index, z);
-    // glints
-    for (let i = 0; i < 2; i++) {
-      const p = this.spot(z, 2);
-      if (p) this.addSite('glint', p, z, rnd.chance(0.2) ? { kind: 'small' } : { kind: 'gold' });
+    // reserved dig spots first (the X takes one by a sight), open spots after that
+    const reserved = this.digSpots(z);
+    const take = (clear: number, rMin?: number, rMax?: number) => {
+      const r = reserved.shift();
+      return r ? r : (() => {
+        const p = this.spot(z, clear, rMin, rMax);
+        return p ? { p, near: undefined as string | undefined } : null;
+      })();
+    };
+    // the X (hidden until a map shows it): a relic of this region, else a schematic
+    {
+      const at = take(3, 0.35, 0.9);
+      if (at) {
+        const relic = this.relicPool.shift();
+        const bp = relic ? null : this.rollBlueprint(1.4);
+        const s = this.addSite('x', at.p, z, relic ? { kind: 'relic', id: relic } : bp ? { kind: 'blueprint', id: bp } : { kind: 'chest', tier: 'gold' });
+        if (at.near) s.zoneName = `${z.name}, by the ${at.near}`;
+      }
     }
     // suspicious mounds: the very first one of a fresh hunter hides a schematic
     const nMounds = 1 + (rnd.chance(0.4) ? 1 : 0);
     for (let i = 0; i < nMounds; i++) {
-      const p = this.spot(z, 3.2);
-      if (!p) continue;
+      const at = take(3.2);
+      if (!at) continue;
       let cache: Cache;
       const first = z.index === 0 && i === 0 && Blueprints.count().found === 0;
       const r = rnd.next();
@@ -264,16 +292,12 @@ export class TreasureHunt {
       if (bp) cache = { kind: 'blueprint', id: bp };
       else if (r < 0.45) cache = { kind: 'bones' };
       else cache = { kind: 'chest', tier: z.index >= 3 && rnd.chance(0.4) ? 'silver' : 'wood' };
-      this.addSite('mound', p, z, cache);
+      this.addSite('mound', at.p, z, cache);
     }
-    // the X (hidden until a map shows it): a relic of this region, else a schematic
-    {
-      const p = this.spot(z, 3, 0.35, 0.9);
-      if (p) {
-        const relic = this.relicPool.shift();
-        const bp = relic ? null : this.rollBlueprint(1.4);
-        this.addSite('x', p, z, relic ? { kind: 'relic', id: relic } : bp ? { kind: 'blueprint', id: bp } : { kind: 'chest', tier: 'gold' });
-      }
+    // glints
+    for (let i = 0; i < 2; i++) {
+      const at = take(2);
+      if (at) this.addSite('glint', at.p, z, rnd.chance(0.2) ? { kind: 'small' } : { kind: 'gold' });
     }
     // a torn map fragment lying in the sand (always one in the first zone)
     if (z.index === 0 || rnd.chance(0.45)) {
@@ -347,11 +371,11 @@ export class TreasureHunt {
     bv.x *= k;
     bv.z *= k;
     if (!P.weapons.dig) {
-      const fwd = P.rig.root.localToWorld(new THREE.Vector3(0, 0, 0.82));
+      const fwd = P.rig.root.localToWorld(new THREE.Vector3(0, 0, 0.56));
       fwd.y = this.d.ctx.world.groundAt(fwd.x, fwd.z) - 0.04;
       P.weapons.dig = { at: fwd, t: 0 };
     } else {
-      const fwd = P.rig.root.localToWorld(_v.set(0, 0, 0.82));
+      const fwd = P.rig.root.localToWorld(_v.set(0, 0, 0.56));
       P.weapons.dig.at.set(fwd.x, this.d.ctx.world.groundAt(fwd.x, fwd.z) - 0.04, fwd.z);
     }
     s.progress += dt;

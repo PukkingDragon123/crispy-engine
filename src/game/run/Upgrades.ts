@@ -243,8 +243,8 @@ export class UpgradeManager {
   /**
    * Roll n offers weighted by rarity (luck), with a guaranteed evolution if eligible
    * and a sealed tarot skill until all three are learned. Trade-offs come up half
-   * again as often as plain cards, and the house deals a gamble into about a third
-   * of the hands (more with Luck), never two at once.
+   * again as often as plain cards, and a gamble turns up in roughly two hands of
+   * five (more with Luck), never two at once.
    */
   roll(n: number): Offer[] {
     const out: Offer[] = [];
@@ -265,7 +265,7 @@ export class UpgradeManager {
     };
     // the house deals a game
     const games = pool.filter((u) => u.gamble && !chosen.has(u.id));
-    if (games.length && out.length < n && rnd.next() < Math.min(0.6, 0.34 + luck * 0.01)) {
+    if (games.length && out.length < n && rnd.next() < Math.min(0.55, 0.26 + luck * 0.01)) {
       const g = rnd.weighted(games, weight);
       if (g) {
         chosen.add(g.id);

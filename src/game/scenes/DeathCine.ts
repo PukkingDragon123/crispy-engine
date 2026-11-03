@@ -325,6 +325,7 @@ export class DeathCine implements GameScene {
   /** time-lapse: day fraction (0 midnight, .25 sunrise, .5 noon, .75 sunset) */
   private tau = 0.66;
   private tlStart = -1;
+  private tlOn = false;
   private tlDur = 8;
   private sunrises = 0;
   private endAt = -1;
@@ -734,7 +735,7 @@ export class DeathCine implements GameScene {
     this.stepBodies(dt);
     // drifting pixel sand, always
     const w = { x: -0.9, z: 0.42 };
-    const tl = this.tlStart >= 0 ? clamp01((t - this.tlStart) / this.tlDur) : 0;
+    const tl = this.tlOn ? clamp01((t - this.tlStart) / this.tlDur) : 0;
     if (Math.random() < rdt * (16 + tl * 30)) {
       const x = (Math.random() - 0.5) * 14 + 4, z = (Math.random() - 0.5) * 14;
       this.particles.emit({ pos: { x, y: this.h(x, z) + 0.05 + Math.random() * 0.2, z }, count: 3, vel: { x: w.x * (6 + Math.random() * 4), y: 0.25, z: w.z * (6 + Math.random() * 4) }, spread: 0.6, jitter: 1, gravity: 1.2, drag: 0.25, life: [1.4, 2.8], size: [0.04, 0.07], sprite: 'dot3', color: this.sand, ground: true });
@@ -753,7 +754,7 @@ export class DeathCine implements GameScene {
     } else if (fd < 2.4) {
       // past his skull, down the length of him, to the killer gloating over the body
       this.setCam(this.v1.set(-0.6, g + 1.2 - fd * 0.05, -3.05 - fd * 0.08), this.v2.set(0.1, g + 0.6, 0.25), 42, 0.03, rdt);
-    } else if (this.tlStart < 0) {
+    } else if (!this.tlOn) {
       // crane straight up over the body, then out and away, tilting up into the sky
       const k = ss(clamp01((fd - 2.4) / 5.2));
       const P0 = new THREE.Vector3(-0.6, g + 1.08, -3.24), P1 = new THREE.Vector3(0.35, g + 8.5, -0.9), P2 = TL_POS.clone().setY(g + TL_POS.y);
@@ -763,6 +764,7 @@ export class DeathCine implements GameScene {
       const sky = TL_DIR.clone().multiplyScalar(40).add(pos);
       this.setCam(pos, body.lerp(sky, tilt), 42 + ss(clamp01(k / 0.6)) * 26, 0, rdt * 2.2);
       if (k >= 1) {
+        this.tlOn = true;
         this.tlStart = t;
         (window as any).__music?.setMood('off', 2);
         this.nightLoop = eng.audio.loop('night_loop', 0.0);
@@ -775,13 +777,13 @@ export class DeathCine implements GameScene {
     }
     // ---- the time-lapse
     let night = 0;
-    if (this.tlStart >= 0) {
+    if (this.tlOn) {
       const ease = tl < 0.5 ? 2 * tl * tl : 1 - Math.pow(-2 * tl + 2, 2) / 2;
       const span = this.o.days + (0.3 - 0.66);
-      const prev = this.tau;
       this.tau = 0.66 + span * ease;
-      // count the sunrises
-      if (Math.floor(prev - 0.27) < Math.floor(this.tau - 0.27)) this.onSunrise();
+      // count the sunrises (from the clock itself, so a jump never loses one)
+      const n = Math.max(0, Math.floor(this.tau - 0.27));
+      if (n > this.sunrises) this.onSunrise(n);
       night = this.applySky(this.tau);
       (this.env as any).cloudSpeed = 2.2 + Math.sin(tl * Math.PI) * 140;
       this.nightLoopVol(night);
@@ -802,7 +804,7 @@ export class DeathCine implements GameScene {
       if (tl >= 1 && this.endAt < 0) this.endAt = t + 1.1;
     } else this.applySky(0.66);
     this.skyU.uTime.value = t;
-    this.env.update(this.v1.set(0, g, 0), rdt * (this.tlStart >= 0 ? 1 : this.rate), t);
+    this.env.update(this.v1.set(0, g, 0), rdt * (this.tlOn ? 1 : this.rate), t);
     this.sky.position.copy(this.camera.position);
     this.particles.update(dt, this.scene.fog as THREE.Fog);
     if (this.endAt >= 0 && t >= this.endAt) this.finish(false);
@@ -813,9 +815,8 @@ export class DeathCine implements GameScene {
     if (l?.setVolume) l.setVolume(0.35 * night);
   }
 
-  private onSunrise() {
-    this.sunrises++;
-    const n = this.sunrises;
+  private onSunrise(n: number) {
+    this.sunrises = n;
     const el = this.title;
     el.textContent = `${n} ${n === 1 ? 'DAY' : 'DAYS'} PASSED…`;
     el.style.opacity = '1';

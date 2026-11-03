@@ -125,15 +125,19 @@ export function mapFragment(seed = 3): PivotModel {
 export function digMound(seed = 1): PivotModel {
   const s = new Sc('mound', 0.42);
   const rng = new RNG(seed * 31 + 7);
-  const R = 78, H = 26;
+  const R = 74, H = 32;
   const lump: [number, number, number][] = [];
-  for (let i = 0; i < 5; i++) lump.push([rng.range(-40, 40), rng.range(-40, 40), rng.range(14, 26)]);
-  s.region([-R - 10, 0, -R - 10], [R + 10, H + 12, R + 10], (x, y, z) => {
-    const r = Math.hypot(x, z * 1.15) / R;
-    let h = H * Math.pow(Math.max(0, 1 - r * r), 1.3);
-    for (const [lx, lz, lr] of lump) h += 6 * Math.max(0, 1 - Math.hypot(x - lx, z - lz) / lr);
-    h += Math.sin(x * 0.18 + seed) * 1.2 + Math.sin(z * 0.15) * 1.0;
-    return y <= h && r <= 1.15;
+  for (let i = 0; i < 4; i++) lump.push([rng.range(-30, 30), rng.range(-30, 30), rng.range(22, 34)]);
+  s.region([-R - 4, 0, -R - 4], [R + 4, H + 12, R + 4], (x, y, z) => {
+    const ang = Math.atan2(z, x);
+    const r = Math.hypot(x, z * 1.12) / (R * (1 + Math.sin(ang * 3 + seed) * 0.06 + Math.sin(ang * 7) * 0.03));
+    if (r >= 1) return false;
+    const fall = Math.pow(1 - r * r, 1.25);
+    let h = H * fall;
+    // soft lumps and wind ripples, faded out toward the rim so it melts into the dune
+    for (const [lx, lz, lr] of lump) h += 5 * fall * Math.max(0, 1 - Math.hypot(x - lx, z - lz) / lr) ** 2;
+    h += (Math.sin(x * 0.16 + seed) * 0.9 + Math.sin(z * 0.13 + x * 0.05) * 0.8) * fall;
+    return y <= h;
   }, (x, y, z) => {
     const n = noise.n3(x * 0.06 + seed, y * 0.06, z * 0.06) * 0.5 + 0.5;
     return y < 3 ? SAND.shade : n > 0.72 ? SAND.hi : n < 0.22 ? SAND.shade : SAND.base;
@@ -153,11 +157,13 @@ export function digMound(seed = 1): PivotModel {
   }
   s.ell([0, top(0, 0) + 2.5, 0], [6, 4, 6], 0x948876);
   // a bleached long-bone poking out of the side, knuckle up
-  s.cap([-46, 8, 22], [-24, 26, 10], 2.6, 2.2, BONE.base);
-  s.ell([-24, 27, 10], [4.2, 3.4, 3.4], BONE.hi);
-  // a broken stake with a scrap of rag
-  s.cap([40, 0, -30], [43, 46, -32], 2.0, 1.6, WOOD.base);
-  s.region([42, 32, -36], [58, 44, -30], (x, y, z) => Math.abs(z + 33 + Math.sin(x * 0.4) * 1.2) < 1.0 && y > 34 + (x - 42) * 0.25 && y < 43 - (x - 42) * 0.2, RAG.base);
+  s.cap([-50, 12, 26], [-30, 32, 14], 2.6, 2.2, BONE.base);
+  s.ell([-29, 33.5, 13.4], [4.2, 3.4, 3.6], BONE.hi);
+  s.ell([-31.5, 34.5, 15.6], [2.6, 2.4, 2.4], BONE.base);
+  // a weathered survey stake leaning out of the heap, a twist of twine round its head
+  s.cap([34, 6, -24], [42, 52, -30], 2.0, 1.5, WOOD.base);
+  s.cap([42, 52, -30], [42.6, 55, -30.4], 1.3, 0.8, WOOD.hi);
+  s.region([38, 44, -34], [46, 50, -26], (x, y, z) => Math.abs(Math.hypot(x - 40.8, z + 29.2) - 2.3) < 0.7 && y > 45 && y < 48.5, 0x8a6a42);
   relief(s.m, 1.06, 0.9);
   return { model: s.m, voxelSize: 1 / 42, pivot: [0, 0, 0] };
 }

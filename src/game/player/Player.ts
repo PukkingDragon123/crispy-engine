@@ -468,7 +468,9 @@ export class Player {
     this.updateAssist(dt, this.aiming && !wasAiming);
     if (this.alive) {
       this.weapons.preUpdate(dt);
-      if (this.weapons.isLong) this.weapons.updateLong(dt);
+      // a dig (treasure hunt) puts the gun away: no shooting with a shovel in hand
+      if (this.weapons.dig) this.firing = this.fanning = false;
+      else if (this.weapons.isLong) this.weapons.updateLong(dt);
       else this.updateGun(dt);
       this.updateMelee(dt);
       this.updateGrapple(dt);
