@@ -36,3 +36,12 @@ export const TURTLE_HOUSE_MODELS: Record<string, ModelEntry> = {
   turtle_house: () => turtleHouseRig(),
   tortoise_guy: () => tortoiseGuyRig(),
 };
+
+// ---- the dromedary (creatures/camel.ts): a realistic pack camel (hump tufts, knobbly knees,
+// lashed lids over modelled eyes, split lip, kilim blanket and packs; animate with CamelIdle).
+// It replaces the old characters/npc.ts camel under the same key: lookup.ts merges the
+// registries in file-name order, and registryCreatures loads after registryCharacters.
+import { camelRig as dromedaryRig } from './creatures/camel';
+export const CAMEL_MODELS: Record<string, ModelEntry> = {
+  camel: () => dromedaryRig(),
+};

@@ -1,7 +1,7 @@
 // Full mobile controls. Left half: a floating stick that appears under your
 // thumb (ride / steer). Right half: drag anywhere to look; the FIRE button can be
 // held and dragged at the same time (aim while shooting). Around it: aim, jump,
-// drift, boost, reload, kick, grapple, the three skills, the ultimate, the two
+// push (hold: drift), boost, reload, kick, grapple, the three skills, the ultimate, the two
 // consumables, interact and pause. During a QTE a big tap target sends exactly
 // the key the QTE wants (balance QTEs get left/right pads).
 // Everything is injected into the normal Input as real key codes, so gameplay
@@ -85,7 +85,7 @@ export class TouchControls {
       ['FIRE', 'Mouse0', 5, 24, 100],
       ['AIM', 'Mouse2', 18, 19, 62, true],
       ['JUMP', 'Space', 4, 45, 66],
-      ['DRIFT', 'ShiftLeft', 16, 37, 58],
+      ['PUSH', 'ShiftLeft', 16, 37, 58], // tap = kick-push, hold through a carve = drift
       ['BOOST', 'KeyV', 28, 22, 54],
       ['R', 'KeyR', 28, 37, 50],
       ['KICK', 'KeyF', 15, 54, 54],

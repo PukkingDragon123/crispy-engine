@@ -1713,7 +1713,9 @@ export class Shop {
         return q;
       };
       const pSign = ground(at(3.6, 5.9, 7.4), 1), lSign = at(-0.15, 4.4, 1.2);
-      const pNear = ground(at(6.4, 2.05, 2.5), 0.6), lNear = at(1.98, 4.25, 1.55);
+      // low on the sand looking up at the porch; over the hunter's shoulder when he stands close
+      const hx = (hp.x - H.x) * X.x + (hp.z - H.z) * X.z, hz = (hp.x - H.x) * Z.x + (hp.z - H.z) * Z.z;
+      const pNear = ground(hx < 9.5 ? at(hx + 2.6, 2.35, hz + 1.5) : at(6.4, 2.05, 2.5), 0.6), lNear = at(1.98, 4.25, 1.55);
       this.pivot.copy(H);
       this.fwdAng = Math.atan2(X.x, X.z);
       this.lightAt = at(3.0, 4.6, 1.0);
@@ -2155,7 +2157,7 @@ export class Shop {
     this.speechForce = 0;
     const F = g.meta.ramp?.foot ?? [5.35, 0.08, 0.1], T = g.meta.ramp?.top ?? [2.4, 3, 0.1];
     const fl = g.meta.porch?.[1] ?? 3.0, st = g.meta.room?.stand ?? [0.85, fl, -0.95];
-    this.dismount(v, [[8.3, 0, 1.3], [F[0] + 0.75, 0, F[2] + 0.15], [F[0] - 0.1, F[1], F[2]], [T[0], T[1], T[2]], [1.55, fl, 0.1], [0.92, fl, 0.1], st]);
+    this.dismount(v, [[8.3, 0, 1.3], [F[0] + 0.75, 0, F[2] + 0.15], [F[0], F[1] + 0.03, F[2]], [T[0], T[1], T[2]], [1.55, fl, 0.1], [0.92, fl, 0.1], st]);
     // looking back up the shop at Ozymandias from where he stands
     v.standYaw = Math.atan2(-Math.cos(g.root.rotation.y), Math.sin(g.root.rotation.y));
     this.followTarget(v, v.cp, v.cl);
@@ -2338,7 +2340,7 @@ export class Shop {
     v.from.fov = this.shot.fov;
     const F = g.meta.ramp?.foot ?? [5.35, 0.08, 0.1], T = g.meta.ramp?.top ?? [2.4, 3, 0.1];
     const fl = g.meta.porch?.[1] ?? 3.0, st = g.meta.room?.stand ?? [0.85, fl, -0.95];
-    this.setPath(v, [st, [0.92, fl, 0.1], [1.55, fl, 0.1], [T[0], T[1], T[2]], [F[0] - 0.1, F[1], F[2]], [F[0] + 0.75, 0, F[2] + 0.15], [8.1, 0, 2.4]]);
+    this.setPath(v, [st, [0.92, fl, 0.1], [1.55, fl, 0.1], [T[0], T[1], T[2]], [F[0], F[1] + 0.03, F[2]], [F[0] + 0.75, 0, F[2] + 0.15], [8.1, 0, 2.4]]);
     v.standYaw = v.heading;
     v.cp.copy(this.shot.pos);
     v.cl.copy(this.shot.look);

@@ -542,14 +542,15 @@ export class CamelIdle {
       n['body'].position.y = this.bodyY0 - (meta.kneelDrop ?? 1) * k + breathe;
       n['body'].rotation.set(Math.sin(t * 1.1) * 0.006 - k * 0.04, 0, Math.sin(t * 0.37) * 0.01);
     }
-    n['leg_fl']?.rotation.set(-1.2 * k, 0, 0.04 * k);
-    n['leg_fr']?.rotation.set(-1.2 * k, 0, -0.04 * k);
-    n['shin_fl']?.rotation.set(2.77 * k, 0, 0);
-    n['shin_fr']?.rotation.set(2.77 * k, 0, 0);
-    n['leg_bl']?.rotation.set(-1.05 * k, 0, 0.12 * k);
-    n['leg_br']?.rotation.set(-1.05 * k, 0, -0.12 * k);
-    n['shin_bl']?.rotation.set(2.55 * k, 0, 0);
-    n['shin_br']?.rotation.set(2.55 * k, 0, 0);
+    // (angles found by a fit that keeps every folded leg tucked under the belly and above the sand)
+    n['leg_fl']?.rotation.set(1.2 * k, 0, 0.03 * k);
+    n['leg_fr']?.rotation.set(1.2 * k, 0, -0.03 * k);
+    n['shin_fl']?.rotation.set(-3.05 * k, 0, 0);
+    n['shin_fr']?.rotation.set(-3.05 * k, 0, 0);
+    n['leg_bl']?.rotation.set(-1.3 * k, 0, 0.1 * k);
+    n['leg_br']?.rotation.set(-1.3 * k, 0, -0.1 * k);
+    n['shin_bl']?.rotation.set(-3.05 * k, 0, 0);
+    n['shin_br']?.rotation.set(-3.05 * k, 0, 0);
     // ---- look around (toward `look` now and then), slow neck sway
     this.nextLook -= dt;
     if (this.nextLook <= 0) {
@@ -561,8 +562,9 @@ export class CamelIdle {
     }
     this.lookY += (this.lookTY - this.lookY) * Math.min(1, dt * 1.6);
     this.lookP += (Math.sin(t * 0.23) * 0.08 - this.lookP) * Math.min(1, dt);
-    n['neck']?.rotation.set(Math.sin(t * 0.7) * 0.03 + this.lookP + k * 0.25, this.lookY * 0.45, Math.sin(t * 0.5) * 0.02);
-    n['head']?.rotation.set(Math.sin(t * 0.9 + 1) * 0.04 - this.lookP * 0.5 - k * 0.2, this.lookY * 0.5, Math.sin(t * 0.6) * 0.04);
+    // kneeling, the neck stands up tall and proud
+    n['neck']?.rotation.set(Math.sin(t * 0.7) * 0.03 + this.lookP - k * 0.5, this.lookY * 0.45, Math.sin(t * 0.5) * 0.02);
+    n['head']?.rotation.set(Math.sin(t * 0.9 + 1) * 0.04 - this.lookP * 0.5 + k * 0.42, this.lookY * 0.5, Math.sin(t * 0.6) * 0.04);
     // ---- cud chewing: open/close + side-to-side grind
     if (n['jaw']) {
       const ph = t * Math.PI * 2 * 1.25;

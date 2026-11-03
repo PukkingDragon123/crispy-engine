@@ -3,8 +3,12 @@
 // Rig frame: Sundown faces +Z, his LEFT (+X) points at the board's nose, the
 // soles sit on the deck at y = 0. Everything here is allocation-free.
 //
-//  - legs: exact two-bone IK with hip splay, feet planted on the deck (or the
-//    back foot pushing along the sand at exactly ground speed)
+//  - legs: exact two-bone IK with hip splay, feet planted on the deck; the
+//    kick-push stroke follows the board's push clock (foot off, plant by the
+//    toe edge, kick back along the sand, step back on), weight over the front knee
+//  - drift: counter-steered shoulders, the free hand trailing to the sand, the
+//    edge dug in; board-slash tail whip; sand-kick stamp; nose-manual rock with a
+//    balancing arm; wall-ride crouch
 //  - hips & spine: carve lean (toe side drives the knees, heel side sits back
 //    with the chest over the knees), a spine that lags the hips, inertial sway
 //    from the board's acceleration, ollie pop + counter-rotation
@@ -25,7 +29,7 @@ import * as THREE from 'three';
 import type { RigInstance } from '../../engine/voxel/Rig';
 import type { Board } from '../player/Board';
 import { SpringF, Spring3 } from './spring';
-import { leg, LegSample } from './gait';
+import { PUSH } from '../player/Board';
 import { clamp, clamp01, lerp, smooth, damp, easeOutCubic, easeInCubic, easeInOutSine, easeOutBack, wobble, fbm, wrapAngle, TAU, PI } from './math';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -293,8 +297,16 @@ export class PlayerAnim {
   prevTrickYaw = 0;
   prevTrickPitch = 0;
   behind = false;
-  pushP = 0.62;
-  pushStance = false;
+  /** board-driven stroke bookkeeping: push dust, sand-kick / slash triggers */
+  prevPushT = 9;
+  prevSandKick = 9;
+  prevSlash = 9;
+  /** stroke body envelope (crouch over the front knee), foot yaw and the springy foot target */
+  pushBody = 0;
+  pushYaw = 0;
+  pushFoot = new THREE.Vector3(-0.25, 0, 0);
+  manualW = 0;
+  wallW = 0;
   idleT = 0;
   fidgetT = 5;
   fidget = 0;
@@ -319,7 +331,6 @@ export class PlayerAnim {
 
   ab: ActionBody = { crouch: 0, hipX: 0, hipZ: 0, px: 0, tx: 0, ty: 0, tz: 0, jaw: 0 };
   private lp: LegPose = { x: 0, z: 0, knee: 0, roll: 0 };
-  private ls: LegSample = { sweep: 0, lift: 0, stance: true, u: 0 };
   // frames
   private mRig = new THREE.Matrix4();
   private mT = new THREE.Matrix4();
@@ -442,10 +453,30 @@ export class PlayerAnim {
     const idle = alive && grounded && spd < 1.2 && !I.forwardHeld && !aimOn && !rel && !act && !I.wrapped;
     this.idleT = idle ? this.idleT + dt : 0;
     this.idleW = damp(this.idleW, idle && this.idleT > 0.6 ? 1 : 0, 1.6, dt);
-    const hatHold = alive && grounded && spd > 20 && !aimOn && !rel && !act;
+    const hatHold = alive && grounded && spd > 11.5 && !aimOn && !rel && !act;
     this.hatW = damp(this.hatW, hatHold ? 1 : 0, 4, dt);
-    const pushing = alive && grounded && spd < 9 && I.forwardHeld && !I.firing && !rel && !act && this.aimW < 0.5 && !I.wrapped && !I.stunned && b.stumble <= 0;
-    this.pushW = damp(this.pushW, pushing ? 1 : 0, pushing ? 6 : 4, dt);
+    // the kick-push stroke runs on the board's push clock (works while aiming / shooting too)
+    const stroking = alive && grounded && b.pushT < PUSH.dur && !I.wrapped && !I.stunned && b.stumble <= 0 && !b.drifting && !b.manual;
+    this.pushW = damp(this.pushW, stroking ? 1 : 0, stroking ? 30 : 12, dt);
+    {
+      const u = clamp01(b.pushT / PUSH.dur);
+      this.pushBody = this.pushW * smooth(u / 0.22) * smooth((1 - u) / 0.32) * (b.pushGrade === 'rushed' ? 0.6 : 1);
+    }
+    this.manualW = damp(this.manualW, b.manual && grounded ? 1 : 0, 10, dt);
+    this.wallW = damp(this.wallW, b.wall.on ? 1 : 0, 12, dt);
+    // one-shot moves: the sand-kick stamp, the board-slash tail whip
+    if (b.sandKickT < this.prevSandKick) {
+      this.crouch.kick(-4.5);
+      this.ollie.kick(-7);
+      this.handL.kick(0.2, 1.8, 0.4);
+    }
+    this.prevSandKick = b.sandKickT;
+    if (b.slashT < this.prevSlash) {
+      this.yawOff.kick(b.driftDir * 16);
+      this.spinLead.kick(-b.driftDir * 5);
+      this.handL.kick(0.3, 0.6, -b.driftDir * 0.6);
+    }
+    this.prevSlash = b.slashT;
     // idle fidgets: hat adjust, glance over the shoulder, a casual twirl
     this.wantFidgetTwirl = false;
     if (this.idleW > 0.8) {
@@ -505,11 +536,17 @@ export class PlayerAnim {
     this.lean.step(b.lean, dt);
     this.lag.step(this.lean.x, dt);
     // the board banks INTO the carve (positive lean = left turn = heel side for this stance)
-    const roll = -this.lean.x * 0.42 * (1 - this.airW * 0.7);
+    const roll = -this.lean.x * 0.42 * (1 - this.airW * 0.7) - b.driftDir * this.driftW * 0.1;
     I.tilt.rotation.set(0, 0, 0);
     I.tilt.rotateY(b.trickYaw + this.yawOff.x);
     I.tilt.rotateZ(-(b.trickPitch + this.pitchOff.x) + roll);
     I.tilt.rotateX(this.ollie.x);
+    // nose manual: the board rocks onto its nose (pivot at the nose, the tail lifts) and wobbles with the balance
+    if (this.manualW > 0.001) {
+      const mp = (0.17 + clamp(b.manualBal, -1, 1) * 0.1 + Math.sin(t * 9) * 0.008) * this.manualW;
+      I.tilt.rotateX(mp);
+      I.tilt.position.set(0, Math.sin(mp) * 0.6, 0);
+    } else I.tilt.position.set(0, 0, 0);
 
     // ------------------------------------------------------------ aim (rig frame)
     I.rig.root.updateWorldMatrix(true, false);
@@ -530,7 +567,12 @@ export class PlayerAnim {
     const charge = grounded ? b.jumpCharge : 0;
     let yawT = lerp(0.38, clamp(yawAim * 0.62, -1.3, 1.3), this.aimW);
     yawT = lerp(yawT, 0.12, this.relW * 0.8);
-    yawT += -I.spinInput * charge * 0.6 * (1 - this.aimW); // spin wind-up (anticipation)
+    yawT += I.spinInput * charge * 0.6 * (1 - this.aimW); // spin wind-up (coils against the spin D / A will throw)
+    // drifting: the shoulders stay on the travel line while the tail slides out; a charging spin launch coils against it
+    if (this.driftW > 0.01) {
+      const slide = grounded ? wrapAngle(Math.atan2(b.vel.x, b.vel.z) - b.heading) : 0;
+      yawT += (clamp(slide, -0.9, 0.9) * 0.45 - b.driftDir * charge * 0.5) * this.driftW * (1 - this.aimW * 0.7);
+    }
     this.spinLead.step(clamp(spinRate * 0.045, -0.6, 0.6), dt); // shoulders lead the spin
     yawT += this.spinLead.x + ab.ty + this.idleW * fbm(t * 0.13, 3) * 0.3;
     this.yaw.step(yawT, dt);
@@ -538,7 +580,7 @@ export class PlayerAnim {
     // ----------------------------------------------------- knee compression
     const flipTuck = clamp(Math.abs(flipRate) / 8, 0, 1);
     const falling = !grounded && b.vel.y < -3 && I.heightAboveGround < 3.2 ? 1 : 0;
-    let cT = 0.12 + clamp(spd / 40, 0, 0.18) + b.compress * 0.5 + this.driftW * 0.25 + heel * 0.2 + toe * 0.1 + this.boostW * 0.14 + this.stunW * 0.15 + this.lowW * 0.08 - this.idleW * 0.05 + this.pushW * 0.3 + this.wrapW * 0.15;
+    let cT = 0.12 + clamp(spd / 40, 0, 0.18) + b.compress * 0.5 + this.driftW * 0.25 + heel * 0.2 + toe * 0.1 + this.boostW * 0.14 + this.stunW * 0.15 + this.lowW * 0.08 - this.idleW * 0.05 + this.pushBody * 0.34 + this.wrapW * 0.15 + this.manualW * 0.06 + this.wallW * 0.32;
     cT += this.airW * (0.36 + this.grabW * 0.5 + flipTuck * 0.3 - falling * 0.3);
     cT += this.deadW * 0.8 + ab.crouch;
     if (takeoff) this.crouch.kick(-3.5); // legs extend: the pop
@@ -548,37 +590,61 @@ export class PlayerAnim {
     this.accZ.step(clamp(accZ * 0.012, -0.5, 0.5), dt);
     this.absorb.step(grounded ? clamp(acc.y * 0.0035, -0.05, 0.08) : 0, dt);
 
-    // --------------------------------------------------- push-off (back foot)
+    // --------------------------------------------------- kick-push (back foot)
+    // the stroke follows the board's push clock: the back foot lifts off the deck, plants
+    // beside the toe edge by the front foot, kicks back along the sand (as far as the leg
+    // reaches at this speed), then swings round and sets back down on the deck
     let pbob = 0;
-    const pf = this.v2.set(0, 0, 0);
     if (this.pushW > 0.01) {
-      const rate = 1.3;
-      const stroke = clamp((spd * 0.42) / rate, 0.18, 0.5);
-      const duty = clamp((stroke * rate) / Math.max(spd, 0.4), 0.22, 0.58);
-      this.pushP += dt * rate;
-      const s = leg(this.pushP, duty, this.ls);
-      pf.set((-0.14 + s.sweep * stroke * 0.5) * sc, (-0.085 + s.lift * 0.15) * sc, (0.22 - s.lift * 0.05) * sc);
-      if (s.stance && !this.pushStance && this.pushW > 0.5) {
+      const T = b.pushT;
+      const big = b.pushGrade === 'perfect' || b.pushGrade === 'landing' ? 1.15 : b.pushGrade === 'rushed' ? 0.6 : 1;
+      const gy = -0.095 * sc;
+      const deckX = -this.stanceHalf, deckZ = this.footZ;
+      const plantX = 0.03 * sc, plantZ = 0.21 * sc;
+      const L = clamp(spd * 0.2, 0.16, 0.56) * sc * big;
+      const pf = this.v2;
+      if (T < PUSH.plant) {
+        // up off the deck, reach forward and down to the sand
+        bez(deckX, 0, deckZ, -0.1 * sc, 0.17 * sc * big, 0.12 * sc, plantX, gy, plantZ, easeInOutSine(T / PUSH.plant), pf);
+      } else if (T < PUSH.kickEnd) {
+        // planted: the foot stays with the ground while the board runs on, so it sweeps back
+        const k = (T - PUSH.plant) / (PUSH.kickEnd - PUSH.plant);
+        const sw = k * k * (3 - 2 * k) * 0.35 + k * 0.65;
+        pf.set(plantX - L * sw, gy, plantZ + 0.02 * sc * Math.sin(k * PI));
+      } else {
+        // toe-off: the heel flicks up behind, the foot swings round and sets back down
+        bez(plantX - L, gy, plantZ, -0.42 * sc, 0.2 * sc * big, 0.1 * sc, deckX, 0, deckZ, easeInOutSine((T - PUSH.kickEnd) / (PUSH.dur - PUSH.kickEnd)), pf);
+      }
+      // springy follow so a queued (mashed) stroke never pops the foot
+      const fk = 1 - Math.exp(-40 * dt);
+      this.pushFoot.x += (pf.x - this.pushFoot.x) * fk;
+      this.pushFoot.y += (pf.y - this.pushFoot.y) * fk;
+      this.pushFoot.z += (pf.z - this.pushFoot.z) * fk;
+      // the foot turns to point down the line while it is on the sand
+      this.pushYaw = 0.9 * this.pushW * smooth(T / PUSH.plant) * (1 - smooth((T - PUSH.kickEnd) / (PUSH.dur - PUSH.kickEnd)));
+      // the toe-off flicks sand back
+      if (this.prevPushT < PUSH.kickEnd && T >= PUSH.kickEnd && this.pushW > 0.5) {
         this.dustNow = true;
-        this.dust.copy(pf);
+        this.dust.set(plantX - L, gy, plantZ);
         I.rig.root.localToWorld(this.dust);
       }
-      this.pushStance = s.stance;
-      pbob = (s.stance ? Math.sin(s.u * PI) * 0.02 : 0) * this.pushW;
+      // weight bobs over the front knee: dips into the plant, drives up through the kick
+      pbob = (Math.sin(clamp01((T - PUSH.plant * 0.5) / PUSH.kickEnd) * PI) * 0.035 - Math.sin(clamp01(T / PUSH.dur) * PI) * 0.01) * this.pushW * big;
     } else {
-      this.pushP = 0.62;
-      this.pushStance = false;
+      this.pushFoot.set(-this.stanceHalf, 0, this.footZ);
+      this.pushYaw = 0;
     }
+    this.prevPushT = b.pushT;
 
     // ------------------------------------------------------------------ pelvis
     const land = I.landX;
     const drop = (0.025 + crouch * 0.2 + Math.max(0, -land) * 0.3 + this.absorb.x + pbob) * sc;
     const ext = Math.max(0, land) * 0.08 * sc;
-    const hz = (-0.015 - crouch * 0.06 - heel * 0.06 + toe * 0.035 + this.pushW * 0.05 - this.deadW * 0.04 + ab.hipZ) * sc;
-    const hx = (-this.accX.x * 0.08 + fbm(t * 0.35, 1) * 0.03 * this.idleW + this.pushW * 0.06 + ab.hipX) * sc;
+    const hz = (-0.015 - crouch * 0.06 - heel * 0.06 + toe * 0.035 + this.pushBody * 0.06 - this.deadW * 0.04 + ab.hipZ) * sc;
+    const hx = (-this.accX.x * 0.08 + fbm(t * 0.35, 1) * 0.03 * this.idleW + this.pushBody * 0.07 + this.manualW * (0.08 + clamp(b.manualBal, -1, 1) * 0.03) + ab.hipX) * sc;
     const stw = b.stumble > 0 ? Math.sin(t * 19) * Math.min(1, b.stumble * 2.5) : 0;
     const px = 0.05 + crouch * 0.3 + toe * 0.1 - heel * 0.03 + this.deadW * 0.3 + ab.px;
-    const py = 0.16 + (this.yaw.x - 0.38) * 0.28 + this.pushW * 0.12;
+    const py = 0.16 + (this.yaw.x - 0.38) * 0.28 + this.pushBody * 0.14;
     const pz = -hx * 1.6 + this.ollie.x * 0.85 + stw * 0.12;
     const pelvis = n['pelvis'];
     if (pelvis) {
@@ -588,16 +654,16 @@ export class PlayerAnim {
       this.qInvP.copy(pelvis.quaternion).invert();
       const fl = this.v3.set(this.stanceHalf, 0, this.footZ);
       const fr = this.v4.set(-this.stanceHalf, 0, this.footZ);
-      if (this.pushW > 0.01) fr.lerp(pf, this.pushW);
+      if (this.pushW > 0.01) fr.lerp(this.pushFoot, this.pushW);
       this.solveLeg(n['thigh_l'], n['shin_l'], fl, this.hipL, pelvis, 0.26 - py);
-      this.solveLeg(n['thigh_r'], n['shin_r'], fr, this.hipR, pelvis, -0.16 - py + this.pushW * 0.9);
+      this.solveLeg(n['thigh_r'], n['shin_r'], fr, this.hipR, pelvis, -0.16 - py + this.pushYaw);
     }
 
     // ------------------------------------------------------------------ torso
     this.flinch.step(0, dt);
     this.recBody.step(0, dt);
     const breathe = Math.sin(t * (1.5 + this.lowW * 1.6)) * (0.016 + this.lowW * 0.03 + this.idleW * 0.012);
-    const tx = crouch * 0.2 + heel * 0.28 + toe * 0.05 - this.recBody.x * 0.1 + this.flinch.x * 0.12 + breathe - this.accZ.x * 0.15 + this.deadW * 0.75 + this.boostW * 0.2 + this.lowW * 0.12 - aimPitch * 0.14 * this.aimW + ab.tx + this.airW * this.grabW * 0.55 + (this.lag.x - this.lean.x) * 0.25;
+    const tx = crouch * 0.2 + heel * 0.28 + toe * 0.05 - this.recBody.x * 0.1 + this.flinch.x * 0.12 + breathe - this.accZ.x * 0.15 + this.deadW * 0.75 + this.boostW * 0.2 + this.lowW * 0.12 - aimPitch * 0.14 * this.aimW + ab.tx + this.airW * this.grabW * 0.55 + (this.lag.x - this.lean.x) * 0.25 + this.pushBody * 0.16 + charge * 0.14 + this.manualW * 0.06 + this.wallW * 0.15;
     const ty = this.yaw.x - py;
     const tz = this.accX.x * 0.14 - pz * 0.55 + stw * 0.25 + this.stunW * Math.sin(t * 1.7) * 0.1 + ab.tz + this.recBody.x * 0.04;
     const torso = n['torso'];
@@ -633,7 +699,7 @@ export class PlayerAnim {
     this.gunSway.step(
       -this.accX.x * 0.08 - this.airW * 0.1,
       this.airW * 0.14 - Math.max(0, -land) * 0.05 + this.boostW * 0.04,
-      heel * 0.07 - toe * 0.05 + (this.pushW > 0.01 ? Math.sin(this.pushP * TAU) * 0.1 * this.pushW : 0) - this.boostW * 0.12,
+      heel * 0.07 - toe * 0.05 + Math.sin(clamp01(I.board.pushT / PUSH.dur) * TAU) * 0.1 * this.pushBody - this.boostW * 0.12,
       dt
     );
     const T = this.tR.set(S.x + (0.02 + this.gunSway.x.x) * sc, S.y + (-0.37 + this.gunSway.y.x) * sc, S.z + (0.2 + this.gunSway.z.x) * sc);
@@ -743,7 +809,7 @@ export class PlayerAnim {
     if (!armL || !foreL) return;
     const S = this.shL;
     // balance: the front arm counters the carve, flies out in the air, trails in drifts
-    const push = this.pushW > 0.01 ? -Math.sin(this.pushP * TAU) * 0.14 * this.pushW : 0;
+    const push = -Math.sin(clamp01(b.pushT / PUSH.dur) * TAU) * 0.16 * this.pushBody;
     const ltx = (0.17 + toe * 0.1 + this.airW * 0.26 + this.driftW * 0.28 - this.accX.x * 0.1 + this.boostW * 0.03) * sc;
     const lty = (-0.42 + heel * 0.12 + toe * 0.07 + this.airW * 0.32 - this.driftW * 0.06 - charge * 0.05) * sc;
     const ltz = (0.14 + heel * 0.2 - toe * 0.14 + this.airW * 0.04 + this.driftW * 0.12 - charge * 0.26 - this.boostW * 0.24 + push) * sc;
@@ -814,6 +880,16 @@ export class PlayerAnim {
         pole.lerp(this.v5.set(0.7, -0.65, 0.1), this.relW);
       }
     }
+    // drift: the free hand trails down to the sand on the inside of the slide (heel side behind, toe side in front)
+    const drag = this.driftW * (1 - this.aimW * 0.4) * (1 - this.relW);
+    if (drag > 0.01) {
+      const heelSide = b.driftDir > 0;
+      I.rig.root.localToWorld(this.v6.set(0.16 * sc, 0.22 * sc + Math.sin(t * 13) * 0.01, (heelSide ? -0.4 : 0.44) * sc)).applyMatrix4(this.mT);
+      T.lerp(this.v6, drag * 0.85);
+      pole.lerp(this.v5.set(0.8, 0.2, heelSide ? 0.4 : -0.6), drag);
+    }
+    // manual: the arm flies out over the nose to balance, bobbing with the wobble
+    if (this.manualW > 0.01) T.lerp(this.v6.set(S.x + 0.4 * sc, S.y - 0.05 * sc + clamp(b.manualBal, -1, 1) * 0.12 * sc, S.z + 0.06 * sc), this.manualW * (1 - this.aimW * 0.5));
     // board grab
     if (this.grabW > 0.01) {
       I.rig.root.localToWorld(this.v6.set(0.03 * sc, 0.06, 0.2 * sc)).applyMatrix4(this.mT);
@@ -1170,4 +1246,10 @@ export class PlayerAnim {
     this.qc.setFromEuler(this.e0.set(x, y, z));
     node.quaternion.slerp(this.qc, w);
   }
+}
+
+/** quadratic Bézier a → c → b at k, into out */
+function bez(ax: number, ay: number, az: number, cx: number, cy: number, cz: number, bx: number, by: number, bz: number, k: number, out: THREE.Vector3) {
+  const u = 1 - k;
+  return out.set(u * u * ax + 2 * u * k * cx + k * k * bx, u * u * ay + 2 * u * k * cy + k * k * by, u * u * az + 2 * u * k * cz + k * k * bz);
 }

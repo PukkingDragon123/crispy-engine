@@ -258,7 +258,7 @@ const LANDMARKS: Record<string, () => SM> = {
   // the trading post is a giant travelling tortoise now (Ozymandias, spawned by
   // Missions); his landmark is just the campfire he plods round, so the mission
   // scan and the escort routes still find "the trading post"
-  tradingPost: () => ({ ...P.campfire(3), meta: { entrance: [0, 3], footprint: [6, 6], height: 1.5, caravanCamp: true } }),
+  tradingPost: () => ({ ...P.campfire(3), meta: { entrance: [0, 3], footprint: [6, 6], height: 1.5, turtleCamp: true } }), // Gobi the turtle house walks round this fire (run/Missions.ts)
   // the rest are ghost towns now: abandoned, caved in and full of spiders (built once per type)
   outlawFort: () => memoRuin('outlawFort', () => ruined(P.outlawFort(2), { seed: 201, collapse: 0.55, breach: 0.5, sand: 0.7 }))!,
   mineHeadframe: () => memoRuin('mineHeadframe', () => ruined(P.mineHeadframe(3), { seed: 202, collapse: 0.35, keepBelow: 3.2, breach: 0.5, lean: 0.025, sand: 0.6 }))!,

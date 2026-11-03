@@ -3,7 +3,7 @@
 // spirit, models/characters/scorpionGirl.ts) and each step waits for the player
 // to actually do it, with a short spoken line and a floating 3D prompt (Alagard)
 // naming the keys:
-//   1. ride (W A S D), carve (A / D) and tuck (hold SPACE)
+//   1. push (tap SHIFT, on the beat), carve (A / D) and tuck (hold SPACE)
 //   2. hold SPACE to charge a jump, release, and land it
 //   3. aim (RMB) and shoot (LMB) three skull targets she raises from the sand
 //   4. reload (R) and hit the timing window (R again) for venom rounds
@@ -164,8 +164,8 @@ export class Tutorial {
     yield* this.line("Ride with me a while, bone-rider. Let's shake the rust off.", 'happy', 'present');
 
     // 1. ride, carve, tuck
-    this.setGoals(['RIDE   W  A  S  D', 'CARVE   A / D  into the turns', 'TUCK   hold SPACE downhill']);
-    yield* this.line('Lean into the dunes. W to push, A and D to carve. Hold SPACE to tuck and fly downhill.', 'neutral', 'point');
+    this.setGoals(['PUSH   tap SHIFT  on the beat', 'CARVE   A / D  into the turns', 'TUCK   hold SPACE downhill']);
+    yield* this.line('The sand carries no lazy rider. Tap SHIFT to kick, and kick again as your foot lands back on the board. A and D to carve, hold SPACE to tuck.', 'neutral', 'point');
     yield () => {
       this.check(0, this.rideDist > 26);
       this.check(1, this.carveT > 0.8);

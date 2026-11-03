@@ -94,3 +94,12 @@ export const ENEMY_MODELS: Record<string, ModelEntry> = {
   khonsu_sand: () => khonsuSandRig(),
   khonsu_sand_spike: () => khonsuSandSpikeModel(0),
 };
+
+// ---- ruin spiders (enemies/ruinSpider.ts): big hairy desert tarantulas nesting in the
+// abandoned buildings (two colour morphs) and their brood mother (alpha). Def: run/RuinNests.ts
+import { ruinSpiderRig } from './enemies/ruinSpider';
+export const RUIN_SPIDER_MODELS: Record<string, ModelEntry> = {
+  ruin_spider: () => ruinSpiderRig(),
+  ruin_spider_v1: () => ruinSpiderRig({ variant: 1 }),
+  ruin_spider_alpha: () => ruinSpiderRig({ alpha: true }),
+};
