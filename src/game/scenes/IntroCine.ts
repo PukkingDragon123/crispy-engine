@@ -420,7 +420,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
   let skipped = false;
   const skip = document.createElement('div');
   skip.style.cssText = "position:absolute;right:3vw;bottom:4vh;font-family:'Alagard';font-size:18px;color:#fff3d6;opacity:.75;z-index:9;pointer-events:auto;cursor:pointer;padding:8px 12px;text-shadow:0 2px 0 #2a1408";
-  skip.textContent = 'SKIP ▸';
+  skip.textContent = 'SKIP >';
   skip.onpointerdown = (e) => {
     e.stopPropagation();
     skipped = true;

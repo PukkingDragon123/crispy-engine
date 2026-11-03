@@ -97,7 +97,7 @@ export class TouchControls {
       ['T', 'KeyT', 38, 62, 50],
     ];
     for (const [label, code, r, b, size, toggle] of B) this.addBtn(label, code, `right:${r}%;bottom:${b}%`, size, toggle);
-    this.addBtn('❚❚', 'Escape', 'right:3%;top:4%', 44);
+    this.addBtn('II', 'Escape', 'right:3%;top:4%', 44);
     this.addBtn('TAB', 'Tab', 'right:12%;top:4%', 44);
     // consumables sit just above the HUD's item slots
     this.addBtn('1', 'Digit1', 'left:4%;bottom:27%', 46);
@@ -114,8 +114,8 @@ export class TouchControls {
       e.preventDefault();
       if (this.qteCode) this.input.release(this.qteCode);
     }, { passive: false });
-    this.padL = this.pad('◀', 'KeyA', 'left:8%');
-    this.padR = this.pad('▶', 'KeyD', 'right:8%');
+    this.padL = this.pad('<', 'KeyA', 'left:8%');
+    this.padR = this.pad('>', 'KeyD', 'right:8%');
     this.root.append(this.qteBtn, this.padL, this.padR);
   }
 

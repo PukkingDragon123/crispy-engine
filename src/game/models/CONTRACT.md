@@ -3,7 +3,7 @@
 All models are built with `src/engine/voxel/VoxelModel.ts` (DSL), colors from
 `src/engine/voxel/palette.ts`, and rigs follow `src/engine/voxel/Rig.ts`.
 
-## ★★★ MOST IMPORTANT RULES (user, permanent — see /CLAUDE.md; they override everything below) ★★★
+## MOST IMPORTANT RULES (user, permanent — see /CLAUDE.md; they override everything below)
 1. **Never use lazy, ugly, simple shapes** (plain spheres, boxes, cylinders, cones, rings, flat quads) for any model, prop,
    creature, effect or HUD piece. Every shape feels organic and hand-sculpted; anything that moves has a rig.
 2. **Never hand-draw 2D art in code.** No canvas-primitive pictures (motifs, icons, portraits, card scenes, posters,
@@ -12,7 +12,7 @@ All models are built with `src/engine/voxel/VoxelModel.ts` (DSL), colors from
 3. **No 2D eyes** — modelled, realistic eyes.
 4. Beautiful, detailed, polished, alive. Lazy-looking work is wrong.
 
-## ★ STYLE v2 — THE ONLY ART RULES (user, final: "forget my old rules, make it just look good, human made, stylized") ★
+## STYLE v2 — THE ONLY ART RULES (user, final: "forget my old rules, make it just look good, human made, stylized")
 Reference the user gave: a polished cartoon voxel skeleton (MagicaVoxel-style). Big rounded-blocky skull, about 28% of
 body height and as wide as the shoulders. Large square dark eye sockets, a small nose hole, a grin with a clean row of
 teeth. Thin bone limbs with knobby joints, chunky blocky hands and feet, a clear rib cage (separate rib rows with gaps)
@@ -61,7 +61,7 @@ Deviate only for a character's identity (jackal taller, mummy hunched, Anubis/Se
   exact numbers and is the source of truth). Boots/feet 6–7 long, 4 wide, 4 tall.
 - Total ≈ 52 voxels = 1.73 m (+ hat). `meta.height` etc. must match.
 
-## ★ STYLE v3 ADDENDUM (user, latest) — realistic creatures + Khonsu + ruined hideout ★
+## STYLE v3 ADDENDUM (user, latest) — realistic creatures + Khonsu + ruined hideout
 Humanoid skeletons, outlaws and NPCs stay STYLE v2 cartoon. These are the exceptions:
 - **Husk (bring back the old design) and every bug: scarab, bomb scarab, golden scarab, giant scorpion, Big Bertha,
   Sunroller.**

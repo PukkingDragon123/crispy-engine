@@ -1,6 +1,6 @@
 # dustUP — project rules
 
-## ★★★ MOST IMPORTANT RULES — from the user, permanent, they override every other note ★★★
+## MOST IMPORTANT RULES — from the user, permanent, they override every other note
 
 1. **Never use lazy, ugly, simple shapes.**
    - No plain spheres, boxes, cylinders, cones, rings or flat quads standing in for a model, prop, creature, effect or
@@ -21,6 +21,8 @@
    - Never remake or redesign a model or feature that is already good unless the user asks for that specific thing.
    - Plan first, then get it right in one or two passes, with few screenshots.
    - Finished, approved work (e.g. the tortoise shopkeeper, the sandworms) is frozen.
+6. **Never use emoji. Ever.** Not in game text, UI, buttons, toasts, code, comments, docs, commit messages or
+   replies. Use words, Alagard typography or real 3D/sculpted art instead.
 
 ## Current art direction (latest user notes win)
 - Realistic lighting with an anime-painted look: cel light ramp, black ink outlines, and lots of 2D pixel-art particles
