@@ -1320,7 +1320,7 @@ export class AnubisTrial {
     const ph = this.phase;
     const inHall = ph !== 'descent' && ph !== 'gate';
     this.mirror.visible = inHall || this.gateOpen > 0.6;
-    this.hemi.intensity = inHall ? 0.42 : 0.3;
+    this.hemi.intensity = inHall ? 0.55 : 0.3;
     for (const s of this.shafts) {
       s.k = damp(s.k, s.target, 1.2, dt);
       s.mat.uniforms.uDensity.value = s.k;
