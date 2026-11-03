@@ -876,7 +876,7 @@ export function shack(seed = 0): StaticModel & { meta: { entrance: [number, numb
 // ---------------------------------------------------------------------------
 const WVS = 1 / 40;
 /** weathered grey with a little brown left in it */
-const BROWN_GREY: WoodSpecies = { ...WOOD.weathered, tones: WOOD.weathered.tones.map((c) => mixRGB(c, 0x8a6a48, 0.18)) };
+const BROWN_GREY: WoodSpecies = { ...WOOD.weathered, tones: WOOD.weathered.tones.map((c) => mixRGB(c, 0x7a5636, 0.35)), late: mixRGB(WOOD.weathered.late, 0x8a6a48, 0.3) };
 const INK = 0x2a1d14;
 const RED_INK = 0x8e2a1a;
 
@@ -1078,14 +1078,12 @@ export function wantedBoard(seed = 0): StaticModel {
   const PX = 37; // post centres at x = +-PX, 7 x 7 section
   const yS = (z: number) => 93 - Math.round(Math.abs(z) * 0.6); // roof surface
   // ---- frame: lintel, ridge beam, knee braces, rafters
-  timber(m, [-46, 84, -2, 46, 88, 2], 'x', { seed: seed + 11, hewn: 0.2, wear: 0.1 });
+  timber(m, [-46, 84, -2, 46, 88, 2], 'x', { seed: seed + 11 });
   timber(m, [-47, 89, -1, 46, 91, 1], 'x', { seed: seed + 12, chamfer: 0 });
   for (const sx of [-1, 1]) seg(m, [sx * (PX - 4), 71, 0], [sx * 22, 83, 0], 3, weathered({ along: 'y', seed: seed + 13 + sx }));
-  for (const rx of [-46, -16, 14, 45]) for (let z = -11; z <= 11; z++) for (const x of [rx, rx + 1]) m.set(x, yS(z) - 2, z, mixRGB(WOOD.weathered.tones[1], 0x3a3028, 0.25));
   // ---- roof: dark deck boards under staggered weathered shingles (courses with proud butts), barge boards, ridge cap
-  const deck = darkWood({ along: 'x', seed: seed + 14, bleach: 0.35, knots: 0 });
   for (let x = -47; x <= 46; x++)
-    for (let z = -11; z <= 11; z++) m.set(x, yS(z) - 1, z, deck);
+    for (let z = -11; z <= 11; z++) m.set(x, yS(z) - 1, z, mod(z, 4) === 0 ? 0x3e342c : mod(z, 8) < 4 ? 0x5e5246 : 0x665a4c);
   for (const side of [-1, 1]) {
     for (let c = 0; c < 4; c++) {
       // course c: |z| in (11-3c-2 .. 11-3c)
@@ -1096,7 +1094,9 @@ export function wantedBoard(seed = 0): StaticModel {
         const id = c * 97 + sh * 13 + side * 5 + seed * 1000;
         const gone = hash3(id, 1, 2) < 0.05;
         const lift = hash3(id, 3, 4) < 0.08 ? 1 : 0;
-        const mat = weathered({ along: 'z', seed: id, checks: 0.5, knots: 0, species: hash3(id, 5, 6) < 0.3 ? 'bleached' : 'weathered' });
+        // one hand-picked tone per shingle (+ an occasional dark check), like painted shakes
+        const shT = (hash3(id, 5, 6) < 0.3 ? WOOD.bleached : WOOD.weathered).tones[1 + Math.floor(hash3(id, 7, 8) * 3.99)];
+        const chkX = hash3(id, 9, 1) < 0.4 ? x + 1 + Math.floor(hash3(id, 9, 2) * (wdt - 2)) : -999;
         for (let xx = Math.max(-47, x); xx <= Math.min(46, x + wdt - 1); xx++)
           for (let k = 0; k < 3; k++) {
             const az = 11 - 3 * c - k;
@@ -1106,8 +1106,9 @@ export function wantedBoard(seed = 0): StaticModel {
             if (gone) continue;
             const butt = k === 0 ? 1 : 0;
             const seam = xx === x + wdt - 1;
-            m.set(xx, yS(z) + butt + lift * (k === 0 ? 1 : 0), z, seam ? 0x3a3129 : mat);
-            if (butt) m.set(xx, yS(z), z, seam ? 0x2e2620 : mat);
+            const col = seam ? 0x3a3129 : xx === chkX && k > 0 ? WOOD.weathered.check : shT;
+            m.set(xx, yS(z) + butt + lift * (k === 0 ? 1 : 0), z, col);
+            if (butt) m.set(xx, yS(z), z, seam ? 0x2e2620 : shT);
           }
         x += wdt;
         sh++;
@@ -1123,7 +1124,7 @@ export function wantedBoard(seed = 0): StaticModel {
   // ---- posts (after the roof so they pierce it cleanly), tin-capped, bolted to the lintel
   for (const sx of [-1, 1]) {
     const cx = sx * PX;
-    timber(m, [cx - 3, 0, -3, cx + 3, 99, 3], 'y', { mat: weathered({ along: 'y', seed: seed * 5 + sx + 2, ends: [0, 99], checks: 0.9, rotBelow: 7, rotFrom: 0 }), chamfer: 1, hewn: 0.28, wear: 0.12, seed: seed + sx });
+    timber(m, [cx - 3, 0, -3, cx + 3, 99, 3], 'y', { mat: weathered({ along: 'y', seed: seed * 5 + sx + 2, ends: [0, 99], checks: 0.9, rotBelow: 7, rotFrom: 0 }), chamfer: 1, hewn: 0.14, seed: seed + sx });
     split(m, [cx + 1, 99, 3], 'z+', [0, -1, 0], 14, { seed: seed + sx * 3, depth: 2 });
     const cap = tin({ seed: seed + sx, rust: 0.55 });
     for (let k = 0; k <= 3; k++) {
@@ -1142,16 +1143,16 @@ export function wantedBoard(seed = 0): StaticModel {
     const broken = flip && i === 4;
     const x0 = -43 + (hash3(i, seed, 2) < 0.4 ? 1 : 0), x1 = broken ? 26 : 43 - (hash3(i, seed, 3) < 0.4 ? 1 : 0);
     const sp: WoodName | WoodSpecies = i % 3 === 1 ? 'bleached' : i % 3 === 2 ? WOOD.weathered : BROWN_GREY;
-    timber(m, [x0, y0, 4, x1, y0 + tall, 5], 'x', { mat: weathered({ along: 'x', seed: seed * 31 + i, ends: [x0, x1], checks: 0.8, species: sp }), chamfer: 0, wear: 0.1, seed: seed + i });
+    timber(m, [x0, y0, 4, x1, y0 + tall, 5], 'x', { mat: weathered({ along: 'x', seed: seed * 31 + i, ends: [x0, x1], checks: 0.8, species: sp }), chamfer: 0, wear: 0.05, seed: seed + i });
     if (broken) for (let y = y0; y <= y0 + tall; y++) for (let k = 0; k < 1 + Math.floor(hash3(y, seed, 9) * 5); k++) m.set(x1 + 1 + k, y, 4 + (k % 2), WOOD.bleached.tones[4]); // splintered end
     for (const sx of [-1, 1]) {
-      for (const [dx, dy] of [[-2, 1], [2, tall - 1]]) nailHead(m, [sx * PX + dx * sx, y0 + dy, 5], 'z+', { rust: 0.7, seed: i });
+      for (const [dx, dy] of [[-2, 1], [2, tall - 1]]) nailHead(m, [sx * PX + dx * sx, y0 + dy, 5], 'z+', { rust: 0.7, seed: i, streak: hash3(i, dx, sx) < 0.4 ? 2 : 0 });
     }
     if (hash3(i, seed, 4) < 0.5) split(m, [hash3(i, seed, 5) < 0.5 ? x0 : x1, y0 + 2, 5], 'z+', [hash3(i, seed, 5) < 0.5 ? 1 : -1, 0, 0], 8 + Math.floor(hash3(i, seed, 6) * 10), { seed: seed + i, depth: 2 });
   }
   timber(m, [-2, 31, 2, 1, 77, 3], 'y', { seed: seed + 16, chamfer: 0 }); // centre batten behind the gaps
   knotHole(m, [flip ? -20 : 18, 34, 5], 'z+', { r: 1.3, through: 2 });
-  wormHoles(m, [-43, 30, 5, 43, 36, 5], 'z+', { density: 0.03, seed, galleries: true });
+  wormHoles(m, [-43, 30, 5, 43, 36, 5], 'z+', { density: 0.014, seed, galleries: true });
   // top drip ledge + bottom ledge
   timber(m, [-45, 79, 3, 45, 80, 8], 'x', { seed: seed + 17, chamfer: 0, wear: 0.15 });
   timber(m, [-44, 27, 3, 44, 28, 7], 'x', { seed: seed + 18, chamfer: 0, wear: 0.15 });
@@ -1236,8 +1237,8 @@ export function wantedBoard(seed = 0): StaticModel {
         const h = Math.round(4.6 * Math.pow(1 - d, 1.3) + n3s(cx + x, z, seed) * 0.9);
         for (let y = 0; y < h; y++) if (!m.has(cx + x, y, z)) m.set(cx + x, y, z, sand, NOCOL);
       }
-    for (let k = 0; k < 4; k++) {
-      const a = hash3(sx, k, seed) * Math.PI * 2;
+    for (let k = 0; k < 3; k++) {
+      const a = (k / 3 + hash3(sx, k, seed) * 0.2) * Math.PI * 2;
       fieldStone(m, [cx + Math.round(Math.cos(a) * 6), 2, Math.round(Math.sin(a) * 6)], [2.2 + hash3(k, sx, 1) * 1.8, 1.6 + hash3(k, sx, 2), 2 + hash3(k, sx, 3) * 1.5], { seed: seed * 9 + k + sx * 4, mat: sandstone({ seed: seed + k, bed: 2 }), flags: NOCOL });
     }
   }

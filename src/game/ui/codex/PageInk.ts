@@ -195,13 +195,13 @@ export function paintPage(spec: PageSpec, folio: number, left: boolean, cv = doc
       p.text('CODEX', 96, INK, 'center', undefined, 1.05);
       p.text("of Serket's Reach", 30, SEPIA);
       p.y += 10;
-      p.para('Being a true account of the beasts and bandits, the treasures and the haunts of the Reach, set down by the hand of Sundown, who keeps coming back.', 22, SEPIA);
+      p.para('Being a true account of the beasts and bandits, the treasures and the haunts of the Reach, set down by the hand of Sundown, who keeps coming back.', 26, SEPIA);
       p.rule();
       p.y += 16;
-      p.text('DISCOVERY POINTS', 22, SEPIA);
+      p.text('DISCOVERY POINTS', 26, SEPIA);
       p.text(String(pts), 82, INK, 'center', undefined, 1.1);
       p.y += 10;
-      p.text('RANK', 20, SEPIA);
+      p.text('RANK', 24, SEPIA);
       p.text(rk.title.toUpperCase(), p.fit(rk.title.toUpperCase(), 52), RED, 'center', undefined, 1.25);
       if (rk.next) {
         const prev = Math.round(Codex.maxPoints() * [0, 0.03, 0.08, 0.15, 0.24, 0.35, 0.48, 0.62, 0.77, 0.9][rk.index]);
@@ -218,11 +218,11 @@ export function paintPage(spec: PageSpec, folio: number, left: boolean, cv = doc
         c.fillStyle = 'rgba(42,26,16,0.22)';
         c.fillText(off, INK_W / 2 - w / 2 + c.measureText(bar).width, p.y);
         p.y += 40;
-        p.text(`${rk.next.at - pts} more to ${rk.next.title}`, 22, SEPIA);
-      } else p.text('There is no higher title.', 22, SEPIA);
+        p.text(`${rk.next.at - pts} more to ${rk.next.title}`, 26, SEPIA);
+      } else p.text('There is no higher title.', 26, SEPIA);
       p.y = INK_H - 210;
       p.rule('-  *  -');
-      p.para('Points come from first sightings and first kills, from loot found and plans owned, from every place ridden and every legend met.', 20, SEPIA);
+      p.para('Points come from first sightings and first kills, from loot found and plans owned, from every place ridden and every legend met.', 24, SEPIA);
       break;
     }
     case 'contents': {
@@ -233,8 +233,8 @@ export function paintPage(spec: PageSpec, folio: number, left: boolean, cv = doc
       secs.forEach((s, i) => {
         const st = Codex.sectionStats(s);
         const y0 = p.y - 6;
-        p.leader(`${ROMAN(i + 1)}.  ${s.name}`, `${st.found} / ${st.total}`, 26);
-        p.c.font = '18px Alagard';
+        p.leader(`${ROMAN(i + 1)}.  ${s.name}`, `${st.found} / ${st.total}`, 30);
+        p.c.font = '21px Alagard';
         p.c.textAlign = 'left';
         p.c.fillStyle = st.fresh ? RED : FADE;
         p.c.fillText(st.fresh ? `${st.fresh} new  ·  ${st.pts} of ${st.max} pts` : `${st.pts} of ${st.max} pts`, M + 46, p.y - 6);
@@ -242,11 +242,11 @@ export function paintPage(spec: PageSpec, folio: number, left: boolean, cv = doc
         p.link(y0, p.y - 4, 'section:' + i);
       });
       const y0 = p.y - 6;
-      p.leader(`${ROMAN(secs.length + 1)}.  Moves & Cards`, `${TECHNIQUES.filter((t) => isUnlocked(t.id)).length} / ${TECHNIQUES.length}`, 26);
+      p.leader(`${ROMAN(secs.length + 1)}.  Moves & Cards`, `${TECHNIQUES.filter((t) => isUnlocked(t.id)).length} / ${TECHNIQUES.length}`, 30);
       p.y += 26;
       p.link(y0, p.y - 4, 'section:' + secs.length);
       p.y = INK_H - 170;
-      p.para('Click a chapter, a tab or a page corner. A and D turn the pages; Esc shuts the book.', 19, FADE);
+      p.para('Click a chapter, a tab or a page corner. A and D turn the pages; Esc shuts the book.', 23, FADE);
       break;
     }
     case 'title':
@@ -258,12 +258,12 @@ export function paintPage(spec: PageSpec, folio: number, left: boolean, cv = doc
       if (spec.kind === 'title') {
         p.head(`Chapter ${ROMAN(spec.s + 1)}`, true);
         p.y = 70;
-        p.text(`CHAPTER ${ROMAN(spec.s + 1)}`, 22, SEPIA);
-        p.text(s.name.toUpperCase(), p.fit(s.name.toUpperCase(), 64), INK, 'center', undefined, 1.15);
-        p.para(s.blurb, 22, SEPIA);
-        p.text(s.epigraph, 20, RED);
+        p.text(`CHAPTER ${ROMAN(spec.s + 1)}`, 26, SEPIA);
+        p.text(s.name.toUpperCase(), p.fit(s.name.toUpperCase(), 70), INK, 'center', undefined, 1.12);
+        p.para(s.blurb, 26, SEPIA);
+        p.text(s.epigraph, p.fit(s.epigraph, 25), RED);
         p.y += 6;
-        p.text(`${st.found} of ${st.total} recorded  ·  ${st.pts} of ${st.max} points`, 20, SEPIA);
+        p.text(`${st.found} of ${st.total} recorded  ·  ${st.pts} of ${st.max} points`, p.fit(`${st.found} of ${st.total} recorded  ·  ${st.pts} of ${st.max} points`, 24), SEPIA);
         p.rule();
         rows = s.entries.slice(0, rowsLeft);
       } else {

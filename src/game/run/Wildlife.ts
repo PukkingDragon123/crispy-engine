@@ -109,6 +109,8 @@ interface Hippo {
   tumble: number;
   hitIds: Set<number>;
   enraged: boolean;
+  /** seconds into a stampede before it will run the hunter down (he just threw the calf) */
+  grace: number;
 }
 interface Herd {
   home: THREE.Vector3;
@@ -215,6 +217,7 @@ export class Wildlife {
   private firstCarry = true;
   private firstSap = true;
   private stampedeT = -99;
+  private offExplosion: () => void;
 
   constructor(private d: WildlifeDeps) {
     this.group.name = 'wildlife';
@@ -228,6 +231,14 @@ export class Wildlife {
       use: () => this.throwCalf(),
     };
     d.inter.add(this.throwInter);
+    // blasts burst healing cacti wherever they are (the shootable target is only registered near the hunter)
+    this.offExplosion = d.ctx.events.on('explosion', (pos: { x: number; y: number; z: number }, r: number) => {
+      for (const c of this.cacti) {
+        if (!c.alive) continue;
+        const dx = c.pos.x - pos.x, dz = c.pos.z - pos.z;
+        if (Math.hypot(dx, dz) < r + c.radius && Math.abs(c.pos.y - pos.y) < r + c.height) this.burstCactus(c, dx, dz);
+      }
+    });
   }
 
   // ======================================================================== per zone
@@ -351,6 +362,7 @@ export class Wildlife {
       tumble: 0,
       hitIds: new Set(),
       enraged: false,
+      grace: 0,
     };
     herd.members.push(h);
     this.place(h, 1);
@@ -464,6 +476,7 @@ export class Wildlife {
     h.gruntCd -= dt;
     h.thinkT -= dt;
     h.hurtCd -= dt;
+    h.grace -= dt;
     if (h.rageT > 0) h.rageT -= dt;
     let target = 0; // desired speed
     let maxTurn = h.baby ? 3.2 : 1.5;
@@ -734,24 +747,37 @@ export class Wildlife {
     for (const c of this.cacti) if (c.alive && Math.hypot(c.pos.x - cx, c.pos.z - cz) < r + c.radius) this.burstCactus(c, fx, fz);
     if (h.st !== 'stampede' || !pl.alive || h.hurtCd > 0) return;
     if (Math.hypot(pl.pos.x - cx, pl.pos.z - cz) < r + 0.4 && pl.pos.y < h.pos.y + h.m.backY - 0.4) {
-      h.hurtCd = 1.4;
-      pl.takeHit({ base: 12, kind: 'phys', source: 'contact', knock: 11 }, h.pos);
-      this.d.ctx.sfx('punch', pl.pos, 0.9, 0.55);
+      h.hurtCd = 1.2;
+      if (h.grace <= 0 && h.speed > 6) {
+        // in its way at full tilt: run down
+        pl.takeHit({ base: 12, kind: 'phys', source: 'contact', knock: 11 }, h.pos);
+        this.d.ctx.sfx('punch', pl.pos, 0.9, 0.55);
+      } else {
+        // otherwise just shouldered aside
+        const sx = Math.cos(h.yaw), sz = -Math.sin(h.yaw);
+        const side = (pl.pos.x - h.pos.x) * sx + (pl.pos.z - h.pos.z) * sz >= 0 ? 1 : -1;
+        pl.board.impulse.x += sx * side * 6;
+        pl.board.impulse.z += sz * side * 6;
+        pl.board.impulse.y += 2.5;
+        this.d.ctx.sfx('camel_grunt', h.pos, 0.6, 0.45);
+      }
     }
   }
 
-  /** the herd goes berserk: every adult near `at` bellows and stampedes the enemies there */
-  private enrage(at: THREE.Vector3) {
+  /** the herd goes berserk: every adult near `at` (or near `also`, the thrower) bellows and stampedes the enemies round `at` */
+  private enrage(at: THREE.Vector3, also?: THREE.Vector3) {
     const ctx = this.d.ctx;
     let first: Hippo | null = null;
     for (const herd of this.herds)
       for (const h of herd.members) {
-        if (h.baby || Math.hypot(h.pos.x - at.x, h.pos.z - at.z) > ENRAGE_R) continue;
+        if (h.baby) continue;
+        if (Math.hypot(h.pos.x - at.x, h.pos.z - at.z) > ENRAGE_R && !(also && Math.hypot(h.pos.x - also.x, h.pos.z - also.z) < ENRAGE_R)) continue;
         const was = h.rageT > 0;
         h.rageT = 14;
         h.rageAt.copy(at);
         h.enraged = true;
         if (!was) {
+          h.grace = 2.2;
           h.foe = this.nearestFoe(h.pos, 40, at, 42);
           this.setState(h, 'alert');
         }
@@ -1037,6 +1063,8 @@ export class Wildlife {
     b.yaw = Math.atan2(ax, az);
     ctx.sfx('whoosh_big', from, 0.7, 1.1);
     ctx.sfx('squeak', from, 0.9, 1.7);
+    // throwing a calf is enough: the herd goes berserk at once (the landing squeal re-aims them)
+    this.enrage(to, from);
     pl.express?.('smug', 1);
     this.d.enemies.callout(TITLES.throw, { x: from.x, y: from.y + 1.2, z: from.z });
   }
@@ -1094,7 +1122,7 @@ export class Wildlife {
     if (b.enraged) return;
     b.enraged = true;
     this.d.ctx.sfx('squeak', b.pos, 1, 1.5);
-    this.enrage(b.pos.clone());
+    this.enrage(b.pos.clone(), this.d.player.pos);
   }
 
   // ======================================================================== jerboas
@@ -1283,6 +1311,7 @@ export class Wildlife {
   dispose() {
     const d = this.d;
     d.inter.remove(this.throwInter);
+    this.offExplosion();
     for (const herd of this.herds) for (const h of herd.members) if (h.inter) d.inter.remove(h.inter);
     for (const c of this.cacti) if (c.registered) d.enemies.unregisterExternal(c);
     this.group.removeFromParent();

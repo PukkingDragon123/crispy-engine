@@ -357,7 +357,12 @@ export class CodexBook {
     if (this.state !== 'open') return;
     this.state = 'closing';
     this.t = 0;
-    this.turn = null;
+    // a leaf caught mid-turn settles back where it came from before the cover comes down
+    if (this.turn) {
+      const back = this.turn.dir > 0 ? this.turn.leaf : this.turn.leaf + 1;
+      this.turn = null;
+      this.showStatic(back);
+    }
     this.steps = [];
     this.tip.style.display = 'none';
     document.body.style.cursor = 'default';

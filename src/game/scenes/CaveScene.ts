@@ -659,7 +659,6 @@ export class CaveScene implements GameScene {
       this.run.ultCharge = Math.min(1, this.run.ultCharge + 0.25);
       if (!escaped) {
         this.bossNames.push(bb.name);
-        this.codexKills['olm'] = (this.codexKills['olm'] ?? 0) + 1;
         this.hud.toast(`${bb.name.toUpperCase()}: BOUNTY CLAIMED`, '#ffd36b', `+${Math.round(bb.bounty)} bounty`, true);
       }
       this.olmSlain = true;

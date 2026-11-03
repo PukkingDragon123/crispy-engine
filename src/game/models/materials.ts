@@ -110,9 +110,9 @@ export const WOOD = {
   /** red cedar / redwood */
   cedar: { tones: [0x6e3424, 0x8e4630, 0xa85a3c, 0xbe7050, 0xd08a66], late: 0x7a3a26, knot: 0x42180e, end: [0x9a5a40, 0xc07a5a, 0xd49674], check: 0x341208 },
   /** sun-weathered silver-grey timber (UV-bleached surface, brown underneath) */
-  weathered: { tones: [0x5e564c, 0x7c7366, 0x988e7e, 0xb2a794, 0xc9bea8], late: 0xb8ad98, knot: 0x3e3630, end: [0x8a7a64, 0xa89478, 0xbca88a], check: 0x2e2822 },
+  weathered: { tones: [0x4a4138, 0x5f5447, 0x736656, 0x877866, 0x9c8c76], late: 0x8e7f6a, knot: 0x342c26, end: [0x7a6650, 0x957c60, 0xa88e70], check: 0x2a221c },
   /** bone-dry bleached boards (ruins, driftwood) */
-  bleached: { tones: [0x8a8070, 0xa89c88, 0xc0b49e, 0xd4c8b0, 0xe4dac4], late: 0xd8ccb4, knot: 0x5a5046, end: [0xb4a488, 0xcab896, 0xdccaa8], check: 0x463e36 },
+  bleached: { tones: [0x6e6558, 0x857a6a, 0x9a8e7c, 0xaea08c, 0xc0b29c], late: 0xb4a690, knot: 0x4a4038, end: [0x9e8c72, 0xb4a084, 0xc6b296], check: 0x3a322a },
 } as const satisfies Record<string, WoodSpecies>;
 export type WoodName = keyof typeof WOOD;
 
@@ -189,10 +189,10 @@ export function woodGrain(o: GrainOpts): Mat {
     if (ph < 0.17) return fin(sp.late);
     // ---- earlywood: broad figure + fibre streaks (long along the grain)
     const broad = n3(a * 0.02, u * 0.1, v * 0.1, seed + 9) * 0.5;
-    const fib = n3(a * 0.07, u * 0.9, v * 0.9, seed + 4);
-    let t = 0.55 + broad + (ph > 0.75 ? 0.12 : 0);
-    if (fib > 0.42) t += 0.22;
-    else if (fib < -0.5) t -= 0.25;
+    const fib = n3(a * 0.045, u * 0.6, v * 0.6, seed + 4);
+    let t = 0.55 + broad;
+    if (fib > 0.46) t += 0.22;
+    else if (fib < -0.55) t -= 0.25;
     return fin(tone(sp.tones, t));
   };
 }
@@ -227,7 +227,7 @@ export function endGrain(o: { along: Axis; species?: WoodName | WoodSpecies; see
 export function weathered(o: Omit<GrainOpts, 'species'> & { species?: WoodName | WoodSpecies; checks?: number; dust?: number; rotBelow?: number; rotFrom?: number }): Mat {
   const sp = speciesOf(o.species ?? 'weathered');
   const seed = o.seed ?? 0;
-  const base = woodGrain({ ...o, species: { ...sp, late: sp.tones[4] } }); // weathered: latewood stands proud and light
+  const base = woodGrain({ ...o, species: { ...sp, late: sp.tones[3] } }); // weathered: latewood stands proud and catches the light
   const chk = o.checks ?? 0.6;
   const dust = o.dust ?? 0.5;
   const rotC = 0x4e4236, rotC2 = 0x6a5a48;
@@ -235,9 +235,9 @@ export function weathered(o: Omit<GrainOpts, 'species'> & { species?: WoodName |
     const [a, u, v] = frameOf(o.along, x, y, z);
     if (chk > 0) {
       // a check: a thin long crack (low frequency along a, high across), only in some stretches
-      const line = Math.abs(n3(a * 0.03, u * 0.55, v * 0.55, seed + 21));
-      const zone = n3(a * 0.05, u * 0.07, v * 0.07, seed + 22);
-      if (line < 0.035 * chk && zone > 0.05) return dust > 0 && hash3(Math.floor(a / 3), u, v + seed) < dust * 0.35 ? 0xc4a87e : sp.check;
+      const line = Math.abs(n3(a * 0.016, u * 0.5, v * 0.5, seed + 21));
+      const zone = n3(a * 0.025, u * 0.05, v * 0.05, seed + 22);
+      if (line < 0.032 * chk && zone > 0.1) return dust > 0 && hash3(Math.floor(a / 3), u, v + seed) < dust * 0.35 ? 0xc4a87e : sp.check;
     }
     if (o.rotBelow !== undefined && y <= o.rotBelow) {
       const depth = (o.rotBelow - y) / Math.max(1, o.rotBelow - (o.rotFrom ?? o.rotBelow - 8));
@@ -646,12 +646,12 @@ export function nailHead(m: VoxelModel, p: V3, face: Face, o: { size?: 1 | 2 | 3
     m.set(d[0], d[1], d[2], mat, VF.METAL);
   }
   // rust bleeding down the surface below the nail
-  const L = o.streak ?? Math.round((o.rust ?? 0.4) * 6);
+  const L = o.streak ?? Math.round((o.rust ?? 0.4) * 4);
   for (let k = 1; k <= L; k++) {
     const q: V3 = [p[0], p[1] - k - (size === 3 ? 1 : 0), p[2]];
     const c = colAt(m, q);
     if (c === undefined) break;
-    m.set(q[0], q[1], q[2], mix(c, k < 2 ? 0x6e3218 : 0x8c4a26, k < 2 ? 0.55 : 0.32));
+    m.set(q[0], q[1], q[2], mix(c, 0x7a3c1e, k < 2 ? 0.4 : 0.22)); // a soft tea-coloured run, not a spot
   }
   return m;
 }
@@ -1069,7 +1069,8 @@ export function hewn(m: VoxelModel, box: Box, axis: Axis, o: { seed?: number; am
     if (!onU && !onV) return;
     if (onU && onV) return; // edges handled by chamfers
     const lat = onU ? v : u;
-    const sc = n3(a * 0.11, lat * 0.3, (onU ? (u === bu0 ? 1 : 2) : v === bv0 ? 3 : 4) * 5.3, seed);
+    // broad, long scallops (a few big facets read as adze work and stay cheap to mesh)
+    const sc = n3(a * 0.05, lat * 0.16, (onU ? (u === bu0 ? 1 : 2) : v === bv0 ? 3 : 4) * 5.3, seed);
     if (sc > 0.62 - amt * 0.6) del.push([x, y, z]);
   });
   for (const [x, y, z] of del) m.del(x, y, z);
@@ -1119,7 +1120,7 @@ export function timber(m: VoxelModel, box: Box, axis: Axis, o: { mat?: Mat; spec
         const du = Math.min(u - u0, u1 - u), dv = Math.min(v - v0, v1 - v);
         if (ch > 0 && u1 - u0 >= 3 && v1 - v0 >= 3) {
           // chamfer varies a little along the length (hand-cut, not machined)
-          const c = ch + (n3(a * 0.08, u0, v0, seed + 3) > 0.35 ? 1 : 0) - (n3(a * 0.1, u1, v1, seed + 4) < -0.45 ? 1 : 0);
+          const c = ch + (n3(a * 0.035, u0, v0, seed + 3) > 0.45 ? 1 : 0);
           if (du + dv < c) continue;
         }
         m.set(x, y, z, o.endMat && (a === ends[0] || a === ends[1]) ? o.endMat : mat, o.flags);

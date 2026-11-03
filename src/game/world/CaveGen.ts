@@ -704,7 +704,8 @@ export class CaveWorld {
   private makeLights() {
     const L = this.layout;
     const toneCol = { cyan: 0x58e6ff, violet: 0xb576ff, teal: 0x5cf0c8 };
-    const lit = L.crystals.filter((c) => c.key?.endsWith('_l') || c.key?.endsWith('_m')).slice(0, 12);
+    // the big clusters each light their part of the cave (a couple of medium ones by the lake too)
+    const lit = [...L.crystals.filter((c) => c.key?.endsWith('_l')).slice(0, 7), ...L.crystals.filter((c) => c.key?.endsWith('_m')).slice(-2)];
     for (const c of lit) {
       const big = c.key!.endsWith('_l');
       const light = new THREE.PointLight(toneCol[c.tone ?? 'cyan'], big ? 60 : 26, big ? 30 : 18, 1.7);
