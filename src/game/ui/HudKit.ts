@@ -235,7 +235,14 @@ export function inkText(c: CanvasRenderingContext2D, q: number, l: InkLine) {
 export function measureInk(s: string, size = 16) {
   const c = measureCtx();
   c.font = `${size}px Alagard`;
-  return c.measureText(s).width;
+  // before the web font has loaded the canvas measures a narrower fallback face: pad it so layouts never come up short
+  let ready = true;
+  try {
+    ready = document.fonts?.check?.(`${size}px Alagard`) ?? true;
+  } catch {
+    /* no font API: trust the measure */
+  }
+  return c.measureText(s).width * (ready ? 1 : 1.3);
 }
 let _mc: CanvasRenderingContext2D | null = null;
 function measureCtx() {

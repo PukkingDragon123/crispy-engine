@@ -385,7 +385,11 @@ class Note {
     const obj = wrapInk(q.objective, maxW - PAD * 2, 16, compact ? 1 : 2);
     const prog = q.progress ? wrapInk(q.progress, maxW - PAD * 2 - 11, 16, 1)[0] : '';
     const reward = compact || !q.reward ? '' : wrapInk(q.reward, maxW - PAD * 2, 16, 1)[0];
-    const lines: { t: string; kind: 'title' | 'obj' | 'prog' | 'rew' }[] = [{ t: title, kind: 'title' }, ...obj.map((t) => ({ t, kind: 'obj' as const }))];
+    const lines: { t: string; kind: 'title' | 'obj' | 'prog' | 'rew' }[] = [
+      // long titles ("Find a way out of the Glass Hollow") wrap instead of running off the cloth
+      ...wrapInk(title, maxW - PAD * 2, 16, compact ? 1 : 2).map((t) => ({ t, kind: 'title' as const })),
+      ...obj.map((t) => ({ t, kind: 'obj' as const })),
+    ];
     if (prog) lines.push({ t: prog, kind: 'prog' });
     if (reward) lines.push({ t: reward, kind: 'rew' });
     let tw = 0;
