@@ -3,6 +3,7 @@
 // melee/counter, grapple, health/shield/status and expression changes.
 import * as THREE from 'three';
 import { Board, BoardInput, LandingInfo } from './Board';
+import { BoardMoves } from './BoardMoves';
 import { CameraRig } from './CameraRig';
 import { buildRigGeo, RigInstance, RigSpec, voxelMesh } from '../../engine/voxel/Rig';
 import { RigEyes } from '../fx/FaceFx';
@@ -418,12 +419,15 @@ export class Player {
       if (!inp.held('jump')) this.dodgeHold = false;
       bi.jumpHeld = bi.jumpPressed = bi.jumpReleased = false;
     }
+    if (sliding) bi.drift = this.alive && !stunned && inp.held('drift');
     const wasBoost = this.board.boosting;
     this.board.step(dt * this.status.slowMul(), bi, { surface: this.ctx.world.surface, normal: this.ctx.world.normal, slope: this.ctx.world.slope, colliders: this.ctx.world.colliders });
     if (this.board.boosting && !wasBoost) {
       this.ctx.sfx('boost', this.pos, 0.9);
       this.ctx.fx.ring({ x: this.pos.x, y: this.pos.y + 0.3, z: this.pos.z }, P.turq0, 4);
     }
+    // push rhythm feedback, drift spray + board slash, move unlocks, the style combo
+    (this.moves ??= new BoardMoves(this.ctx, this)).update(dt);
 
     // timers
     this.invuln = Math.max(0, this.invuln - dt);
@@ -475,6 +479,9 @@ export class Player {
     else if (!this.aiming && this.rig.expression === 'focus') this.rig.setExpression(this.exprBase);
     void t;
   }
+
+  /** push / drift / trick feel, unlockable moves and the style combo (player/BoardMoves) */
+  moves: BoardMoves | null = null;
 
   private boardFx(dt: number) {
     const b = this.board;

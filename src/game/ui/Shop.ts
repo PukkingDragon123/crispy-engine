@@ -1,28 +1,34 @@
-// Old Mother Tamsin's rug shop. When you trade, the camera arcs off the
-// riding rig into a low, warm three-quarter shot of her behind her rug, with a
-// little handheld drift. She heaves her pack and the wares tumble out onto the
-// rug as real rigid bodies (box contacts, bounce, friction, sleep). Hovering
-// lifts and slowly spins a ware while the camera eases over to frame it; a
-// click buys it and it arcs into the hunter's satchel; right-click fires a shot
-// that knocks the wares about (and sends her into her shell). Leaving dollies
-// the camera back to the saddle. Pauses combat while you browse.
+// The trading post shop. Its keeper is Ozymandias, an old tortoise who lives
+// in a little shop-house on the back of Gobi, a giant walking turtle with an
+// acacia growing from his shell (models/creatures/turtleHouse.ts). Gobi plods
+// round his camp; when outlaws come near, or there is shooting or a blast
+// close by, he pulls in, drops onto his plastron and digs down into the sand
+// until only the shell top, the house and the tree show, the shutters banging
+// shut; once it is quiet his eyes come up first and he heaves himself out.
 //
-// Out in the world she is shy: aim at her (crosshair on her within ~25 m) or
-// shoot / blow something up near her and her head, legs and tail snap into her
-// shell (squash, thump, muffled grumble). 1.5-2.5 s after the threat is gone
-// she peeks — eyes first — then slides back out. Her world idle lives here too
-// (`animateMerchant`), driven by whoever owns her rig each frame.
+// Ride slowly into his radius (or head straight for him, or press T at his
+// gangplank) and a cutscene takes over: letterbox, the board brakes in a spray
+// of sand, Gobi turns his porch to you while the camera cranes past the
+// TRADING POST sign and down to Ozymandias, who ducked at the racket, peeks
+// out and greets you in floating Alagard text. Then you talk: a few answers
+// float beside him as 3D plaques (click or 1-5). "Show me your wares" lowers
+// the gangplank; Ozymandias goes in ahead, and the camera follows the hunter
+// (a walking copy of his rig, his board parked at the foot) up the plank and
+// in at the door. Inside, from the doorway: he stands behind his counter with
+// the window at his back, the wares tumble out of his basket onto a rug as
+// real rigid bodies (box contacts, bounce, friction, sleep), each in its own
+// soft pool of light; hovering lifts and spins a ware while the camera eases
+// in and he comments; a click buys it (coins arc into his claws, the ware into
+// the hunter's satchel); right-click fires a shot that knocks the wares about
+// and sends him into his shell. Leaving: a farewell, the wares back in the
+// basket, the hunter walks out and down to his board while Ozymandias follows
+// to wave from the porch, and the camera settles back into the saddle. It
+// re-arms once you have ridden off and stayed away a few seconds; never with
+// enemies within 15 m or during a boss fight. The world is paused throughout.
 //
-// Arrival: ride slowly into ~13 m of her (or head straight for her) and a short
-// cutscene takes over — letterbox, the board brakes to a stop in a spray of
-// sand, the camera cranes up past the TRADING POST sign and swings down to her;
-// startled by the board she has ducked into her shell, so she peeks out, eyes
-// first, then greets you in floating Alagard text and the shop opens. Leaving
-// gets a farewell beat (she waves her cane) before the dolly back. It re-arms
-// once you have ridden off and stayed away a few seconds; never with enemies
-// within 15 m or during a boss fight. In the shop each ware sits in its own
-// soft pool of light, she has something to say about whatever you hover, and a
-// purchase pays her in a spray of coins.
+// Old Mother Tamsin (models/characters/tortoise.ts, frozen) is still the
+// puppet here too: Ozymandias is her rig re-dressed, and she keeps her own
+// rug shop (the shot from the rug, the dolly back) wherever she stands alone.
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Input } from '../../engine/Input';
@@ -1610,7 +1616,7 @@ export class Shop {
     if (p instanceof Turtle) {
       // a gun pointed at Ozymandias sends him into his shell; outlaws near and Gobi digs in
       if (d < 25 && p.rider && !p.hidden && this.aimedAt(p)) p.rider.threat(0.5);
-      if (this.danger(p.root.position, DIG_R)) p.threat(1);
+      if (this.danger(p.root.position, DIG_R)) p.threat(0.6);
     } else if (d < 25 && this.aimedAt(p)) p.threat(0.5);
     p.near = d < 12;
     p.lookAt = hunter && d < 14 ? _w.copy(hunter).add(_a.set(0, 1.45, 0)) : null;
@@ -1636,7 +1642,7 @@ export class Shop {
       if (p.awayT > REARM_T) p.armed = true;
       return;
     }
-    if (d > (p instanceof Turtle ? ARRIVE_R_T : ARRIVE_R) || p.hidden || this.active || this.arrival || !p.root.parent) {
+    if (d > (p instanceof Turtle ? ARRIVE_R_T : ARRIVE_R) || (p instanceof Turtle && p.hidden) || this.active || this.arrival || !p.root.parent) {
       p.dwell = 0;
       return;
     }

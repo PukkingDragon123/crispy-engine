@@ -1,7 +1,7 @@
 // Landmark encounters: ride up to a tall wooden landmark, press T, and a short
 // walk-in cinematic plays (crane around the building, title cut-in), then a
 // notice offers its mission. One mission at a time, each landmark once per run.
-//   Trading Post  → the merchant's rug shop (merchant + his camel live here)
+//   Trading Post  → Gobi's turtle house: talk to Ozymandias, go inside to shop
 //   Outlaw Fort   → clear the fort before the timer runs out
 //   Abandoned Mine→ strike ore veins (timing bar) while scarabs swarm
 //   Dusty Ranch   → rustlers took a camel: beat the guards, cut it loose

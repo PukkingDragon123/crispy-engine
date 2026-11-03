@@ -890,6 +890,9 @@ function applyTheme(ctx: ThemeCtx, zn: ZoneDef) {
       break;
     }
   }
+  // a lush oasis in the zones that can hold one (water, reeds, palms, flowers, a resting spot)
+  const OASIS: Partial<Record<ThemeId, number>> = { flats: 9, glassdunes: 11, mesas: 10, palmshore: 10 };
+  if (OASIS[zn.theme]) placeOasis(ctx, zn, OASIS[zn.theme]!);
   // treasure, ore and secrets in every zone
   scatter(ctx, zn, 'ore', 3, 10, R - 6, 14, (a) => (a.data = { type: rng.pick(['copper', 'silver', 'gold', 'turquoise', 'amethyst']) }));
   scatter(ctx, zn, 'chest', 2, R * 0.25, R - 6, 8);
@@ -897,7 +900,127 @@ function applyTheme(ctx: ThemeCtx, zn: ZoneDef) {
   // one big landmark encounter per zone (tall wooden building, walk-in cinematic + mission)
   const lmTypes: LandmarkType[] = ['tradingPost', 'outlawFort', 'mineHeadframe', 'ranchBarn', 'sheriffOffice', 'saloon'];
   const lt = zn.index === 0 ? 'tradingPost' : lmTypes[(zn.index * 7 + ctx.spec.key.charCodeAt(0)) % lmTypes.length];
-  if (zn.theme !== 'arena' && zn.theme !== 'apex' && zn.theme !== 'oasisheart') placeLandmark(ctx, zn, lt);
+  if (zn.theme !== 'arena' && zn.theme !== 'apex' && zn.theme !== 'oasisheart') {
+    placeLandmark(ctx, zn, lt);
+    // tall ruined lookout towers: landmarks seen from across the zone, loot at the top
+    placeOutposts(ctx, zn);
+  }
+}
+
+/** scatter that a set piece may clear away from its footprint */
+const SMALL_SCATTER = new Set(['cactus', 'bush', 'tumbleweed', 'deadBush', 'dryGrass', 'rock', 'boulder', 'ore', 'pot', 'boneScatter', 'skull', 'palm', 'reeds', 'obeliskBroken', 'mineCart', 'tntCrate', 'ruinWall', 'chest', 'crate', 'barrel', 'whiskeyBarrel', 'fence', 'fenceBroken', 'signpost', 'hitchingPost', 'wagonWheel', 'cattleSkullPost']);
+
+/** corridor mouths of a zone (keep set pieces off the way in and out) */
+function mouths(ctx: ThemeCtx, zn: ZoneDef) {
+  const out: { x: number; z: number }[] = [];
+  if (zn.corridor) out.push({ x: zn.corridor.bx, z: zn.corridor.bz });
+  const nx = ctx.zones[zn.index + 1]?.corridor;
+  if (nx) out.push({ x: nx.ax, z: nx.az });
+  return out;
+}
+
+/**
+ * A lush oasis: a sunken pool with a wobbly shoreline (local water in the dry
+ * sub-areas, the sea level where there is one), mud under the water, a ring of
+ * green bank and damp dark sand, reeds and cattails at the waterline, lily pads,
+ * palms and flowering shrubs on the bank, and a resting spot with a drinking place.
+ */
+function placeOasis(ctx: ThemeCtx, zn: ZoneDef, R: number) {
+  const { rng, field, noise } = ctx;
+  const half = R * 1.6;
+  const mo = mouths(ctx, zn);
+  const startZ = zn.cz - zn.r * 0.45;
+  let best: { x: number; z: number } | null = null;
+  let bestSoft = 1e9;
+  for (let k = 0; k < 90; k++) {
+    const a = rng.range(0, Math.PI * 2), r = rng.range(zn.r * 0.2, Math.max(zn.r * 0.25, zn.r - half - 4));
+    const x = zn.cx + Math.cos(a) * r, z = zn.cz + Math.sin(a) * r;
+    if (mo.some((m) => Math.hypot(m.x - x, m.z - z) < half + 10)) continue;
+    if (zn.index === 0 && Math.hypot(x - zn.cx, z - startZ) < half + 8) continue;
+    let hard = 0, soft = 0;
+    for (const o of zn.anchors) {
+      if (Math.hypot(o.x - x, o.z - z) >= half + 3) continue;
+      if (SMALL_SCATTER.has(o.kind)) soft++;
+      else hard++;
+    }
+    if (hard > 0 || soft >= bestSoft) continue;
+    best = { x, z };
+    bestSoft = soft;
+    if (soft < 4) break;
+  }
+  if (!best) return;
+  const { x, z } = best;
+  zn.anchors = zn.anchors.filter((o) => Math.hypot(o.x - x, o.z - z) >= half + 2 || !SMALL_SCATTER.has(o.kind));
+  const ground = avgBase(field, x, z, R);
+  const sea = ctx.spec.water;
+  const level = sea > -100 && ground - 0.7 < sea + 0.3 ? sea : ground - 0.7;
+  const shore = (px: number, pz: number) => {
+    const ang = Math.atan2(pz - z, px - x);
+    const wob = 1 + 0.16 * noise.n2(Math.cos(ang) * 1.3 + x * 0.01, Math.sin(ang) * 1.3 + z * 0.01) + 0.06 * noise.n2(px * 0.15, pz * 0.15);
+    return Math.hypot(px - x, pz - z) / (R * wob);
+  };
+  forRect(field, x - half - 10, z - half - 10, x + half + 10, z + half + 10, (k, px, pz) => {
+    const d = shore(px, pz);
+    if (d > 1.8) return;
+    let h: number;
+    if (d < 1) h = level - 0.65 * Math.pow(1 - d * d, 0.6) - 0.06;
+    else if (d < 1.35) h = level + 0.12 + ((d - 1) / 0.35) * 0.38;
+    else h = lerp(level + 0.5, field.base[k], smoothstep(1.35, 1.8, d));
+    field.base[k] = h;
+    const n = noise.n2(px * 0.2, pz * 0.2) * 0.08;
+    if (d < 0.97) field.baseMat[k] = MAT.MUD;
+    else if (d < 1.3 + n) field.baseMat[k] = MAT.GRASS;
+    else if (d < 1.62 + n) field.baseMat[k] = MAT.SAND_DARK;
+  });
+  const at = (d: number, a: number) => ({ x: x + Math.cos(a) * R * d, z: z + Math.sin(a) * R * d });
+  // the resting spot faces the water from the side away from the zone centre's bustle
+  const restA = Math.atan2(z - zn.cz, x - zn.cx) + rng.range(-0.6, 0.6);
+  const rest = at(1.42, restA), drink = at(1.02, restA + 0.25);
+  zn.anchors.push({ kind: 'oasisPool', x, z, data: { r: R, level, rest: { ...rest, rot: restA + Math.PI }, drink } });
+  // hard markers keep the scatter / set pieces out of the water
+  for (let i = 0; i < 9; i++) zn.anchors.push({ kind: 'oasisMark', ...(i === 0 ? { x, z } : at(0.65, (i / 8) * Math.PI * 2)) });
+  zn.anchors.push({ kind: 'rug', ...rest, rot: restA + Math.PI / 2 });
+  const ring = (kind: string, n: number, d0: number, d1: number, extra?: (a: Anchor) => void) => {
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + rng.range(-0.25, 0.25);
+      if (Math.abs(((a - restA + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.32 && kind !== 'palm') continue; // keep the resting spot open
+      const p = at(rng.range(d0, d1), a);
+      const an: Anchor = { kind, x: p.x, z: p.z, rot: rng.range(0, Math.PI * 2), scale: rng.range(0.85, 1.2) };
+      extra?.(an);
+      zn.anchors.push(an);
+    }
+  };
+  ring('palm', 7 + rng.int(0, 2), 1.08, 1.45, (a) => (a.scale = rng.range(0.95, 1.35)));
+  ring('oasisReeds', 13, 0.84, 1.04);
+  ring('oasisFlowers', 8, 1.16, 1.55);
+  ring('lilyPads', 4, 0.25, 0.7, (a) => (a.data = { y: level - 0.02 }));
+  ring('rock', 3, 1.0, 1.15, (a) => (a.scale = rng.range(0.5, 0.8)));
+}
+
+/**
+ * 2-3 tall ruined lookout towers per zone, spread out, off the corridor mouths,
+ * on a small levelled pad.
+ */
+function placeOutposts(ctx: ThemeCtx, zn: ZoneDef) {
+  const { rng, field, noise } = ctx;
+  const n = 2 + (rng.chance(0.4) ? 1 : 0);
+  const mo = mouths(ctx, zn);
+  const placed: { x: number; z: number }[] = [];
+  const first = rng.int(0, 1);
+  for (let i = 0; i < n; i++) {
+    for (let k = 0; k < 60; k++) {
+      const a = rng.range(0, Math.PI * 2), r = rng.range(zn.r * 0.42, zn.r * 0.86);
+      const x = zn.cx + Math.cos(a) * r, z = zn.cz + Math.sin(a) * r;
+      if (placed.some((p) => Math.hypot(p.x - x, p.z - z) < 28)) continue;
+      if (mo.some((m) => Math.hypot(m.x - x, m.z - z) < 16)) continue;
+      if (zn.anchors.some((o) => !SMALL_SCATTER.has(o.kind) && o.kind !== 'deadBush' && o.kind !== 'dryGrass' && Math.hypot(o.x - x, o.z - z) < (o.kind === 'landmark' ? 26 : 8))) continue;
+      zn.anchors = zn.anchors.filter((o) => Math.hypot(o.x - x, o.z - z) >= 5.5 || !SMALL_SCATTER.has(o.kind));
+      flattenDisc(field, x, z, 4.5, 0.85, MAT.DIRT, noise);
+      zn.anchors.push({ kind: 'outpost', x, z, rot: rng.range(0, Math.PI * 2), scale: 1, data: { variant: (first + i) % 2 } });
+      placed.push({ x, z });
+      break;
+    }
+  }
 }
 
 export type LandmarkType = 'tradingPost' | 'outlawFort' | 'mineHeadframe' | 'ranchBarn' | 'sheriffOffice' | 'saloon';
