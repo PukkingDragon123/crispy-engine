@@ -521,8 +521,9 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
   const boardOnBack = new THREE.Mesh(player.boardMesh.geometry, player.material);
   boardOnBack.castShadow = true;
   // the board slung on his back: the rig's own `board_back` mount when it has one, else across the `back` socket
-  const mount = (CH as unknown as { attachBoardOnBack?: (r: RigInstance, b: THREE.Object3D) => THREE.Group | null }).attachBoardOnBack;
-  if (!(mount && actor.sockets['board_back'] && mount(actor, boardOnBack))) {
+  const mount = (CH as unknown as { attachBoardOnBack?: (r: RigInstance, b: THREE.Object3D, o?: { material?: THREE.Material }) => THREE.Group | null }).attachBoardOnBack;
+  const backBoard = mount && actor.sockets['board_back'] ? mount(actor, boardOnBack, { material: player.material }) : null;
+  if (!backBoard) {
     const sling = new THREE.Group();
     const tilt = new THREE.Group();
     tilt.rotation.x = -Math.PI / 2;
@@ -1018,6 +1019,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     });
     actor.root.visible = false;
     boardOnBack.visible = false;
+    if (backBoard) backBoard.visible = false;
     player.rig.root.visible = true;
     player.boardMesh.visible = true;
     if (skills) skills.pinchRoot.visible = pinchWasVisible;

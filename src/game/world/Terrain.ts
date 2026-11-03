@@ -568,9 +568,9 @@ export class Backdrop {
         let kind = 0; // 0 sand, 1 mesa rock, 2 far butte
         if (out <= -CELL) {
           // proxy: stays just below the real terrain so near chunks always cover it
-          h = Math.min(field.heightAt(x, z), field.heightAt(x + CELL, z), field.heightAt(x - CELL, z), field.heightAt(x, z + CELL), field.heightAt(x, z - CELL)) - 2.5;
+          h = Math.min(field.heightAt(x, z), field.heightAt(x + CELL, z), field.heightAt(x - CELL, z), field.heightAt(x, z + CELL), field.heightAt(x, z - CELL)) - 4;
         } else {
-          const e = edgeH(x, z) - 2.5;
+          const e = edgeH(x, z) - 4;
           const d = 22 + dunes(x, z);
           const m = mesa(x, z, out);
           const f = far(x, z, out);

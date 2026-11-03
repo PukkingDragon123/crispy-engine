@@ -617,8 +617,8 @@ export function fitCam(box: THREE.Box3, yaw: number, pitch: number, fov: number,
 export function* neckSlicerShot(k: Kit, aspect = 66 / 88, display: 'screen' | 'scene' = 'screen'): Generator<void, Shot, void> {
   if (!k.heroSpec) {
     // baked outside a run (no player rig handed in): the default Sundown
-    k.heroSpec = (modelEntry('cowboy_stetson_duster')?.() as RigSpec | undefined) ?? null;
-    k.heroKey = 'cowboy_stetson_duster:player';
+    k.heroSpec = (modelEntry('cowboy_stetson_punk')?.() as RigSpec | undefined) ?? null;
+    k.heroKey = 'cowboy_stetson_punk:player';
   }
   const root = new THREE.Group();
   const bed = yield* ground(k, root, 10, 14, 17, 0x9a6a6a, 2, 0.3);

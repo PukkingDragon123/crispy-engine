@@ -913,13 +913,14 @@ export class HubScene implements GameScene {
     } catch (e) {
       console.warn('[hub] hero', e);
     }
-    spec = spec ?? ((modelEntry('cowboy_stetson_duster')?.() as RigSpec) || null);
+    spec = spec ?? ((modelEntry('cowboy_stetson_punk')?.() as RigSpec) || null);
     if (!spec?.parts) return;
     this.heroSpec = spec;
     this.hero = new RigInstance(buildRigGeo(spec, spec.name + ':hub:' + d.look.hat + d.look.outfit), { material: makeVoxelMaterial(), castShadow: true });
     this.heroHolder.add(this.hero.root);
     if (!this.heroHolder.parent) this.scene.add(this.heroHolder);
     this.hero.setExpression('smug');
+    CH.attachBoardOnBack(this.hero, CH.sandboardModel(d.look.board as CH.BoardId), { material: this.hero.material });
     // Pinch asleep on his shoulder
     const ps = modelEntry('pinch')?.() as RigSpec | undefined;
     if (ps?.parts) {

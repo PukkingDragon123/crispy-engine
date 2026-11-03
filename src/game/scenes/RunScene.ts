@@ -230,7 +230,7 @@ export class RunScene implements GameScene {
     // player visuals
     const look = this.opts.look ?? loadSave().look;
     const vis: PlayerVisuals = {
-      rig: resolveRig([`cowboy_${look.hat}_${look.outfit}`, 'cowboy_stetson_duster'], () => placeholderHumanoid()),
+      rig: resolveRig([`cowboy_${look.hat}_${look.outfit}`, 'cowboy_stetson_punk'], () => placeholderHumanoid()),
       gun: (() => {
         try {
           const g = this.opts.gun ? ((CH as any).revolverRig?.(this.opts.gun) as RigSpec | undefined) : undefined;
@@ -321,6 +321,7 @@ export class RunScene implements GameScene {
       return { x: (v3.x * 0.5 + 0.5) * e.width, y: (-v3.y * 0.5 + 0.5) * e.height, visible: v3.z < 1 && Math.abs(v3.x) < 1.2 && Math.abs(v3.y) < 1.2 };
     };
     this.pickups = new Pickups(this.ctx, () => this.player);
+    this.pickups.onBounty = (v) => this.addBounty(v);
     this.director = new WaveDirector(this.ctx, this.enemies, () => this.player);
     this.wireEvents();
 
@@ -430,7 +431,7 @@ export class RunScene implements GameScene {
       }
     });
     this.pickups.onCollect = (k, v, at) => {
-      if (k === 'gold' || k === 'bounty' || k === 'bountyBig') this.hud.fly(k === 'gold' ? 'coin' : 'chip', at);
+      if (k === 'gold') this.hud.fly(k === 'gold' ? 'coin' : 'chip', at);
       if (k === 'bounty' || k === 'bountyBig') this.addBounty(v);
       else if (k === 'gold') {
         this.run.gold += v;
@@ -948,7 +949,7 @@ export class RunScene implements GameScene {
     this.windLoop?.setVolume(0.45 + near * 0.3, 0.3);
     // board slide audio
     const sp = this.player.speed;
-    this.slideLoop?.setVolume(this.player.board.grounded ? clamp(sp / 30, 0, 1) * 0.55 : 0, 0.08);
+    this.slideLoop?.setVolume(this.player.board.grounded ? clamp(sp / 22, 0, 1) * 0.55 : 0, 0.08);
     this.slideLoop?.setRate(0.8 + clamp(sp / 40, 0, 0.6));
     // board tracks in sand
     if (this.player.board.grounded && sp > 2 && this.player.board.lastSurface.kind !== 'water') {
@@ -971,7 +972,7 @@ export class RunScene implements GameScene {
     const pu = e.post.u;
     pu.uDamage.value = Math.max(0, pu.uDamage.value - rdt * 1.5);
     pu.uPoison.value = this.player.status.has('poison') ? 0.6 : Math.max(0, pu.uPoison.value - rdt);
-    pu.uRadial.value = clamp((sp - 28) / 30, 0, 0.6) + (this.player.board.boosting ? 0.25 : 0);
+    pu.uRadial.value = clamp((sp - 18) / 20, 0, 0.6) + (this.player.board.boosting ? 0.25 : 0);
     pu.uVignette.value = 0.32 + near * 0.35;
     // combo decay
     this.run.comboTimer -= dt;
@@ -1091,6 +1092,8 @@ export class RunScene implements GameScene {
       status: (['poison', 'bleed', 'burn', 'curse', 'slow'] as StatusId[]).map((id) => ({ id, stacks: p.status.stacks(id) })),
       hitMarker: this.hitMarker,
       killMarker: this.killMarker,
+      spreadPx: p.spreadPx(window.innerHeight / this.hud.scale),
+      reticle: p.reticle,
       combo: this.run.combo,
       locked: this.engine.input.lookActive,
       aiming: p.aiming,

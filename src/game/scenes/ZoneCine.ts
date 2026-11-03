@@ -237,8 +237,11 @@ export class ZoneCine {
     if (this.disposed) return;
     if (this.active) this.finish();
     this.disposed = true;
-    const list = this.d.engine.onAfterUpdate;
-    const i = list.indexOf(this.tick);
-    if (i >= 0) list.splice(i, 1);
+    // may be called from inside the engine's onAfterUpdate loop: unhook after it
+    setTimeout(() => {
+      const list = this.d.engine.onAfterUpdate;
+      const i = list.indexOf(this.tick);
+      if (i >= 0) list.splice(i, 1);
+    }, 0);
   }
 }

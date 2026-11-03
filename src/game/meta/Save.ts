@@ -25,7 +25,7 @@ const KEY = 'dustup-save-v1';
 
 export const PRICES: Record<string, number> = {
   'hat:stetson': 0, 'hat:bandit': 120, 'hat:sombrero': 180, 'hat:tophat': 220, 'hat:nemes': 320, 'hat:duck': 400,
-  'outfit:duster': 0, 'outfit:vest': 140, 'outfit:poncho': 200, 'outfit:sheriff': 260, 'outfit:pharaoh': 380,
+  'outfit:punk': 0, 'outfit:duster': 0, 'outfit:vest': 140, 'outfit:poncho': 200, 'outfit:sheriff': 260, 'outfit:pharaoh': 380,
   'board:driftwood': 0, 'board:cactus': 160, 'board:bone': 220, 'board:scarab_gold': 360, 'board:cyber': 450, 'board:serket': 520,
   'gun:barrel:standard': 0, 'gun:barrel:long': 150, 'gun:barrel:snub': 110, 'gun:barrel:serket': 300,
   'gun:cylinder:standard': 0, 'gun:cylinder:venom': 180, 'gun:cylinder:gold': 240, 'gun:cylinder:bone': 140,
@@ -34,7 +34,7 @@ export const PRICES: Record<string, number> = {
 };
 
 export const HATS = ['stetson', 'bandit', 'sombrero', 'tophat', 'nemes', 'duck'];
-export const OUTFITS = ['duster', 'vest', 'poncho', 'sheriff', 'pharaoh'];
+export const OUTFITS = ['punk', 'duster', 'vest', 'poncho', 'sheriff', 'pharaoh'];
 export const BOARDS = ['driftwood', 'cactus', 'bone', 'scarab_gold', 'cyber', 'serket'];
 export const GUN_PARTS: { [K in keyof GunLoadout]: GunLoadout[K][] } = {
   barrel: ['standard', 'long', 'snub', 'serket'],
@@ -70,7 +70,7 @@ function fresh(): SaveData {
     bestWave: 0,
     kills: 0,
     unlocked: Object.keys(PRICES).filter((k) => PRICES[k] === 0),
-    look: { hat: 'stetson', outfit: 'duster', board: 'driftwood' },
+    look: { hat: 'stetson', outfit: 'punk', board: 'driftwood' },
     gun: { barrel: 'standard', cylinder: 'standard', grip: 'wood', sight: 'none' },
     codex: {},
     seenIntro: false,
@@ -87,6 +87,11 @@ export function loadSave(): SaveData {
       const d = JSON.parse(raw) as SaveData;
       if (d && d.v === 1) {
         cache = { ...fresh(), ...d };
+        // the punk biker jacket is Sundown's new signature look: hand it to old saves once
+        if (!cache.unlocked.includes('outfit:punk')) {
+          cache.unlocked.push('outfit:punk');
+          if (cache.look.outfit === 'duster') cache.look.outfit = 'punk';
+        }
         return cache;
       }
     }

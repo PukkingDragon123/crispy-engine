@@ -41,14 +41,15 @@ const R = (base: number, shade: number, hi: number, dark: number): Ramp => ({ ba
 // ---------------------------------------------------------------- layout (scene metres; camp plateau y ≈ 0)
 const FIELD = 416, RES = 0.5, BASE = 40;
 const CX = 208, CZ = 352; // scene origin inside the heightfield (centre of a terrain chunk)
-const SUN_DIR = new THREE.Vector3(-0.34, 0.07, -0.94).normalize();
-const MOON_DIR = new THREE.Vector3(-0.47, 0.3, -0.83).normalize();
+const SUN_DIR = new THREE.Vector3(-0.39, 0.07, -0.918).normalize();
+const MOON_DIR = new THREE.Vector3(-0.43, 0.19, -0.88).normalize();
 const FIRE = new THREE.Vector3(-1.25, 0, 0.75);
 const SEAT = { x: 0.05, z: -0.5, yaw: -0.42 };
 const BOARD = { x: 1.0, z: -1.05, yaw: -0.25 };
 const GATE = { x: -0.45, z: -2.75, yaw: 0.05 };
-const POST = { x: 3.05, z: 0.85, yaw: -0.31 };
-const CAM_T = new THREE.Vector3(0.3, 1.45, -0.7);
+const POST = { x: 2.45, z: 0.95, yaw: -0.24 };
+const CAM_T = new THREE.Vector3(0.45, 1.5, -0.7);
+const CAM_DIST = 8.4;
 const LABELS = ['NEW RUN', 'RESUME', 'HIDEOUT', 'CODEX', 'SETTINGS'];
 const brinkZ = (x: number) => -3.1 + Math.sin(x * 0.21 + 0.6) * 0.5 + x * 0.05;
 
@@ -184,7 +185,6 @@ export class MenuScene implements GameScene {
   private sun!: THREE.DirectionalLight;
   private fireLight!: THREE.PointLight;
   private lanterns: { pivot: THREE.Group; light: THREE.PointLight; phase: number; mesh: THREE.Object3D }[] = [];
-  private skull: THREE.Group | null = null;
   private planks: Plank[] = [];
   private ray = new THREE.Raycaster();
   private hot: Plank | null = null;
@@ -308,14 +308,14 @@ export class MenuScene implements GameScene {
     this.sky.renderOrder = -10;
     this.sky.frustumCulled = false;
     this.scene.add(this.sky);
-    this.scene.fog = new THREE.Fog(0xd08a6c, 22, 360);
+    this.scene.fog = new THREE.Fog(0xd08a6c, 28, 380);
     this.scene.background = new THREE.Color(0xd08a6c);
   }
 
   private buildLights() {
     const s = this.scene;
-    s.add(new THREE.HemisphereLight(0x8c7cc0, 0xc88458, 1.2));
-    this.sun = new THREE.DirectionalLight(0xff9a52, 3.6);
+    s.add(new THREE.HemisphereLight(0x7c76c8, 0xc88458, 1.0));
+    this.sun = new THREE.DirectionalLight(0xff9a52, 4.0);
     this.sun.position.copy(SUN_DIR).multiplyScalar(70);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -382,24 +382,8 @@ export class MenuScene implements GameScene {
     const lg = MS.seatLog();
     const log = this.place(vmesh(lg.model, lg.voxelSize), SEAT.x, SEAT.z, SEAT.yaw, 0.04);
     this.logFrame.top = log.position.y + lg.seatTop;
-    // a cattle skull half in the sand, a wagon wheel, dry brush and stones
+    // a few stones scattered round the camp
     try {
-      const sk = P.skull('cow');
-      const m = this.place(vmesh(sk.model, sk.voxelSize), -2.35, 1.55, 0.9, 0.06);
-      m.rotation.z = 0.12;
-    } catch {}
-    try {
-      const ww = P.wagonWheel(2);
-      const m = this.place(vmesh(ww.model, ww.voxelSize, 'center'), 4.6, -2.0, 0.5, 0);
-      m.position.y += 0.18;
-      m.rotation.set(1.25, 0.5, 0.2);
-    } catch {}
-    try {
-      for (const [x, z, sd] of [[-4.6, -1.0, 1], [5.4, 2.2, 2], [-3.4, 3.6, 3], [2.2, 3.4, 1]] as [number, number, number][]) {
-        const b = P.dryBush(sd);
-        const m = this.place(vmesh(b.model, b.voxelSize), x, z, sd * 1.7, 0.03);
-        m.scale.setScalar(0.75 + (sd % 2) * 0.2);
-      }
       for (const [x, z, sd] of [[-0.6, 1.9, 1], [1.9, 0.5, 2], [-3.0, -0.4, 3]] as [number, number, number][]) {
         const r = P.rock(sd, 1);
         const m = this.place(vmesh(r.model, r.voxelSize), x, z, sd, 0.05);
@@ -428,20 +412,10 @@ export class MenuScene implements GameScene {
     gate.add(vmesh(gt.model, gt.voxelSize, [0, 0, 0]));
     this.place(gate, GATE.x, GATE.z, GATE.yaw, 0.08);
     gate.updateMatrixWorld(true);
-    // hanging cattle skull on a chain
-    try {
-      const ch = MS.chain(4);
-      const sk = (PM as any).skull('cow');
-      const pivot = new THREE.Group();
-      pivot.position.set(...gt.skullHook);
-      pivot.add(vmesh(ch.model, ch.voxelSize, ch.pivot));
-      const skm = vmesh(sk.model, sk.voxelSize, 'center');
-      skm.position.y = -ch.length - 0.14;
-      skm.rotation.x = -0.25;
-      pivot.add(skm);
-      gate.add(pivot);
-      this.skull = pivot;
-    } catch {}
+    // the letters catch a warm wash from the camp below
+    const titleLight = new THREE.PointLight(0xffb070, 3.2, 7, 2);
+    titleLight.position.set(0, gt.top - 0.5, 1.7);
+    gate.add(titleLight);
     // ---- signpost + menu boards
     const sp = MS.signpost();
     const post = new THREE.Group();
@@ -452,16 +426,18 @@ export class MenuScene implements GameScene {
     LABELS.forEach((label, i) => {
       const dir: 1 | -1 = i % 2 === 0 ? -1 : 1;
       const pm = MS.arrowPlank(label, dir, i * 7 + 3, woods[i], i === 0 ? red : cream);
+      const PS = 0.86;
       const mat = makeVoxelMaterial();
       (mat.userData.emissiveStrength as { value: number }).value = 0;
       const mesh = vmesh(pm.model, pm.voxelSize, pm.pivot, mat);
+      mesh.scale.setScalar(PS);
       const g = new THREE.Group();
       g.add(mesh);
       // invisible hit box (cheap raycasts)
-      const proxy = new THREE.Mesh(new THREE.BoxGeometry(pm.length, pm.height, 0.12), new THREE.MeshBasicMaterial({ visible: false }));
-      proxy.position.set((dir * pm.length) / 2, 0, 0.04);
+      const proxy = new THREE.Mesh(new THREE.BoxGeometry(pm.length * PS, pm.height * PS, 0.12), new THREE.MeshBasicMaterial({ visible: false }));
+      proxy.position.set((dir * pm.length * PS) / 2, 0, 0.04);
       g.add(proxy);
-      g.position.set(0, 2.5 - i * 0.4, sp.faceZ + 0.004 + i * 0.002);
+      g.position.set(0, 2.3 - i * 0.37, sp.faceZ + 0.004 + i * 0.002);
       const restYaw = [0.08, -0.12, 0.05, -0.06, 0.1][i];
       const restRoll = [-0.05, 0.04, 0.02, -0.06, 0.035][i];
       g.rotation.set(0, restYaw, restRoll);
@@ -509,7 +485,7 @@ export class MenuScene implements GameScene {
   private buildHero() {
     const save = loadSave();
     const look = save.look ?? { hat: 'stetson', outfit: 'duster', board: 'driftwood' };
-    const spec = this.rigOf([`cowboy_${look.hat}_${look.outfit}`, 'cowboy_stetson_duster']);
+    const spec = this.rigOf([`cowboy_${look.hat}_${look.outfit}`, 'cowboy_stetson_punk', 'cowboy_stetson_duster']);
     if (!spec) return;
     const hero = new RigInstance(buildRigGeo(spec, spec.name + ':player'), { material: makeVoxelMaterial() });
     this.hero = hero;
@@ -544,17 +520,21 @@ export class MenuScene implements GameScene {
     hero.root.position.copy(this.heroBase);
     hero.root.rotation.y = lf.yaw;
     // board: on his back when the rig has the socket, else planted upright in the sand
-    const be = (modelEntry('board_' + look.board) ?? modelEntry('board_driftwood'))?.() as { model: VoxelModel; voxelSize: number; meta?: any } | undefined;
+    let be: { model: VoxelModel; voxelSize: number; meta?: any } | undefined;
+    try {
+      be = CH.sandboardModel((look.board ?? 'driftwood') as CH.BoardId);
+    } catch {
+      be = (modelEntry('board_' + look.board) ?? modelEntry('board_driftwood'))?.() as typeof be;
+    }
     if (be?.model) {
       const bm = vmesh(be.model, be.voxelSize, 'center', hero.material);
       const half = (be.meta?.length ?? 1.45) / 2;
       this.perch.position.set(0, 0, half - 0.04);
       bm.add(this.perch);
-      const mount = (CH as unknown as { attachBoardOnBack?: (r: RigInstance, b: THREE.Object3D) => THREE.Group | null }).attachBoardOnBack;
       let onBack = false;
-      if (mount && hero.sockets['board_back']) {
+      if (hero.sockets['board_back']) {
         try {
-          onBack = !!mount(hero, bm);
+          onBack = !!CH.attachBoardOnBack(hero, bm, { material: hero.material });
         } catch (err) {
           console.warn('[menu] board_back mount failed', err);
         }
@@ -787,7 +767,7 @@ export class MenuScene implements GameScene {
     this.mouse.y = damp(this.mouse.y, inp.ndcY, 1.6, dt || 1);
     const intro = Ease.outCubic(clamp(t / 3.6, 0, 1));
     const yaw = 0.035 + 0.075 * Math.sin(t * 0.12) + 0.03 * Math.sin(t * 0.27 + 1) + this.mouse.x * 0.035;
-    const dist = 9.5 + (1 - intro) * 3.2;
+    const dist = CAM_DIST + (1 - intro) * 3.2;
     const cx = CAM_T.x + Math.sin(yaw) * dist, cz = CAM_T.z + Math.cos(yaw) * dist;
     const cy = this.gy(cx, cz) + 1.72 + 0.07 * Math.sin(t * 0.17) + this.mouse.y * 0.1 + (1 - intro) * 0.9;
     this.camera.position.set(cx, cy, cz);
@@ -1093,8 +1073,8 @@ export class MenuScene implements GameScene {
       P.emit({ ...base, pos: { x: f.x, y: f.y + 0.2, z: f.z }, life: [0.2, 0.3], size: [0.85, 0.55], sprite: 'glow32', color: 0xff6a1a, alpha: 0.42, additive: true, sizeJitter: 0.2 });
     for (let i = this.rate('spark', 9 + Math.max(0, Math.sin(t * 0.7)) * 8, dt); i > 0; i--)
       P.emit({ ...base, pos: { x: f.x, y: f.y + 0.35, z: f.z }, vel: { x: W.x * lean * 1.6, y: 1.6, z: W.z * lean * 1.6 }, spread: 0.6, up: 0.8, life: [0.9, 2.0], size: [0.035, 0.015], sprite: 'spark', color: [0xffc060, 0xff9a40, 0xffe090], additive: true, drag: 0.5, jitter: 0.08, gravity: -0.2 });
-    for (let i = this.rate('smoke', 3.5, dt); i > 0; i--)
-      P.emit({ ...base, pos: { x: f.x, y: f.y + 0.7, z: f.z }, vel: { x: W.x * 0.6 * this.gust, y: 0.65, z: W.z * 0.6 * this.gust }, spread: 0.12, life: [2.4, 3.8], size: [0.3, 1.6], sprite: ['puff0', 'puff1', 'puff2', 'puff3'], color: [0x5c4c46, 0x74645c, 0x86766c], alpha: 0.3, drag: 0.4, rot: 6, rotSpeed: 0.5, fadeIn: 0.25 });
+    for (let i = this.rate('smoke', 2.2, dt); i > 0; i--)
+      P.emit({ ...base, pos: { x: f.x, y: f.y + 0.8, z: f.z }, vel: { x: W.x * 0.7 * this.gust, y: 0.7, z: W.z * 0.7 * this.gust }, spread: 0.1, life: [2.2, 3.4], size: [0.18, 0.9], sprite: ['puff0', 'puff1', 'puff2', 'puff3'], color: [0x9a8a82, 0xae9e94, 0x8a7a72], alpha: 0.16, drag: 0.4, rot: 6, rotSpeed: 0.5, fadeIn: 0.3 });
     // a log settles: a pop of sparks
     if (Math.random() < dt * 0.25) {
       P.emit({ ...base, pos: { x: f.x, y: f.y + 0.25, z: f.z }, count: 16, spread: 1.6, up: 2.2, life: [0.6, 1.4], size: [0.04, 0.012], sprite: 'spark', color: [0xffe0a0, 0xffa040], additive: true, drag: 0.8, gravity: 2.5 });
@@ -1108,10 +1088,6 @@ export class MenuScene implements GameScene {
       l.pivot.rotation.z = Math.sin(t * 1.7 + l.phase) * 0.05 * this.gust + 0.03 * this.gust;
       l.pivot.rotation.x = Math.sin(t * 1.3 + l.phase * 2) * 0.03;
     }
-    if (this.skull) {
-      this.skull.rotation.z = Math.sin(t * 1.4) * 0.05 * this.gust + 0.035 * this.gust;
-      this.skull.rotation.y = Math.sin(t * 0.6) * 0.15;
-    }
   }
 
   // ---------------------------------------------------------------- wind and sand
@@ -1123,7 +1099,7 @@ export class MenuScene implements GameScene {
     for (let i = this.rate('brink', 55 * g, dt); i > 0; i--) {
       const x = -8 + Math.random() * 16, z = brinkZ(x);
       const sp = 1.2 + Math.random() * 1.6 * g;
-      P.emit({ pos: { x, y: this.gy(x, z) + 0.04, z }, vel: { x: W.x * sp, y: 0.25 + Math.random() * 0.3, z: W.z * sp - 0.3 }, count: 1, spread: 0.2, life: [1.2, 2.4], size: [0.03, 0.02], sprite: ['grain0', 'grain1', 'grain2', 'grain3', 'grain4', 'grain5'], color: [0xf4d7a0, 0xe6bb7c, 0xfde6b8], gravity: 0.45, drag: 0.35 });
+      P.emit({ pos: { x, y: this.gy(x, z) + 0.04, z }, vel: { x: W.x * sp, y: 0.25 + Math.random() * 0.3, z: W.z * sp - 0.3 }, count: 1, spread: 0.2, life: [1.2, 2.4], size: [0.045, 0.03], sprite: ['grain0', 'grain1', 'grain2', 'grain3', 'grain4', 'grain5'], color: [0xf4d7a0, 0xe6bb7c, 0xfde6b8], gravity: 0.45, drag: 0.35 });
     }
     // low saltation over the plateau and the apron
     for (let i = this.rate('salt', 30 * g, dt); i > 0; i--) {

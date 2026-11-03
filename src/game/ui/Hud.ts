@@ -33,6 +33,10 @@ export interface HudState {
   status: { id: StatusId; stacks: number }[];
   hitMarker: number;
   killMarker: number;
+  /** crosshair bloom radius in HUD px (Player.spreadPx) */
+  spreadPx?: number;
+  /** Player.reticle: hit / kill / head / sticky, 0..1 */
+  reticle?: { hit: number; kill: number; head: number; sticky: number };
   combo: number;
   locked: boolean;
   aiming: boolean;
@@ -346,7 +350,7 @@ export class Hud {
       if (!this.use3D && rel.phase === 'eject' && Math.random() < dt * 30) this.parts.push({ kind: 'casing', x: ox + (Math.random() - 0.5) * 10, y: oy, vx: (Math.random() - 0.5) * 50, vy: -30 - Math.random() * 30, t: 0, life: 1.2, rot: Math.random() * 6 });
     }
     // speed plaque
-    text(c, `${Math.round(s.speed)}`, cx + 38, cy - 6, s.speed > 30 ? UI.brass.h : UI.textDim, 16, 'left');
+    text(c, `${Math.round(s.speed)}`, cx + 38, cy - 6, s.speed > 20 ? UI.brass.h : UI.textDim, 16, 'left');
     text(c, 'm/s', cx + 38, cy + 6, UI.textDim, 16, 'left');
   }
 
@@ -369,16 +373,22 @@ export class Hud {
     {
       const cy = Math.round(H / 2);
       const hm = s.hitMarker, km = s.killMarker;
-      const gap = s.aiming ? 2 : 4;
-      const col = km > 0 ? UI.blood.h : hm > 0 ? UI.brass.h : 'rgba(255,244,216,0.95)';
-      for (const [dx, dy, w, h] of [[-gap - 4, 0, 4, 1], [gap + 1, 0, 4, 1], [0, -gap - 4, 1, 4], [0, gap + 1, 1, 4]]) {
+      const rt = s.reticle;
+      const head = (rt?.head ?? 0) > 0.05;
+      const sticky = rt?.sticky ?? 0;
+      // ticks sit on the edge of the real shot cone, with a small punch on hit
+      const gap = Math.round(Math.min(22, (s.aiming ? 2 : 3) + (s.spreadPx ?? 0) + (rt?.hit ?? 0) * 2));
+      const len = s.aiming ? 3 : 4;
+      const col = km > 0 ? UI.blood.h : head ? '#ffffff' : hm > 0 ? UI.brass.h : sticky > 0.5 ? '#ffd9a0' : 'rgba(255,244,216,0.95)';
+      for (const [dx, dy, w, h] of [[-gap - len, 0, len, 1], [gap + 1, 0, len, 1], [0, -gap - len, 1, len], [0, gap + 1, 1, len]]) {
         px(c, cx + dx + 1, cy + dy + 1, w, h, 'rgba(20,10,4,0.6)');
         px(c, cx + dx, cy + dy, w, h, col);
       }
       px(c, cx, cy, 1, 1, col);
-      if (hm > 0 || km > 0) {
-        const k = km > 0 ? 7 : 5;
-        for (let i = 3; i < k; i++) for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) px(c, cx + sx * i, cy + sy * i, 1, 1, col);
+      if (hm > 0 || km > 0 || head) {
+        const k1 = km > 0 ? 8 : head ? 7 : 5;
+        const mc = km > 0 ? UI.blood.h : head ? '#ffffff' : UI.brass.h;
+        for (let i = 3; i < k1; i++) for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) px(c, cx + sx * i, cy + sy * i, 1, 1, mc);
       }
     }
 

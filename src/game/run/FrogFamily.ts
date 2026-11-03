@@ -1389,7 +1389,9 @@ export class FrogFamily {
     const hat = r.meshes['hat'] ?? null;
     const geo = hat?.geometry ?? null;
     let mesh: THREE.Mesh | null = null;
-    if (H.node) {
+    // (a second family later in the run: he is already wearing one)
+    const wearing = !!H.node?.children.some((c) => (c as THREE.Mesh).geometry === WIG_GEO);
+    if (H.node && !wearing) {
       mesh = new THREE.Mesh(hunterWigGeo(), r.material);
       mesh.castShadow = true;
       mesh.receiveShadow = true;

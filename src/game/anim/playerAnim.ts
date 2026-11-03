@@ -442,7 +442,7 @@ export class PlayerAnim {
     const idle = alive && grounded && spd < 1.2 && !I.forwardHeld && !aimOn && !rel && !act && !I.wrapped;
     this.idleT = idle ? this.idleT + dt : 0;
     this.idleW = damp(this.idleW, idle && this.idleT > 0.6 ? 1 : 0, 1.6, dt);
-    const hatHold = alive && grounded && spd > 34 && !aimOn && !rel && !act;
+    const hatHold = alive && grounded && spd > 20 && !aimOn && !rel && !act;
     this.hatW = damp(this.hatW, hatHold ? 1 : 0, 4, dt);
     const pushing = alive && grounded && spd < 9 && I.forwardHeld && !I.firing && !rel && !act && this.aimW < 0.5 && !I.wrapped && !I.stunned && b.stumble <= 0;
     this.pushW = damp(this.pushW, pushing ? 1 : 0, pushing ? 6 : 4, dt);

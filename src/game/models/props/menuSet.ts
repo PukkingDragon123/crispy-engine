@@ -480,8 +480,9 @@ export function titleGate(text = 'dustUP', split = 4): TitleGate {
   const lhx = PX - 30;
   const lY = [hook(-lhx, 2), hook(lhx, 2)];
   // ---- the letters: cut-out boards, bevelled, painted, chipped, bolted on iron feet
-  let g = alagardMask(text, 48, split);
-  if (g.h < 30) g = alagardMask(text, 64, split);
+  // big chunky glyphs (4x the font's pixel grid); smaller if they would overhang the beam
+  let g = alagardMask(text, 64, split);
+  if (g.w > 248 || g.w === 0) g = alagardMask(text, 48, split);
   const depth = inkDepth(g, 4);
   const LX0 = -Math.floor(g.w / 2), LY0 = BY1 + 4;
   const LZ0 = -3, LZ1 = 3;

@@ -123,8 +123,13 @@ Sockets: `hand_r`, `hand_l`, `head_top`, `back`, `shoulder_l`, `shoulder_r`, `hi
 ### characters/ (registryCharacters.ts)
 - `skeletonCowboyRig(look: CowboyLook): RigSpec` — `CowboyLook { hat: HatId; outfit: OutfitId }`
   - `HatId = 'stetson' | 'duck' | 'sombrero' | 'nemes' | 'tophat' | 'bandit'`
-  - `OutfitId = 'duster' | 'poncho' | 'vest' | 'sheriff' | 'pharaoh'`
-  - parts: humanoid + `jaw`, `hat` (parent head), `coat` (parent pelvis). Eye sockets get engine-drawn 2D eyes.
+  - `OutfitId = 'bare' | 'punk' | 'duster' | 'poncho' | 'vest' | 'sheriff' | 'pharaoh'` (`punk` = the biker-jacket default look)
+  - Sundown is the HD build (`characters/sundown.ts`, 1/54 m, sculpted in 1/36 design units so every joint/socket
+    matches the legacy layout). The 1/36 `skeleton.ts` build stays only as the base for `skeletonFigure()` (enemies).
+  - parts: humanoid + `jaw`, `hat` (parent head), `coat` (parent pelvis), modelled `eye_l`/`eye_r` (glowing pupils).
+  - socket `board_back` (torso, between the shoulder blades); mount a board with
+    `attachBoardOnBack(rig, sandboardModel(id) | geometry | Object3D, opts?)` from `characters/index.ts`.
+- `pinchRig()` is the HD Pinch (1/72 m, sculpted in the legacy 1/48 units; same part names and sockets).
 - `revolverRig(parts: GunParts): RigSpec` — parts `frame` (root, pivot = grip center), `cylinder`
   (pivot = cylinder axis center, can spin around Z), `hammer` (pivot hinge), optional `scope`.
   `meta.muzzle: V3` (voxel coords in frame space), `meta.ejector`. 

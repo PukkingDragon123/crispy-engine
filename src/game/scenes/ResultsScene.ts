@@ -187,7 +187,7 @@ function heroSpec(res: RunResult): RigSpec | null {
   if (res.hero?.parts) return res.hero;
   try {
     const look = loadSave().look;
-    for (const k of [`cowboy_${look.hat}_${look.outfit}`, 'cowboy_stetson_duster']) {
+    for (const k of [`cowboy_${look.hat}_${look.outfit}`, 'cowboy_stetson_punk']) {
       const s = modelEntry(k)?.() as RigSpec | undefined;
       if (s?.parts) return s;
     }
