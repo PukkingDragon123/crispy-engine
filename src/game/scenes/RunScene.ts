@@ -390,7 +390,7 @@ export class RunScene implements GameScene {
       else if (k === 'boost') this.player.board.boostMeter = Math.min(1, this.player.board.boostMeter + 0.3);
     };
     ev.on('trick', (l: any) => {
-      this.hud.toast(l.trickName || 'TRICK', '#6fe3cf', `+${l.score} style`);
+      this.hud.toast(l.trickName || 'TRICK', l.quality === 'perfect' ? '#ffd36b' : l.quality === 'sketchy' ? '#e0b373' : '#6fe3cf', `+${l.score} style`);
       this.run.style += l.score;
       this.run.ultCharge = Math.min(1, this.run.ultCharge + l.score / 6000);
       ctx.sfx('trick_spin', null, 0.6);

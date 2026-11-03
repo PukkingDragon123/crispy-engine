@@ -16,6 +16,9 @@ import { sandWolfRig } from './enemies/wolf';
 import { duneWormRig } from './enemies/worm';
 import { sandwormRig } from './enemies/sandworm';
 import { khonsuAvatarRig, khonsuHandRig } from './enemies/khonsu';
+import { rainFrogMamaRig, rainFrogBabyRig } from './enemies/frog';
+import { thornyLizardRig, thornbackRig } from './enemies/lizard';
+import { bellSnakeRig } from './enemies/snake';
 
 export const ENEMY_MODELS: Record<string, ModelEntry> = {
   husk: () => huskRig(),
@@ -69,4 +72,18 @@ export const ENEMY_MODELS: Record<string, ModelEntry> = {
   khonsu_avatar: () => khonsuAvatarRig(),
   khonsu_avatar_enraged: () => khonsuAvatarRig({ enraged: true }),
   khonsu_hand: () => khonsuHandRig(),
+  // rain-frog family event, thorny lizards (+ Old Thornback miniboss), bell snakes
+  rain_frog_mama: () => rainFrogMamaRig(),
+  rain_frog_baby: () => rainFrogBabyRig({ variant: 0 }),
+  rain_frog_baby_v1: () => rainFrogBabyRig({ variant: 1 }),
+  rain_frog_baby_v2: () => rainFrogBabyRig({ variant: 2 }),
+  rain_frog_baby_v3: () => rainFrogBabyRig({ variant: 3 }),
+  rain_frog_baby_v4: () => rainFrogBabyRig({ variant: 4 }),
+  thorny_lizard: () => thornyLizardRig(),
+  thorny_lizard_v1: () => thornyLizardRig({ variant: 1 }),
+  thorny_lizard_v2: () => thornyLizardRig({ variant: 2 }),
+  thorny_lizard_alpha: () => thornyLizardRig({ alpha: true }),
+  thorny_lizard_boss: () => thornbackRig(),
+  bell_snake: () => bellSnakeRig(),
+  bell_snake_alpha: () => bellSnakeRig({ alpha: true }),
 };

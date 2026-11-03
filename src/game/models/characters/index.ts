@@ -3,7 +3,7 @@
 // (no resampling / texture passes). Humanoids use the shared toon kit (../toon/humanoid.ts).
 // Scales: Sundown & merchant 1/30, dumb scarab / dung ball 1/30, Pinch & revolver & dung bomb /
 // duck 1/48, boards 1/32, camel 1/24, Anubis & Serket avatar 1/20, attachments 1/30 (hero grid).
-import { skeletonCowboyRig as sundownBase, CowboyLook } from './skeleton';
+import { skeletonCowboyRig as sundownBase, referenceSkeletonRig as refBase, CowboyLook } from './skeleton';
 import { revolverRig as revolverBase, GunParts, DEFAULT_GUN } from './revolver';
 import { pinchRig as pinchBase } from './pinch';
 import { sandboardModel as boardBase, BoardId } from './boards';
@@ -14,8 +14,8 @@ import { serketAvatarRig as serketBase } from './serket';
 import { attachmentModel as attachmentBase, AttachmentId, Attachment } from './attachments';
 import type { RigSpec } from '../../../engine/voxel/Rig';
 
-export { HAT_IDS, OUTFIT_IDS, SUNDOWN_EXPRESSIONS } from './skeleton';
-export type { CowboyLook, HatId, OutfitId } from './skeleton';
+export { HAT_IDS, OUTFIT_IDS, SUNDOWN_EXPRESSIONS, SUNDOWN_VS, skeletonFigure, figureRig } from './skeleton';
+export type { CowboyLook, HatId, OutfitId, SkeletonFigure, FigurePart } from './skeleton';
 export { DEFAULT_GUN } from './revolver';
 export type { GunParts } from './revolver';
 export { PINCH_EXPRESSIONS } from './pinch';
@@ -39,7 +39,8 @@ const memo = <A extends unknown[], R>(fn: (...a: A) => R) => {
   };
 };
 
-export const skeletonCowboyRig = memo((look: CowboyLook = { hat: 'stetson', outfit: 'duster' }): RigSpec => sundownBase(look));
+export const skeletonCowboyRig = memo((look: CowboyLook = { hat: 'stetson', outfit: 'bare' }): RigSpec => sundownBase(look));
+export const referenceSkeletonRig = memo((): RigSpec => refBase());
 export const revolverRig = memo((g: GunParts = DEFAULT_GUN): RigSpec => revolverBase(g));
 export const pinchRig = memo((): RigSpec => pinchBase());
 export const sandboardModel = memo((style: BoardId = 'driftwood') => boardBase(style));

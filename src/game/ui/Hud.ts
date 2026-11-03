@@ -387,7 +387,8 @@ export class Hud {
 
     // ---------------------------------------------------------- health (bottom left)
     {
-      const x = 8 - slide * 200, y = H - 28;
+      // the 3D beating heart sits left of the bar, so the bar moves over for it
+      const x = (this.use3D ? 34 : 8) - slide * 200, y = H - 28;
       if (this.lastHp >= 0 && s.hp < this.lastHp - 0.5) this.onHurt(this.lastHp - s.hp);
       this.lastHp = s.hp;
       const frac = Math.max(0, s.hp / s.maxHp);
@@ -400,7 +401,7 @@ export class Hud {
       const low = frac < 0.3;
       drawBarFill(c, x + 18 + sx, y + sy, bw, bh, frac, this.hpFlash > 0.5 ? { o: '#fff', d: '#fff', m: '#ffe0d0', l: '#fff', h: '#fff' } : low && Math.sin(this.t * 9) > 0 ? { ...UI.blood, m: '#ff5a3a' } : UI.blood, this.hpTrail);
       if (s.shield > 0) drawBarFill(c, x + 18 + sx, y - 6 + sy, bw, 9, Math.min(1, s.shield / s.maxHp), UI.sky);
-      this.anchors.heart = { x: x + 4, y: y + 6, frac };
+      this.anchors.heart = { x: x - 12, y: y + 4, frac };
       if (!this.use3D) this.spr('skullIcon', x - 2 + sx, y - 1 + sy + (low ? Math.round(Math.sin(this.t * 9)) : 0));
       text(c, `${Math.ceil(s.hp)}`, x + 26 + sx, y + 1 + sy, UI.text, 16);
       text(c, `/${Math.round(s.maxHp)}`, x + 26 + measure(c, `${Math.ceil(s.hp)}`) + sx, y + 1 + sy, UI.textDim, 16);

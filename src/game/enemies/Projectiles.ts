@@ -35,6 +35,7 @@ const LOOK: Record<ProjKind, { sprite: string; size: number; color: number; stre
   needle: { sprite: 'twig', size: 0.3, color: 0x9fd060, stretch: 0.01, grav: 0 },
   dynamite: { sprite: 'bullet', size: 0.5, color: 0xff6040, stretch: 0, grav: 16, trail: 0xffb233 },
   bone: { sprite: 'bone', size: 0.4, color: 0xffffff, stretch: 0, grav: 4 },
+  blood: { sprite: 'dot4', size: 0.24, color: 0xa81414, stretch: 0.03, grav: 15, trail: 0x6e0a0a },
 };
 
 const _v = new THREE.Vector3();
@@ -55,7 +56,7 @@ export class Projectiles {
   }
 
   /** helper: fire pattern from a point toward a target */
-  pattern(kind: 'burst' | 'fan' | 'ring' | 'spiral' | 'volley' | 'lob' | 'snipe', from: THREE.Vector3, target: THREE.Vector3, o: { count?: number; spread?: number; speed?: number; dmg: number; proj?: ProjKind; status?: StatusApply[]; phase?: number; delay?: number; sourceId?: number }) {
+  pattern(kind: 'burst' | 'fan' | 'ring' | 'spiral' | 'volley' | 'lob' | 'snipe' | 'stream', from: THREE.Vector3, target: THREE.Vector3, o: { count?: number; spread?: number; speed?: number; dmg: number; proj?: ProjKind; status?: StatusApply[]; phase?: number; delay?: number; sourceId?: number }) {
     const proj = o.proj ?? 'bullet';
     const speed = o.speed ?? 18;
     const dx = target.x - from.x, dz = target.z - from.z;
@@ -95,6 +96,17 @@ export class Projectiles {
         const g = LOOK[proj].grav;
         this.ctx.engine.tweens.after(i * 0.15, () =>
           this.spawn({ kind: proj, x: from.x, y: from.y, z: from.z, vx: ddx / T, vy: (target.y - from.y) / T + 0.5 * g * T, vz: ddz / T, dmg: o.dmg, status: o.status, life: T + 2, sourceId: o.sourceId })
+        );
+      }
+    } else if (kind === 'stream') {
+      // a continuous arcing squirt: drops in quick succession, slightly jittered, leading the target
+      const T = Math.max(0.35, flat / speed);
+      const g = LOOK[proj].grav;
+      for (let i = 0; i < n; i++) {
+        const j = (rnd.next() - 0.5) * 0.08;
+        const sp = speed * (0.94 + rnd.next() * 0.12);
+        this.ctx.engine.tweens.after(i * 0.045, () =>
+          this.spawn({ kind: proj, x: from.x, y: from.y, z: from.z, vx: Math.sin(base + j) * sp, vy: dy / T + 0.5 * g * T * (0.92 + rnd.next() * 0.16), vz: Math.cos(base + j) * sp, dmg: o.dmg, status: o.status, sourceId: o.sourceId, life: T + 2 })
         );
       }
     } else if (kind === 'snipe') {
@@ -224,6 +236,11 @@ export class Projectiles {
       case 'bone':
         if (!onPlayer) ctx.fx.hit(pos, { x: -q.vx * 0.05, y: 0.6, z: -q.vz * 0.05 }, 'sand', 0.5);
         else ctx.fx.hit(pos, { x: -q.vx * 0.05, y: 0.4, z: -q.vz * 0.05 }, 'bone', 0.6);
+        break;
+      case 'blood':
+        ctx.events.emit('groundMark', x, z, onPlayer ? 0.35 : 0.55, 2);
+        ctx.particles.emit({ pos, count: 6, spread: 1.4, up: 1.6, life: [0.3, 0.6], size: [0.07, 0.04], sprite: ['dot3', 'dot4'], color: [0x9a1010, 0x6e0a0a, 0xc02020], gravity: 14, ground: true });
+        if (rnd.chance(0.3)) ctx.sfx('gore_splat', pos, 0.25, 1.3);
         break;
       default:
         ctx.fx.hit(pos, { x: 0, y: 1, z: 0 }, 'sand', 0.5);

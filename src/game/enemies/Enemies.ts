@@ -12,23 +12,9 @@ import type { StatSheet } from '../combat/Stats';
 import { clamp, damp, dampAngle, rnd, wrapAngle } from '../../engine/math/rand';
 import { P } from '../../engine/voxel/palette';
 import { Spring } from '../../engine/Tween';
-import { EyeState, EyeStyle } from '../fx/FaceFx';
+import { EnemyAnim, animateEnemy, AnimEnv } from '../anim/enemyAnim';
 
-/** 2D eye look per enemy type: organic (white + pupil) for critters & jackals, glowing embers for the undead */
-const EYE_LOOK: Record<string, [EyeStyle, number]> = {
-  scarab: ['organic', 0x1a1008],
-  bombScarab: ['organic', 0x1a1008],
-  goldenScarab: ['organic', 0x1a1008],
-  vulture: ['organic', 0x2a1408],
-  jackal: ['organic', 0xd8a020],
-  jackalArcher: ['organic', 0xd8a020],
-  giantScorpion: ['organic', 0x1a0808],
-  mummy: ['glow', 0x7fe0ff],
-  bandageWhipper: ['glow', 0x7fe0ff],
-  mariachi: ['glow', 0xffc040],
-};
-
-type Skel = 'humanoid' | 'beetle' | 'scorpion' | 'bird' | 'other';
+type Skel = 'humanoid' | 'beetle' | 'scorpion' | 'bird' | 'quad' | 'worm' | 'snake' | 'lizard' | 'other';
 
 export interface PlayerLink {
   pos: THREE.Vector3;
@@ -53,6 +39,14 @@ const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
+const AX = new THREE.Vector3(1, 0, 0);
+const AZ = new THREE.Vector3(0, 0, 1);
+const _qa = new THREE.Quaternion();
+const _root = new THREE.Matrix4();
+const _loc = new THREE.Matrix4();
+const _eul = new THREE.Euler();
+const _lv = new THREE.Vector3();
+const _one = new THREE.Vector3(1, 1, 1);
 
 export class Enemy implements EnemyLike {
   id = NEXT_ID++;
@@ -68,7 +62,7 @@ export class Enemy implements EnemyLike {
   name: string;
   flying?: boolean;
   status = new StatusSet();
-  state: 'spawn' | 'move' | 'windup' | 'strike' | 'recover' | 'stagger' | 'hidden' | 'charge' | 'leap' | 'dive' = 'spawn';
+  state: 'spawn' | 'move' | 'windup' | 'strike' | 'recover' | 'stagger' | 'hidden' | 'charge' | 'leap' | 'dive' | 'burrow' | 'erupt' | 'wrap' = 'spawn';
   stateT = 0;
   atk: AttackDef | null = null;
   cds: number[];
@@ -89,7 +83,10 @@ export class Enemy implements EnemyLike {
   hitZ = 0;
   flash = 0;
   glow = 0;
-  eye: EyeState | null = null;
+  /** procedural animation memory (springs, gait, death) */
+  anim = new EnemyAnim();
+  /** worms: time spent surfaced */
+  burrowT = 0;
   jaw = 0;
   lean = 0;
   spawnT = 0;
@@ -125,7 +122,17 @@ export class Enemy implements EnemyLike {
     this.posOff = new Float32Array(n * 3);
     this.hidden = new Uint8Array(n);
     const pi = this.batch.partIndex;
-    this.skel = 'pelvis' in pi ? 'humanoid' : 'tail1' in pi ? 'scorpion' : 'leg_l3' in pi && !('leg_l4' in pi) ? 'beetle' : 'wing_l' in pi ? 'bird' : 'other';
+    const lizardLegs = ('leg_fl' in pi || 'leg_l1' in pi) && 'tail1' in pi && !('leg_l3' in pi) && !('hips' in pi) && !('chest' in pi);
+    this.skel =
+      'pelvis' in pi ? 'humanoid'
+      : 'seg1' in pi ? (def.ai === 'constrictor' || 'rattle' in pi ? 'snake' : 'worm')
+      : lizardLegs ? 'lizard'
+      : 'leg_fl' in pi || 'shin_fl' in pi ? 'quad'
+      : 'pincer_l' in pi || ('tail1' in pi && 'leg_l4' in pi) ? 'scorpion'
+      : 'leg_l3' in pi ? 'beetle'
+      : 'wing_l' in pi ? 'bird'
+      : 'other';
+    this.anim.prevYaw = this.yaw;
   }
   part(name: string) {
     return this.batch.partIndex[name] ?? -1;
@@ -165,6 +172,12 @@ export class Enemies implements EnemyApi {
   render: EnemyRender;
   proj: Projectiles;
   rag: RagPiece[] = [];
+  /** enemies playing their procedural death before turning into ragdoll pieces */
+  dying: Enemy[] = [];
+  /** the bell snake currently coiled around the hunter */
+  wrapping: Enemy | null = null;
+  private wrapTick = 0;
+  private lastTitleT = -99;
   wave = 1;
   private grid = new Map<number, Enemy[]>();
   private laserMat = new THREE.LineBasicMaterial({ color: 0xff3020, transparent: true, opacity: 0.85 });
@@ -173,6 +186,11 @@ export class Enemies implements EnemyApi {
     this.render = new EnemyRender(ctx.scene);
     this.proj = new Projectiles(ctx, () => player as any);
     ctx.events.on('melee', () => this.playerMelee());
+    // the coordinator's mash QTE: emit 'snakeWrapBreak' (enemy) on success
+    ctx.events.on('snakeWrapBreak', (en?: Enemy) => {
+      const w = en ?? this.wrapping;
+      if (w) this.releaseWrap(w, true);
+    });
     ctx.events.on('grappleKick', (e: Enemy) => this.grappleKick(e));
     ctx.events.on('explosion', (pos: { x: number; y: number; z: number }, r: number, dmg: number, owner: string) => this.explosion(pos, r, dmg, owner));
   }
@@ -194,6 +212,10 @@ export class Enemies implements EnemyApi {
     e.spawnT = 0;
     if (e.emerge === 'fly') e.pos.y = g + 18;
     if (def.ai === 'ambusher') e.state = 'hidden';
+    if (def.ai === 'burrower') {
+      e.state = 'burrow';
+      e.stateT = 0.6;
+    }
     this.list.push(e);
     if (e.emerge === 'sand') {
       this.ctx.fx.sandBurst({ x, y: g, z }, 0.8);
@@ -215,7 +237,7 @@ export class Enemies implements EnemyApi {
     let best: RayHit | null = null;
     let bestT = maxT;
     for (const e of this.list) {
-      if (!e.alive || (skip && skip.has(e.id)) || e.state === 'hidden') continue;
+      if (!e.alive || (skip && skip.has(e.id)) || e.state === 'hidden' || e.state === 'burrow') continue;
       // vertical capsule test
       const cx = e.pos.x, cz = e.pos.z;
       const ox = o.x - cx, oz = o.z - cz;
@@ -266,7 +288,7 @@ export class Enemies implements EnemyApi {
   nearest(p: THREE.Vector3, maxD: number, filter?: (e: EnemyLike) => boolean): EnemyLike | null {
     let best: EnemyLike | null = null, bd = maxD;
     for (const e of [...this.list, ...this.externals]) {
-      if (!e.alive || (e as Enemy).state === 'hidden') continue;
+      if (!e.alive || (e as Enemy).state === 'hidden' || (e as Enemy).state === 'burrow') continue;
       if (filter && !filter(e)) continue;
       const d = e.pos.distanceTo(p);
       if (d < bd) {
@@ -279,7 +301,7 @@ export class Enemies implements EnemyApi {
 
   inRadius(p: THREE.Vector3, r: number, fn: (e: EnemyLike, d: number) => void) {
     for (const e of this.list) {
-      if (!e.alive || e.state === 'hidden') continue;
+      if (!e.alive || e.state === 'hidden' || e.state === 'burrow') continue;
       const d = Math.hypot(e.pos.x - p.x, e.pos.y + e.height * 0.5 - p.y, e.pos.z - p.z);
       if (d < r + e.radius) fn(e, d);
     }
@@ -407,10 +429,11 @@ export class Enemies implements EnemyApi {
     // spawn ragdoll pieces for each hidden part using last world matrices
     const before = new Set<number>();
     parts.forEach((_, j) => e.hidden[j] && before.add(j));
+    const W = this.poseWorld(e);
     hideRec(i);
     parts.forEach((_, j) => {
       if (!e.hidden[j] || before.has(j)) return;
-      this.spawnPiece(e, j, dx * 6 + (rnd.next() - 0.5) * 3, 4 + rnd.next() * 3 + (partName === 'head' ? 4 : 0), dz * 6 + (rnd.next() - 0.5) * 3);
+      this.spawnPiece(e, j, dx * 6 + (rnd.next() - 0.5) * 3, 4 + rnd.next() * 3 + (partName === 'head' ? 4 : 0), dz * 6 + (rnd.next() - 0.5) * 3, W);
     });
     const p = { x: e.pos.x, y: e.pos.y + e.height * (partName === 'head' ? 0.9 : 0.6), z: e.pos.z };
     this.ctx.fx.hit(p, { x: dx, y: 0.6, z: dz }, e.def.hitKind === 'flesh' ? 'flesh' : 'bone', 1.4);
@@ -418,8 +441,8 @@ export class Enemies implements EnemyApi {
     if (partName === 'head') this.ctx.events.emit('decap', e);
   }
 
-  private spawnPiece(e: Enemy, part: number, vx: number, vy: number, vz: number) {
-    const W = e.batch.partWorld(part);
+  private spawnPiece(e: Enemy, part: number, vx: number, vy: number, vz: number, pose?: THREE.Matrix4[]) {
+    const W = pose ? pose[part] : this.poseWorld(e)[part];
     const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), sc = new THREE.Vector3();
     W.decompose(pos, quat, sc);
     this.rag.push({ batch: e.batch, part, pos, quat, vel: new THREE.Vector3(vx, vy, vz), ang: new THREE.Vector3((rnd.next() - 0.5) * 16, (rnd.next() - 0.5) * 16, (rnd.next() - 0.5) * 16), life: 3.2 + rnd.next(), scale: sc.x, rest: false, tint: e.tint.clone() });
@@ -431,13 +454,26 @@ export class Enemies implements EnemyApi {
     const ctx = this.ctx;
     this.clearTelegraph(e);
     const c = { x: e.pos.x, y: e.pos.y + e.height * 0.5, z: e.pos.z };
-    // ragdoll: every visible part becomes a tumbling piece
-    const force = 5 + (hit?.knock ?? 2) * 1.5 + (crit ? 3 : 0);
-    e.batch.geo.parts.forEach((p, j) => {
-      if (e.hidden[j]) return;
-      const up = 2 + rnd.next() * 4 + (p.name === 'head' || p.name === 'hat' ? 3.5 : 0);
-      this.spawnPiece(e, j, dx * force * (0.5 + rnd.next() * 0.8) + e.vel.x * 0.5 + (rnd.next() - 0.5) * 3, up, dz * force * (0.5 + rnd.next() * 0.8) + e.vel.z * 0.5 + (rnd.next() - 0.5) * 3);
-    });
+    // violent deaths send the bones flying; everything else collapses procedurally first
+    const headI = e.part('head');
+    const violent = !hit || (hit.knock ?? 0) >= 9 || hit.source === 'explosion' || hit.source === 'board' || (crit && rnd.chance(0.35)) || (headI >= 0 && e.hidden[headI] === 1);
+    if (violent) {
+      const force = 5 + (hit?.knock ?? 2) * 1.5 + (crit ? 3 : 0);
+      const W = this.poseWorld(e);
+      e.batch.geo.parts.forEach((p, j) => {
+        if (e.hidden[j]) return;
+        const up = 2 + rnd.next() * 4 + (p.name === 'head' || p.name === 'hat' ? 3.5 : 0);
+        this.spawnPiece(e, j, dx * force * (0.5 + rnd.next() * 0.8) + e.vel.x * 0.5 + (rnd.next() - 0.5) * 3, up, dz * force * (0.5 + rnd.next() * 0.8) + e.vel.z * 0.5 + (rnd.next() - 0.5) * 3, W);
+      });
+    } else {
+      // fall away from the shot (local push direction), sideways at random
+      const lz = dx * Math.sin(e.yaw) + dz * Math.cos(e.yaw);
+      const dur = e.skel === 'humanoid' ? 1.35 : e.skel === 'quad' ? 1.4 : e.skel === 'worm' ? 1.6 : e.skel === 'bird' ? 1.3 : e.skel === 'beetle' ? 1.1 : e.skel === 'scorpion' ? 1.2 : 0.6;
+      e.anim.die(lz >= 0 ? -1 : 1, rnd.chance(0.5) ? 1 : -1, dur);
+      e.vel.x += dx * 2;
+      e.vel.z += dz * 2;
+      this.dying.push(e);
+    }
     ctx.fx.hit(c, { x: dx, y: 0.5, z: dz }, e.def.hitKind, 1.8);
     ctx.fx.dust({ x: e.pos.x, y: e.pos.y + 0.2, z: e.pos.z }, 0.8 * e.scale, P.sand0, 3);
     const deathSfx: Record<string, string> = { husk: 'husk_death', mummy: 'mummy_death', jackal: 'jackal_growl', giantScorpion: 'giant_scorpion_death', vulture: 'vulture_screech', gunslinger: 'skeleton_rattle' };
@@ -466,6 +502,29 @@ export class Enemies implements EnemyApi {
       case 'buffAura':
         ctx.sfx('banjo_funny', c, 0.6, 0.8);
         break;
+      case 'acidBurst':
+        if (e.alpha) {
+          ctx.engine.tweens.after(0.35, () => {
+            // the venom sac ruptures: acid globs arc out and splat, droplets rain, fumes roll
+            for (let i = 0; i < 14; i++) {
+              const a = (i / 14) * Math.PI * 2 + Math.random() * 0.35;
+              const sp = 4.5 + Math.random() * 4.5;
+              this.proj.spawn({ kind: 'venom', x: c.x, y: c.y + 0.35, z: c.z, vx: Math.sin(a) * sp, vy: 3.5 + Math.random() * 4.5, vz: Math.cos(a) * sp, dmg: 6 * e.dmgMul, status: [{ id: 'poison', stacks: 2, dur: 4, power: 2 }], sourceId: e.id });
+            }
+            ctx.particles.emit({ pos: c, count: 28, spread: 0.5, up: 5.5, jitter: 5, life: [0.45, 1.1], size: [0.13, 0.05], sprite: ['ichor', 'dot4', 'dot3'], color: [0xc8ff5a, 0x9dff3a, 0x5aa82a], gravity: 16, ground: true });
+            ctx.fx.poisonCloud(c, 4);
+            ctx.sfx('poison_burst', c, 1);
+            ctx.events.emit('groundMark', c.x, c.z, 4, 3);
+            ctx.events.emit('explosion', c, 4.2, 26 * e.dmgMul, 'acid');
+            const pd = this.player.center(_v2).distanceTo(_v.set(c.x, c.y, c.z));
+            if (pd < 4.6) this.player.status.apply('poison', 6, 5, 2, 30, {});
+          });
+        }
+        break;
+    }
+    if (this.wrapping === e) {
+      this.wrapping = null;
+      ctx.events.emit('snakeWrapEnd', e, true);
     }
     if (e.def.id === 'cactusHusk') this.proj.pattern('ring', new THREE.Vector3(c.x, c.y, c.z), this.player.pos, { count: 10, speed: 11, dmg: 4 * e.dmgMul, proj: 'needle' });
     // plague spread
@@ -644,7 +703,7 @@ export class Enemies implements EnemyApi {
         e.pos.z += r.z;
       }
       // ram / contact with player
-      if (pl.alive && e.state !== 'hidden' && e.state !== 'spawn') {
+      if (pl.alive && e.state !== 'hidden' && e.state !== 'spawn' && e.state !== 'burrow') {
         const dx = e.pos.x - ppos.x, dz = e.pos.z - ppos.z;
         const d = Math.hypot(dx, dz);
         const dy = Math.abs(e.pos.y - ppos.y);
@@ -672,37 +731,21 @@ export class Enemies implements EnemyApi {
       this.animate(e, dt, time);
     }
     this.proj.update(dt);
+    this.updateDying(dt, time);
     this.updateRag(dt);
     // render
     this.render.begin();
-    const faces = ctx.faces;
     const cam = ctx.camera.position;
-    for (const e of this.list) {
-      if (!e.alive) continue;
+    const drawE = (e: Enemy) => {
+      if (e.anim.hidden) return;
       const cd = cam.distanceTo(e.pos);
       const lod: 0 | 1 | 2 = cd > 58 ? 2 : cd > 26 ? 1 : 0;
-      const sq = e.squash.x;
-      _q.setFromAxisAngle(UP, e.yaw);
-      let tilt = 0;
-      if (e.flipped > 0) tilt = Math.PI;
-      if (tilt) _q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), tilt));
-      const spawnSink = e.state === 'spawn' && e.emerge === 'sand' ? (1 - clamp(e.stateT / 1.1, 0, 1)) * e.height : 0;
-      _s.set(e.scale * (2 - sq) ** 0.5, e.scale * sq, e.scale * (2 - sq) ** 0.5);
-      _m.compose(_v.set(e.pos.x, e.pos.y - spawnSink + (tilt ? e.height * 0.4 : 0), e.pos.z), _q, _s);
+      this.rootMatrix(e, _m);
       const fx: [number, number, number, number] = [e.flash * 0.85, 0, e.glow, 0];
       e.batch.push(_m, e.rot, e.hidden, lod, fx, e.tint, e.posOff);
-      const be = e.batch.eyes;
-      if (faces && be && lod < 2 && cd < 48 && !e.hidden[be.head]) {
-        if (!e.eye) {
-          const look = EYE_LOOK[e.def.id] ?? ['glow', e.alpha ? 0xff2a0a : 0xff5a14];
-          e.eye = new EyeState(look[0], look[1], be.size);
-        }
-        e.eye.tick(dt);
-        const st = e.state;
-        const expr = e.status.stunned() || st === 'stagger' ? 'stunned' : e.flash > 0.35 ? 'hurt' : st === 'windup' || st === 'charge' || st === 'leap' || st === 'dive' ? 'angry' : st === 'spawn' ? 'surprised' : 'neutral';
-        e.eye.draw(faces, e.batch.partWorld(be.l), be.r >= 0 ? e.batch.partWorld(be.r) : null, expr, 0, 0, 1.15);
-      }
-    }
+    };
+    for (const e of this.list) if (e.alive) drawE(e);
+    for (const e of this.dying) drawE(e);
     for (const r of this.rag) {
       _s.set(r.scale, r.scale, r.scale);
       _m.compose(r.pos, r.quat, _s);
@@ -747,6 +790,65 @@ export class Enemies implements EnemyApi {
     if (this.rag.length > 900) this.rag.splice(0, this.rag.length - 900);
   }
 
+  // ------------------------------------------------------------- snake wrap
+  private startWrap(e: Enemy) {
+    const ctx = this.ctx;
+    e.state = 'wrap';
+    e.stateT = 0;
+    this.wrapping = e;
+    this.wrapTick = 0.25;
+    e.anim.tauntT = -1;
+    ctx.sfx('giant_scorpion_hiss', e.pos, 1, 0.8);
+    ctx.sfx('skeleton_rattle', e.pos, 0.9, 1.5);
+    ctx.shake(0.35);
+    ctx.toast('I WANT TO HOLD YOUR HAND', '#c84a2a', 'Wrapped! Mash to break free');
+    ctx.events.emit('snakeWrap', e);
+  }
+
+  /** end a wrap. broke = the hunter fought free (snake is flung off, hurt and dazed) */
+  releaseWrap(e: Enemy, broke: boolean) {
+    if (this.wrapping === e) this.wrapping = null;
+    if (e.state !== 'wrap') return;
+    const ctx = this.ctx;
+    const pp = this.player.pos;
+    const dx = e.pos.x - pp.x, dz = e.pos.z - pp.z;
+    const dl = Math.hypot(dx, dz) || 1;
+    e.state = broke ? 'stagger' : 'recover';
+    e.stateT = broke ? -0.5 : 0;
+    e.vel.set((dx / dl) * (broke ? 9 : 4), broke ? 5 : 2, (dz / dl) * (broke ? 9 : 4));
+    if (broke && e.alive) {
+      ctx.toast('BROKE FREE', '#ffd36b');
+      ctx.sfx('punch', e.pos, 0.9);
+      this.damage(e, { base: e.maxHp * 0.12, kind: 'phys', source: 'melee', knock: 10, dirX: dx / dl, dirZ: dz / dl, canCrit: false, status: [{ id: 'stun', stacks: 1, dur: 1.2 }] });
+    }
+    ctx.events.emit('snakeWrapEnd', e, broke);
+  }
+
+  private updateWrap(e: Enemy, dt: number, ppos: THREE.Vector3) {
+    const pl = this.player;
+    if (!pl.alive || e.stateT > 4.2 || e.status.stunned()) {
+      this.releaseWrap(e, false);
+      return;
+    }
+    // orbit the coil around the hunter: the head sits one coil-radius out along its local +X
+    e.yaw += dt * 0.9;
+    const R = 0.42 * e.scale;
+    e.pos.x = ppos.x + Math.cos(e.yaw) * R;
+    e.pos.z = ppos.z - Math.sin(e.yaw) * R;
+    e.pos.y = ppos.y;
+    e.vel.set(0, 0, 0);
+    // the squeeze: pinned in place, crushed over time
+    pl.board.vel.multiplyScalar(Math.exp(-10 * dt));
+    this.wrapTick -= dt;
+    if (this.wrapTick <= 0) {
+      this.wrapTick = 0.55;
+      pl.takeHit({ base: (e.def.attacks[1]?.dmg ?? 12) * 0.45 * e.dmgMul, kind: 'phys', source: 'contact', knock: 0 }, e.pos);
+      pl.status.apply('slow', 1, 0.6, 0, 1, {});
+      this.ctx.sfx('hit_bone', e.pos, 0.35, 0.8);
+      e.squash.kick(-2.5);
+    }
+  }
+
   // ------------------------------------------------------------- AI
   private think(e: Enemy, dt: number, time: number, ppos: THREE.Vector3) {
     const ctx = this.ctx;
@@ -755,7 +857,7 @@ export class Enemies implements EnemyApi {
     const dist = Math.hypot(toX, toZ) || 1e-3;
     const buff = e.buffT > 0 ? 1.3 : 1;
     const stunned = e.status.stunned() || e.flipped > 0;
-    let spd = d.speed * e.spdMul * e.status.slowMul() * buff;
+    let spd = d.speed * e.spdMul * e.status.slowMul() * buff * (e.hp < e.maxHp * 0.3 ? 0.8 : 1);
     let wantX = 0, wantZ = 0, face = Math.atan2(toX, toZ);
     const ground = ctx.world.groundAt(e.pos.x, e.pos.z);
 
@@ -805,9 +907,61 @@ export class Enemies implements EnemyApi {
       }
       return;
     }
+    // the hunter is down: everyone stops to gloat (the animation layer dances)
+    if (!this.player.alive && e.state !== 'leap' && e.state !== 'dive' && e.state !== 'burrow' && e.state !== 'erupt') {
+      if (e.state !== 'move') {
+        e.state = 'move';
+        e.stateT = 0;
+        this.clearTelegraph(e);
+      }
+      this.move(e, 0, 0, dt, ground, dist < 25 ? face : e.yaw);
+      return;
+    }
+    // ---- dune worms: tunnel under the sand, erupt beneath the prey
+    if (e.state === 'burrow') {
+      if (e.stateT > 0.6) {
+        const s = d.speed * 1.5 * e.spdMul;
+        this.move(e, (toX / dist) * s, (toZ / dist) * s, dt, ground, face);
+        if (rnd.chance(dt * 16)) ctx.fx.sandSpray({ x: e.pos.x, y: ground + 0.05, z: e.pos.z }, { x: -e.vel.x * 0.06, y: 0.9, z: -e.vel.z * 0.06 }, 1.1);
+        if (rnd.chance(dt * 5)) ctx.events.emit('groundMark', e.pos.x, e.pos.z, 0.55, 1);
+        if ((dist < 3.6 && e.stateT > 1.4) || e.stateT > 7) {
+          e.state = 'erupt';
+          e.stateT = 0;
+          ctx.fx.sandBurst({ x: e.pos.x, y: ground, z: e.pos.z }, 1.6);
+          ctx.sfx('sand_burst', e.pos, 0.9);
+          if (dist < 9) ctx.shake(0.22);
+        }
+      } else {
+        e.vel.multiplyScalar(Math.exp(-5 * dt));
+        if (rnd.chance(dt * 10)) ctx.fx.sandSpray({ x: e.pos.x, y: ground, z: e.pos.z }, { x: 0, y: 1.4, z: 0 }, 1.4);
+      }
+      e.pos.y = ground;
+      return;
+    }
+    if (e.state === 'erupt') {
+      e.vel.multiplyScalar(Math.exp(-6 * dt));
+      e.yaw = dampAngle(e.yaw, face, 6, dt);
+      e.pos.y = ground;
+      if (e.stateT >= 0.3 && e.stateT - dt < 0.3) {
+        ctx.fx.sandBurst({ x: e.pos.x, y: ground, z: e.pos.z }, 1.2);
+        if (dist < 2.8 + e.radius && Math.abs(ppos.y - e.pos.y) < 2.5) this.player.takeHit({ base: (d.attacks[0]?.dmg ?? 14) * e.dmgMul * 1.25, kind: 'phys', source: 'contact', knock: 9, status: [{ id: 'bleed', stacks: 2, dur: 3 }] }, e.pos);
+      }
+      if (e.stateT > 0.9) {
+        e.state = 'move';
+        e.stateT = 0;
+        e.burrowT = 0;
+      }
+      return;
+    }
+    // ---- bell snake: coiled around the hunter, squeezing
+    if (e.state === 'wrap') {
+      this.updateWrap(e, dt, ppos);
+      return;
+    }
     // ---- attacks in progress
     if (e.state === 'windup' && e.atk) {
       const a = e.atk;
+      if (d.ai === 'constrictor' && Math.floor(e.stateT / 0.2) !== Math.floor((e.stateT - dt) / 0.2)) ctx.sfx('skeleton_rattle', e.pos, 0.55, 1.7 + rnd.next() * 0.2);
       e.glow = clamp(e.stateT / a.windup, 0, 1) * 1.5;
       e.yaw = dampAngle(e.yaw, face, a.kind === 'snipe' ? 6 : 10, dt);
       e.vel.multiplyScalar(Math.exp(-8 * dt));
@@ -850,16 +1004,23 @@ export class Enemies implements EnemyApi {
       const T = e.state === 'leap' ? 0.75 : 1.1;
       const k = clamp(e.stateT / T, 0, 1);
       e.pos.lerpVectors(e.leapFrom, e.leapTo, k);
-      e.pos.y = (e.state === 'leap' ? Math.max(ground, e.leapFrom.y + (e.leapTo.y - e.leapFrom.y) * k) + Math.sin(k * Math.PI) * 4.5 : e.leapFrom.y + (e.leapTo.y - e.leapFrom.y) * k + Math.sin(k * Math.PI) * -1.5);
+      const arcH = d.ai === 'leaper' ? 4.5 : d.ai === 'constrictor' ? 1.1 : 1.8;
+      e.pos.y = (e.state === 'leap' ? Math.max(ground, e.leapFrom.y + (e.leapTo.y - e.leapFrom.y) * k) + Math.sin(k * Math.PI) * arcH : e.leapFrom.y + (e.leapTo.y - e.leapFrom.y) * k + Math.sin(k * Math.PI) * -1.5);
       if (k >= 1) {
         e.state = 'recover';
         e.stateT = 0;
         e.squash.kick(-9);
         const p = { x: e.pos.x, y: e.pos.y, z: e.pos.z };
-        if (e.state === 'recover' && d.ai === 'leaper') {
+        if (e.state === 'recover' && (d.ai === 'leaper' || d.ai === 'pack')) {
           ctx.fx.sandBurst(p, 1);
           ctx.sfx('board_land', p, 0.6);
           if (this.player.pos.distanceTo(e.pos) < 3.2) this.player.takeHit({ base: (e.atk?.dmg ?? 15) * e.dmgMul, kind: 'phys', source: 'contact', knock: 8, status: [{ id: 'bleed', stacks: 2, dur: 3 }] }, e.pos);
+        }
+        if (e.state === 'recover' && d.ai === 'constrictor') {
+          ctx.fx.sandBurst(p, 0.8);
+          const pd = this.player.pos.distanceTo(e.pos);
+          if (pd < 2.6 && this.player.alive && !this.wrapping) this.startWrap(e);
+          else if (pd < 3.2) this.player.takeHit({ base: (e.atk?.dmg ?? 15) * e.dmgMul, kind: 'phys', source: 'contact', knock: 6, status: [{ id: 'poison', stacks: 3, dur: 4 }] }, e.pos);
         }
       }
       return;
@@ -950,6 +1111,69 @@ export class Enemies implements EnemyApi {
         if (rnd.chance(dt * 3)) ctx.fx.sparkle({ x: e.pos.x, y: e.pos.y + 0.5, z: e.pos.z }, P.gold1, 1);
         break;
       }
+      case 'pack': {
+        // flank: circle toward the side/back of where the prey is heading, then dart in to bite
+        const pv = this.player.board.vel;
+        const pvl = Math.hypot(pv.x, pv.z);
+        const heading = pvl > 2 ? Math.atan2(pv.x, pv.z) : Math.atan2(-toX, -toZ);
+        const slot = (e.targetOff / Math.PI - 1) * 1.25;
+        const ang = heading + Math.PI + slot + Math.sin(time * 0.6 + e.quirk * 7) * 0.4;
+        const biteReady = e.cds[0] <= 0;
+        const R = biteReady ? 1.5 : 7 + Math.sin(time * 0.9 + e.quirk * 5) * 1.5;
+        const tx = ppos.x + Math.sin(ang) * R + pv.x * 0.35, tz = ppos.z + Math.cos(ang) * R + pv.z * 0.35;
+        const dx = tx - e.pos.x, dz = tz - e.pos.z;
+        const l = Math.hypot(dx, dz) || 1;
+        const sprint = l > 12 ? 1.25 : 1;
+        const ease = clamp(l / 2, 0.3, 1);
+        wantX = (dx / l) * spd * sprint * ease;
+        wantZ = (dz / l) * spd * sprint * ease;
+        face = l > 1.5 ? Math.atan2(wantX, wantZ) : Math.atan2(toX, toZ);
+        if (rnd.chance(dt * 0.05)) ctx.sfx('jackal_growl', e.pos, 0.35, 1.25);
+        break;
+      }
+      case 'burrower': {
+        // surfaced: weave around the prey, then dive and tunnel again
+        e.burrowT += dt;
+        const ux = toX / dist, uz = toZ / dist;
+        const want = dist > 9 ? 1 : dist < 4 ? -0.4 : 0.15;
+        wantX = (ux * want - uz * 0.5 * e.orbitDir) * spd * 0.6;
+        wantZ = (uz * want + ux * 0.5 * e.orbitDir) * spd * 0.6;
+        face = Math.atan2(toX, toZ);
+        if (e.burrowT > 4.5 + e.quirk * 2.5 && e.state === 'move') {
+          e.state = 'burrow';
+          e.stateT = 0;
+          ctx.sfx('sand_rise', e.pos, 0.7);
+          ctx.fx.sandBurst({ x: e.pos.x, y: ground, z: e.pos.z }, 1);
+          return;
+        }
+        break;
+      }
+      case 'skitter': {
+        // stop-and-go darts around a preferred range (lizard freeze, then a burst)
+        const cyc = (time * 1.1 + e.quirk * 7) % 1;
+        const dash = cyc < 0.38;
+        const ux = toX / dist, uz = toZ / dist;
+        const radial = clamp((dist - 7) / 7, -1, 1);
+        const dx = ux * radial - uz * e.orbitDir * 0.9, dz = uz * radial + ux * e.orbitDir * 0.9;
+        const l = Math.hypot(dx, dz) || 1;
+        const s2 = dash ? spd * 2.1 : 0;
+        wantX = (dx / l) * s2;
+        wantZ = (dz / l) * s2;
+        face = dash ? Math.atan2(wantX, wantZ) : Math.atan2(toX, toZ);
+        if (rnd.chance(dt * 0.3)) e.orbitDir *= -1;
+        break;
+      }
+      case 'constrictor': {
+        // slither in a wide S toward strike range
+        const ux = toX / dist, uz = toZ / dist;
+        const radial = clamp((dist - 5.5) / 4, -0.6, 1);
+        const weave = Math.sin(time * 1.3 + e.quirk * 9) * 0.6;
+        wantX = (ux * radial - uz * weave) * spd;
+        wantZ = (uz * radial + ux * weave) * spd;
+        face = dist < 8 ? Math.atan2(toX, toZ) : Math.atan2(wantX, wantZ);
+        if (rnd.chance(dt * 0.08)) ctx.sfx('skeleton_rattle', e.pos, 0.3, 1.8);
+        break;
+      }
       default:
         wantX = (toX / dist) * spd;
         wantZ = (toZ / dist) * spd;
@@ -974,6 +1198,13 @@ export class Enemies implements EnemyApi {
         e.atk = a;
         e.state = 'windup';
         e.stateT = 0;
+        if (a.title) {
+          const elite = e.alpha || d.hp >= 120;
+          if (time - this.lastTitleT > 2.6 && rnd.chance(e.alpha ? 0.85 : elite ? 0.4 : 0.04) && dist < 40) {
+            this.lastTitleT = time;
+            ctx.toast(a.title.toUpperCase(), e.alpha ? '#ff8a4a' : elite ? '#ffb070' : '#ffd36b', e.name);
+          }
+        }
         e.squash.kick(a.kind === 'melee' ? 5 : 3);
         if (a.kind === 'melee' || a.kind === 'explode' || a.kind === 'charge' || a.kind === 'leap') {
           ctx.particles.emit({ pos: { x: e.pos.x, y: e.pos.y + e.height + 0.45, z: e.pos.z }, count: 1, vel: { x: 0, y: 0.8, z: 0 }, life: [a.windup, a.windup], size: [0.5, 0.5], sprite: 'dg_!', color: a.kind === 'explode' ? 0xff4020 : 0xffd040, screen: true, sizeJitter: 0 });
@@ -988,7 +1219,7 @@ export class Enemies implements EnemyApi {
   }
 
   private move(e: Enemy, wantX: number, wantZ: number, dt: number, ground: number, face: number) {
-    const accel = e.def.ai === 'rider' ? 3 : e.def.ai === 'tank' ? 4 : 8;
+    const accel = e.def.ai === 'rider' ? 3 : e.def.ai === 'tank' ? 4 : e.def.ai === 'skitter' ? 20 : 8;
     e.vel.x = damp(e.vel.x, wantX, accel, dt);
     e.vel.z = damp(e.vel.z, wantZ, accel, dt);
     e.pos.x += e.vel.x * dt;
@@ -1052,7 +1283,11 @@ export class Enemies implements EnemyApi {
       case 'melee':
         ctx.sfx('melee_whoosh', e.pos, 0.6);
         if (dist < a.range + 0.7 && Math.abs(ppos.y - e.pos.y) < 2) {
-          this.player.takeHit({ base: dmg, kind: 'phys', source: 'contact', knock: 5, status: a.status as any }, e.pos);
+          const dealt = this.player.takeHit({ base: dmg, kind: 'phys', source: 'contact', knock: 5, status: a.status as any }, e.pos);
+          if (dealt > 0 && rnd.chance(0.3)) {
+            e.anim.tauntT = 0;
+            e.anim.tauntKind = rnd.chance(0.5) ? 2 : 0;
+          }
         }
         break;
       case 'burst':
@@ -1062,16 +1297,22 @@ export class Enemies implements EnemyApi {
       case 'volley':
       case 'lob':
       case 'snipe':
+      case 'stream':
+        if (a.kind === 'stream') {
+          // squirted from the eyes
+          from.set(e.pos.x + Math.sin(e.yaw) * e.radius * 1.1, e.pos.y + e.height * 0.85, e.pos.z + Math.cos(e.yaw) * e.radius * 1.1);
+          ctx.sfx('gore_splat', from, 0.5, 1.4);
+        }
         this.proj.pattern(a.kind, from, target, { count: a.count, spread: a.spread, speed: a.speed, dmg, proj: a.proj, status: a.status as any, sourceId: e.id });
-        ctx.fx.muzzle(from, { x: Math.sin(e.yaw), y: 0, z: Math.cos(e.yaw) }, 0xffd090);
-        ctx.sfx(a.proj === 'bullet' ? (a.kind === 'fan' && (a.count ?? 1) > 6 ? 'shotgun_shot' : a.kind === 'snipe' ? 'rifle_shot' : 'enemy_shot') : a.proj === 'arrow' ? 'whoosh' : 'whoosh', from, 0.7);
+        if (a.kind !== 'stream') ctx.fx.muzzle(from, { x: Math.sin(e.yaw), y: 0, z: Math.cos(e.yaw) }, 0xffd090);
+        if (a.kind !== 'stream') ctx.sfx(a.proj === 'bullet' ? (a.kind === 'fan' && (a.count ?? 1) > 6 ? 'shotgun_shot' : a.kind === 'snipe' ? 'rifle_shot' : 'enemy_shot') : a.proj === 'arrow' ? 'whoosh' : 'whoosh', from, 0.7);
         break;
       case 'leap':
         e.state = 'leap';
         e.leapFrom.copy(e.pos);
         e.leapTo.set(ppos.x + this.player.board.vel.x * 0.4, 0, ppos.z + this.player.board.vel.z * 0.4);
         e.leapTo.y = ctx.world.groundAt(e.leapTo.x, e.leapTo.z);
-        ctx.sfx('jackal_attack', e.pos, 0.8);
+        ctx.sfx(e.def.ai === 'constrictor' ? 'giant_scorpion_hiss' : 'jackal_attack', e.pos, 0.8, e.def.ai === 'constrictor' ? 1.3 : 1);
         break;
       case 'charge':
         e.state = 'charge';
@@ -1138,138 +1379,123 @@ export class Enemies implements EnemyApi {
   }
 
   // ------------------------------------------------------------- animation
+  private animEnv: AnimEnv = {
+    time: 0,
+    dt: 0,
+    groundAt: () => 0,
+    player: { x: 0, y: 0, z: 0 },
+    playerAlive: true,
+    camDist: 0,
+    fx: {
+      step: (x, y, z, size, kick, dirX, dirZ) => {
+        const P = this.ctx.particles;
+        P.emit({ pos: { x, y: y + 0.05, z }, count: kick > 0.6 ? 3 : 2, spread: 0.35 * size, up: 0.35 + kick * 0.4, life: [0.35, 0.75], size: [0.22 * size, 0.36 * size], sprite: ['puff0', 'puff1'], color: [0xe6cf9f, 0xd8b98a, 0xc9a77a], alpha: 0.6, drag: 2.6, rot: 3, rotSpeed: 0.5 });
+        if (kick > 0.15)
+          P.emit({ pos: { x, y: y + 0.08, z }, count: Math.ceil(2 + kick * 4), vel: { x: dirX * 2.4 * kick, y: 1.3 + kick * 0.8, z: dirZ * 2.4 * kick }, spread: 0.5, life: [0.3, 0.65], size: [0.06, 0.035], sprite: ['dot3', 'dot4'], color: [0xe0c08a, 0xc9a06a, 0xf0d6a2], gravity: 13, ground: true, jitter: 0.8 });
+      },
+      burst: (x, y, z, kind, power) => {
+        const P = this.ctx.particles;
+        const pos = { x, y, z };
+        if (kind === 'sand') {
+          P.emit({ pos, count: Math.round(6 * power), spread: 0.8, up: 0.9, life: [0.5, 1.1], size: [0.35, 0.6], sprite: ['puff0', 'puff1'], color: [0xe6cf9f, 0xd8b98a], alpha: 0.65, drag: 2.2, rot: 3, rotSpeed: 0.4 });
+          P.emit({ pos, count: Math.round(10 * power), spread: 0.9, up: 3, life: [0.4, 0.8], size: [0.06, 0.035], sprite: ['dot3', 'dot4'], color: [0xe0c08a, 0xc9a06a], gravity: 13, ground: true, jitter: 1.2 });
+        } else {
+          const col = kind === 'chitin' ? [0x2a2018, 0x3e3226, 0x5a4630, 0x1c1610] : kind === 'bone' ? [0xf2dcb4, 0xd6b78a, 0xfff1d6] : kind === 'fur' ? [0xc9a06a, 0xa8804a, 0xe0c08a] : [0x9a1010, 0x6e0a0a, 0xc02020];
+          P.emit({ pos, count: Math.round(12 * power), spread: 0.7, up: kind === 'fur' ? 1.5 : 3.2, life: [0.5, 1.1], size: kind === 'fur' ? [0.09, 0.05] : [0.08, 0.045], sprite: kind === 'chitin' || kind === 'bone' ? ['twig', 'dot3'] : ['dot3', 'dot4'], color: col, gravity: kind === 'fur' ? 3 : 14, ground: true, drag: kind === 'fur' ? 2 : 0.5, jitter: 1 });
+        }
+      },
+    },
+  };
   private animate(e: Enemy, dt: number, time: number) {
-    const sp = Math.hypot(e.vel.x, e.vel.z);
-    e.squash.update(1, dt);
-    const stride = clamp(sp / Math.max(1, e.def.speed), 0, 1.6);
-    e.phase += dt * (2 + sp * 1.3);
-    const ph = e.phase;
-    const r = e.rot;
-    r.fill(0);
-    e.posOff.fill(0);
-    const hitK = Math.max(0, 1 - e.hitT / 0.3);
-    // local hit direction relative to facing
-    const hx = e.hitX * Math.cos(e.yaw) - e.hitZ * Math.sin(e.yaw);
-    const hz = e.hitX * Math.sin(e.yaw) + e.hitZ * Math.cos(e.yaw);
-    const wind = e.state === 'windup' && e.atk ? clamp(e.stateT / e.atk.windup, 0, 1) : 0;
-    const strike = e.state === 'strike' ? Math.max(0, 1 - e.stateT / 0.3) : 0;
-    const scream = e.state === 'windup' ? wind : e.hitT < 0.2 ? 1 - e.hitT / 0.2 : 0;
-    e.jaw = damp(e.jaw, scream * 0.6 + (e.def.id === 'husk' ? Math.max(0, Math.sin(time * 7 + e.quirk * 20)) * 0.15 : 0), 14, dt);
-    if (e.skel === 'humanoid') {
-      const sw = Math.sin(ph) * 0.65 * Math.min(1, stride);
-      const shamble = e.def.id === 'husk' || e.def.id === 'cactusHusk';
-      const heavy = e.def.ai === 'tank' || e.def.id === 'bandageWhipper';
-      // legs
-      e.setRot('thigh_l', -sw, 0, 0);
-      e.setRot('thigh_r', sw * (shamble ? 0.6 : 1), 0, 0);
-      e.setRot('shin_l', Math.max(0, Math.sin(ph + 1.4)) * 0.9 * stride, 0, 0);
-      e.setRot('shin_r', Math.max(0, Math.sin(ph + 1.4 + Math.PI)) * 0.9 * stride * (shamble ? 0.5 : 1), 0, 0);
-      // body bob + lean into run
-      const bob = Math.abs(Math.cos(ph)) * 0.06 * stride * (heavy ? 1.8 : 1);
-      const pi = e.part('pelvis');
-      if (pi >= 0) e.posOff[pi * 3 + 1] = bob - (heavy ? 0.04 : 0);
-      e.setRot('pelvis', 0, Math.sin(ph) * 0.12 * stride, 0);
-      e.setRot('torso', 0.12 * stride + (shamble ? 0.3 : 0) - wind * 0.45 + strike * 0.7 - hz * hitK * 0.6, -Math.sin(ph) * 0.18 * stride + hx * hitK * 0.3, (shamble ? Math.sin(time * 1.3 + e.quirk * 9) * 0.15 : 0) + hx * hitK * 0.4);
-      e.setRot('head', (shamble ? 0.25 : 0) - wind * 0.2 + hitK * 0.5, Math.sin(time * 0.9 + e.quirk * 7) * 0.3, shamble ? 0.35 * Math.sin(time * 0.6 + e.quirk) : 0);
-      e.setRot('jaw', e.jaw, 0, 0);
-      // arms by archetype
-      const armSw = -sw * 0.8;
-      if (shamble) {
-        e.setRot('arm_l', -1.3 + Math.sin(time * 2 + e.quirk) * 0.15 - wind * 1.2 + strike * 1.6, 0, 0.1);
-        e.setRot('arm_r', -1.1 + Math.sin(time * 2.4 + e.quirk) * 0.2 - wind * 1.4 + strike * 1.9, 0, -0.1);
-        e.setRot('fore_l', -0.4, 0, 0);
-        e.setRot('fore_r', -0.5, 0, 0);
-      } else if (e.def.id === 'bomberHusk') {
-        e.setRot('arm_l', -0.9, 0, 0.5);
-        e.setRot('arm_r', -0.9, 0, -0.5);
-        e.setRot('fore_l', -1.2, 0, 0);
-        e.setRot('fore_r', -1.2, 0, 0);
-        e.addRot('head', 0, Math.sin(time * 18) * 0.25, 0); // panicked head shakes
-      } else if (e.def.id === 'mariachi') {
-        const strum = Math.sin(time * 14) * 0.35;
-        e.setRot('arm_r', -0.6 + strum, 0, -0.2);
-        e.setRot('fore_r', -1.1, 0, 0);
-        e.setRot('arm_l', -0.8, 0.4, 0.3);
-        e.setRot('fore_l', -1.0, 0, 0);
-        e.addRot('pelvis', 0, 0, Math.sin(time * 4) * 0.15); // dance sway
-        e.addRot('torso', 0, Math.sin(time * 4) * 0.2, 0);
-      } else if (e.def.ai === 'ranged' || e.def.ai === 'sniper' || e.def.ai === 'ambusher' || e.def.ai === 'rider' || e.def.id === 'dungSkeleton') {
-        const aimUp = e.state === 'windup' || e.state === 'strike' ? 1 : 0.25;
-        e.setRot('arm_r', -1.45 * aimUp + armSw * (1 - aimUp) - strike * 0.5, 0.2, -0.1);
-        e.setRot('fore_r', -0.15, 0, 0);
-        e.setRot('arm_l', e.def.id === 'sharpshooter' || e.def.id === 'shotgunner' ? -1.3 * aimUp : -armSw, 0, 0.15);
-        e.setRot('fore_l', -0.3 - (e.def.id === 'shotgunner' ? 0.6 * aimUp : 0), 0, 0);
-        if (e.def.id === 'dungSkeleton') e.setRot('arm_r', 2.2 * wind - 1.8 * strike, 0, -0.2); // overhand throw
-      } else {
-        // melee brawlers: wind back arm, slam forward
-        e.setRot('arm_r', armSw + wind * 2.1 - strike * 2.4, 0, -0.1 - wind * 0.3);
-        e.setRot('fore_r', -0.5 - wind * 0.8, 0, 0);
-        e.setRot('arm_l', -armSw + (heavy ? -0.9 - wind * 0.8 + strike * 1.6 : 0), 0, 0.1);
-        e.setRot('fore_l', -0.4, 0, 0);
-        if (e.def.id === 'jackal') e.setRot('arm_l', -0.6, 0.4, 0.3); // shield up
-      }
-      if (e.state === 'leap') {
-        e.setRot('thigh_l', -1.2, 0, 0);
-        e.setRot('thigh_r', -0.9, 0, 0);
-        e.setRot('shin_l', 1.8, 0, 0);
-        e.setRot('shin_r', 1.6, 0, 0);
-        e.setRot('arm_r', 2.6, 0, 0);
-      }
-      e.setRot('tail', Math.sin(time * 6 + e.quirk * 5) * 0.4, Math.sin(time * 4) * 0.5, 0);
-      e.setRot('hat', hitK * -0.4, 0, hitK * 0.3);
-      if (e.state === 'hidden') {
-        e.setRot('weed', time * 4, 0, 0);
-      } else e.setRot('weed', 0, 0, 0);
-      if (e.def.ai === 'rider') {
-        // surf stance
-        e.setRot('pelvis', 0, 0.9, Math.sin(time * 1.5) * 0.08);
-        e.setRot('thigh_l', -0.5, 0, 0.25);
-        e.setRot('thigh_r', -0.5, 0, -0.25);
-        e.setRot('shin_l', 0.9, 0, 0);
-        e.setRot('shin_r', 0.9, 0, 0);
-        e.setRot('board', 0, -0.9, 0);
-      }
-    } else if (e.skel === 'beetle') {
-      for (let k = 1; k <= 3; k++) {
-        const o = k * 2.1;
-        e.setRot('leg_l' + k, Math.sin(ph * 2 + o) * 0.5 * stride, Math.cos(ph * 2 + o) * 0.3 * stride, 0);
-        e.setRot('leg_r' + k, Math.sin(ph * 2 + o + Math.PI) * 0.5 * stride, -Math.cos(ph * 2 + o + Math.PI) * 0.3 * stride, 0);
-      }
-      const bi = e.part('body');
-      if (bi >= 0) e.posOff[bi * 3 + 1] = Math.abs(Math.sin(ph * 2)) * 0.02 * stride;
-      e.setRot('head', -wind * 0.4 + strike * 0.5, Math.sin(time * 3 + e.quirk * 4) * 0.2, 0);
-      const wings = e.flipped > 0 ? 0.9 : e.state === 'windup' ? 0.35 : 0;
-      e.setRot('wing_l', 0, 0, wings);
-      e.setRot('wing_r', 0, 0, -wings);
-    } else if (e.skel === 'scorpion') {
-      for (let k = 1; k <= 4; k++) {
-        const o = k * 1.6;
-        e.setRot('leg_l' + k, 0, Math.sin(ph * 2 + o) * 0.35 * stride, Math.cos(ph * 2 + o) * 0.25 * stride);
-        e.setRot('leg_r' + k, 0, -Math.sin(ph * 2 + o + 1) * 0.35 * stride, Math.cos(ph * 2 + o + 1) * 0.25 * stride);
-      }
-      const curl = 0.25 + wind * 0.35 - strike * 0.6;
-      for (let k = 1; k <= 5; k++) e.setRot('tail' + k, -curl - Math.sin(time * 2 + k) * 0.05, Math.sin(time * 1.3 + k * 0.4) * 0.06, 0);
-      e.setRot('stinger', -curl * 1.2, 0, 0);
-      const snap = Math.max(0, Math.sin(time * 5 + e.quirk * 3)) * 0.3 + wind * 0.5;
-      e.setRot('arm_l', 0, -0.2 - wind * 0.4 + strike * 0.6, 0);
-      e.setRot('arm_r', 0, 0.2 + wind * 0.4 - strike * 0.6, 0);
-      e.setRot('pincer_l', 0, -snap, 0);
-      e.setRot('pincer_r', 0, snap, 0);
-    } else if (e.skel === 'bird') {
-      const flap = e.state === 'dive' ? 0.2 : Math.sin(time * 9 + e.quirk * 6) * 0.7;
-      e.setRot('wing_l', 0, 0, flap + 0.2);
-      e.setRot('wing_r', 0, 0, -flap - 0.2);
-      e.setRot('head', -0.3 + (e.state === 'dive' ? 0.5 : 0), Math.sin(time * 2) * 0.3, 0);
-      e.setRot('tail', Math.sin(time * 3) * 0.1, 0, 0);
-      e.setRot('body', e.state === 'dive' ? 0.9 : 0.1, 0, Math.sin(time * 1.5) * 0.2);
+    const env = this.animEnv;
+    env.time = time;
+    env.dt = dt;
+    env.groundAt = this.ctx.world.groundAt;
+    const pp = this.player.pos;
+    env.player.x = pp.x;
+    env.player.y = pp.y;
+    env.player.z = pp.z;
+    env.playerAlive = this.player.alive;
+    env.camDist = this.ctx.camera.position.distanceTo(e.pos);
+    animateEnemy(e, env);
+  }
+
+  /** root transform of an enemy (yaw, flip, death tilt/roll, squash, sinks) */
+  private rootMatrix(e: Enemy, out: THREE.Matrix4) {
+    const a = e.anim;
+    const sq = e.squash.x;
+    _q.setFromAxisAngle(UP, e.yaw);
+    const flip = e.flipped > 0 && !a.dying ? Math.PI : 0;
+    if (flip) _q.multiply(_qa.setFromAxisAngle(AZ, flip));
+    if (a.tilt) _q.multiply(_qa.setFromAxisAngle(AX, a.tilt));
+    if (a.roll) _q.multiply(_qa.setFromAxisAngle(AZ, a.roll));
+    const spawnSink = e.state === 'spawn' && e.emerge === 'sand' ? (1 - clamp(e.stateT / 1.1, 0, 1)) * e.height : 0;
+    _s.set(e.scale * (2 - sq) ** 0.5, e.scale * sq, e.scale * (2 - sq) ** 0.5).multiplyScalar(1 + a.puff * 0.24);
+    out.compose(_v.set(e.pos.x, e.pos.y - spawnSink - a.sink + a.lift + (flip ? e.height * 0.4 : 0), e.pos.z), _q, _s);
+    return out;
+  }
+
+  /** world matrices of every part for this enemy's current pose (ragdoll seeding) */
+  private poseWorld(e: Enemy): THREE.Matrix4[] {
+    const parts = e.batch.geo.parts;
+    while (this.fk.length < parts.length) this.fk.push(new THREE.Matrix4());
+    const W = this.fk;
+    this.rootMatrix(e, _root);
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      _eul.set(p.rest.x + e.rot[i * 3], p.rest.y + e.rot[i * 3 + 1], p.rest.z + e.rot[i * 3 + 2]);
+      _qa.setFromEuler(_eul);
+      _lv.set(p.offset.x + e.posOff[i * 3], p.offset.y + e.posOff[i * 3 + 1], p.offset.z + e.posOff[i * 3 + 2]);
+      _loc.compose(_lv, _qa, _one);
+      W[i].multiplyMatrices(p.parent >= 0 ? W[p.parent] : _root, _loc);
     }
-    // jaw scream for every skeleton
-    e.setRot('jaw', e.jaw, 0, 0);
+    return W;
+  }
+  private fk: THREE.Matrix4[] = [];
+
+  /** advance procedural death collapses; hand over to the ragdoll when they finish */
+  private updateDying(dt: number, time: number) {
+    const ctx = this.ctx;
+    for (let i = this.dying.length - 1; i >= 0; i--) {
+      const e = this.dying[i];
+      const a = e.anim;
+      const g = ctx.world.groundAt(e.pos.x, e.pos.z);
+      // corpses keep their momentum briefly and fall out of the sky
+      e.vel.x *= Math.exp(-4 * dt);
+      e.vel.z *= Math.exp(-4 * dt);
+      e.pos.x += e.vel.x * dt;
+      e.pos.z += e.vel.z * dt;
+      if (e.pos.y > g + 0.01 || e.vel.y > 0) {
+        e.vel.y -= 22 * dt;
+        e.pos.y += e.vel.y * dt;
+        if (e.pos.y <= g) {
+          e.pos.y = g;
+          e.vel.y = 0;
+        }
+      } else e.pos.y = g;
+      this.animate(e, dt, time);
+      if (a.impact) {
+        a.impact = false;
+        const p = { x: e.pos.x, y: g + 0.1, z: e.pos.z };
+        ctx.fx.dust(p, 0.7 * e.scale, P.sand0, 4);
+        ctx.sfx('board_land', p, 0.35, 0.7 + rnd.next() * 0.2);
+      }
+      if (a.dT >= a.dDur) {
+        const W = this.poseWorld(e);
+        e.batch.geo.parts.forEach((pp, j) => {
+          if (e.hidden[j]) return;
+          this.spawnPiece(e, j, (rnd.next() - 0.5) * 1.4, 0.4 + rnd.next() * 1.2 + (pp.name === 'head' ? 1 : 0), (rnd.next() - 0.5) * 1.4, W);
+        });
+        this.dying.splice(i, 1);
+      }
+    }
   }
 
   clear() {
     for (const e of this.list) this.clearTelegraph(e);
     this.list.length = 0;
+    this.dying.length = 0;
+    this.wrapping = null;
     this.rag.length = 0;
     this.proj.clear();
   }

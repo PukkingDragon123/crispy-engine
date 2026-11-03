@@ -26,6 +26,9 @@ const THEMES = [
   { name: 'JACKAL HUNT', types: ['jackal', 'jackalArcher'], mult: 1.0, from: 18 },
   { name: 'DYNAMITE DAY', types: ['bomberHusk', 'bombScarab', 'outlaw'], mult: 1.2, from: 9 },
   { name: 'STINK STORM', types: ['dungSkeleton', 'husk', 'scarab'], mult: 1.3, from: 8 },
+  { name: 'WOLF PACK', types: ['sandWolf'], mult: 1.25, from: 6 },
+  { name: 'THE SANDS MOVE', types: ['duneWorm', 'scarab', 'thornyLizard'], mult: 1.0, from: 11 },
+  { name: 'SNAKE PIT', types: ['bellSnake', 'thornyLizard', 'sandWolf'], mult: 0.9, from: 13 },
 ];
 
 export class WaveDirector {

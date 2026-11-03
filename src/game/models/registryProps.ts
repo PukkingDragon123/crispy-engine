@@ -1,6 +1,8 @@
 // Registry of props / structures / items for the model viewer and game lookups.
 import type { ModelEntry } from './registryCharacters';
 import * as Pr from './props';
+import * as Hx from './props/hideout';
+import * as Hud from './props/hud';
 
 export const PROP_MODELS: Record<string, ModelEntry> = {
   ...seeds('cactus_saguaro', 8, (i) => Pr.cactus(i, 'saguaro')),
@@ -125,6 +127,65 @@ export const PROP_MODELS: Record<string, ModelEntry> = {
   swing_door: () => Pr.swingDoor(),
   roof_beam: () => Pr.roofBeam(),
   menu_sign: () => menuSignPreview(),
+  // --- hideout: small ruined outpost
+  ...seeds('ruin_wall_adobe', 3, (i) => Hx.ruinWallAdobe(i)),
+  ...seeds('ruin_shack_corner', 2, (i) => Hx.ruinShackCorner(i)),
+  tarp_lean_to: () => Hx.tarpLeanTo(1),
+  ...seeds('rubble_pile', 3, (i) => Hx.rubblePile(i)),
+  outpost_ground: () => Hx.outpostGround(1),
+  ...seeds('sack', 4, (i) => Hx.sack(i)),
+  ...seeds('crate_stack', 3, (i) => Hx.crateStack(i)),
+  ...seeds('junk_pile', 2, (i) => Hx.junkPile(i)),
+  hitching_rail: () => Hx.hitchingRail(1),
+  water_pump: () => Hx.waterPump(1),
+  ...seeds('bottle_cluster', 2, (i) => Hx.bottleCluster(i)),
+  lantern_string: () => Hx.lanternString(1),
+  ...seeds('poster_plank', 2, (i) => Hx.posterPlank(i)),
+  ...seeds('holey_sign', 4, (i) => Hx.holeySign(i)),
+  bedroll: () => Hx.bedroll(1),
+  ...seeds('bucket', 2, (i) => Hx.bucket(i)),
+  rope_coil: () => Hx.ropeCoil(),
+  clothes_rack: () => Hx.clothesRack(1),
+  trunk: () => Hx.trunk(1),
+  log_bench: () => Hx.logBench(1),
+  wood_pile: () => Hx.woodPile(1),
+  saddle_rail: () => Hx.saddleRail(1),
+  skull_plaque: () => Hx.skullPlaque(),
+  ...seeds('crate_table', 2, (i) => Hx.crateTable(i)),
+  pot_cactus: () => Hx.potCactus(1),
+  // --- the ruined saloon interior
+  saloon_floor: () => Hx.saloonFloor(1),
+  saloon_walls: () => Hx.saloonWalls(1),
+  saloon_roof: () => Hx.saloonRoof(1),
+  bar_ruin: () => Hx.barRuin(1),
+  back_bar: () => Hx.backBar(1),
+  chair_up: () => Hx.saloonChair(1, 'up'),
+  chair_tipped: () => Hx.saloonChair(2, 'tipped'),
+  chair_side: () => Hx.saloonChair(3, 'side'),
+  chair_broken: () => Hx.saloonChair(4, 'broken'),
+  table_cards: () => Hx.saloonTable(1, 'cards'),
+  table_bare: () => Hx.saloonTable(2, 'bare'),
+  table_tipped: () => Hx.saloonTable(3, 'tipped'),
+  ...seeds('broken_glass', 2, (i) => Hx.brokenGlass(i)),
+  ...seeds('sawdust', 2, (i) => Hx.sawdust(i)),
+  ...seeds('cobweb', 2, (i) => Hx.cobweb(i)),
+  card_scatter: () => Hx.cardScatter(1),
+  spittoon: () => Hx.spittoon(),
+  ...seeds('junk_shelf', 2, (i) => Hx.junkShelf(i)),
+  hanging_lantern: () => Hx.hangingLantern(0.8),
+  wheel_chandelier: () => Hx.wheelChandelier(),
+  potbelly_stove: () => Hx.potBellyStove(3.2),
+  ...seeds('keg', 2, (i) => Hx.keg(i)),
+  ...seeds('grass_tuft', 3, (i) => Hx.grassTuft(i)),
+  boardwalk_10m: () => Hx.boardwalk(10, 1),
+  // --- 3D HUD hero models (viewer previews; the game calls props/hud.ts directly)
+  hud_cylinder: () => Hud.hudCylinderPreview(6),
+  hud_cylinder_8: () => Hud.hudCylinderPreview(8),
+  hud_cylinder_loaded: () => Hud.hudCylinderPreview(6, true),
+  hud_round: () => Hud.hudRoundPreview(),
+  hud_heart: () => Hud.hudHeartRig(1 / 80),
+  hud_heart_merged: () => Hud.hudHeartPreview(true),
+  hud_heart_bare: () => Hud.hudHeartPreview(false),
 };
 
 /** viewer preview: chest base + closed lid merged */

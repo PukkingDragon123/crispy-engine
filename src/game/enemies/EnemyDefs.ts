@@ -5,9 +5,10 @@ import type { HitKind } from '../fx/Fx';
 
 export type AiKind =
   | 'chaser' | 'ranged' | 'tank' | 'leaper' | 'swarm' | 'charger' | 'flyer' | 'rider'
-  | 'bomber' | 'support' | 'sniper' | 'fleer' | 'ambusher' | 'whipper' | 'lobber';
+  | 'bomber' | 'support' | 'sniper' | 'fleer' | 'ambusher' | 'whipper' | 'lobber'
+  | 'pack' | 'burrower' | 'skitter' | 'constrictor';
 
-export type AttackKind = 'melee' | 'burst' | 'fan' | 'ring' | 'spiral' | 'snipe' | 'lob' | 'leap' | 'charge' | 'explode' | 'aura' | 'lasso' | 'whip' | 'music' | 'volley' | 'dive' | 'vortex';
+export type AttackKind = 'melee' | 'burst' | 'fan' | 'ring' | 'spiral' | 'snipe' | 'lob' | 'leap' | 'charge' | 'explode' | 'aura' | 'lasso' | 'whip' | 'music' | 'volley' | 'dive' | 'vortex' | 'stream';
 
 export interface AttackDef {
   kind: AttackKind;
@@ -23,9 +24,11 @@ export interface AttackDef {
   status?: { id: any; stacks: number; dur: number }[];
   radius?: number;
   alphaOnly?: boolean;
+  /** the move's name (song titles only — Rolling Stones / Guns N' Roses / the Beatles) */
+  title?: string;
 }
 
-export type ProjKind = 'bullet' | 'venom' | 'curse' | 'dung' | 'arrow' | 'sand' | 'needle' | 'dynamite' | 'bone';
+export type ProjKind = 'bullet' | 'venom' | 'curse' | 'dung' | 'arrow' | 'sand' | 'needle' | 'dynamite' | 'bone' | 'blood';
 
 export interface EnemyDef {
   id: string;
@@ -201,7 +204,68 @@ export const ENEMIES: Record<string, EnemyDef> = {
     contact: 6, bounty: 10, gold: [1, 4], hitKind: 'linen', weakness: 'Whip has a long telegraph — side-step it. Burns easily.', burnMul: 2,
     firstWave: 22, weight: 2, lore: 'Unwrapped one arm to make a better weapon. Regrets nothing.',
   },
+  // ------------------------------------------------------------ desert wildlife
+  sandWolf: {
+    id: 'sandWolf', name: 'Sand Wolf', title: 'Hunts in Threes, Laughs in Fours', rig: 'sand_wolf', rigAlpha: 'sand_wolf_alpha',
+    hp: 34, armor: 6, physRes: 0, magicRes: 0, statusRes: {}, speed: 9.5, radius: 0.55, height: 1.0,
+    ai: 'pack', attacks: [{ kind: 'melee', range: 1.9, cooldown: 1.1, windup: 0.3, dmg: 8, status: [{ id: 'bleed', stacks: 1, dur: 3 }] }, { kind: 'leap', range: 9, minRange: 3.5, cooldown: 4.2, windup: 0.45, dmg: 13 }],
+    contact: 5, bounty: 4, gold: [0, 2], hitKind: 'flesh', weakness: 'Packs circle behind you, then pounce. Keep moving and thin the pack before it closes in.',
+    firstWave: 6, weight: 3, group: [3, 5], lore: 'Born from the dust of Set\'s storm. They howl at the moon because Khonsu owes them money.',
+  },
+  duneWorm: {
+    id: 'duneWorm', name: 'Dune Worm', title: 'The Sand Bites Back', rig: 'dune_worm', rigAlpha: 'dune_worm_alpha',
+    hp: 70, armor: 18, physRes: 0.05, magicRes: 0.05, statusRes: {}, speed: 7, radius: 0.7, height: 1.2,
+    ai: 'burrower', attacks: [{ kind: 'melee', range: 2.6, cooldown: 1.6, windup: 0.5, dmg: 14 }, { kind: 'lob', range: 18, minRange: 5, cooldown: 3.5, windup: 0.6, dmg: 7, count: 3, speed: 13, proj: 'sand' }],
+    contact: 7, bounty: 8, gold: [1, 3], hitKind: 'flesh', weakness: 'Untouchable underground. Watch the ripple in the sand, then shoot it when it rears up.',
+    firstWave: 11, weight: 2, group: [1, 2], lore: 'Sandworm hatchlings with grown-up appetites. They can hear your heartbeat through the dunes.',
+  },
+  thornyLizard: {
+    id: 'thornyLizard', name: 'Thorny Devil', title: 'Cries Blood, Sheds No Tears', rig: 'thorny_lizard', rigAlpha: 'thorny_lizard_alpha',
+    hp: 32, armor: 22, physRes: 0.1, magicRes: 0, statusRes: { bleed: 1 }, speed: 7.5, radius: 0.5, height: 0.5,
+    ai: 'skitter', attacks: [{ kind: 'stream', range: 13, minRange: 3, cooldown: 4.2, windup: 0.95, dmg: 4, count: 10, speed: 11, proj: 'blood', status: [{ id: 'bleed', stacks: 1, dur: 3 }] }, { kind: 'melee', range: 1.5, cooldown: 1.2, windup: 0.25, dmg: 6 }],
+    contact: 6, bounty: 4, gold: [0, 2], hitKind: 'chitin', weakness: 'The push-ups mean it is about to squirt blood from its eyes. Sidestep the stream.', thorns: 3,
+    firstWave: 7, weight: 2.5, group: [2, 4], lore: 'Puffs up, does push-ups at you, then cries blood in your eye. Rude, but impressive.',
+  },
+  bellSnake: {
+    id: 'bellSnake', name: 'Bell Snake', title: 'The Rattle Before the Grave', rig: 'bell_snake', rigAlpha: 'bell_snake_alpha',
+    hp: 150, armor: 20, physRes: 0.05, magicRes: 0.1, statusRes: { poison: 0.8 }, speed: 6.5, radius: 0.75, height: 0.8,
+    ai: 'constrictor', attacks: [{ kind: 'leap', range: 9, minRange: 2.5, cooldown: 5.5, windup: 1.15, dmg: 16 }, { kind: 'melee', range: 2.5, cooldown: 1.8, windup: 0.45, dmg: 12, status: [{ id: 'poison', stacks: 3, dur: 4 }] }],
+    contact: 8, bounty: 16, gold: [2, 6], hitKind: 'flesh', weakness: 'Listen for the rattle: the strike comes next. If it wraps you, mash to break free. Alphas burst into acid when they die.',
+    firstWave: 13, weight: 1.2, special: 'acidBurst', lore: 'Big as a stagecoach, loud as a church bell. It swallows bounty hunters whole and keeps their spurs.',
+  },
 };
+
+/** every move gets a song title (titles only, never lyrics), by attack index */
+const SONG_TITLES: Record<string, string[]> = {
+  husk: ['Mr. Brownstone', 'Gimme Shelter'],
+  gunslinger: ['Happiness Is a Warm Gun', 'Paint It Black'],
+  mummy: ['Let It Be', 'Under My Thumb'],
+  jackal: ["It's So Easy", "Jumpin' Jack Flash"],
+  scarab: ['Twist and Shout'],
+  giantScorpion: ['Doom and Gloom', 'Helter Skelter'],
+  vulture: ['Paradise City'],
+  outlaw: ['Welcome to the Jungle', 'Live and Let Die'],
+  bomberHusk: ['Start Me Up'],
+  cactusHusk: ['Patience', 'November Rain'],
+  dungSkeleton: ['Get Off of My Cloud'],
+  mariachi: ['While My Guitar Gently Weeps'],
+  sharpshooter: ['Rocky Raccoon'],
+  shotgunner: ['Tumbling Dice'],
+  bombScarab: ['Here Comes the Sun'],
+  tumbleweedBandit: ['Midnight Rambler'],
+  lassoRider: ['Wild Horses'],
+  jackalArcher: ['Come Together'],
+  bandageWhipper: ['Street Fighting Man'],
+  sandWolf: ['Nightrain', 'You Could Be Mine'],
+  duneWorm: ['Get Back', 'Yellow Submarine'],
+  thornyLizard: ["Don't Cry", 'Help!'],
+  bellSnake: ['Sympathy for the Devil', 'Garden of Eden'],
+};
+for (const [id, titles] of Object.entries(SONG_TITLES))
+  titles.forEach((t, i) => {
+    const a = ENEMIES[id]?.attacks[i];
+    if (a) a.title = t;
+  });
 
 /** wave → spawn table weights */
 export function rosterFor(wave: number) {

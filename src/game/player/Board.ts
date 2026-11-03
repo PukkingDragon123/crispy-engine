@@ -3,7 +3,11 @@
 // - carving keeps speed (lateral velocity rotates into heading), drifting slides
 //   and charges a mini-boost, boost meter, charged ollies, booster jumps
 // - physically-motivated crest launches (ground falls faster than free fall)
-// - air control, Shift+WASD flips/spins, landing quality + transition bonus
+// - air control, Shift+WASD flips/spins with angular momentum, graded landings
+//   (perfect / clean / sketchy / bail) + transition bonus
+// - deliberately slow on the flat: speed comes from the dunes. Tuck (hold Jump)
+//   down a face to gain speed, pop at the lip for big air, carve smoothly (hard
+//   turns scrub speed)
 // - cliffs act as walls, colliders bounce / get plowed through
 import * as THREE from 'three';
 import { Colliders, Collider } from '../world/Colliders';
@@ -40,6 +44,8 @@ export interface BoardEnv {
 
 export interface BoardTuning {
   gravity: number;
+  /** pull along slopes (lower than air gravity so dunes feel weighty, not slippery) */
+  slopeG: number;
   pushSpeed: number;
   pushAccel: number;
   boostAccel: number;
@@ -54,6 +60,9 @@ export interface BoardTuning {
   dragLin: number;
   dragQuad: number;
   rolling: number;
+  /** top speeds: normal, boosting */
+  cap: number;
+  boostCap: number;
 }
 
 export interface LandingInfo {
@@ -66,6 +75,7 @@ export interface LandingInfo {
   trickName: string;
   score: number;
   grab: boolean;
+  quality: 'none' | 'perfect' | 'clean' | 'sketchy' | 'bail';
 }
 
 export class Board {
@@ -85,31 +95,42 @@ export class Board {
   jumpCharge = 0;
   trickYaw = 0;
   trickPitch = 0;
+  /** angular momentum of the trick (rad/s) — flips keep turning after you let go */
+  spinYaw = 0;
+  spinPitch = 0;
+  /** tucked (holding Jump on the ground): less drag, more pull downhill, stiffer steering */
+  tucked = false;
   grabbing = false;
   grabTime = 0;
   stumble = 0;
   compress = 0; // landing/charge crouch 0..1
+  /** how hard the board is being turned (rad/s), for carve scrub */
+  turnSpeed = 0;
   lastSurface: SurfaceInfo = { h: 0, drag: 0, speedMul: 1, kind: 'sand' };
   grapple: { x: number; y: number; z: number; len: number; active: boolean; target?: any } = { x: 0, y: 0, z: 0, len: 0, active: false };
   /** extra external acceleration this frame (knockback, explosions) */
   impulse = new THREE.Vector3();
-  t: BoardTuning = {
+  static readonly BASE: BoardTuning = {
     gravity: 22,
-    pushSpeed: 14,
-    pushAccel: 15,
-    boostAccel: 24,
-    boostDrain: 0.38,
-    turnRate: 3.4,
-    driftTurnRate: 4.6,
+    slopeG: 15,
+    pushSpeed: 7.5,
+    pushAccel: 5.5,
+    boostAccel: 12,
+    boostDrain: 0.42,
+    turnRate: 3.0,
+    driftTurnRate: 4.2,
     grip: 8.5,
     driftGrip: 1.4,
-    jump: 8.2,
-    jumpCharge: 5.5,
-    airControl: 7,
-    dragLin: 0.06,
-    dragQuad: 0.0028,
-    rolling: 0.7,
+    jump: 7.4,
+    jumpCharge: 5.2,
+    airControl: 4.5,
+    dragLin: 0.05,
+    dragQuad: 0.0026,
+    rolling: 0.55,
+    cap: 30,
+    boostCap: 36,
   };
+  t: BoardTuning = { ...Board.BASE };
   mobilityMul = 1;
   // events
   onLand?: (l: LandingInfo) => void;
@@ -174,8 +195,10 @@ export class Board {
       // slope gravity (horizontal space)
       const gx = -this.n.x / Math.max(0.2, this.n.y), gz = -this.n.z / Math.max(0.2, this.n.y); // = -grad h
       const s2 = gx * gx + gz * gz;
-      this.vel.x += (t.gravity * gx) / (1 + s2) * dt;
-      this.vel.z += (t.gravity * gz) / (1 + s2) * dt;
+      this.tucked = inp.jumpHeld && this.stumble <= 0;
+      const pull = t.slopeG * (this.tucked ? 1.18 : 1);
+      this.vel.x += (pull * gx) / (1 + s2) * dt;
+      this.vel.z += (pull * gz) / (1 + s2) * dt;
 
       // steering
       if (this.stumble <= 0) {
@@ -195,8 +218,10 @@ export class Board {
         }
         this.drifting = drifting;
         const spdK = clamp(spd / 30, 0, 1);
-        const rate = (drifting ? t.driftTurnRate : t.turnRate * (1 - spdK * 0.4)) * (0.8 + 0.2 * mob);
+        const rate = (drifting ? t.driftTurnRate : t.turnRate * (1 - spdK * 0.4)) * (0.8 + 0.2 * mob) * (this.tucked ? 0.55 : 1);
+        const h0 = this.heading;
         if (hasDir) this.heading = dampAngle(this.heading, desired, rate, dt * 1.0);
+        this.turnSpeed = Math.abs(wrapAngle(this.heading - h0)) / Math.max(1e-4, dt);
         if (drifting) {
           this.driftCharge += dt * clamp(spd / 18, 0.3, 1.6) * (0.6 + Math.abs(wrapAngle(Math.atan2(this.vel.x, this.vel.z) - this.heading)));
         }
@@ -230,7 +255,8 @@ export class Board {
         const grip = (this.drifting ? t.driftGrip : t.grip) * (s.kind === 'water' ? 0.5 : 1);
         const keep = Math.exp(-grip * dt);
         const removed = lat * (1 - keep);
-        const eff = this.drifting ? 0.25 : 0.86;
+        // smooth carves keep their momentum; yanking the board around scrubs it
+        const eff = this.drifting ? 0.25 : 0.95 - 0.42 * clamp(this.turnSpeed / 2.6, 0, 1);
         this.vel.x = fwd.x * (along + Math.sign(along || 1) * removed * eff) + latX * keep;
         this.vel.z = fwd.z * (along + Math.sign(along || 1) * removed * eff) + latZ * keep;
         // if moving backwards relative to the board for long, flip heading (fakie -> regular)
@@ -240,6 +266,7 @@ export class Board {
       const sp = this.speed;
       if (sp > 1e-4) {
         let dec = t.dragLin * sp + t.dragQuad * sp * sp + t.rolling + s.drag * sp;
+        if (this.tucked) dec *= 0.5;
         if (this.boosting) dec *= 0.5;
         const ns = Math.max(0, sp - dec * dt);
         this.vel.x *= ns / sp;
@@ -263,7 +290,9 @@ export class Board {
         this.pos.y += 0.05;
         this.airTime = 0;
         this.trickYaw = this.trickPitch = 0;
+        this.spinYaw = this.spinPitch = 0;
         this.jumpCharge = 0;
+        this.tucked = false;
         this.onJump?.(charge, booster);
         this.applyGrapple(dt);
         return;
@@ -304,6 +333,7 @@ export class Board {
         this.grounded = false;
         this.airTime = 0;
         this.trickYaw = this.trickPitch = 0;
+        this.spinYaw = this.spinPitch = 0;
         this.pos.set(nx, oy + this.vel.y * dt, nz);
         this.onLaunch?.();
       } else {
@@ -323,13 +353,23 @@ export class Board {
         this.vel.z += inp.dirZ * t.airControl * dt;
         this.heading = dampAngle(this.heading, desired, 2.0, dt);
       }
+      // flips and spins have momentum: holding a direction winds the spin up,
+      // letting go it keeps turning and bleeds off — commit early, time the stop
+      const spinRate = 7.2 * (0.85 + 0.15 * mob);
+      const wind = 1 - Math.exp(-9 * dt), bleed = Math.exp(-3.2 * dt);
       if (trick && this.stumble <= 0) {
-        const spinRate = 7.5 * (0.85 + 0.15 * mob);
-        this.trickYaw += inp.fx * spinRate * dt;
-        this.trickPitch += inp.fz * spinRate * 0.95 * dt;
+        const ty = inp.fx * spinRate, tp = inp.fz * spinRate * 0.95;
+        this.spinYaw = Math.abs(inp.fx) > 0.1 ? this.spinYaw + (ty - this.spinYaw) * wind : this.spinYaw * bleed;
+        this.spinPitch = Math.abs(inp.fz) > 0.1 ? this.spinPitch + (tp - this.spinPitch) * wind : this.spinPitch * bleed;
         this.grabbing = Math.abs(inp.fx) < 0.1 && Math.abs(inp.fz) < 0.1;
         if (this.grabbing) this.grabTime += dt;
-      } else this.grabbing = false;
+      } else {
+        this.spinYaw *= bleed;
+        this.spinPitch *= bleed;
+        this.grabbing = false;
+      }
+      this.trickYaw += this.spinYaw * dt;
+      this.trickPitch += this.spinPitch * dt;
       if (this.boosting) {
         const f = this.forward;
         this.vel.x += f.x * t.boostAccel * 0.4 * dt;
@@ -395,7 +435,7 @@ export class Board {
     }
     if (this.stumble > 0) this.stumble -= dt;
     // cap absurd speeds
-    const cap = this.boosting ? 62 : 52;
+    const cap = (this.boosting ? t.boostCap : t.cap) * (0.85 + 0.15 * mob);
     const sp2 = this.speed;
     if (sp2 > cap) {
       this.vel.x *= cap / sp2;
@@ -442,45 +482,72 @@ export class Board {
     const flips = Math.round(Math.abs(this.trickPitch) / (Math.PI * 2));
     const yawErr = Math.abs(wrapAngle(this.trickYaw - halfSpins * Math.PI * Math.sign(this.trickYaw || 1)));
     const pitchErr = Math.abs(wrapAngle(this.trickPitch));
-    const clean = yawErr < 0.75 && pitchErr < 0.85 && this.stumble <= 0;
+    // still spinning hard at touchdown makes it worse
+    const spinErr = (Math.abs(this.spinPitch) + Math.abs(this.spinYaw)) * 0.035;
+    const err = Math.max(pitchErr / 0.85, yawErr / 0.8) + spinErr;
+    const tried = halfSpins > 0 || flips > 0 || Math.abs(this.trickYaw) > 0.9 || pitchErr > 0.6;
+    let quality: LandingInfo['quality'] = 'none';
+    if (this.stumble > 0) quality = tried ? 'bail' : 'none';
+    else if (err < 0.36) quality = tried || air > 1.2 ? 'perfect' : 'none';
+    else if (err < 0.78) quality = 'clean';
+    else if (err < 1.12) quality = 'sketchy';
+    else quality = tried ? 'bail' : 'sketchy';
+    const clean = quality === 'perfect' || quality === 'clean' || (quality === 'none' && !tried);
     const grab = this.grabTime > 0.35;
     let score = 0;
     let name = '';
-    if (clean) {
+    const f = this.forward;
+    if (clean || quality === 'sketchy') {
       const parts: string[] = [];
       if (grab) parts.push(this.grabTime > 1 ? 'Long Tail Grab' : 'Tail Grab');
       if (halfSpins > 0) parts.push(String(halfSpins * 180));
-      if (flips > 0) parts.push(flips === 1 ? 'Backflip' : flips === 2 ? 'Double Flip' : `${flips}x Flip`);
+      if (flips > 0) parts.push(flips === 1 ? (this.trickPitch > 0 ? 'Frontflip' : 'Backflip') : flips === 2 ? 'Double Flip' : `${flips}x Flip`);
       if (air > 1.6 && !parts.length) parts.push('Big Air');
       name = parts.join(' ');
       score = Math.round(halfSpins * 120 + flips * 300 + (grab ? 80 + this.grabTime * 60 : 0) + Math.max(0, air - 0.6) * 90);
+      if (quality === 'perfect' && name) {
+        name = 'PERFECT ' + name;
+        score = Math.round(score * 1.5);
+      } else if (quality === 'sketchy' && name) {
+        name = 'Sketchy ' + name;
+        score = Math.round(score * 0.5);
+      }
     }
-    if (!clean && (halfSpins > 0 || flips > 0 || Math.abs(this.trickYaw) > 0.9 || pitchErr > 0.85)) {
-      this.stumble = 0.7;
-      this.vel.x *= 0.55;
-      this.vel.z *= 0.55;
+    if (quality === 'bail') {
+      this.stumble = 0.8;
+      this.vel.x *= 0.45;
+      this.vel.z *= 0.45;
       name = 'BAIL';
     } else {
       if (transition > 0.05) {
-        const add = Math.max(0, -this.vel.y) * transition * 0.7;
-        const f = this.forward;
+        const add = Math.max(0, -this.vel.y) * transition * (quality === 'perfect' ? 0.9 : 0.7);
         this.vel.x += f.x * add;
         this.vel.z += f.z * add;
       }
+      if (quality === 'perfect') {
+        // stomped it: a kick of speed and boost
+        this.vel.x += f.x * 2.6;
+        this.vel.z += f.z * 2.6;
+      } else if (quality === 'sketchy') {
+        this.vel.x *= 0.8;
+        this.vel.z *= 0.8;
+        this.stumble = Math.max(this.stumble, 0.22);
+      }
       if (impact > 24 && transition < 0.3) {
-        this.stumble = 0.35;
+        this.stumble = Math.max(this.stumble, 0.35);
         this.vel.x *= 0.8;
         this.vel.z *= 0.8;
       }
-      if (clean && score > 0) this.boostMeter = Math.min(1, this.boostMeter + Math.min(0.5, score / 1200));
+      if (score > 0) this.boostMeter = Math.min(1, this.boostMeter + Math.min(0.5, score / 1200));
     }
     this.grounded = true;
     this.vel.y = 0;
     this.compress = clamp(impact / 18, 0.15, 1);
     // align heading with landed spin (half spins land fakie -> flip heading)
     if (halfSpins % 2 === 1) this.heading = wrapAngle(this.heading + Math.PI);
-    this.onLand?.({ airTime: air, spins: halfSpins, flips, clean, impact, transition, trickName: name, score, grab });
+    this.onLand?.({ airTime: air, spins: halfSpins, flips, clean, impact, transition, trickName: name, score, grab, quality });
     this.trickYaw = this.trickPitch = 0;
+    this.spinYaw = this.spinPitch = 0;
     this.grabTime = 0;
     this.airTime = 0;
   }

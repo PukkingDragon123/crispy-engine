@@ -16,6 +16,7 @@ import { Spring } from '../../engine/Tween';
 import { clamp, damp, rnd, wrapAngle } from '../../engine/math/rand';
 import { P } from '../../engine/voxel/palette';
 import { Input } from '../../engine/Input';
+import { PlayerAnim } from '../anim/playerAnim';
 
 export interface PlayerVisuals {
   rig: RigSpec;
@@ -80,6 +81,8 @@ export class Player {
   private exprBase = 'determined';
   private animT = 0;
   private kickPhase = 0;
+  /** procedural board animation (springs, IK, choreography) */
+  private pa = new PlayerAnim();
   muzzleWorld = new THREE.Vector3();
   // tunables
   baseGunDamage = 18;
@@ -186,11 +189,19 @@ export class Player {
     this.ctx.sfx('board_land', this.pos, vol);
     this.ctx.fx.sandBurst(this.pos, clamp(l.impact / 14, 0.4, 1.6));
     if (l.impact > 16) this.ctx.shake(clamp(l.impact / 60, 0.1, 0.45));
-    if (l.trickName === 'BAIL') {
+    if (l.quality === 'bail') {
       this.ctx.toast('BAIL!', '#ff7a5a');
       this.express('hurt', 0.8);
       this.ctx.sfx('banjo_funny', null, 0.5);
-    } else if (l.score > 0) {
+    } else if (l.quality === 'sketchy' && l.score <= 0) {
+      this.ctx.toast('Sketchy!', '#e0b373');
+      this.express('surprised', 0.6);
+    } else if (l.quality === 'perfect' && l.score <= 0) {
+      this.ctx.toast('Stomped it!', '#ffd36b');
+      this.ctx.fx.sandBurst(this.pos, 1.2);
+    }
+    if (l.quality !== 'bail' && l.score > 0) {
+      if (l.quality === 'perfect') this.ctx.fx.sandBurst(this.pos, 1.6);
       this.ctx.events.emit('trick', l);
       this.express(l.score > 500 ? 'laugh' : 'smug', 1.2);
     }
@@ -225,8 +236,8 @@ export class Player {
 
     // stats → board tuning
     this.board.mobilityMul = this.stats.get('moveSpeed');
-    this.board.t.pushAccel = 15 * this.stats.get('accel');
-    this.board.t.jump = 8.2 * this.stats.get('jump');
+    this.board.t.pushAccel = Board.BASE.pushAccel * this.stats.get('accel');
+    this.board.t.jump = Board.BASE.jump * this.stats.get('jump');
     this.board.boostMeter = Math.min(1, this.board.boostMeter + 0.03 * this.stats.get('boostRegen') * dt);
 
     // input → board
@@ -728,115 +739,44 @@ export class Player {
 
   // ------------------------------------------------------------ animation
   private animate(dt: number) {
+    const A = this.pa;
+    const I = A.in;
     const b = this.board;
-    const n = this.rig.nodes;
-    this.root.position.copy(b.pos);
-    // orientation: yaw then tilt to ground normal
-    _q.setFromAxisAngle(UP, b.heading);
-    _q2.setFromUnitVectors(UP, b.up);
-    this.root.quaternion.copy(_q2).multiply(_q);
-    // tricks: spin around Y, flip around board long axis (Z); lean roll around Z
-    this.tilt.rotation.set(0, 0, 0);
-    this.tilt.rotateY(b.trickYaw);
-    this.tilt.rotateZ(-b.trickPitch + b.lean * 0.45);
-    // landing spring + charge crouch
     this.landS.update(0, dt);
-    const crouch = clamp(0.12 + b.compress * 0.55 + Math.max(0, -this.landS.x) * 0.06 + (b.drifting ? 0.25 : 0) + clamp(b.speed / 40, 0, 0.18) + (b.grabbing ? 0.35 : 0), 0, 1);
-    // accelerations for secondary motion
-    const acc = _v.copy(b.vel).sub(this.prevVel).divideScalar(Math.max(dt, 1e-3));
-    this.prevVel.copy(b.vel);
-    const fwd = b.forward;
-    const accF = acc.x * fwd.x + acc.z * fwd.z;
-    const accR = acc.x * fwd.z - acc.z * fwd.x;
-    // stance pose
-    const legBend = 0.25 + crouch * 0.85;
-    const pelvis = n['pelvis'];
-    if (pelvis) {
-      const rest = this.rig.geo.parts[0].offset;
-      const legScale = ((this.rig.geo.spec.meta?.legLen as number) ?? 0.9) / 0.9;
-      pelvis.position.set(rest.x, rest.y - (crouch * 0.22 + 0.04) * legScale, rest.z);
-      pelvis.rotation.set(0.1 * crouch, 0, 0);
-    }
-    const spread = 0.24;
-    const kick = this.meleeAnim;
-    if (n['thigh_l']) n['thigh_l'].rotation.set(-legBend, 0, spread);
-    if (n['shin_l']) n['shin_l'].rotation.set(legBend * 1.8, 0, 0);
-    if (n['thigh_r']) n['thigh_r'].rotation.set(-legBend - kick * 1.4, 0, -spread);
-    if (n['shin_r']) n['shin_r'].rotation.set(legBend * 1.8 - kick * 1.6, 0, 0);
-    // pushing kick cycle at low speed
-    if (b.grounded && b.speed < 9 && this.input.held('forward') && !this.firing) {
-      this.kickPhase += dt * 6;
-      const s = Math.max(0, Math.sin(this.kickPhase));
-      if (n['thigh_r']) n['thigh_r'].rotation.x -= s * 0.6;
-      if (n['thigh_r']) n['thigh_r'].rotation.z -= s * 0.35;
-      if (s > 0.98) this.ctx.fx.sandBurst({ x: b.pos.x, y: b.pos.y, z: b.pos.z }, 0.2);
-    }
-    // torso twist toward aim
-    const torso = n['torso'];
-    const aimLocal = this.stance.worldToLocal(_v2.copy(this.aimPoint));
-    const yawToAim = Math.atan2(aimLocal.x, aimLocal.z);
-    const horiz = Math.hypot(aimLocal.x, aimLocal.z);
-    const pitchToAim = Math.atan2(aimLocal.y - ((this.rig.geo.spec.meta?.shoulderY as number) ?? 1.3), Math.max(0.5, horiz));
-    if (torso) {
-      torso.rotation.set(clamp(-pitchToAim * 0.25, -0.4, 0.4) + crouch * 0.25 - accF * 0.004, clamp(yawToAim * 0.55, -1.15, 1.15), clamp(accR * 0.003, -0.25, 0.25));
-    }
-    const head = n['head'];
-    if (head) {
-      head.rotation.set(clamp(-pitchToAim * 0.5, -0.6, 0.5), clamp(yawToAim * 0.45, -0.9, 0.9), 0);
-    }
-    // jaw from expression + chatter
-    const jaw = n['jaw'];
-    if (jaw) jaw.rotation.x = damp(jaw.rotation.x, this.rig.exprJaw + (this.rig.expression === 'laugh' ? Math.abs(Math.sin(this.animT * 22)) * 0.25 : 0), 18, dt);
-    if (n['brow_l']) n['brow_l'].rotation.z = damp(n['brow_l'].rotation.z, this.rig.exprBrow[0], 14, dt);
-    if (n['brow_r']) n['brow_r'].rotation.z = damp(n['brow_r'].rotation.z, this.rig.exprBrow[1], 14, dt);
-    // right arm aims gun at target (IK-lite)
-    this.rig.root.updateMatrixWorld(true);
-    const armR = n['arm_r'];
-    if (armR && torso) {
-      const tgt = torso.worldToLocal(_v.copy(this.aimPoint));
-      const sh = armR.position;
-      const dir = tgt.sub(sh).normalize();
-      const rel = this.reload.active ? 1 : 0;
-      if (rel) dir.set(0.35, -0.55, 0.75).normalize(); // bring gun to chest for Pinch
-      _q.setFromUnitVectors(_v2.set(0, -1, 0), dir);
-      armR.quaternion.slerp(_q, Math.min(1, dt * 22));
-      this.gunKick.update(0, dt);
-      armR.rotateX(-this.gunKick.x * 0.03);
-      const foreR = n['fore_r'];
-      if (foreR) foreR.rotation.set(-this.gunKick.x * 0.02 - rel * 0.9, 0, 0);
-    }
-    const armL = n['arm_l'];
-    if (armL) {
-      if (this.fanning) {
-        armL.rotation.set(-1.2, 0.5, -0.3);
-        if (n['fore_l']) n['fore_l'].rotation.set(-0.6 + Math.sin(this.animT * 40) * 0.3, 0, 0);
-      } else if (b.grabbing) {
-        armL.rotation.set(0.2, 0, 0.5);
-        if (n['fore_l']) n['fore_l'].rotation.set(0.4, 0, 0);
-      } else if (b.drifting) {
-        armL.rotation.set(0.5, 0, 0.9 + Math.sin(this.animT * 9) * 0.05);
-        if (n['fore_l']) n['fore_l'].rotation.set(-0.3, 0, 0);
-      } else {
-        armL.rotation.set(-0.15 + accF * 0.003, 0, 1.0 + Math.sin(this.animT * 2.2) * 0.06 - b.lean * 0.4);
-        if (n['fore_l']) n['fore_l'].rotation.set(-0.35, 0, 0);
-      }
-      if (b.stumble > 0) armL.rotation.z += Math.sin(this.animT * 25) * 0.6;
-    }
-    // coat flaps with speed
-    const coat = n['coat'];
-    if (coat) {
-      const target = -clamp(b.speed * 0.035, 0, 1.25) - (b.grounded ? 0 : 0.35);
-      this.coatS.update(target, dt);
-      coat.rotation.x = this.coatS.x + Math.sin(this.animT * (6 + b.speed * 0.3)) * 0.06 * clamp(b.speed / 20, 0.2, 1);
-    }
-    // hat inertia
-    const hat = n['hat'];
-    if (hat) {
-      this.hatX.update(clamp(-accF * 0.004, -0.35, 0.35), dt);
-      this.hatZ.update(clamp(accR * 0.004, -0.3, 0.3), dt);
-      hat.rotation.set(this.hatX.x, 0, this.hatZ.x);
-    }
+    I.dt = dt;
+    I.time = this.animT;
+    I.rig = this.rig;
+    I.gun = this.gun;
+    I.root = this.root;
+    I.tilt = this.tilt;
+    I.board = b;
+    I.alive = this.alive;
+    I.aiming = this.aiming;
+    I.firing = this.firing;
+    I.fanning = this.fanning;
+    I.aimPoint = this.aimPoint;
+    I.reload = this.reload;
+    I.hp01 = this.hp / Math.max(1, this.maxHp);
+    I.stunned = this.status.stunned();
+    I.wrapped = !!(this.ctx.enemies as unknown as { wrapping?: unknown }).wrapping;
+    I.hurtFlash = this.hurtFlash;
+    I.gunKick = this.gunKick;
+    I.landX = this.landS.x;
+    I.forwardHeld = this.input.held('forward');
+    I.spinInput = this.input.axis('left', 'right');
+    I.action = this.action;
+    I.expression = this.rig.expression;
+    I.exprJaw = this.rig.exprJaw;
+    I.exprBrow = this.rig.exprBrow;
+    I.heightAboveGround = b.grounded ? 0 : b.pos.y - this.ctx.world.groundAt(b.pos.x, b.pos.z);
+    I.camForward = this.ctx.camera.getWorldDirection(_v2);
+    A.update(I);
+    // answers to the animation's requests
+    if (A.wantGlanceQuery) A.setGlance(this.ctx.enemies.nearest(b.pos, 18));
+    if (A.wantFidgetTwirl && !this.action) this.playAction('twirl', 0.9);
+    if (A.dustNow) this.ctx.fx.sandBurst(A.dust, 0.18);
     this.applyAction(dt);
+    A.finish(I);
     // hurt flash decay
     const fxu = this.material.userData.fx.value;
     fxu.x = damp(fxu.x, 0, 12, dt);
@@ -851,6 +791,7 @@ export class Player {
     } else this.muzzleWorld.copy(this.center());
   }
 
+  /** advance the action layer; poses come from the animation module (envelopes per action) */
   private applyAction(dt: number) {
     const a = this.action;
     if (!a) return;
@@ -858,82 +799,9 @@ export class Player {
     const k = Math.min(1, a.t / a.dur);
     if (k >= 1) {
       this.action = null;
-      const g = this.gun.root;
-      g.rotation.set(0, 0, 0);
       return;
     }
-    // envelope: quick in, hold, ease out
-    const w = Math.min(1, k / 0.15) * Math.min(1, (1 - k) / 0.2);
-    const n = this.rig.nodes;
-    const set = (name: string, x: number, y: number, z: number) => {
-      const node = n[name];
-      if (!node) return;
-      node.rotation.x += (x - node.rotation.x) * w;
-      node.rotation.y += (y - node.rotation.y) * w;
-      node.rotation.z += (z - node.rotation.z) * w;
-    };
-    const ease = (t: number) => t * t * (3 - 2 * t);
-    switch (a.name) {
-      case 'throw': {
-        // wind back, whip forward, follow through
-        const arm = k < 0.35 ? ease(k / 0.35) * 1.9 : 1.9 - ease((k - 0.35) / 0.25) * 3.9;
-        set('arm_l', Math.max(-2, arm), 0.3, 0.2);
-        set('fore_l', -0.4 - Math.max(0, 0.35 - k) * 2, 0, 0);
-        set('torso', -0.15 + (k > 0.35 ? 0.35 : -0.2), k < 0.35 ? 0.7 : -0.5, 0);
-        set('head', 0.1, k < 0.35 ? -0.3 : 0.2, 0);
-        break;
-      }
-      case 'summon':
-        set('arm_l', -2.85, 0.2, 0.35);
-        set('arm_r', -2.6, -0.2, -0.35);
-        set('fore_l', -0.3, 0, 0);
-        set('torso', -0.35, 0, 0);
-        set('head', -0.45, 0, 0);
-        break;
-      case 'lob': {
-        const arm = k < 0.4 ? ease(k / 0.4) * 0.9 : 0.9 - ease((k - 0.4) / 0.3) * 2.4;
-        set('arm_l', arm, 0.1, 0.25);
-        set('torso', 0.35 * (1 - k), 0.3, 0);
-        break;
-      }
-      case 'kick':
-        set('torso', -0.25, -0.6 + k * 0.4, 0.1);
-        set('arm_l', -0.3, 0, 1.4);
-        set('thigh_r', -1.9 * Math.sin(k * Math.PI), 0, -0.2);
-        set('shin_r', 0.2, 0, 0);
-        break;
-      case 'twirl': {
-        set('arm_r', -0.6, 0, -1.2);
-        set('fore_r', -0.5, 0, 0);
-        const g = this.gun.root;
-        g.rotation.x = -ease(k) * Math.PI * 4; // spin twice around the trigger finger
-        break;
-      }
-      case 'grapple':
-        set('arm_l', -1.6, 0.2, 0.1);
-        set('fore_l', -0.1, 0, 0);
-        set('torso', -0.1, 0.4, 0);
-        break;
-      case 'drink':
-        set('arm_l', -2.3, 0.4, 0.6);
-        set('fore_l', -1.6, 0, 0);
-        set('head', -0.6, 0, 0);
-        break;
-      case 'wrap':
-        set('arm_l', -1.2, 0.8, -0.2);
-        set('arm_r', -1.2, -0.8, 0.2);
-        set('fore_l', -1.5, 0, 0);
-        set('fore_r', -1.5, 0, 0);
-        set('head', 0.35, 0, 0);
-        break;
-      case 'ult':
-        set('arm_r', -3.0, 0, -0.25);
-        set('arm_l', -1.0, 0.9, 0.2);
-        set('fore_l', -1.4, 0, 0);
-        set('head', k < 0.5 ? 0.5 : -0.35, 0, 0);
-        set('torso', -0.2, 0, 0);
-        break;
-    }
+    this.pa.actionPose(a.name, k, a.dur, this.pa.in);
   }
 
   dispose() {
