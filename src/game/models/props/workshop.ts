@@ -1916,9 +1916,9 @@ export function priceTag(): StaticModel & { meta: { face: V3; size: [number, num
 
 /** a gunsmith's parts tray — 1/48: a shallow walnut tray with finger-jointed corners, green felt and three dividers,
  *  meant to sit at the front edge of the bench with the loose parts in it. meta.top (m, the felt). */
-export function partsTray(len = 60, seed = 45): StaticModel & { meta: { top: number } } {
+export function partsTray(len = 60, depth = 7, seed = 45): StaticModel & { meta: { top: number } } {
   const m = new VoxelModel('parts_tray');
-  const HL = len / 2, HZ = 7;
+  const HL = len / 2, HZ = depth;
   for (let x = -HL; x <= HL; x++)
     for (let z = -HZ; z <= HZ; z++) {
       const wall = Math.abs(x) >= HL - 0.5 || Math.abs(z) >= HZ - 0.5;

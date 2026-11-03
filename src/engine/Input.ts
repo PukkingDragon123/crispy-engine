@@ -35,6 +35,16 @@ export const DEFAULT_BINDINGS: Record<Action, string[]> = {
   trick: ['Mouse4', 'KeyB'],
 };
 
+function readFlag(key: string) {
+  try {
+    const q = new URLSearchParams(location.search).get('autopush');
+    if (q !== null) return q === '1';
+    return localStorage.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+}
+
 export class Input {
   private down = new Set<string>();
   private pressed = new Set<string>();
@@ -75,6 +85,9 @@ export class Input {
     window.addEventListener('blur', () => {
       for (const k of this.down) this.released.add(k);
       this.down.clear();
+      for (const a of this.tHeld) this.tUp.add(a);
+      this.tHeld.clear();
+      this.stick.active = false;
     });
     el.addEventListener('mousedown', (e) => {
       const c = 'Mouse' + e.button;
@@ -159,6 +172,61 @@ export class Input {
   /** touch devices: no pointer lock, look comes from the touch layer */
   touchMode = false;
 
+  // ---------------------------------------------------------------- touch layer
+  // The gesture layer (game/ui/TouchControls) drives actions directly instead of
+  // faking key codes, so a gesture never fights a real key bound to the same action.
+  private tHeld = new Set<Action>();
+  private tHit = new Set<Action>();
+  private tUp = new Set<Action>();
+  /** analog steering from the touch layer (x: carve right +, y: forward + / brake -) */
+  stick = { x: 0, y: 0, active: false };
+  /** a touch PUSH tap lands this many seconds after the finger went down (the beat is timed from the touch) */
+  pushLead = 0;
+  /** performance.now() of the last aiming drag on the touch layer (the camera eases behind the board when idle) */
+  touchAimAt = 0;
+  /** desktop opt-in: the board kick-pushes on its own while you hold a direction (touch always does) */
+  autoPushDesktop = readFlag('dustup.autoPush');
+  get autoPush() {
+    return this.touchMode || this.autoPushDesktop;
+  }
+  setAutoPushDesktop(v: boolean) {
+    this.autoPushDesktop = v;
+    try {
+      localStorage.setItem('dustup.autoPush', v ? '1' : '0');
+    } catch {
+      /* storage blocked */
+    }
+  }
+  /** hold / let go of an action from the touch layer */
+  touchHold(a: Action, on: boolean) {
+    if (on && !this.tHeld.has(a)) {
+      this.tHeld.add(a);
+      this.tHit.add(a);
+      this.anyKeyPressed = true;
+    } else if (!on && this.tHeld.has(a)) {
+      this.tHeld.delete(a);
+      this.tUp.add(a);
+    }
+  }
+  /** a one-frame press and release of an action (a tap) */
+  touchTap(a: Action) {
+    this.tHeld.delete(a);
+    this.tHit.add(a);
+    this.tUp.add(a);
+    this.anyKeyPressed = true;
+  }
+  /** is the touch layer holding this action */
+  touchHeld(a: Action) {
+    return this.tHeld.has(a);
+  }
+  /** let go of everything the touch layer holds */
+  touchReset() {
+    for (const a of this.tHeld) this.tUp.add(a);
+    this.tHeld.clear();
+    this.stick.active = false;
+    this.stick.x = this.stick.y = 0;
+  }
+
   isDown(code: string) {
     return this.down.has(code);
   }
@@ -167,14 +235,14 @@ export class Input {
   }
   held(a: Action) {
     if (!this.enabled && a !== 'pause') return false;
-    return this.bindings[a].some((c) => this.down.has(c));
+    return this.tHeld.has(a) || this.bindings[a].some((c) => this.down.has(c));
   }
   hit(a: Action) {
     if (!this.enabled && a !== 'pause') return false;
-    return this.bindings[a].some((c) => this.pressed.has(c));
+    return this.tHit.has(a) || this.bindings[a].some((c) => this.pressed.has(c));
   }
   up(a: Action) {
-    return this.bindings[a].some((c) => this.released.has(c));
+    return this.tUp.has(a) || this.bindings[a].some((c) => this.released.has(c));
   }
   /** raw click (for 3D UI) regardless of enabled flag */
   clicked(button = 0) {
@@ -193,6 +261,9 @@ export class Input {
   endFrame() {
     this.pressed.clear();
     this.released.clear();
+    this.tHit.clear();
+    this.tUp.clear();
+    this.pushLead = 0;
     this.wheel = 0;
     this.anyKeyPressed = false;
   }

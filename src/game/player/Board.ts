@@ -37,6 +37,10 @@ export interface BoardInput {
   push?: boolean;
   /** forward key pressed this frame (double tap = nose manual) */
   fwdTap?: boolean;
+  /** auto-push (touch, or the desktop opt-in): the rider holds a direction, the board kicks on its own */
+  autoPush?: boolean;
+  /** a touch tap: the push was pressed this long ago (s), the beat is timed from the touch */
+  pushLead?: number;
 }
 
 export interface SurfaceInfo {
@@ -114,6 +118,18 @@ export const PUSH = {
   streakMax: 4,
 };
 
+/** auto-push: a slow, steady kick every two beats toward a gentle cruise (tap on the off-beat for PERFECT pushes) */
+export const AUTO_PUSH = {
+  /** gap between auto kicks (s): two beats, so a tap between two kicks lands on the beat */
+  every: PUSH.beat * 2,
+  /** the cruise the auto kicks hold (m/s, scaled like the push cap) */
+  cruise: 6.6,
+  /** hold a direction this long before the first kick (a tap never auto-kicks) */
+  delay: 0.22,
+  /** the strongest auto kick (m/s) */
+  maxDv: 2.9,
+};
+
 /** drift entry */
 export const DRIFT = {
   /** hold the PUSH key this long through a carve to kick the tail out */
@@ -185,6 +201,7 @@ export class Board {
   private pushAt = -9;
   private pushQueue: PushGrade | null = null;
   private rushes = 0;
+  private autoHold = 0;
   /** open window after a clean landing for a LANDING PUSH */
   private landWin = 0;
   // ---- unlockable moves
@@ -296,6 +313,8 @@ export class Board {
     const hasDir = Math.hypot(inp.dirX, inp.dirZ) > 0.15;
     this.desired = hasDir ? Math.atan2(inp.dirX, inp.dirZ) : this.heading;
     if (inp.push) this.pressPush(inp);
+    this.autoHold = inp.autoPush ? this.autoHold + dt : 0;
+    if (inp.autoPush && !inp.push && this.autoHold >= AUTO_PUSH.delay) this.autoKick();
     if (inp.fwdTap) {
       if (this.clock - this.lastFwdTap < 0.3) this.tryManual();
       this.lastFwdTap = this.clock;
@@ -317,7 +336,8 @@ export class Board {
       return;
     }
     if (this.manual) this.endManual('clean');
-    const gap = this.clock - this.pushAt;
+    const lead = clamp(inp.pushLead ?? 0, 0, 0.3);
+    const gap = this.clock - lead - this.pushAt;
     let grade: PushGrade;
     if (this.landWin > 0 && this.landWin < PUSH.landWin - 0.04) grade = 'landing';
     else if (gap < PUSH.kickEnd + 0.12) grade = 'rushed';
@@ -326,7 +346,22 @@ export class Board {
     else grade = 'normal';
     // mid-kick presses wait for the toe-off (mashing just queues weak scuffs)
     if (this.pushT < PUSH.kickEnd) this.pushQueue = grade;
-    else this.startPush(grade);
+    else {
+      this.startPush(grade);
+      this.pushAt -= lead;
+    }
+  }
+
+  /** auto-push: the rider kicks on his own, slow and steady, topping up to a gentle cruise */
+  private autoKick() {
+    if (!this.grounded || this.stumble > 0 || this.wall.on || this.manual || this.drifting || this.boosting || this.pushQueue) return;
+    if (this.clock - this.pushAt < AUTO_PUSH.every || this.pushT < PUSH.dur) return;
+    const f = this.forward;
+    const along = this.vel.x * f.x + this.vel.z * f.z;
+    const cruise = AUTO_PUSH.cruise * this.mobilityMul * this.lastSurface.speedMul;
+    if (along > cruise - 0.35) return;
+    this.startPush('normal');
+    this.pushDv = clamp(cruise + 0.9 - Math.max(0, along), 0.7, AUTO_PUSH.maxDv * (0.85 + 0.15 * this.mobilityMul));
   }
 
   private startPush(grade: PushGrade) {

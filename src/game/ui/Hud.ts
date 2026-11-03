@@ -14,6 +14,7 @@ import type { WeaponHud } from '../player/Weapons';
 import type { SoulAnchor } from './SoulBar';
 import { WATCH_DROP, type OutlawAnchors } from './OutlawHud';
 import { isTouchDevice } from './TouchControls';
+import type { ArsenalAnchors } from './ArsenalHud';
 
 /** one quest note on the mission paper stack */
 export type HudQuest = PaperQuest;
@@ -78,7 +79,7 @@ export interface HudState {
 
 /** where the 3D HUD layer (Hud3D) should place its models, in HUD pixels */
 export interface HudAnchors {
-  cyl: { x: number; y: number; R: number; rot: number; angVel: number; open: number; recoil: number; shown: number; n: number; venom: number; phase: string; active: boolean };
+  cyl: { x: number; y: number; R: number; rot: number; angVel: number; open: number; recoil: number; shown: number; n: number; venom: number; phase: string; active: boolean; hidden?: boolean };
   coin: { x: number; y: number; pop: number };
   items: { x: number; y: number; size: number; model: string; count: number }[];
   ult: { x: number; y: number; frac: number; ready: boolean };
@@ -88,6 +89,8 @@ export interface HudAnchors {
   soul: SoulAnchor | null;
   /** tin star, tally board, wave plaque, stopwatch (3D layer) */
   outlaw: OutlawAnchors | null;
+  /** long-gun magazines, the carried-guns strip and treasure markers (3D layer) */
+  arsenal: ArsenalAnchors | null;
   /** the mission paper: the right margin it keeps and its nail height */
   paper: { right: number; y: number; k: number; compact: boolean; speed: number };
 }
@@ -172,6 +175,7 @@ export class Hud {
     soul: null,
     outlaw: null,
     paper: { right: 0, y: 0, k: 1, compact: false, speed: 0 },
+    arsenal: null,
   };
   /** recent toasts (the mission paper reads them to tell a finished quest from a failed one) */
   recent: { text: string; sub?: string; at: number }[] = [];
@@ -182,7 +186,7 @@ export class Hud {
   /** size factor for the 3D pieces on small screens */
   uiK = 1;
   /** world -> screen (css px) projector, set by RunScene */
-  project: ((p: { x: number; y: number; z: number }) => { x: number; y: number; visible: boolean }) | null = null;
+  project: ((p: { x: number; y: number; z: number }) => { x: number; y: number; visible: boolean; behind?: boolean }) | null = null;
 
   constructor(parent: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -336,6 +340,25 @@ export class Hud {
 
   private drawCylinder(dt: number, s: HudState, cx: number, cy: number) {
     const c = this.ctx;
+    const wk = s.weapon?.kind ?? 'cylinder';
+    if (wk !== 'cylinder') {
+      // a long gun is in hand: the 3D layer shows its shells / drum here instead of the cylinder
+      this.anchors.cyl.hidden = true;
+      this.anchors.cyl.x = cx;
+      this.anchors.cyl.y = cy;
+      const w = s.weapon!;
+      const lift = Math.round(Math.sin(Math.min(1, w.swap) * Math.PI) * 23);
+      if (wk === 'drum') {
+        const low = w.ammo <= Math.max(5, w.mag * 0.15);
+        text(c, String(w.ammo), cx - 25, cy - 17 + lift, w.reloading ? UI.textDim : low && Math.sin(this.t * 10) > 0 ? UI.blood.h : UI.text, 32, 'right');
+        text(c, `/${w.mag}`, cx - 25, cy + 7 + lift, UI.textDim, 16, 'right');
+      } else if (!this.use3D) text(c, `${w.ammo}/${w.mag}`, cx, cy - 8, UI.text, 16, 'center');
+      if (w.reloading) text(c, 'RELOADING', cx, cy - 46, UI.brass.h, 16, 'center');
+      text(c, `${Math.round(s.speed)}`, cx + 38, cy - 6, s.speed > 20 ? UI.brass.h : UI.textDim, 16, 'left');
+      text(c, 'm/s', cx + 38, cy + 6, UI.textDim, 16, 'left');
+      return;
+    }
+    this.anchors.cyl.hidden = false;
     const R = 19;
     const n = Math.min(9, Math.max(6, s.maxAmmo));
     const rel = s.reload;
@@ -753,6 +776,49 @@ export class Hud {
       }
     }
     // ---------------------------------------------------------- objective + marker
+    // ---------------------------------------------------------- arsenal: carried guns + treasure (3D layer)
+    if (this.use3D) {
+      const ar: ArsenalAnchors = { k: 1, x: cx, y: H - 32 + slide * 70, weapon: s.weapon ?? null, strip: null, markers: [] };
+      const car = s.weapon?.carried ?? [];
+      if (car.length > 1) {
+        const sy = H - 60 + slide * 70;
+        const slots = car.map((g, i) => ({ x: cx + 36 + i * 28, id: g.id, active: g.id === s.weapon!.id }));
+        ar.strip = { x: cx + 36 + ((car.length - 1) * 28) / 2, y: sy, slots };
+        car.forEach((g, i) => {
+          const kc = keycap(g.key);
+          this.blit(kc, slots[i].x - kc.width / 2, sy - 23 + (slots[i].active ? -2 : 0));
+        });
+      }
+      if (s.treasure?.length && this.project) {
+        const hw = s.heroWorld;
+        const list = s.treasure
+          .map((t) => ({ t, d: hw ? Math.hypot(t.x - hw.x, t.z - hw.z) : 0 }))
+          .sort((a, b) => a.d - b.d)
+          .slice(0, 4);
+        for (const { t, d } of list) {
+          const p = this.project(t);
+          let mx = p.x / this.scale, my = p.y / this.scale;
+          const M = 24;
+          let edge = !p.visible || mx < M || mx > W - M || my < M || my > H - M;
+          let ang = 0;
+          if (edge) {
+            let dx = mx - W / 2, dy = my - H / 2;
+            if (p.behind) {
+              dx = -dx;
+              dy = Math.abs(dy) + H;
+            }
+            ang = Math.atan2(dy, dx);
+            const kk = Math.min((W / 2 - M) / Math.max(1, Math.abs(dx)), (H / 2 - M) / Math.max(1, Math.abs(dy)));
+            mx = W / 2 + dx * kk;
+            my = H / 2 + dy * kk;
+            edge = true;
+          }
+          ar.markers.push({ x: mx, y: my, kind: t.kind, edge, ang });
+          if (hw) text(c, `${Math.round(d)} m`, mx - (edge ? Math.cos(ang) * 6 : 0), my + 12, 'rgba(255,236,190,0.95)', 16, 'center');
+        }
+      }
+      this.anchors.arsenal = ar;
+    } else this.anchors.arsenal = null;
     // (on touch screens the pause / tab buttons own the top-right corner: hang the note under them)
     this.anchors.paper = { right: W - 8 + slide * 220, y: 10 * k + (this.touch ? 32 : 0), k, compact: H < 250 || W < 520, speed: s.speed };
     if (s.objective && !this.use3D) {

@@ -23,6 +23,7 @@ import { PausePoster } from './PausePoster';
 import { SoulBar } from './SoulBar';
 import { MissionPaper, questFromObjective } from './MissionPaper';
 import { OutlawHud } from './OutlawHud';
+import { ArsenalHud } from './ArsenalHud';
 
 export interface CutInOpts {
   /** rig to show as the bust (default: the player) */
@@ -198,6 +199,7 @@ export class Hud3D {
   private soul: SoulBar;
   private paper: MissionPaper;
   private outlaw: OutlawHud;
+  private arsenal: ArsenalHud;
   private t = 0;
   // cut-in
   private cut: {
@@ -274,6 +276,7 @@ export class Hud3D {
     this.soul = new SoulBar(this.scene, hud);
     this.paper = new MissionPaper(this.scene);
     this.outlaw = new OutlawHud(this.scene);
+    this.arsenal = new ArsenalHud(this.scene, () => this.gunSpec);
 
     this.tarot = new TarotBar(this.scene, hud);
 
@@ -610,7 +613,7 @@ export class Hud3D {
     const cy = A.cyl;
     if (cy.n !== this.cylN) this.buildCylinder(cy.n);
     const vox = (cy.R * s) / (CR + 0.5); // css px per voxel
-    this.hinge.visible = visible;
+    this.hinge.visible = visible && !cy.hidden;
     const hx = cy.x * s - CR * vox * 1.05, hy = -cy.y * s;
     this.hinge.position.set(hx, hy + Math.sin(this.t * 1.6) * 2.5 * s, 0);
     this.hinge.scale.setScalar(vox);
@@ -747,6 +750,7 @@ export class Hud3D {
     // ------------------------------------------------ soul jar, outlaw readouts, mission paper
     this.soul.update(dt, A.soul, visible, s);
     if (A.outlaw) this.outlaw.update(dt, A.outlaw, visible, s);
+    this.arsenal.update(dt, A.arsenal, visible, s, !!cy.hidden);
     {
       const st = hud.last;
       const quests = st?.quests ?? (st?.objective ? [questFromObjective(st.objective)] : []);
@@ -787,6 +791,7 @@ export class Hud3D {
     this.soul.dispose();
     this.paper.dispose();
     this.outlaw.dispose();
+    this.arsenal.dispose();
     this.posterUi?.remove();
     this.hud.canvas.style.display = '';
     this.hud.use3D = false;
