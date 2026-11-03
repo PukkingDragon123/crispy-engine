@@ -241,8 +241,8 @@ export class Gore {
     }
     // the burst at the moment of the cut
     const p = this.ctx.particles;
-    p.emit({ pos: o.joint, count: Math.round(16 * Math.min(1.5, scale)), vel: { x: o.dir.x * 3, y: 2.2, z: o.dir.z * 3 }, spread: 3.2, gravity: F.gravity, drag: 0.6, life: [0.4, 0.9], size: [0.07, 0.035], sprite: F.sprite, color: F.cols, ground: true, stretch: 0.05 });
-    p.emit({ pos: o.joint, count: 3, vel: { x: o.dir.x * 0.8, y: 0.6, z: o.dir.z * 0.8 }, spread: 0.6, life: [0.35, 0.7], size: [0.18, 0.55], sprite: ['puff0', 'puff1'], color: F.mist, alpha: 0.5, drag: 2.5 });
+    p.emit({ pos: o.joint, count: Math.round(16 * Math.min(1.5, scale)), vel: { x: o.dir.x * 3, y: 2.2, z: o.dir.z * 3 }, spread: 3.2, gravity: F.gravity, drag: 0.6, life: [0.4, 0.9], size: [0.06, 0.03], sprite: F.sprite, color: F.cols, ground: true, stretch: 0.018 });
+    p.emit({ pos: o.joint, count: 2, vel: { x: o.dir.x * 0.8, y: 0.6, z: o.dir.z * 0.8 }, spread: 0.5, life: [0.3, 0.55], size: [0.1, 0.26], sprite: ['puff0', 'puff1'], color: F.mist, alpha: 0.32, drag: 2.5 });
     if (F.mark >= 0) this.ctx.events.emit('groundMark', o.joint.x + o.dir.x * 0.6, o.joint.z + o.dir.z * 0.6, 0.35 + Math.random() * 0.25, F.mark);
   }
 
@@ -263,8 +263,8 @@ export class Gore {
   gibs(at: { x: number; y: number; z: number }, fluid: Fluid, n = 10, power = 1) {
     this.ctx.events.emit('gibs', at.x, at.y, at.z, n, 0.07, FLUIDS[fluid].gib, 5 + power * 3, 3 + power * 2);
     const F = FLUIDS[fluid];
-    this.ctx.particles.emit({ pos: at, count: Math.round(26 * power), spread: 5, up: 3, gravity: F.gravity, drag: 0.5, life: [0.5, 1.1], size: [0.08, 0.04], sprite: F.sprite, color: F.cols, ground: true, stretch: 0.05 });
-    this.ctx.particles.emit({ pos: at, count: 5, spread: 1.5, up: 0.8, life: [0.5, 1.0], size: [0.4, 1.1], sprite: ['puff0', 'puff1'], color: F.mist, alpha: 0.5, drag: 2.2 });
+    this.ctx.particles.emit({ pos: at, count: Math.round(26 * power), spread: 5, up: 3, gravity: F.gravity, drag: 0.5, life: [0.5, 1.1], size: [0.07, 0.035], sprite: F.sprite, color: F.cols, ground: true, stretch: 0.02 });
+    this.ctx.particles.emit({ pos: at, count: 3, spread: 1.2, up: 0.8, life: [0.4, 0.8], size: [0.2, 0.5], sprite: ['puff0', 'puff1'], color: F.mist, alpha: 0.3, drag: 2.2 });
     if (F.mark >= 0) for (let i = 0; i < 4; i++) this.ctx.events.emit('groundMark', at.x + (Math.random() - 0.5) * 3, at.z + (Math.random() - 0.5) * 3, 0.3 + Math.random() * 0.5, F.mark);
   }
 
@@ -322,8 +322,8 @@ export class Gore {
       if (cnt > 0) {
         j.acc -= cnt;
         const sp = j.speed * (0.55 + beat * 0.6) * (0.5 + fade * 0.5);
-        P.emit({ pos: _v, count: cnt, vel: { x: _d.x * sp, y: _d.y * sp + 0.6, z: _d.z * sp }, spread: 0.55 + (1 - beat) * 0.4, gravity: F.gravity, drag: 0.4, life: [0.45, 0.9], size: [0.055 * j.size, 0.03 * j.size], sprite: F.sprite, color: F.cols, ground: true, stretch: 0.06 });
-        if (Math.random() < 0.08 * j.power) P.emit({ pos: _v, count: 1, vel: { x: _d.x * 1.2, y: 0.4, z: _d.z * 1.2 }, spread: 0.3, life: [0.3, 0.6], size: [0.12, 0.35], sprite: ['puff0', 'puff1'], color: F.mist, alpha: 0.35, drag: 2.5 });
+        P.emit({ pos: _v, count: cnt, vel: { x: _d.x * sp, y: _d.y * sp + 0.6, z: _d.z * sp }, spread: 0.45 + (1 - beat) * 0.35, gravity: F.gravity, drag: 0.4, life: [0.45, 0.9], size: [0.05 * j.size, 0.028 * j.size], sprite: F.sprite, color: F.cols, ground: true, stretch: 0.02 });
+        if (Math.random() < 0.05 * j.power) P.emit({ pos: _v, count: 1, vel: { x: _d.x * 1.2, y: 0.4, z: _d.z * 1.2 }, spread: 0.3, life: [0.25, 0.5], size: [0.08, 0.2], sprite: ['puff0', 'puff1'], color: F.mist, alpha: 0.28, drag: 2.5 });
       }
       // where the stream lands: soak the sand
       j.markT -= dt;

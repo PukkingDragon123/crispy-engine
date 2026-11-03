@@ -19,6 +19,7 @@ import { khonsuAvatarRig, khonsuHandRig } from './enemies/khonsu';
 import { rainFrogMamaRig, rainFrogBabyRig } from './enemies/frog';
 import { thornyLizardRig, thornbackRig } from './enemies/lizard';
 import { bellSnakeRig } from './enemies/snake';
+import { khonsuSandRig, khonsuSandSpikeModel } from './enemies/khonsuSand';
 
 export const ENEMY_MODELS: Record<string, ModelEntry> = {
   husk: () => huskRig(),
@@ -86,4 +87,7 @@ export const ENEMY_MODELS: Record<string, ModelEntry> = {
   thorny_lizard_boss: () => thornbackRig(),
   bell_snake: () => bellSnakeRig(),
   bell_snake_alpha: () => bellSnakeRig({ alpha: true }),
+  // wave 75: Khonsu returns as the desert itself (+ the sandstone spikes he raises)
+  khonsu_sand: () => khonsuSandRig(),
+  khonsu_sand_spike: () => khonsuSandSpikeModel(0),
 };

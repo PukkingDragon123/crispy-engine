@@ -248,6 +248,7 @@ export class RunScene implements GameScene {
     this.slicer = new NeckSlicer({
       engine: e, ctx: this.ctx, player: this.player, enemies: this.enemies, cam: this.camRig,
       cutIn: (t, c) => this.hud3d.cutIn(t, c, 'determined'),
+      hud: (on) => this.hud.setVisible(on),
       onStyle: (v) => {
         this.run.style += v;
         this.addBounty(4);

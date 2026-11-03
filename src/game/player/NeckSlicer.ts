@@ -17,8 +17,8 @@ const RING_T = 0.62;
 const WIN0 = 0.42;
 const WIN1 = 0.76;
 /** the move itself (real seconds; the world runs at ~10% meanwhile) */
-const MOVE_T = 1.25;
-const CUT_K = 0.42;
+const MOVE_T = 1.8;
+const CUT_K = 0.34;
 
 const _v = new THREE.Vector3();
 const _a = new THREE.Vector3();
@@ -32,6 +32,8 @@ export interface NeckSlicerDeps {
   cam: CameraRig;
   cutIn: (title: string, color: string) => void;
   onStyle: (score: number) => void;
+  /** hide the HUD while the move plays */
+  hud: (on: boolean) => void;
 }
 
 function ease(k: number) {
@@ -49,12 +51,14 @@ export class NeckSlicer {
   // cutscene state
   private t = 0;
   private cut = false;
+  private slain = false;
   private victim: Enemy | null = null;
   private start = new THREE.Vector3();
   private end = new THREE.Vector3();
   private fwd = new THREE.Vector3();
   private side = new THREE.Vector3();
   private neck = new THREE.Vector3();
+  private tgt = new THREE.Vector3();
   private apexH = 2;
   private speed0 = 12;
   private shot: CineShot = { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 48, roll: 0.05 };
@@ -170,6 +174,8 @@ export class NeckSlicer {
     this.cut = false;
     this.target = null;
     eng.input.enabled = false;
+    this.d.hud(false);
+    this.slain = false;
     p.invuln = Math.max(p.invuln, 30);
     this.speed0 = Math.max(10, p.speed);
     this.start.copy(b.pos);
@@ -178,12 +184,13 @@ export class NeckSlicer {
     const dist = this.fwd.length();
     this.fwd.multiplyScalar(1 / Math.max(0.001, dist));
     this.side.set(-this.fwd.z, 0, this.fwd.x);
-    this.end.copy(e.pos).addScaledVector(this.fwd, 4.5);
+    // film from whichever side has the clearer line of sight
+    if (this.blocked(1) > this.blocked(-1)) this.side.negate();
+    this.end.copy(e.pos).addScaledVector(this.fwd, 5);
     this.end.y = ctx.world.groundAt(this.end.x, this.end.z);
-    // the board edge must pass right through the neck at the cut
-    const yLine = this.start.y + (this.end.y - this.start.y) * ease(CUT_K);
-    const u = ease(CUT_K);
-    this.apexH = Math.max(1.2, (this.neck.y - 0.15 - yLine) / Math.max(0.2, 4 * u * (1 - u)));
+    // the board edge passes right through the neck at the cut
+    this.tgt.set(this.neck.x, this.neck.y + 0.05, this.neck.z);
+    this.apexH = 1.3;
     b.heading = Math.atan2(this.fwd.x, this.fwd.z);
     b.trickYaw = b.trickPitch = 0;
     b.spinYaw = b.spinPitch = 0;
@@ -200,12 +207,30 @@ export class NeckSlicer {
     // a low tracking side shot that drifts along the leap, then rises over the landing
     const s = this.shot;
     const mid = _v.copy(this.start).lerp(this.neck, 0.6);
-    s.pos.copy(mid).addScaledVector(this.side, 5.2 - k * 1.2).addScaledVector(this.fwd, -1.5 + k * 4.2);
+    s.pos.copy(mid).addScaledVector(this.side, 4.4 - k * 1.0).addScaledVector(this.fwd, -1.2 + k * 4.2);
     s.pos.y = Math.max(mid.y, this.neck.y) + 0.4 + k * 1.6;
     s.look.copy(this.neck).lerp(this.end, Math.max(0, k - 0.45) * 1.2);
     s.look.y = this.neck.y - 0.2 + k * 0.3;
-    s.fov = 46 + k * 10;
+    // punch in on the cut
+    const punch = Math.exp(-Math.pow((k - CUT_K) / 0.06, 2));
+    s.fov = 46 + k * 10 - punch * 9;
     s.roll = 0.06 - k * 0.1;
+  }
+
+  /** how much solid stuff stands between a side camera and the neck */
+  private blocked(sign: number) {
+    const ctx = this.d.ctx;
+    const mid = _a.copy(this.start).lerp(this.neck, 0.6);
+    let n = 0;
+    for (let i = 0; i <= 4; i++) {
+      const f = i / 4;
+      const x = mid.x + this.side.x * sign * 4.4 * (1 - f) + (this.neck.x - mid.x) * f;
+      const z = mid.z + this.side.z * sign * 4.4 * (1 - f) + (this.neck.z - mid.z) * f;
+      ctx.world.colliders.query(x, z, 1.1, () => {
+        n++;
+      });
+    }
+    return n;
   }
 
   /** after player.update: the scripted leap, the cut, the flip */
@@ -215,11 +240,20 @@ export class NeckSlicer {
     const b = p.board;
     this.t += rdt;
     const k = Math.min(1, this.t / MOVE_T);
-    const u = ease(k);
-    // the arc
-    b.pos.copy(this.start).lerp(this.end, u);
+    // the arc: spring up onto the neck (accelerating), then a high backflip down to the sand
+    if (k <= CUT_K) {
+      const s1 = k / CUT_K;
+      const h = s1 * s1 * 0.35 + s1 * 0.65;
+      b.pos.copy(this.start).lerp(this.tgt, h);
+      b.pos.y = this.start.y + (this.tgt.y - this.start.y) * Math.sin(s1 * Math.PI * 0.5);
+    } else {
+      const s2 = (k - CUT_K) / (1 - CUT_K);
+      const h = 1 - (1 - s2) * (1 - s2);
+      b.pos.copy(this.tgt).lerp(this.end, h);
+      b.pos.y = this.end.y + (this.tgt.y - this.end.y) * (1 - s2 * s2) + this.apexH * Math.sin(Math.PI * s2);
+    }
     const g = ctx.world.groundAt(b.pos.x, b.pos.z);
-    b.pos.y = Math.max(g + 0.06, this.start.y + (this.end.y - this.start.y) * u + this.apexH * 4 * u * (1 - u));
+    b.pos.y = Math.max(g + 0.06, b.pos.y);
     // velocity for the animation (world units / game second) and the landing
     b.vel.copy(this.fwd).multiplyScalar(this.speed0);
     b.vel.y = k < 0.5 ? 4 : -6;
@@ -253,7 +287,7 @@ export class NeckSlicer {
         eng.hitStop(0.16, 0.02);
         ctx.shake(0.45);
         ctx.particles.emit({ pos: this.neck, count: 18, spread: 4, life: [0.2, 0.45], size: [0.14, 0.04], sprite: ['star4', 'spark'], color: [0xffffff, 0xfff3d6, 0xffd36b], additive: true, drag: 4 });
-        this.d.cutIn('NECK SLICER', '#ffd36b');
+        this.slain = true;
         this.d.onStyle(650);
         ctx.events.emit('neckSlicer', e);
       }
@@ -265,6 +299,9 @@ export class NeckSlicer {
     const { engine: eng, player: p } = this.d;
     const b = p.board;
     this.active = false;
+    this.d.hud(true);
+    if (this.slain) this.d.cutIn('NECK SLICER', '#ffd36b');
+    this.slain = false;
     this.victim = null;
     this.cool = 1.4;
     b.trickYaw = 0;
