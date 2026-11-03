@@ -627,9 +627,11 @@ export class RankUpCine {
 
   /**
    * Freeze and stage. rank: the number to stamp (null: a card reward, no stamp).
+   * from: a beat played just before (the bullet-cam): its grade carries on and
+   * the slow-down whoosh is not repeated.
    * Returns when (stage seconds) the first card may burst.
    */
-  begin(hero: CineHero | null, rank: number | null) {
+  begin(hero: CineHero | null, rank: number | null, from?: { desat: number }) {
     const ctx = this.ctx;
     const eng = ctx.engine;
     if (this.alive) this.teardown();
@@ -659,7 +661,7 @@ export class RankUpCine {
     this.saved.desat = u.uDesat.value;
     this.saved.ca = u.uCA.value;
     this.saved.vig = u.uVignette.value;
-    this.desat = this.saved.desat;
+    this.desat = from ? from.desat : this.saved.desat;
     if (hero) {
       this.H.copy(hero.pos);
       const box = new THREE.Box3().setFromObject(hero.root);
@@ -712,7 +714,7 @@ export class RankUpCine {
     // the freeze
     eng.flash(0xfff0c8, 0.32, 0.3);
     eng.letterbox(true, 0.35);
-    ctx.sfx('time_slow', null, 0.9);
+    if (!from) ctx.sfx('time_slow', null, 0.9);
     u.uRadial.value = 0.7;
     return this.tCards;
   }

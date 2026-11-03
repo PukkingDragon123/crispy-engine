@@ -934,7 +934,8 @@ export class OasisHeart implements KingArena {
     if (this.state === 'owned' && this.zoneOpen()) {
       this.ensureLurker();
       this.updateLurker(dt);
-      if (this.lurker && pl.alive && dist < this.r * 0.8 && !this.bossAlive()) this.startKing();
+      // (never on top of another cinematic: the zone's own entry cutscene plays first)
+      if (this.lurker && pl.alive && dist < this.r * 0.8 && !this.bossAlive() && !d.cam.cine && ctx.engine.timeScale > 0.5) this.startKing();
     }
     if (this.king && !this.kingAdopted && (this.king.alive || this.king.root.parent)) this.king.update(dt);
     // the army: spawn once the zone opens, hold the ambushes, respawn the fallen while the King rules

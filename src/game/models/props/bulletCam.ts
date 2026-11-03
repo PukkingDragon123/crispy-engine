@@ -154,6 +154,10 @@ export function boneShard(seed: number, kind: ShardKind): StaticModel {
 
 export const SKULL_VS = 1 / 96;
 export const STAKE_VS = 1 / 56;
+/** the point under the back of the skull that rests on the stake tip (meters, skull space) */
+export const SKULL_SEAT: [number, number, number] = [0, -0.058, -0.112];
+/** between the eyes, where the shot goes in (meters, skull space) */
+export const SKULL_AIM: [number, number, number] = [0, 0.012, 0.02];
 
 type V = [number, number, number];
 const len3 = (x: number, y: number, z: number) => Math.sqrt(x * x + y * y + z * z);

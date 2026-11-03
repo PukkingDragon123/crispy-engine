@@ -118,7 +118,7 @@ function drumModel() {
 }
 
 // ------------------------------------------------------------------ gun-belt strip (HUD px, 2 vox/px)
-const SLOT = 28;
+export const SLOT = 32;
 function beltModel(n: number) {
   const hw = (n * SLOT) / 2 + 3, hh = 6.5;
   const col = (x: number, y: number) => {
@@ -263,7 +263,7 @@ export class ArsenalHud {
         r = new RigInstance(buildRigGeo(spec, spec.name + ':hudstrip'), { material: this.mat, castShadow: false });
         const b = new THREE.Box3().setFromObject(r.root);
         const sz = b.getSize(new THREE.Vector3());
-        this.gunScale.set(id, 23 / Math.max(1e-3, sz.x, sz.y, sz.z));
+        this.gunScale.set(id, 29 / Math.max(1e-3, sz.x, sz.y, sz.z));
         this.strip.add(r.root);
       }
     } catch (e) {
@@ -412,17 +412,18 @@ export class ArsenalHud {
       o.root.visible = true;
       o.root.position.set(mk.x * s, -mk.y * s, 20);
       const bob = Math.sin(this.t * 2.4 + i) * 1.5;
-      const size = (mk.kind === 'x' ? 18 : 15) * k;
+      const size = (mk.kind === 'x' ? 32 : 27) * k;
       o.model.scale.setScalar((size * s) / (o.model.userData.size || 1));
-      o.model.position.set(0, (bob + (mk.edge ? 0 : 6 * k)) * s, 0);
-      o.model.rotation.set(mk.kind === 'x' ? 0.75 : 0.45, this.t * 1.1 + i, mk.kind === 'blueprint' ? 0.4 : 0);
+      o.model.position.set(0, (bob + (mk.edge ? 0 : 12 * k)) * s, 0);
+      // turn gently (never edge-on) so the prop always reads
+      o.model.rotation.set(mk.kind === 'x' ? 0.8 : 0.55, Math.sin(this.t * 0.9 + i) * 0.6 + (mk.kind === 'blueprint' ? 0.15 : 0.4), mk.kind === 'blueprint' ? 0.35 : 0);
       if (o.arrow) {
         o.arrow.visible = mk.edge;
         if (mk.edge) {
           // the sign rides between the miniature and the edge, pointing the way
           const ax = Math.cos(mk.ang), ay = Math.sin(mk.ang);
-          o.arrow.position.set(ax * 15 * k * s, -ay * 15 * k * s, 4);
-          o.arrow.scale.setScalar(s * k * (1 + Math.sin(this.t * 6) * 0.05));
+          o.arrow.position.set(ax * 22 * k * s, -ay * 22 * k * s, 4);
+          o.arrow.scale.setScalar(s * k * 1.35 * (1 + Math.sin(this.t * 6) * 0.05));
           o.arrow.rotation.set(0, 0, -mk.ang);
         }
       }

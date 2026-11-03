@@ -14,7 +14,7 @@ import type { WeaponHud } from '../player/Weapons';
 import type { SoulAnchor } from './SoulBar';
 import { WATCH_DROP, type OutlawAnchors } from './OutlawHud';
 import { isTouchDevice } from './TouchControls';
-import type { ArsenalAnchors } from './ArsenalHud';
+import { SLOT, type ArsenalAnchors } from './ArsenalHud';
 
 /** one quest note on the mission paper stack */
 export type HudQuest = PaperQuest;
@@ -782,8 +782,8 @@ export class Hud {
       const car = s.weapon?.carried ?? [];
       if (car.length > 1) {
         const sy = H - 60 + slide * 70;
-        const slots = car.map((g, i) => ({ x: cx + 36 + i * 28, id: g.id, active: g.id === s.weapon!.id }));
-        ar.strip = { x: cx + 36 + ((car.length - 1) * 28) / 2, y: sy, slots };
+        const slots = car.map((g, i) => ({ x: cx + 32 + i * SLOT, id: g.id, active: g.id === s.weapon!.id }));
+        ar.strip = { x: cx + 32 + ((car.length - 1) * SLOT) / 2, y: sy, slots };
         car.forEach((g, i) => {
           const kc = keycap(g.key);
           this.blit(kc, slots[i].x - kc.width / 2, sy - 23 + (slots[i].active ? -2 : 0));
@@ -814,7 +814,7 @@ export class Hud {
             edge = true;
           }
           ar.markers.push({ x: mx, y: my, kind: t.kind, edge, ang });
-          if (hw) text(c, `${Math.round(d)} m`, mx - (edge ? Math.cos(ang) * 6 : 0), my + 12, 'rgba(255,236,190,0.95)', 16, 'center');
+          if (hw) text(c, `${Math.round(d)} m`, mx - (edge ? Math.cos(ang) * 8 : 0), my + 14, 'rgba(255,236,190,0.95)', 16, 'center');
         }
       }
       this.anchors.arsenal = ar;

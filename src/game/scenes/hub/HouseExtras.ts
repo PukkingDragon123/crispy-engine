@@ -117,6 +117,12 @@ export class HouseExtras {
   get cam(): View | null {
     return this.camOn ? this.out : null;
   }
+  /** the carousel is swinging away: drop any easing-back or push-in so the swing starts clean */
+  cancel() {
+    this.rel = null;
+    this.decor.focus = null;
+    if (!this.mode) this.camOn = false;
+  }
   /** a station's E */
   use(st: HubStation): boolean {
     const m: Mode | null =
@@ -190,8 +196,10 @@ export class HouseExtras {
 
   /** after the walk/station animation: the mode's hands and feet */
   poseHero(t: number, rdt: number) {
-    if (this.mode?.poseHero) this.mode.poseHero(t, rdt);
-    else if (this.h.here.id === 'gramophone' && !this.mode) this.juke.poseHero(t, rdt);
+    // the station idles that bend the whole body: dancing at the gramophone, sitting at the card table
+    this.juke.poseHero(t, rdt);
+    this.cards.poseHero(t, rdt);
+    if (this.mode?.poseHero && this.mode !== this.cards && this.mode !== this.juke) this.mode.poseHero(t, rdt);
   }
 
   update(t: number, rdt: number) {

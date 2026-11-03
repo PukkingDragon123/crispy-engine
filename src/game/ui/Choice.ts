@@ -1,15 +1,20 @@
-// Parchment notices that drop in front of the camera (mission offers, outlaw
-// encounters, choice events). Hover tilts toward the cursor, click or 1-4 picks.
-// Pauses the world while open.
-// The sheet is real paper in a shader: fibres, foxing, a sun-browned and
+// Choices as scenes in the world (mission offers, trail encounters, the escort,
+// the saloon's cards). Choice.show() keeps its old promise API, but nothing drops
+// in front of the camera any more: cine/Stage.ts sets the scene a few metres
+// ahead - the speaker as a rigged NPC, set dressing, an opener explosion - and
+// lays the options out as physical things (notices shot to a wanted board, the
+// items on offer, words scratched in the sand, cards on a crate table). The
+// camera pushes in on whatever you hover; 1-N, a click or a tap picks. Callers
+// may call stage(spec) right before show() to direct the scene.
+// The notices are real paper in a shader: fibres, foxing, a sun-browned and
 // scorched torn edge, a bullet hole where it was shot to the post, a slight
 // curl in the geometry, and rubber-stamp ink with uneven pressure. Only the
 // Alagard typography is drawn into a canvas.
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Input } from '../../engine/Input';
-import { Ease } from '../../engine/Tween';
-import { damp } from '../../engine/math/rand';
+import { ChoiceStage, type StageSpec } from '../cine/Stage';
+import { cineFlags } from '../cine/CineKit';
 
 export interface ChoiceOption {
   title: string;
@@ -18,6 +23,10 @@ export interface ChoiceOption {
   accent?: string;
   /** big rubber stamp across the card (e.g. 'WANTED', 'DEAL') */
   stamp?: string;
+  /** staged choices: the item on offer (a model key: 'canteen', 'item_snakeoil', 'gold_coin'...) */
+  prop?: string;
+  /** staged choices: the word scratched into the sand for this option */
+  mark?: string;
 }
 
 /**
@@ -105,6 +114,7 @@ void main(){
   vec3 n = normalize(vN) * (gl_FrontFacing ? 1.0 : -1.0);
   float l = 0.8 + 0.2 * clamp(dot(n, normalize(vec3(-0.3, 0.5, 1.0))), 0.0, 1.0);
   gl_FragColor = vec4(lin * l, uOpacity);
+  #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`;
 
@@ -218,9 +228,9 @@ function noticeMaterial(o: ChoiceOption, W = 512, H = 704) {
     vertexShader: NOTICE_VS,
     fragmentShader: NOTICE_FS,
     transparent: true,
-    depthTest: false,
-    // the sheet writes its depth so the ink-outline pass outlines the paper,
-    // not the world behind it
+    // a sheet in the world: hidden behind whatever stands in front of it, and
+    // writing its depth so the ink-outline pass outlines the paper
+    depthTest: true,
     depthWrite: true,
     side: THREE.DoubleSide,
   });
@@ -248,136 +258,101 @@ function disposeCard(m: THREE.Mesh) {
   m.geometry.dispose();
 }
 
-interface Card {
-  mesh: THREE.Mesh;
-  home: THREE.Vector3;
-  hover: number;
-  ready: boolean;
-  tx: number;
-  ty: number;
+/** a paper notice as a mesh (the stage nails it to a board or lays it on a table) */
+export function noticeMesh(o: ChoiceOption) {
+  const m = new THREE.Mesh(noticeGeometry(), noticeMaterial(o));
+  m.castShadow = true;
+  return m;
 }
+void disposeCard;
 
 export class Choice {
+  /** a choice is on screen (the world is paused) */
   active = false;
-  private group = new THREE.Group();
-  private cards: Card[] = [];
-  private ray = new THREE.Raycaster();
-  private hovered: Card | null = null;
-  private resolve: ((i: number) => void) | null = null;
-  private hint: HTMLDivElement;
+  private pending: StageSpec | null = null;
+  private current: ChoiceStage | null = null;
+  private lingering: ChoiceStage[] = [];
+  private last: ChoiceStage | null = null;
 
-  constructor(private ctx: Ctx, private input: Input) {
-    ctx.scene.add(this.group);
-    this.hint = document.createElement('div');
-    this.hint.style.cssText = "position:absolute;left:50%;top:7vh;transform:translateX(-50%);font-family:'Alagard';font-size:26px;color:#fff3d6;text-shadow:0 3px 0 #2a1810,0 0 12px #000;z-index:7;pointer-events:none;display:none;letter-spacing:1px;text-align:center";
-    ctx.engine.overlay.appendChild(this.hint);
+  constructor(private ctx: Ctx, private input: Input) {}
+
+  /** direct the next show(): who speaks, what stands around, how the options are laid out */
+  stage(spec: StageSpec) {
+    this.pending = spec;
+    return this;
   }
 
   show(heading: string, options: ChoiceOption[], canCancel = true): Promise<number> {
     const ctx = this.ctx;
     const eng = ctx.engine;
+    const spec = this.pending ?? {};
+    this.pending = null;
+    this.current?.dispose();
     this.active = true;
-    this.cancelable = canCancel;
+    cineFlags.choice = true;
     eng.paused = true;
-    eng.audio.setMuffle(0.45);
     eng.input.setWantLock(false);
-    this.hint.innerHTML = `${heading}<div style="font-size:15px;opacity:.8;margin-top:6px">click or press 1-${options.length}${canCancel ? ' · ESC to walk away' : ''}</div>`;
-    this.hint.style.display = 'block';
-    ctx.sfx('paper_flutter', null, 0.8);
-    const cam = ctx.camera;
-    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
-    const center = cam.position.clone().addScaledVector(fwd, 2.1).addScaledVector(up, -0.05);
-    const spacing = options.length > 2 ? 0.86 : 0.95;
-    this.cards = options.map((o, i) => {
-      const mesh = new THREE.Mesh(noticeGeometry(), noticeMaterial(o));
-      mesh.renderOrder = 999;
-      const home = center.clone().addScaledVector(right, (i - (options.length - 1) / 2) * spacing);
-      const start = home.clone().addScaledVector(up, 1.6).addScaledVector(right, (i - 1) * 0.4);
-      mesh.position.copy(start);
-      mesh.quaternion.copy(cam.quaternion);
-      this.group.add(mesh);
-      const card: Card = { mesh, home, hover: 0, ready: false, tx: 0, ty: 0 };
-      eng.tweens.run(0.6, (k) => {
-        mesh.position.lerpVectors(start, home, k);
-        mesh.quaternion.copy(cam.quaternion);
-        mesh.rotateZ((1 - k) * (i % 2 ? 0.6 : -0.6));
-      }, Ease.outBack, { real: true, delay: 0.08 + i * 0.12, done: () => (card.ready = true) });
-      eng.tweens.after(0.08 + i * 0.12, () => ctx.sfx('card_flip', null, 0.5, 0.9 + i * 0.08), true);
-      return card;
+    return new Promise((res) => {
+      const done = (i: number) => {
+        this.active = false;
+        cineFlags.choice = false;
+        eng.paused = false;
+        eng.input.setWantLock(true);
+        if (this.current) {
+          this.lingering.push(this.current);
+          this.last = this.current;
+        }
+        this.current = null;
+        res(i);
+      };
+      try {
+        this.current = new ChoiceStage(ctx, this.input, spec, heading, options, canCancel, noticeMesh, done);
+      } catch (e) {
+        console.error('[choice] stage failed', e);
+        this.current = null;
+        done(canCancel ? -1 : 0);
+      }
     });
-    return new Promise((res) => (this.resolve = res));
   }
-  private cancelable = true;
 
-  private pick(i: number) {
-    if (!this.resolve) return;
-    const ctx = this.ctx;
-    const eng = ctx.engine;
-    const res = this.resolve;
-    this.resolve = null;
-    this.hint.style.display = 'none';
-    ctx.sfx(i >= 0 ? 'poster_slam' : 'paper_flutter', null, 0.8);
-    this.cards.forEach((c, k) => {
-      const from = c.mesh.position.clone();
-      const to = from.clone().add(new THREE.Vector3(0, k === i ? 0.4 : -2.2, 0));
-      const u = (c.mesh.material as THREE.ShaderMaterial).uniforms;
-      eng.tweens.run(k === i ? 0.35 : 0.45, (t) => {
-        c.mesh.position.lerpVectors(from, to, t);
-        if (k === i) c.mesh.scale.setScalar(1 + t * 0.15);
-        u.uOpacity.value = k === i ? 1 - t : 1;
-      }, Ease.inQuad, {
-        real: true,
-        done: () => {
-          this.group.remove(c.mesh);
-          disposeCard(c.mesh);
-        },
-      });
-    });
-    eng.tweens.after(0.45, () => {
-      this.active = false;
-      eng.paused = false;
-      eng.audio.setMuffle(0);
-      eng.input.setWantLock(true);
-      this.cards = [];
-      res(i);
-    }, true);
+  /** where the last scene's actors stand (to swap staged outlaws for real ones) */
+  stageActors(): THREE.Vector3[] {
+    return this.last?.actorSpots() ?? [];
+  }
+  /** the last scene's actors vanish in a puff of dust */
+  dismissActors() {
+    this.last?.dismissActors();
   }
 
   dispose() {
-    this.hint.remove();
+    this.current?.dispose();
+    for (const s of this.lingering) s.dispose();
+    this.lingering = [];
+    this.current = null;
+    cineFlags.choice = false;
   }
 
   update(rdt: number) {
-    if (!this.active || !this.resolve) return;
-    const inp = this.input;
-    const cam = this.ctx.camera;
-    const ready = this.cards.every((c) => c.ready);
-    for (let i = 0; i < this.cards.length; i++) if (ready && inp.wasPressed('Digit' + (i + 1))) return this.pick(i);
-    if (this.cancelable && ready && inp.wasPressed('Escape')) return this.pick(-1);
-    this.ray.setFromCamera(new THREE.Vector2(inp.ndcX, inp.ndcY), cam);
-    const hits = this.ray.intersectObjects(this.cards.map((c) => c.mesh), false);
-    const h = hits.length ? this.cards.find((c) => c.mesh === hits[0].object) ?? null : null;
-    if (h !== this.hovered) {
-      if (h) this.ctx.sfx('card_hover', null, 0.5);
-      this.hovered = h;
+    const c = this.current;
+    if (c) {
+      try {
+        c.update(rdt);
+      } catch (e) {
+        console.error('[choice] stage update failed', e);
+        c.dispose();
+        if (this.current === c) {
+          this.current = null;
+          this.active = false;
+          cineFlags.choice = false;
+          this.ctx.engine.paused = false;
+          this.ctx.engine.input.setWantLock(true);
+        }
+      }
     }
-    if (inp.wasPressed('Mouse0') && h && ready) return this.pick(this.cards.indexOf(h));
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
-    const upv = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
-    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
-    for (const c of this.cards) {
-      if (!c.ready) continue;
-      c.hover = damp(c.hover, c === h ? 1 : 0, 12, rdt);
-      const local = c === h && hits.length ? hits[0].point.clone().sub(c.mesh.position) : new THREE.Vector3();
-      c.ty = damp(c.ty, local.dot(right) * 0.6 * c.hover, 10, rdt);
-      c.tx = damp(c.tx, -local.dot(upv) * 0.5 * c.hover, 10, rdt);
-      c.mesh.position.copy(c.home).addScaledVector(fwd, -0.3 * c.hover).addScaledVector(upv, 0.06 * c.hover + Math.sin(performance.now() / 700 + c.home.x * 3) * 0.012);
-      c.mesh.quaternion.copy(cam.quaternion);
-      c.mesh.rotateY(c.ty);
-      c.mesh.rotateX(c.tx);
-      c.mesh.rotateZ(Math.sin(performance.now() / 900 + c.home.y) * 0.02);
+    for (let i = this.lingering.length - 1; i >= 0; i--) {
+      const s = this.lingering[i];
+      s.update(rdt);
+      if (s.phase === 'gone') this.lingering.splice(i, 1);
     }
   }
 }

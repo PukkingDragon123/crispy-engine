@@ -412,7 +412,12 @@ export class PriceLock {
       this.grp.position.y -= rdt * this.drop * 6;
       this.grp.rotation.z += rdt * 2;
       if (this.drop > 0.6) this.grp.visible = false;
-    } else this.grp.visible = !owns(this.key);
+    }
+  }
+  /** show it (when its thing is on display); bought locks stay down */
+  show(v: boolean) {
+    if (this.drop >= 0) return;
+    this.grp.visible = v && !this.open;
   }
   dispose() {
     this.tex?.dispose();

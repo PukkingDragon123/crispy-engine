@@ -287,7 +287,14 @@ export class Bench3D implements Mode {
         if (!a.owned) continue;
         const sm = a.id === 'rev_laser' ? revolverLaserModel() : null;
         const grp = new THREE.Group();
-        if (sm) grp.add(meshOf(buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot })));
+        if (sm) {
+          // clamped under the barrel, just ahead of the cylinder (where Weapons puts it in a run)
+          const rs = (CH as any).revolverRig(REV_DEFAULT) as RigSpec;
+          const vs = rs.voxelSize, piv = rs.parts[0].pivot;
+          const lm = meshOf(buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot }));
+          lm.position.set((0.5 - piv[0]) * vs, (0.6 - piv[1]) * vs, (10.5 - piv[2]) * vs);
+          grp.add(lm);
+        }
         else {
           const cg = geoOf(safe(() => WS.moonClip()));
           if (cg) grp.add(meshOf(cg));
@@ -340,7 +347,7 @@ export class Bench3D implements Mode {
     let x = this.bx + 10 * FV - Math.min(tot * k, span) / 2;
     for (const p of this.parts) {
       p.grp.visible = p.gun === this.sel && this.fly?.p !== p && !this.fittedNow(p);
-      if (p.lock) p.lock.grp.visible = p.grp.visible && !p.lock.open;
+      p.lock?.show(p.grp.visible);
     }
     for (const p of loose) {
       const L = p.len * sc * k;
@@ -372,9 +379,10 @@ export class Bench3D implements Mode {
       const root = this.gunRoot(p.gun);
       if (!root) continue;
       const px = p.grp.clone();
-      px.position.set(0, 0, 0);
+      // a hair proud of the gun so a click finds the part before the gun under it
       px.quaternion.identity();
-      px.scale.setScalar(1);
+      px.scale.setScalar(1.04);
+      px.position.copy(p.c).multiplyScalar(-0.04);
       px.traverse((o) => {
         if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).material = proxyMat;
       });
@@ -566,8 +574,19 @@ export class Bench3D implements Mode {
         this[job] = null;
       }
     }
-    for (const p of this.parts) p.lock?.update(rdt);
+    for (const p of this.parts) {
+      p.lock?.update(rdt);
+      p.lock?.show(p.grp.visible);
+    }
+    // the six-shooter is rebuilt by the hub at times: keep its fitted parts on it
+    const gr = this.gunRoot('revolver');
+    if (gr !== this.lastGun) {
+      this.lastGun = gr;
+      this.dressRevolver();
+      if (this.sel === 'revolver') this.refreshProxies();
+    }
   }
+  private lastGun: THREE.Object3D | null = null;
   update(t: number, rdt: number) {
     const f = this.fly;
     if (!f) return;

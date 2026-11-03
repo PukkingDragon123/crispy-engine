@@ -13,7 +13,8 @@ import { CameraRig } from '../player/CameraRig';
 import { Enemies } from '../enemies/Enemies';
 import { Pickups } from '../run/Pickups';
 import { WaveDirector, WaveSpec } from '../run/WaveDirector';
-import { Hud, HudState } from '../ui/Hud';
+import { Hud, HudState, HudQuest } from '../ui/Hud';
+import { questFromObjective } from '../ui/MissionPaper';
 import { Ctx, EventBus, RunState } from '../Ctx';
 import { modelEntry } from '../models/lookup';
 import { placeholderBoard, placeholderHumanoid, placeholderRevolver } from '../models/placeholder';
@@ -186,6 +187,7 @@ export class RunScene implements GameScene {
   slicer!: NeckSlicer;
   private pickerShown = false;
   private cineHudHidden = false;
+  private hudHero = new THREE.Vector3();
   private zoneCine: ZoneCine | null = null;
   tutorial: Tutorial | null = null;
   ruins: RuinNests | null = null;
@@ -368,7 +370,7 @@ export class RunScene implements GameScene {
     const v3 = new THREE.Vector3();
     this.hud.project = (p) => {
       v3.set(p.x, p.y, p.z).project(this.camera);
-      return { x: (v3.x * 0.5 + 0.5) * e.width, y: (-v3.y * 0.5 + 0.5) * e.height, visible: v3.z < 1 && Math.abs(v3.x) < 1.2 && Math.abs(v3.y) < 1.2 };
+      return { x: (v3.x * 0.5 + 0.5) * e.width, y: (-v3.y * 0.5 + 0.5) * e.height, visible: v3.z < 1 && Math.abs(v3.x) < 1.2 && Math.abs(v3.y) < 1.2, behind: v3.z > 1 };
     };
     this.pickups = new Pickups(this.ctx, () => this.player);
     this.pickups.onBounty = (v) => this.addBounty(v);
@@ -496,7 +498,7 @@ export class RunScene implements GameScene {
       const gold = Math.round((g0 + rnd.next() * (g1 - g0)) * (en.alpha ? 5 : 1) * this.player.stats.get('goldGain'));
       if (gold > 0) this.pickups.drop('gold', 1, { x: en.pos.x, y: en.pos.y + 0.5, z: en.pos.z }, Math.min(gold, 12));
       if (rnd.chance(0.012 + (en.alpha ? 0.5 : 0))) this.pickups.drop('heart', 25, en.pos);
-      this.run.ultCharge = Math.min(1, this.run.ultCharge + 0.006 * this.player.stats.get('ultCharge') * (en.alpha ? 6 : 1));
+      this.ult.chargeKill(this.run.combo, !!en.alpha);
       if (this.run.combo === 10 || this.run.combo === 25 || this.run.combo % 50 === 0) {
         this.hud.toast(`${this.run.combo} STREAK!`, '#ffd36b');
         this.player.express('laugh', 1);
@@ -514,13 +516,13 @@ export class RunScene implements GameScene {
     ev.on('trick', (l: any) => {
       this.hud.toast(l.trickName || 'TRICK', l.quality === 'perfect' ? '#ffd36b' : l.quality === 'sketchy' ? '#e0b373' : '#6fe3cf', `+${l.score} style`);
       this.run.style += l.score;
-      this.run.ultCharge = Math.min(1, this.run.ultCharge + l.score / 6000);
+      this.ult.chargeStyle(l.score);
       ctx.sfx('trick_spin', null, 0.6);
       if (l.score > 400) ctx.sfx('sting_positive', null, 0.4);
     });
     ev.on('graze', () => {
       this.player.board.boostMeter = Math.min(1, this.player.board.boostMeter + 0.02);
-      this.run.ultCharge = Math.min(1, this.run.ultCharge + 0.002);
+      this.ult.chargeGraze();
     });
     ev.on('groundMark', (x: number, z: number, r: number, ch: MarkChannel) => this.marks.splat(x, z, r, ch));
     ev.on('gibs', (x: number, y: number, z: number, n: number, size: number, cols: number[], speed: number, up: number) => this.debris.burst(x, y, z, n, size, cols, speed, up));
@@ -553,7 +555,7 @@ export class RunScene implements GameScene {
       this.pickups.dropBounty(bb.bounty * k * this.player.stats.get('bountyGain'), at);
       this.pickups.drop('gold', 1, at, Math.min(40, Math.round((bb.gold * k) / 4)));
       this.pickups.drop('heart', 40, at);
-      this.run.ultCharge = Math.min(1, this.run.ultCharge + 0.25);
+      this.ult.chargeBoss();
       if (!escaped) this.hud.toast(`${bb.name.toUpperCase()} — BOUNTY CLAIMED`, '#ffd36b', `+${Math.round(bb.bounty)} bounty`, true);
       (window as any).__music?.setMood('explore');
       if (!escaped) this.bossNames.push(bb.name);
@@ -592,6 +594,17 @@ export class RunScene implements GameScene {
           route.start, route.dest, route.name
         );
     }
+  }
+
+  private questList(): HudQuest[] {
+    const out: HudQuest[] = [];
+    for (const q of [this.frogs, this.wagon, this.escort]) {
+      const h = q?.hud();
+      if (h?.objective) out.push(questFromObjective(h.objective));
+    }
+    const m = this.missions.hud();
+    if (m?.objective) out.push(questFromObjective(m.objective));
+    return out;
   }
 
   private questHud() {
@@ -1179,7 +1192,12 @@ export class RunScene implements GameScene {
       gold: this.run.gold,
       wave: d.wave,
       waveTime: d.timeLeft,
-      waveLabel: `WAVE ${d.wave}`,
+      waveLabel: d.hudLabel,
+      intermission: d.inBreak ? d.breakLeft : undefined,
+      intermissionTotal: d.breakTotal,
+      bell: d.bell,
+      heroWorld: p.center(this.hudHero),
+      quests: this.questList(),
       boss: (() => {
         const b = this.bosses.find((x) => x.alive && !x.escaped);
         return b ? { name: b.name, frac: Math.max(0, b.frac), title: b.title } : null;

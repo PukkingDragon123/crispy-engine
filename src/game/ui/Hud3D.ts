@@ -2,8 +2,9 @@
 // voxel models sit on top of it — the revolver cylinder (rounds in chambers,
 // spins per shot with motion ghosts, swings out on reload, spits brass that
 // tumbles off the screen), a spinning gold coin by the purse and the consumables
-// as little turntable models in their slots. Also hosts the ultimate cut-in: a 2D speed-line band with a
-// lit 3D bust of Sundown (2D eyes) and an Alagard title.
+// as little turntable models in their slots. cutIn() no longer draws anything on
+// screen: it hands every big moment to the in-world cutscene director
+// (cine/Cinema.ts: boss arrivals, area titles, voxel title stamps).
 // Also hosts: the SOUL BAR (Serket's soul jar above the heart, Pinch guarding
 // its lid — SoulBar.ts), the MISSION PAPER stack (MissionPaper.ts) and the
 // outlaw readouts — tin star, tally board, branded wave plaque, break
@@ -23,16 +24,20 @@ import { PausePoster } from './PausePoster';
 import { SoulBar } from './SoulBar';
 import { MissionPaper, questFromObjective } from './MissionPaper';
 import { OutlawHud } from './OutlawHud';
+import { Cinema, type BossLike } from '../cine/Cinema';
 import { ArsenalHud } from './ArsenalHud';
 
 export interface CutInOpts {
-  /** rig to show as the bust (default: the player) */
+  /** the subject's rig (a boss cut-in passes the boss rig) */
   geo?: RigGeo;
   eyes?: [EyeStyle, number];
-  /** subject height in meters (default spec.meta.height) */
+  /** subject height in meters */
   height?: number;
-  /** bust on the right side, title on the left */
   flip?: boolean;
+  /** the boss itself: its arrival cutscene erupts at its feet */
+  boss?: BossLike;
+  /** where a small title stamp should stand (default: in front of the hunter) */
+  at?: THREE.Vector3;
 }
 
 const CR = 14; // cylinder radius in voxels
@@ -201,20 +206,6 @@ export class Hud3D {
   private outlaw: OutlawHud;
   private arsenal: ArsenalHud;
   private t = 0;
-  // cut-in
-  private cut: {
-    t: number;
-    dur: number;
-    band: THREE.Mesh;
-    title: THREE.Mesh;
-    bust: RigInstance | null;
-    eyes: RigEyes | null;
-    planes: THREE.Plane[];
-    flip: boolean;
-    height: number;
-    human: boolean;
-  } | null = null;
-  private bandMat: THREE.ShaderMaterial;
   private bustSpec: RigSpec | null = null;
   /** the player's revolver (for card art that shows Sundown armed) */
   gunSpec: RigSpec | null = null;
@@ -280,36 +271,6 @@ export class Hud3D {
 
     this.tarot = new TarotBar(this.scene, hud);
 
-    this.bandMat = new THREE.ShaderMaterial({
-      uniforms: { uT: { value: 0 }, uCol: { value: new THREE.Color(0x9dff3a) }, uAspect: { value: 1 } },
-      vertexShader: /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-      fragmentShader: /* glsl */ `
-        uniform float uT, uAspect; uniform vec3 uCol; varying vec2 vUv;
-        float h(float n){ return fract(sin(n*91.7)*43758.5); }
-        void main(){
-          vec2 p = vec2(vUv.x * uAspect, vUv.y);
-          // pixelate to 4px-ish cells for a pixel-art band
-          vec2 cell = floor(p * vec2(220.0, 64.0));
-          float row = cell.y;
-          // speed lines rushing right-to-left
-          float sp = step(0.82, h(row * 1.31)) * step(0.45, fract((cell.x + uT * (900.0 + h(row)*600.0)) / (60.0 + h(row*7.0)*140.0)));
-          // halftone dots fading toward the left
-          vec2 dc = fract(p * vec2(110.0, 32.0)) - 0.5;
-          float dotR = 0.42 * smoothstep(0.15, 1.0, vUv.x);
-          float dots = step(length(dc), dotR);
-          vec3 base = vec3(0.07, 0.05, 0.04);
-          vec3 c = mix(base, uCol * 0.45, dots * 0.55);
-          c = mix(c, vec3(1.0, 0.96, 0.85), sp * 0.85);
-          // border stripes
-          float b = min(vUv.y, 1.0 - vUv.y);
-          if (b < 0.045) c = uCol;
-          else if (b < 0.07) c = vec3(0.02);
-          gl_FragColor = vec4(c, 1.0);
-          #include <colorspace_fragment>
-        }`,
-      depthTest: false,
-      depthWrite: false,
-    });
   }
 
   private makeTex() {
@@ -465,126 +426,13 @@ export class Hud3D {
     return holder;
   }
 
-  /** ultimate / big-moment cut-in */
+  /**
+   * Big moments (boss arrivals, area names, ultimates, MOVE UNLOCKED, NECK SLICER...).
+   * Nothing is drawn on screen any more: the in-world cutscene director plays them
+   * (letterboxed boss eruptions, establishing shots, voxel title stamps).
+   */
   cutIn(title: string, color = '#9dff3a', expr = 'angry', opts: CutInOpts = {}) {
-    this.endCut();
-    const W = window.innerWidth, H = window.innerHeight;
-    const band = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.bandMat);
-    band.renderOrder = 5;
-    band.frustumCulled = false;
-    this.bandMat.uniforms.uCol.value.set(color);
-    this.scene.add(band);
-    // title texture
-    const cv = document.createElement('canvas');
-    const fs = 44;
-    const cx = cv.getContext('2d')!;
-    cx.font = `${fs}px Alagard`;
-    const tw = Math.ceil(cx.measureText(title).width) + 16;
-    cv.width = tw;
-    cv.height = fs + 20;
-    const c2 = cv.getContext('2d')!;
-    c2.font = `${fs}px Alagard`;
-    c2.textBaseline = 'top';
-    for (const [dx, dy] of [[-3, 0], [3, 0], [0, -3], [0, 3], [3, 3], [-3, 3], [3, -3], [-3, -3]]) {
-      c2.fillStyle = '#120a06';
-      c2.fillText(title, 8 + dx, 8 + dy);
-    }
-    c2.fillStyle = color;
-    c2.fillText(title, 8, 8);
-    c2.fillStyle = 'rgba(255,255,255,0.35)';
-    c2.fillRect(8, 8 + fs * 0.42, tw - 16, 2);
-    const ttex = new THREE.CanvasTexture(cv);
-    ttex.magFilter = THREE.NearestFilter;
-    ttex.minFilter = THREE.NearestFilter;
-    ttex.colorSpace = THREE.SRGBColorSpace;
-    const tmat = new THREE.MeshBasicMaterial({ map: ttex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false });
-    const titleM = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), tmat);
-    const ts = Math.min(1.6, (W * 0.5) / tw) * 1.0;
-    titleM.scale.set(tw * ts, cv.height * ts, 1);
-    titleM.renderOrder = 7;
-    titleM.frustumCulled = false;
-    this.scene.add(titleM);
-    // bust, clipped to the band
-    let bust: RigInstance | null = null;
-    let eyes: RigEyes | null = null;
-    const planes = [new THREE.Plane(), new THREE.Plane()];
-    const geo = opts.geo ?? (this.bustSpec ? buildRigGeo(this.bustSpec, this.bustKey) : null);
-    if (geo) {
-      const mat = makeVoxelMaterial({ fog: false });
-      mat.clippingPlanes = planes;
-      bust = new RigInstance(geo, { material: mat, castShadow: false });
-      bust.setExpression(expr);
-      eyes = new RigEyes(bust, opts.eyes?.[0] ?? 'glow', opts.eyes?.[1] ?? 0x9dff3a);
-      this.scene.add(bust.root);
-      for (const m of Object.values(bust.meshes)) m.renderOrder = 6;
-    }
-    void H;
-    this.cut = { t: 0, dur: opts.geo ? 1.9 : 1.45, band, title: titleM, bust, eyes, planes, flip: !!opts.flip, height: opts.height ?? (geo?.spec.meta?.height as number) ?? 1.8, human: !!geo?.index['arm_r'] };
-  }
-
-  private endCut() {
-    if (!this.cut) return;
-    this.cut.band.removeFromParent();
-    this.cut.title.removeFromParent();
-    ((this.cut.title.material as THREE.MeshBasicMaterial).map as THREE.Texture).dispose();
-    this.cut.bust?.root.removeFromParent();
-    this.cut = null;
-  }
-
-  private updateCut(dt: number, W: number, H: number) {
-    const c = this.cut!;
-    c.t += dt;
-    const k = c.t / c.dur;
-    if (k >= 1) {
-      this.endCut();
-      return;
-    }
-    const inK = Math.min(1, c.t / 0.22);
-    const outK = Math.max(0, (c.t - (c.dur - 0.22)) / 0.22);
-    const ease = (x: number) => 1 - Math.pow(1 - x, 3);
-    const slide = (1 - ease(inK)) * -1 + ease(outK) * 1; // -1 -> 0 -> 1 (screen widths)
-    const ang = -0.12;
-    const bh = H * 0.34;
-    const cx = W / 2 + slide * W * 1.3, cy = -H * 0.5;
-    c.band.position.set(cx, cy, 100);
-    c.band.rotation.z = ang;
-    c.band.scale.set(W * 1.8, bh, 1);
-    this.bandMat.uniforms.uT.value = c.t;
-    this.bandMat.uniforms.uAspect.value = (W * 1.8) / bh;
-    // title slides the opposite way, settles right of center
-    const fl = c.flip ? -1 : 1;
-    c.title.position.set(W / 2 + fl * W * 0.12 - slide * W * 1.1, cy + Math.sin(ang) * (fl * W * 0.12) - 6, 300);
-    c.title.rotation.z = ang;
-    // clip planes = band edges (normals pointing into the band)
-    const n = new THREE.Vector3(-Math.sin(ang), Math.cos(ang), 0);
-    const center = new THREE.Vector3(cx, cy, 0);
-    c.planes[0].setFromNormalAndCoplanarPoint(n, center.clone().addScaledVector(n, -bh / 2 + bh * 0.07));
-    c.planes[1].setFromNormalAndCoplanarPoint(n.clone().negate(), center.clone().addScaledVector(n, bh / 2 - bh * 0.07));
-    if (c.bust) {
-      const r = c.bust;
-      const height = c.height;
-      const s = (bh * (c.human ? 1.5 : 0.95)) / height; // head & chest fill the band
-      r.root.scale.setScalar(s);
-      const bx = W / 2 - fl * W * 0.23 + slide * W * 1.3 + c.t * 18 * fl;
-      r.root.position.set(bx, cy - height * s * (c.human ? 0.72 : 0.45) + Math.sin(ang) * (bx - cx), 200);
-      r.root.rotation.set(0.05, fl * (0.55 - c.t * 0.12), 0);
-      // pose: gun arm raised across, head tilted down, menacing
-      const nd = r.nodes;
-      if (c.human && nd['arm_r']) nd['arm_r'].rotation.set(-1.9, 0.2, -0.5);
-      if (nd['fore_r']) nd['fore_r'].rotation.set(-0.9, 0, 0);
-      if (nd['arm_l']) nd['arm_l'].rotation.set(-0.4, 0, 0.5);
-      if (nd['fore_l']) nd['fore_l'].rotation.set(-1.2, 0, 0);
-      if (nd['head']) nd['head'].rotation.set(0.12 + Math.sin(c.t * 9) * 0.02, -0.25, 0.08);
-      if (nd['jaw']) nd['jaw'].rotation.x = 0.25 + Math.abs(Math.sin(c.t * 11)) * 0.12;
-      r.root.updateMatrixWorld(true);
-      // the bust is clipped to the band; skip the 2D eyes when the head is outside it
-      const head = r.nodes['eye_l'] ?? r.nodes['head'];
-      const hp = head ? head.getWorldPosition(new THREE.Vector3()) : null;
-      if (hp && c.planes[0].distanceToPoint(hp) > 0 && c.planes[1].distanceToPoint(hp) > 0) {
-        c.eyes?.lookAt(new THREE.Vector3(bx + 400, cy, 900));
-        c.eyes?.draw(this.faces, dt);
-      }
-    }
+    Cinema.cutIn(title, color, expr, opts);
   }
 
   update(dt: number) {
@@ -760,7 +608,7 @@ export class Hud3D {
       hud.paperBottom = this.paper.bottom;
     }
 
-    if (this.cut) this.updateCut(dt, W, H);
+    Cinema.poll(this.hud);
     this.updatePoster(dt, W, H);
     this.tarot.update(dt, W, H);
     this.faces.end(null);
@@ -786,7 +634,6 @@ export class Hud3D {
   }
 
   dispose() {
-    this.endCut();
     this.tarot.dispose();
     this.soul.dispose();
     this.paper.dispose();

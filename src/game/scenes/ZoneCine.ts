@@ -4,8 +4,9 @@
 //    the corridor, then pushes in as the canyon of clear air drives through the towering
 //    wall with lightning at its head, ending on the new zone's sky bursting open (~6 s).
 //  - The entry: the first time the hunter rides into a newly opened zone, the camera cranes
-//    over the zone's landmark in a sweeping descending arc while the zone's name types itself
-//    out in big glowing Alagard letters above it; then everything eases back into play (~6 s).
+//    over the zone's landmark in a sweeping descending arc while the zone's name bursts up out
+//    of the sand in front of it as big voxel-cast Alagard letters standing in the world (the
+//    camera swings round to read them square-on); then everything eases back into play (~6 s).
 //
 // Self-driving: it watches the hunter from `engine.onAfterUpdate`, so it keeps
 // running (and always hands control back) even on frames where the run scene
@@ -17,6 +18,9 @@ import type { CameraRig, CineShot } from '../player/CameraRig';
 import type { World } from '../world/World';
 import { LANDMARK_INFO, type LandmarkType, type ZoneDef } from '../world/RegionGen';
 import { FloatText3D } from '../fx/FloatText3D';
+import { VoxelWord } from '../cine/VoxelLetters';
+import { Cinema, splitTitle } from '../cine/Cinema';
+import { cineFlags } from '../cine/CineKit';
 
 export interface ZoneCineDeps {
   engine: Engine;
@@ -67,10 +71,9 @@ export class ZoneCine {
   private mark: Mark = { x: 0, y: 0, z: 0, h: 6, half: 4 };
   private orbit = { a0: 0, a1: 0, r0: 40, r1: 20, y0: 20, y1: 6 };
   private shot: CineShot = { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 52 };
-  private title: FloatText3D | null = null;
+  private title: VoxelWord | null = null;
   private sub: FloatText3D | null = null;
   private titleSize = 1.4;
-  private titleLines = 1;
   private ending = false;
   private resolve: (() => void) | null = null;
   private disposed = false;
@@ -94,6 +97,7 @@ export class ZoneCine {
     this.parted.add(zone.index);
     if (!c) return;
     this.active = true;
+    cineFlags.zone = true;
     this.mode = 'part';
     this.ending = false;
     this.zone = zone;
@@ -148,6 +152,7 @@ export class ZoneCine {
     const eng = this.d.engine;
     this.seen.add(zone.index);
     this.active = true;
+    cineFlags.zone = true;
     this.mode = 'entry';
     this.ending = false;
     this.zone = zone;
@@ -191,6 +196,8 @@ export class ZoneCine {
       else this.step(rdt);
       return;
     }
+    // another cutscene (boss arrival, area title, a trail encounter) owns the screen
+    if (Cinema.busy() || cineFlags.choice) return;
     const w = this.d.world;
     const pt = w.parting;
     if (pt && !this.parted.has(pt.zone.index)) {
@@ -219,12 +226,11 @@ export class ZoneCine {
     if (!this.ending) this.evalShot(Math.min(1, t / DUR));
     if (t >= T_TITLE && !this.title && this.zone) this.showTitle(this.zone);
     if (t >= T_FADE) {
-      this.title?.show(false);
+      this.title?.leave('sink');
       this.sub?.show(false);
     }
     const cam = this.d.camera;
-    if (this.title) this.placeTitle(t);
-    this.title?.update(rdt, cam);
+    this.title?.update(rdt);
     this.sub?.update(rdt, cam);
     if (t >= DUR && !this.ending) this.handBack();
     if (t >= DUR + T_BACK) this.finish();
@@ -258,42 +264,38 @@ export class ZoneCine {
 
   private showTitle(zone: ZoneDef) {
     const sa = this.d.world.sa;
-    const name = zone.name.toUpperCase();
-    const lines = name.length > 20 ? 2 : 1;
-    const len = Math.min(20, name.length);
-    // about 60% of the frame wide at the title's distance in front of the lens
-    const size = THREE.MathUtils.clamp(15 / (len * 0.56), 0.9, 2.2);
+    const w = this.d.world;
+    const L = this.mark, o = this.orbit;
+    const name = splitTitle(zone.name.toUpperCase(), 14);
+    const longest = Math.max(...name.split('\n').map((l) => l.length));
+    // the letters stand between the landmark and where the crane ends, facing that end
+    const ex = L.x + Math.cos(o.a1) * o.r1, ez = L.z + Math.sin(o.a1) * o.r1;
+    const ax = L.x + (ex - L.x) * 0.46, az = L.z + (ez - L.z) * 0.46;
+    const dist = Math.hypot(ex - ax, ez - az);
+    const viewW = 2 * dist * Math.tan(THREE.MathUtils.degToRad(22)) * (this.d.camera.aspect || 1.7);
+    const size = THREE.MathUtils.clamp((viewW * 0.72) / (longest * 0.68), 0.9, 2.4);
     this.titleSize = size;
-    this.titleLines = lines;
     const glow = GLOW[sa.key] ?? '#ffb070';
-    this.title = new FloatText3D(name, { size, px: 112, cps: 15, wrap: 20, color: '#fff0cf', glow, hdr: 1.45 });
-    this.sub = new FloatText3D(`ZONE ${ROMAN[zone.index] ?? zone.index + 1}  ·  ${sa.name.toUpperCase()}`, { size: size * 0.32, px: 64, cps: 0, wrap: 48, color: '#f6dcae', glow, hdr: 1.2 });
-    this.placeTitle(this.t);
-    for (const ft of [this.title, this.sub]) {
-      (ft.mesh.material as THREE.MeshBasicMaterial).fog = false;
-      this.d.scene.add(ft.mesh);
-    }
+    const word = new VoxelWord(name, { height: size, style: sa.key === 'B' ? 'moon' : sa.key === 'C' ? 'ember' : 'gold' });
+    word.group.position.set(ax, w.groundAt(ax, az), az);
+    word.group.rotation.y = Math.atan2(ex - ax, ez - az);
+    word.plant((x, z) => w.groundAt(x, z));
+    const kit = Cinema.get()?.kit;
+    word.onLand = (_l, at, i) => {
+      kit?.sandPop(at, 0.9 + size * 0.2);
+      if (i % 2 === 0) this.d.engine.audio.play('sand_burst', { pos: at, volume: 0.4, pitch: 0.9 + Math.random() * 0.2 });
+    };
+    this.d.scene.add(word.group);
+    word.enter('rise', 0.075);
+    this.title = word;
+    this.sub = new FloatText3D(`ZONE ${ROMAN[zone.index] ?? zone.index + 1}  ·  ${sa.name.toUpperCase()}`, { size: size * 0.3, px: 64, cps: 0, wrap: 48, color: '#f6dcae', glow, hdr: 1.2 });
+    this.sub.anchor.set(ax, word.group.position.y + word.height + size * 0.55, az);
+    (this.sub.mesh.material as THREE.MeshBasicMaterial).fog = false;
+    this.d.scene.add(this.sub.mesh);
     this.sub.show(true);
     this.d.engine.audio.play('divine_chime', { volume: 0.45 });
+    this.d.engine.audio.play('quake_rumble', { volume: 0.4, pitch: 1.3 });
     this.d.onTitle?.(zone);
-  }
-
-  /**
-   * The title floats in the air between the lens and the landmark, a little above the
-   * centre of frame and drifting slowly across it, so it is always framed whatever
-   * the crane does.
-   */
-  private placeTitle(t: number) {
-    const cam = this.d.camera;
-    const fwd = _f.copy(this.shot.look).sub(this.shot.pos).normalize();
-    const right = _r.crossVectors(fwd, _u.set(0, 1, 0)).normalize();
-    const up = _u.crossVectors(right, fwd).normalize();
-    const D = 17;
-    const drift = (t - T_TITLE) * 0.18 - 0.4;
-    const s = this.titleSize;
-    const base = _p.copy(cam.position).addScaledVector(fwd, D).addScaledVector(right, drift).addScaledVector(up, 2.0 + s * 0.3);
-    this.title!.anchor.copy(base);
-    this.sub!.anchor.copy(base).addScaledVector(up, -(s * this.titleLines * 0.62 + s * 0.38));
   }
 
   private handBack() {
@@ -310,8 +312,10 @@ export class ZoneCine {
     if (!this.ending) this.handBack();
     this.title?.dispose();
     this.sub?.dispose();
-    this.title = this.sub = null;
+    this.title = null;
+    this.sub = null;
     this.active = false;
+    cineFlags.zone = false;
     this.mode = 'entry';
     this.zone = null;
     const r = this.resolve;

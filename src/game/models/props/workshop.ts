@@ -1986,3 +1986,37 @@ export function yardGround(lenM = 9, widthM = 12, seed = 47): StaticModel {
     }
   return S(m, V);
 }
+
+/** a curio shelf for the treasure hunt's relics — 1/48, 1.0 × 0.68 m, front +Z: three walnut shelves between side
+ *  boards cut in an ogee profile, a scalloped crown with a carved scarab boss, a spindle gallery rail along each
+ *  shelf, a brass plate under each shelf for its region's name. meta: shelves [y (m), plate centre (voxels)]. */
+export function curioShelf(seed = 48): StaticModel & { meta: { shelves: number[]; plates: [number, number, number][]; depth: number } } {
+  const m = new VoxelModel('curio_shelf');
+  const HW = 24, H = 32, D = 8;
+  for (const sx of [-1, 1])
+    fill(m, (x, y, z) => {
+      const prof = D - 1 - Math.max(0, Math.sin(((y + 0.5) / H) * Math.PI * 2.2) * 2.4) * (y < 4 || y > H - 5 ? 1 : 0.4);
+      return Math.max(Math.abs(x + 0.5 - sx * HW) - 0.9, -(y + 0.5), y + 0.5 - H, -(z + 0.5), z + 0.5 - prof);
+    }, [[sx * HW - 2, 0, 0], [sx * HW + 2, H, D]], 1, (x, y, z) => mul(WALNUT, 0.95 + h01(y >> 2, z, seed + sx) * 0.14));
+  // back boards
+  for (let x = -HW + 1; x < HW; x++) for (let y = 1; y < H; y++) m.set(x, y, 0, mod(x + HW, 6) === 0 ? 0x3e2412 : mul(0x6a4024, 0.94 + h01(Math.floor((x + 40) / 6), y >> 3, seed) * 0.12));
+  const shelves = [1, 11, 21];
+  const plates: [number, number, number][] = [];
+  for (const sy of shelves) {
+    plank(m, [-HW + 1, sy + 0.6, D / 2], [HW - 1, sy + 0.6, D / 2], D, 1.8, 0x7a4a26, seed + sy, { r: 0.5 });
+    // the gallery rail: little turned spindles under a thin rail
+    for (let x = -HW + 3; x <= HW - 3; x += 3) rod(m, [x, sy + 2, D - 0.6], [x, sy + 4.5, D - 0.6], 0.45, 0.4, BRASS, VF.METAL);
+    rod(m, [-HW + 2, sy + 4.8, D - 0.6], [HW - 2, sy + 4.8, D - 0.6], 0.45, 0.45, BRASS_HI, VF.METAL);
+    // the brass plate on the shelf's front edge
+    for (let x = -7; x <= 7; x++) for (let y = sy - 1; y <= sy + 1; y++) m.set(x, y, D + 1, x === -7 || x === 7 ? mul(BRASS, 0.8) : BRASS, VF.METAL);
+    plates.push([0, sy, D + 1]);
+  }
+  // the crown: a scalloped board with a carved scarab boss
+  for (let x = -HW - 1; x <= HW + 1; x++) {
+    const top = H + 2 + Math.round(Math.cos((x / HW) * 1.6) * 3 + Math.abs(Math.sin(x * 0.4)) * 0.8);
+    for (let y = H; y <= top; y++) for (let z = 0; z <= 2; z++) m.set(x, y, z, y === top ? 0x8a5a30 : mul(WALNUT, 1.05));
+  }
+  egg(m, [0, H + 3, 2.6], [3, 2.2, 1.2], (x, y) => (y > H + 3 ? BRASS_HI : BRASS), VF.METAL);
+  for (const sx of [-1, 1]) rod(m, [sx * 1.5, H + 1.5, 3], [sx * 4, H + 3.8, 3], 0.4, 0.3, BRASS, VF.METAL);
+  return { model: m, voxelSize: FV, meta: { shelves: shelves.map((y) => pivotOf(m, FV, [0, y + 1.6, 0])[1]), plates, depth: D * FV } };
+}

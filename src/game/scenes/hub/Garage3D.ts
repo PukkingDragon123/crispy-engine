@@ -108,10 +108,8 @@ export class Garage3D implements Mode {
     for (const [id, L] of this.locks) {
       L.update(rdt);
       const i = ids.indexOf(id);
-      if (i < 0 || !slots[i] || L.open) {
-        if (!L.gone) L.grp.visible = false;
-        continue;
-      }
+      L.show(i >= 0 && !!slots[i]);
+      if (i < 0 || !slots[i]) continue;
       const s = slots[i];
       L.grp.position.set(this.rack.position.x + s[0], this.rack.position.y + s[1] + 0.62, this.rack.position.z + s[2] + 0.18);
     }

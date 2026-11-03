@@ -13,7 +13,7 @@ import { sharedVoxelMaterial } from '../../../engine/render/VoxelMaterial';
 import * as CH from '../../models/characters';
 import * as WS from '../../models/props/workshop';
 import * as HX from '../../models/props/hideout';
-import { loadSave, writeSave, HATS, OUTFITS, PRICES } from '../../meta/Save';
+import { loadSave, writeSave, owns, HATS, OUTFITS, PRICES } from '../../meta/Save';
 import { BuildKit, HubHost, HubStation, HeroBubble, PriceLock, safe, geoOf, meshOf, reach, joint, ease, clamp01, sstep } from './HubKit';
 import type { Mode, Pick, View } from './HouseExtras';
 
@@ -157,7 +157,7 @@ export class Wardrobe3D implements Mode {
     home.add(obj);
     this.h.scene.add(home);
     const key = 'hat:' + id;
-    const lock = (PRICES[key] ?? 0) > 0 ? new PriceLock(this.h, key, PRICES[key], 24, 1) : null;
+    const lock = (PRICES[key] ?? 0) > 0 && !owns(key) ? new PriceLock(this.h, key, PRICES[key], 24, 1) : null;
     if (lock) {
       lock.grp.position.copy(peg).add(new THREE.Vector3(-0.05, -0.02, 0));
       lock.grp.rotation.y = -Math.PI / 2;
@@ -185,19 +185,19 @@ export class Wardrobe3D implements Mode {
     const home = new THREE.Group();
     if (hs && hg) {
       const hm = meshOf(hg);
-      hm.position.y = 0.02;
+      hm.position.y = 0.0;
       home.add(hm);
       obj.position.y = -0.0;
     }
     const hang = new THREE.Group();
     hang.add(obj);
-    hang.position.y = -0.13;
+    hang.position.y = -0.055;
     home.add(hang);
-    home.position.set(x, this.railY - 0.02, IN.front - 0.32);
+    home.position.set(x, this.railY - 0.085, IN.front - 0.32);
     home.rotation.y = Math.PI - 0.95 + Math.sin(i * 2.1) * 0.08;
     this.h.scene.add(home);
     const key = 'outfit:' + id;
-    const lock = (PRICES[key] ?? 0) > 0 ? new PriceLock(this.h, key, PRICES[key], 20, 1) : null;
+    const lock = (PRICES[key] ?? 0) > 0 && !owns(key) ? new PriceLock(this.h, key, PRICES[key], 20, 1) : null;
     if (lock) {
       lock.grp.position.set(x, this.railY - 0.2, IN.front - 0.52);
       lock.grp.rotation.y = Math.PI - 0.6;
@@ -338,6 +338,7 @@ export class Wardrobe3D implements Mode {
     const d = loadSave();
     for (const it of this.items) {
       it.lock?.update(rdt);
+      it.lock?.show(!!it.obj);
       // the worn hat / jacket is not on its hook
       const worn = (it.kind === 'hat' && d.look.hat === it.id) || (it.kind === 'outfit' && d.look.outfit === it.id);
       if (it.obj && !(this.act?.carried && this.act.it === it) && this.flyBack?.it !== it) it.obj.visible = !worn;

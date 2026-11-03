@@ -157,7 +157,7 @@ export class ShootingRange implements Mode {
     let base: THREE.Mesh | null = null, neck: THREE.Mesh | null = null, mid: VoxelModel | null = null;
     if (kind === 'bottle') {
       // the break: a jagged line low on the body (the base stays), a second one under the shoulder (the neck flies)
-      const ny = Math.round((sm.meta as { neckY: number }).neckY / sm.voxelSize);
+      const ny = Math.round((sm.meta as unknown as { neckY: number }).neckY / sm.voxelSize);
       const lo = new VoxelModel('base'), hi = new VoxelModel('neck');
       mid = new VoxelModel('mid');
       sm.model.forEach((x, y, z, c, f) => {
@@ -169,7 +169,7 @@ export class ShootingRange implements Mode {
       base = mk(lo);
       neck = mk(hi);
     }
-    const t: Target = { kind, v, home: at.clone(), full, base, neck, mid, vs: sm.voxelSize, h: (sm.meta as { h: number }).h, r: kind === 'bottle' ? 0.06 : 0.065, glass: (sm.meta as { glass?: number }).glass ?? 0x9a9c9c, state: 'up', vel: new THREE.Vector3(), spin: new THREE.Vector3(), neckVel: new THREE.Vector3(), neckSpin: new THREE.Vector3(), pop: 1, hits: 0 };
+    const t: Target = { kind, v, home: at.clone(), full, base, neck, mid, vs: sm.voxelSize, h: (sm.meta as unknown as { h: number }).h, r: kind === 'bottle' ? 0.06 : 0.065, glass: (sm.meta as unknown as { glass?: number }).glass ?? 0x9a9c9c, state: 'up', vel: new THREE.Vector3(), spin: new THREE.Vector3(), neckVel: new THREE.Vector3(), neckSpin: new THREE.Vector3(), pop: 1, hits: 0 };
     this.targets.push(t);
     this.rack(t, 0);
   }

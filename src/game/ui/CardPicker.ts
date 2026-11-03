@@ -1,4 +1,6 @@
-// Rank-up: a short cinematic (RankUpCine) freezes the run and stages Sundown,
+// Rank-up: a bullet-cam headshot opens it (fx/BulletCam: Sundown drops the
+// nearest enemy in bullet time, full length for the first few rank-ups of a
+// run, a quick cut after), then a short cinematic (RankUpCine) freezes the run and stages Sundown,
 // then physical upgrade cards burst out of the sand in an arch in front of and
 // around him, each by its rarity: commons pop up, rares spin up trailing silver
 // sparks, epics and better rise on a pillar of light with a gold sheen sweeping
@@ -29,6 +31,7 @@ import { RankUpCine, CineHero, LightPillar, SkillUnlock, GambleShow } from './Ra
 import { resolveGamble, GambleOutcome } from '../run/UpgradesExtra';
 import { GlyphRings } from '../fx/SerketSpirit';
 import type { CameraRig } from '../player/CameraRig';
+import { BulletCam, type BulletCamHost } from '../fx/BulletCam';
 
 type Entrance = 'pop' | 'spin' | 'pillar';
 
@@ -97,7 +100,14 @@ export interface PickerOpts {
   cam?: CameraRig;
   /** the hunter to stage (root, rig, material, pos) */
   hero?: () => CineHero | null;
+  /** the rank-up's bullet-cam opener: the shooter, the HUD toggle, the pause flag (default: read off the scene) */
+  bulletCam?: () => BulletCamHost | null;
+  /** no bullet-cam opener in this scene */
+  noBulletCam?: boolean;
 }
+
+/** rank-ups per run that get the full-length bullet-cam before it switches to the quick cut */
+const BULLET_FULL = 3;
 
 export class CardPicker {
   active = false;
@@ -138,6 +148,11 @@ export class CardPicker {
   /** real-time delayed calls (rarity stings) */
   private timers: { t: number; fn: () => void }[] = [];
   private heroArt = false;
+  /** the bullet-cam opener (built on the first rank-up) and whether it is playing */
+  private bullet: BulletCam | null = null;
+  private bulletOn = false;
+  private bulletN = 0;
+  private bulletHost: BulletCamHost | null = null;
 
   constructor(private ctx: Ctx, private up: UpgradeManager, private input: Input, private getHero: () => THREE.Vector3, private opts: PickerOpts = {}) {
     ctx.scene.add(this.group, this.hitGroup);
@@ -148,7 +163,7 @@ export class CardPicker {
     this.cine = new RankUpCine(ctx);
     this.offRank = ctx.events.on('rankUp', (r: number) => this.ranks.push(r));
     // the stage runs after the scene's update (camera, the hero's visibility, the stage's own particles)
-    this.late = (_dt, rdt) => this.lateUpdate(rdt);
+    this.late = (dt, rdt) => this.lateUpdate(dt, rdt);
     ctx.engine.onAfterUpdate.push(this.late);
   }
 
@@ -167,6 +182,9 @@ export class CardPicker {
     this.cards = [];
     this.dying = [];
     this.art.dispose();
+    this.bullet?.dispose();
+    this.bullet = null;
+    this.bulletOn = false;
     this.cine.dispose();
     this.offRank();
     const l = this.ctx.engine.onAfterUpdate;
@@ -192,7 +210,68 @@ export class CardPicker {
 
   // ---------------------------------------------------------------- flow
 
-  private begin() {
+  /** something else owns the screen right now (a shop, a choice, another cinematic): no bullet-cam */
+  private sceneBusy() {
+    const cur = this.ctx.engine.current as any;
+    if (!cur) return true;
+    if (cur.pausedByUser || cur.trial || cur.gameOver) return true;
+    if (cur.choice?.active || cur.shop?.active || cur.ledger?.open || cur.gearLoot?.active || cur.ult?.active || cur.slicer?.active) return true;
+    if (cur.colony?.modal || cur.jerboa?.modal) return true;
+    const rig = this.camRig();
+    return !!rig && (!!rig.cine || rig.cineBlend > 0.05);
+  }
+
+  private makeBulletHost(): BulletCamHost | null {
+    const given = this.opts.bulletCam?.();
+    if (given) return given;
+    const cur = this.ctx.engine.current as any;
+    const sh = this.heroNow() as any;
+    if (!sh?.gun?.root || !sh.rig) return null;
+    return {
+      shooter: sh,
+      hud: typeof cur?.hud?.setVisible === 'function' ? (on: boolean) => cur.hud.setVisible(on) : undefined,
+      held: () => !!cur?.pausedByUser,
+    };
+  }
+
+  /** a rank-up opens on the bullet-cam: true if it started (the cards follow when it is done) */
+  private startBullet() {
+    if (this.opts.noBulletCam || this.active) return false;
+    const rank = this.ranks.length ? this.ranks[0] : null;
+    if (rank === null || rank === undefined) return false;
+    if (this.ctx.engine.paused || this.sceneBusy()) return false;
+    const host = this.makeBulletHost();
+    if (!host) return false;
+    this.bullet ??= new BulletCam(this.ctx);
+    if (!this.bullet.start(host, this.bulletN >= BULLET_FULL)) return false;
+    this.bulletN++;
+    this.bulletOn = true;
+    this.bulletHost = host;
+    this.busy = true;
+    this.hint.textContent = 'CLICK to skip';
+    this.hint.style.display = 'block';
+    return true;
+  }
+
+  /** the bullet-cam is done (or skipped): straight into the rank-up and its cards */
+  private afterBullet() {
+    const b = this.bullet!;
+    this.bulletOn = false;
+    this.busy = false;
+    this.begin({ desat: b.desat });
+    if (!this.active) {
+      // nothing to offer after all: give the run back
+      const eng = this.ctx.engine;
+      this.bulletHost?.hud?.(true);
+      eng.letterbox(false, 0.4);
+      eng.audio.setMuffle(0);
+      eng.input.setWantLock(true);
+      this.hint.style.display = 'none';
+    }
+    this.bulletHost = null;
+  }
+
+  private begin(from?: { desat: number }) {
     this.queue--;
     const rank = this.ranks.length ? this.ranks.shift()! : null;
     const n = this.ctx.run && (this.up as any).stats?.get?.('luck') >= 10 ? 4 : 3;
@@ -217,7 +296,7 @@ export class CardPicker {
         this.art.setHero(spec, spec.name + ':player');
         this.art.setGun(((this.hero as any).gun?.geo?.spec as any) ?? null);
       }
-      tCards = this.cine.begin(this.hero, rank);
+      tCards = this.cine.begin(this.hero, rank, from);
       this.stage();
     } else tCards = this.cine.again(rank);
     this.spawn(offers, tCards);
@@ -476,7 +555,12 @@ export class CardPicker {
   // ---------------------------------------------------------------- per frame
 
   update(rdt: number) {
-    if (!this.busy && this.queue > 0) this.begin();
+    // the bullet-cam plays first (driven from the late hook, after the world has moved)
+    if (this.bulletOn) return;
+    if (!this.busy && this.queue > 0) {
+      if (this.startBullet()) return;
+      this.begin();
+    }
     if (!this.active) return;
     this.time += rdt;
     const ctx = this.ctx;
@@ -824,8 +908,14 @@ export class CardPicker {
     }
   }
 
-  private lateUpdate(rdt: number) {
+  private lateUpdate(dt: number, rdt: number) {
     const cine = this.cine;
+    if (this.bullet) {
+      const inp = this.input;
+      const skip = this.bulletOn && (inp.wasPressed('Mouse0') || inp.wasPressed('Space') || inp.wasPressed('Enter'));
+      this.bullet.update(dt, rdt, skip);
+      if (this.bulletOn && this.bullet.finished) this.afterBullet();
+    }
     if (cine.alive || cine.p.count > 0) cine.update(rdt, this.active);
     for (let i = this.timers.length - 1; i >= 0; i--) {
       const tm = this.timers[i];

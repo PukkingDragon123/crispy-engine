@@ -48,6 +48,8 @@ import { damp, rnd } from '../../engine/math/rand';
 import { Codex } from '../meta/Codex';
 import { CodexBook } from '../ui/CodexBook';
 import { WantedPoster, PosterData } from './ResultsScene';
+import { HouseExtras } from './hub/HouseExtras';
+import type { HubHost } from './hub/HubKit';
 
 /** how he gets home: normally he walks in from the street; after a death he wakes up on the couch */
 export interface HubArrival {
@@ -72,7 +74,7 @@ interface Shot {
   subject?: THREE.Vector3;
   ndc?: [number, number];
 }
-type HeroPose = 'door' | 'bench' | 'board' | 'mirror' | 'book' | 'hearth' | 'music';
+type HeroPose = 'door' | 'bench' | 'board' | 'mirror' | 'book' | 'hearth' | 'music' | 'range' | 'cards' | 'trophies';
 interface Station {
   id: string;
   label: string;
@@ -94,6 +96,8 @@ interface Station {
   via: THREE.Vector2[];
   /** the title's corner in the frame (ndc) and the side it reads from */
   slot: [number, number, 'left' | 'right'];
+  /** the camera swing's control point, when the eased arc would cut through a wall (the back door) */
+  arc?: THREE.Vector3;
   /** pose data: the work surface height (m) and how far in front of him it is */
   surf?: number;
   reach?: number;
@@ -124,7 +128,7 @@ const WALK = { x0: IN.left + 0.25, x1: IN.right - 0.28, z0: IN.back + 0.32, z1: 
 const HERO_R = 0.26;
 
 /** the carousel, left to right */
-const ORDER = ['ride', 'bench', 'garage', 'wardrobe', 'book', 'hearth', 'gramophone'];
+const ORDER = ['ride', 'bench', 'garage', 'wardrobe', 'range', 'trophies', 'book', 'gramophone', 'cards', 'hearth'];
 /** the open strip of floor Sundown walks along between stations */
 const LANE_Z = 0.25;
 const UP = new THREE.Vector3(0, 1, 0);
@@ -495,6 +499,8 @@ export class HubScene implements GameScene {
   private gasp = 0;
   private book: CodexBook | null = null;
   private bankToast: HTMLDivElement | null = null;
+  /** everything new in the house (hub/HouseExtras): decor, trophies, the 3D wardrobe / bench / rack, the toys */
+  private extras: HouseExtras | null = null;
 
   constructor(private engine: Engine, private onRide: () => void, private onMenu: () => void, private arrival: HubArrival = {}) {
     this.tip = document.createElement('div');
@@ -776,7 +782,7 @@ export class HubScene implements GameScene {
       stand: mirStand(mirrorAt), face: Math.atan2(-mn.x, -mn.z), at: mirrorAt.clone(), r: 0.8, objs: [arm, mir], pose: 'mirror',
       via: [new THREE.Vector2(3.0, LANE_Z)], slot: [-0.86, 0.84, 'left'], shot: mirShot(mirrorAt),
     });
-    put(B(() => HX.steamerTrunk(1)), 4.25, 2.55, -Math.PI / 2 - 0.2, 0, 1, false);
+    put(B(() => HX.steamerTrunk(1)), -2.12, 2.84, Math.PI / 2 + 0.15, 0, 1, false);
     put(B(() => HX.potCactus(2)), 4.35, 1.05, 0.4, 0, 1, false);
     // the front door ajar on the right wall, a landscape over the right window
     this.entry = rig(safe(() => WS.zDoorRig()), IN.right + 0.1, 0, O.door.z0 + 0.01, -Math.PI / 2 - 0.42);
@@ -978,6 +984,14 @@ export class HubScene implements GameScene {
     for (const [x, z, k] of [[-11.0, 6.5, 'saguaro'], [-8.5, -8.5, 'organ'], [-16, 14, 'saguaro']] as const) put(B(() => P.cactus?.(Math.round(-x * 3), k)), x, z, x, 0, 1, false);
     put(B(() => P.tumbleweed?.(1)), -8.2, 5.2, 0, 0.35, 1, false);
 
+    // ------------------------------------------------ the extras: decor, the trophy wall, the 3D wardrobe / bench / rack, the toys
+    try {
+      this.extras = new HouseExtras(this as unknown as HubHost);
+      this.extras.build({ put, against, rig, station, lamp });
+    } catch (e) {
+      console.warn('[hub] extras', e);
+    }
+
     this.buildGun();
     this.buildBoards();
     this.buildHero();
@@ -1173,14 +1187,14 @@ export class HubScene implements GameScene {
     this.hero?.root.removeFromParent();
     let spec: RigSpec | null = null;
     try {
-      spec = (CH as any).skeletonCowboyRig?.({ hat: d.look.hat, outfit: d.look.outfit }) ?? null;
+      spec = (CH as any).skeletonCowboyRig?.({ hat: d.look.hat, outfit: d.look.outfit, mask: (d.look as any).mask, shades: (d.look as any).shades }) ?? null;
     } catch (e) {
       console.warn('[hub] hero', e);
     }
     spec = spec ?? ((modelEntry('cowboy_stetson_punk')?.() as RigSpec) || null);
     if (!spec?.parts) return;
     this.heroSpec = spec;
-    this.hero = new RigInstance(buildRigGeo(spec, spec.name + ':hub:' + d.look.hat + d.look.outfit), { material: makeVoxelMaterial(), castShadow: true });
+    this.hero = new RigInstance(buildRigGeo(spec, spec.name + ':hub:' + d.look.hat + d.look.outfit + ':' + (d.look as any).mask + (d.look as any).shades), { material: makeVoxelMaterial(), castShadow: true });
     this.heroHolder.add(this.hero.root);
     if (!this.heroHolder.parent) this.scene.add(this.heroHolder);
     this.hero.setExpression('smug');
@@ -1282,140 +1296,6 @@ export class HubScene implements GameScene {
     p.append(html, close);
     this.engine.overlay.appendChild(p);
     this.panel = p;
-  }
-
-  /** prev / next / buy row for one cosmetic slot */
-  private lookRow(wrap: HTMLElement, kind: 'hat' | 'outfit' | 'board', list: string[], render: () => void) {
-    const d = loadSave();
-    const cur = (d.look as any)[kind] as string;
-    const r = document.createElement('div');
-    r.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0';
-    const i = list.indexOf(cur);
-    const prev = document.createElement('button');
-    prev.textContent = '◀';
-    prev.style.cssText = BTN_CSS;
-    const next = document.createElement('button');
-    next.textContent = '▶';
-    next.style.cssText = BTN_CSS;
-    const lab = document.createElement('div');
-    lab.style.cssText = 'flex:1;text-align:center';
-    const key = `${kind}:${cur}`;
-    const own = owns(key);
-    lab.innerHTML = `<div style="font-size:13px;opacity:.7">${kind.toUpperCase()}</div>${cur.replace('_', ' ')}${own ? '' : `<div style="color:#a02a1a;font-size:14px">${PRICES[key]} gold</div>`}`;
-    const set = (v: string) => {
-      (d.look as any)[kind] = v;
-      writeSave(d);
-      if (kind === 'board') this.buildBoards();
-      else this.buildHero();
-      render();
-      this.engine.audio.play(kind === 'board' ? 'kick' : 'paper_flutter', { volume: 0.5, pitch: kind === 'board' ? 1.4 : 1 });
-    };
-    prev.onclick = () => set(list[(i - 1 + list.length) % list.length]);
-    next.onclick = () => set(list[(i + 1) % list.length]);
-    r.append(prev, lab, next);
-    if (!own) {
-      const b = document.createElement('button');
-      b.textContent = 'BUY';
-      b.style.cssText = BTN_CSS;
-      b.onclick = () => {
-        if (buy(key)) {
-          this.engine.audio.play('gold_burst', { volume: 0.8 });
-          this.updateBank();
-          render();
-        } else this.engine.audio.play('ui_error', { volume: 0.8 });
-      };
-      r.appendChild(b);
-    }
-    wrap.appendChild(r);
-  }
-
-  private wardrobe() {
-    const wrap = document.createElement('div');
-    const render = () => {
-      wrap.innerHTML = '<div style="font-size:26px;color:#8a2a18;text-align:center;margin-bottom:8px">WARDROBE</div>';
-      this.lookRow(wrap, 'hat', HATS, render);
-      this.lookRow(wrap, 'outfit', OUTFITS, render);
-      const note = document.createElement('div');
-      note.style.cssText = 'font-size:14px;opacity:.75;text-align:center;margin-top:6px';
-      note.textContent = 'Check yourself in the mirror. Locked looks are previewed; buy them to ride out in style.';
-      wrap.appendChild(note);
-    };
-    render();
-    this.openPanel(wrap, 'left');
-  }
-
-  private garage() {
-    const wrap = document.createElement('div');
-    const render = () => {
-      wrap.innerHTML = '<div style="font-size:26px;color:#8a2a18;text-align:center;margin-bottom:8px">THE GARAGE</div>';
-      this.lookRow(wrap, 'board', BOARDS, render);
-      const note = document.createElement('div');
-      note.style.cssText = 'font-size:14px;opacity:.75;text-align:center;margin-top:6px';
-      note.textContent = 'Fresh wax on the sawhorses. Whatever sits there is what you ride.';
-      wrap.appendChild(note);
-    };
-    render();
-    this.openPanel(wrap, 'left');
-  }
-
-  /** drag a part chip onto its slot (or click it) */
-  private gunBench() {
-    const wrap = document.createElement('div');
-    const render = () => {
-      const d = loadSave();
-      wrap.innerHTML = '<div style="font-size:26px;color:#8a2a18;text-align:center;margin-bottom:4px">WEAPON BENCH</div><div style="font-size:14px;text-align:center;opacity:.75;margin-bottom:8px">Drag a part onto its slot</div>';
-      for (const slot of Object.keys(GUN_PARTS) as (keyof GunLoadout)[]) {
-        const r = document.createElement('div');
-        r.style.cssText = 'margin:8px 0';
-        const target = document.createElement('div');
-        target.style.cssText = 'border:3px dashed #5a3418;padding:6px 10px;margin-bottom:4px;background:#f4e4bc';
-        target.innerHTML = `<span style="font-size:13px;opacity:.7">${slot.toUpperCase()}</span> · ${d.gun[slot]}<div style="font-size:13px;color:#5a3a1a">${GUN_PERKS[`${slot}:${d.gun[slot]}`] ?? ''}</div>`;
-        target.ondragover = (e) => {
-          e.preventDefault();
-          target.style.background = '#ffe9a8';
-        };
-        target.ondragleave = () => (target.style.background = '#f4e4bc');
-        target.ondrop = (e) => {
-          e.preventDefault();
-          const v = e.dataTransfer?.getData('text/plain') ?? '';
-          const [sl, part] = v.split(':');
-          if (sl === slot) equip(slot, part);
-          else target.style.background = '#f4e4bc';
-        };
-        const chips = document.createElement('div');
-        chips.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px';
-        for (const part of GUN_PARTS[slot] as string[]) {
-          const key = `gun:${slot}:${part}`;
-          const own = owns(key);
-          const c = document.createElement('div');
-          c.draggable = true;
-          c.textContent = own ? part : `${part} (${PRICES[key]}g)`;
-          c.title = GUN_PERKS[`${slot}:${part}`] ?? '';
-          c.style.cssText = `cursor:grab;padding:3px 8px;border:3px solid #2a1408;background:${(d.gun as any)[slot] === part ? '#c9a050' : own ? '#d8b878' : '#b8a888'};font-size:15px`;
-          c.ondragstart = (e) => e.dataTransfer?.setData('text/plain', `${slot}:${part}`);
-          c.onclick = () => equip(slot, part);
-          chips.appendChild(c);
-        }
-        r.append(target, chips);
-        wrap.appendChild(r);
-      }
-    };
-    const equip = (slot: keyof GunLoadout, part: string) => {
-      const key = `gun:${slot}:${part}`;
-      if (!owns(key) && !buy(key)) {
-        this.engine.audio.play('ui_error', { volume: 0.8 });
-        return;
-      }
-      const d = loadSave();
-      (d.gun as any)[slot] = part;
-      writeSave(d);
-      this.engine.audio.play(slot === 'cylinder' ? 'rev_spin' : 'rev_close', { volume: 0.8 });
-      this.updateBank();
-      this.buildGun();
-      render();
-    };
-    render();
-    this.openPanel(wrap, 'right');
   }
 
   /** the Book of Skills: Sundown's tarot skills up front, Thoth's codex of every soul sent ahead behind them */
@@ -1545,18 +1425,12 @@ export class HubScene implements GameScene {
     const eng = this.engine;
     switch (st.id) {
       case 'wardrobe':
-        this.active = st;
-        eng.audio.play('chest_open', { volume: 0.5 });
-        this.wardrobe();
-        break;
       case 'bench':
-        this.active = st;
-        eng.audio.play('rev_open', { volume: 0.6 });
-        this.gunBench();
-        break;
       case 'garage':
-        this.active = st;
-        this.garage();
+      case 'range':
+      case 'cards':
+      case 'trophies':
+        this.extras?.use(st);
         break;
       case 'book':
         this.active = st;
@@ -1569,10 +1443,14 @@ export class HubScene implements GameScene {
         this.mamaCd = 14;
         break;
       case 'duck':
-        this.duckSquash = 1;
-        eng.audio.play('duck_quack', { volume: 1, pitch: 0.9 + rnd.next() * 0.3 });
+        if (this.extras) this.extras.squeeze();
+        else {
+          this.duckSquash = 1;
+          eng.audio.play('duck_quack', { volume: 1, pitch: 0.9 + rnd.next() * 0.3 });
+        }
         break;
       case 'gramophone':
+        if (this.extras?.use(st)) break;
         this.music = !this.music;
         (window as any).__music?.setMood(this.music ? 'hub' : 'off');
         eng.audio.play('ui_click', { volume: 0.7 });
@@ -1608,6 +1486,7 @@ export class HubScene implements GameScene {
     const st = typeof i === 'number' ? this.stations[i] : i;
     if (!st) return;
     if (this.panel) this.closePanel();
+    this.extras?.cancel();
     this.idx = this.stations.indexOf(st);
     if (intro) {
       // in from the street, through the barn doors
@@ -1630,6 +1509,9 @@ export class HubScene implements GameScene {
     c.y += 0.12 + dist * 0.04;
     if (intro) c.set(-5.6, 1.85, 1.05);
     c.set(THREE.MathUtils.clamp(c.x, -4.3, 4.3), Math.min(c.y, 2.12), THREE.MathUtils.clamp(c.z, -2.8, 2.9));
+    const outside = (p: THREE.Vector3) => p.x > IN.right - 0.1;
+    if (st.arc && !intro) c.copy(st.arc);
+    else if (outside(this.baseP) && !intro) c.set(4.15, 1.68, 1.62); // back in through the door
     this.mv = { t: 0, dur, p0: this.baseP.clone(), l0: this.baseL.clone(), f0: this.camera.fov, c, intro };
     if (!intro) this.engine.audio.play('paper_flutter', { volume: 0.18, pitch: 0.7 });
   }
@@ -1694,6 +1576,8 @@ export class HubScene implements GameScene {
     }
     this.book?.dispose();
     this.book = null;
+    this.extras?.dispose();
+    this.extras = null;
     this.poster?.dispose();
     this.bankToast?.remove();
     if ((window as any).__hub === this) (window as any).__hub = null;
@@ -1755,6 +1639,7 @@ export class HubScene implements GameScene {
 
   /** he's there: Mama greets him at the hearth */
   private onArrive(st: Station) {
+    this.extras?.onArrive(st);
     if (st.id === 'hearth' && this.mamaCd <= 0) {
       this.mamaLine = this.mamaLine === 0 && !this.bubbleText ? 0 : (this.mamaLine + 1) % MAMA_LINES.length;
       this.say(MAMA_LINES[this.mamaLine]);
@@ -1835,6 +1720,22 @@ export class HubScene implements GameScene {
         out.poleR = new THREE.Vector3(-0.8, -0.6, -0.3);
         break;
       }
+      case 'range':
+      case 'cards':
+        out.r = belt(-1);
+        out.l = belt(1);
+        out.poleR = new THREE.Vector3(-1, -0.2, -0.4);
+        out.poleL = new THREE.Vector3(1, -0.2, -0.4);
+        break;
+      case 'trophies': {
+        // thumbs hooked in his belt, admiring the wall; now and then a hat tip to the fallen
+        const w = pulse(9, 3.0, 3.5, 4.6, 5.1);
+        out.l = belt(1);
+        out.r = belt(-1).lerp(brim(), w);
+        out.poleL = new THREE.Vector3(1, -0.2, -0.4);
+        out.poleR = new THREE.Vector3(-1, -0.4 + w * 0.3, -0.3 + w * 0.5);
+        break;
+      }
       case 'music': {
         if (this.music) {
           // snapping his fingers to the record, the other thumb in his belt
@@ -1892,7 +1793,7 @@ export class HubScene implements GameScene {
     });
     const [sL, sR] = sweeps;
     if (n['pelvis']) n['pelvis'].rotation.set(0, -0.12 * sL, 0.035 * Math.sin(this.phase * Math.PI * 2) * mk + Math.sin(t * 0.37) * 0.012 * (1 - mk) - shiftX * 1.6);
-    const LEAN: Record<HeroPose, number> = { door: -0.02, bench: 0.3, board: 0.42, mirror: -0.06, book: 0.18, hearth: 0.12, music: 0.02 };
+    const LEAN: Record<HeroPose, number> = { door: -0.02, bench: 0.3, board: 0.42, mirror: -0.06, book: 0.18, hearth: 0.12, music: 0.02, range: 0, cards: 0.1, trophies: -0.04 };
     const lean = 0.03 + 0.06 * mk + 0.1 * rk + Math.sin(t * 1.5) * 0.008 * (1 - mk) + P * LEAN[pose] + groove * 0.03;
     const twist = P * (pose === 'mirror' ? Math.sin(t * 0.5) * 0.14 : pose === 'door' ? -0.08 : 0) + groove * Math.sin(beat * 0.5) * 0.1;
     if (n['torso']) n['torso'].rotation.set(lean, 0.17 * sL + twist, -0.02 * Math.sin(this.phase * Math.PI * 2) * mk + groove * Math.sin(beat * 0.5) * 0.04);
@@ -1951,6 +1852,15 @@ export class HubScene implements GameScene {
           if (this.mamaTalk > 0.2 || Math.sin(t * 0.23) > 0.55) pl.copy(this.mamaHead).add(this.v3.set(0, -0.2, 0));
           else pl.copy(this.firePos);
           break;
+        case 'range':
+          pl.copy(st.at);
+          break;
+        case 'trophies':
+          pl.set(0.9 + Math.sin(t * 0.19) * 1.1, 1.75, IN.front);
+          break;
+        case 'cards':
+          pl.copy(this.mamaHead).add(this.v3.set(0, -0.15, 0));
+          break;
         case 'music':
           if (this.music) H.localToWorld(pl.set(Math.sin(t * 0.3) * 0.8, 1.6, 3));
           else pl.copy(st.at);
@@ -1989,18 +1899,21 @@ export class HubScene implements GameScene {
       return;
     }
     if (inp.wasPressed('Escape')) {
-      if (this.panel) this.closePanel();
+      if (this.extras?.escape()) {
+        /* the extras stepped back */
+      } else if (this.panel) this.closePanel();
       else this.onMenu();
     }
     const g = this.locomote(rdt);
     this.animateHero(g, t, rdt);
+    this.extras?.poseHero(t, rdt);
     // ------------------------------------------------ the camera, then the UI that rides with it
     this.updateCamera(t, rdt);
     this.placeUI(t, rdt);
     this.updateTitle(rdt);
 
     // ------------------------------------------------ left / right, use; the arrow signs, the stations, the duck under the mouse
-    const free = !this.panel && !this.intro;
+    const free = !this.panel && !this.intro && !this.extras?.busy;
     if (free) {
       if (inp.wasPressed('KeyA') || inp.wasPressed('ArrowLeft')) this.step(-1);
       else if (inp.wasPressed('KeyD') || inp.wasPressed('ArrowRight')) this.step(1);
@@ -2054,13 +1967,14 @@ export class HubScene implements GameScene {
     this.prompt.style.opacity = showPrompt ? '1' : '0';
     this.prompt.style.pointerEvents = showPrompt ? 'auto' : 'none';
     const st = this.here;
-    const verb = st.id === 'gramophone' ? (this.music ? 'Hush the record' : 'Play a record') : st.verb;
+    const verb = this.extras?.verbFor(st) ?? (st.id === 'gramophone' ? (this.music ? 'Hush the record' : 'Play a record') : st.verb);
     const key = this.touch ? 'TAP' : 'E';
     const html = `<span style="display:inline-block;padding:1px 9px;margin-right:10px;background:#e8d4a4;color:#2a1a10;border:3px solid #2a1408;box-shadow:0 3px 0 #2a1408">${key}</span>${verb.toUpperCase()}`;
     if (this.prompt.innerHTML !== html) this.prompt.innerHTML = html;
 
     // ------------------------------------------------ the house breathes
     this.animateLife(t, rdt);
+    this.extras?.update(t, rdt);
     this.particles.update(rdt, this.scene.fog as THREE.Fog);
     this.stepMoveArt();
   }
@@ -2105,7 +2019,7 @@ export class HubScene implements GameScene {
     this.ui.position.copy(cam.position);
     this.ui.quaternion.copy(cam.quaternion);
     this.ui.updateMatrixWorld(true);
-    const show = !this.panel && !this.intro;
+    const show = !this.panel && !this.intro && !this.extras?.busy;
     this.uiK = damp(this.uiK, show ? 1 : 0, show ? 3.5 : 9, rdt);
     const d = 0.95;
     const halfH = d * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2), halfW = halfH * cam.aspect;
@@ -2137,7 +2051,7 @@ export class HubScene implements GameScene {
 
   /** the station's name flips up in gilded letters in the shot's empty third, the subtitle types itself under it */
   private updateTitle(rdt: number) {
-    const want = !this.panel && !this.intro && this.arrived ? this.here : null;
+    const want = !this.panel && !this.intro && !this.extras?.busy && this.arrived ? this.here : null;
     const tt = this.ttl;
     if (tt) {
       if (tt.st !== want && tt.out < 0) tt.out = 0;
@@ -2483,6 +2397,11 @@ export class HubScene implements GameScene {
       P.fromArray(this.debugCam.pos);
       L.fromArray(this.debugCam.look);
       fov = this.debugCam.fov ?? 50;
+    } else if (this.extras?.cam && !this.wakeCam) {
+      const c = this.extras.cam;
+      P.copy(c.pos);
+      L.copy(c.look);
+      fov = c.fov;
     } else if (this.wakeCam) {
       P.copy(this.wakeCam.pos);
       L.copy(this.wakeCam.look);
@@ -2520,8 +2439,9 @@ export class HubScene implements GameScene {
       }
     }
     // the mouse only leans the frame a little (parallax), with a slow breathing drift
-    this.par.x = damp(this.par.x, this.panel ? 0 : inp.ndcX, 2.5, rdt);
-    this.par.y = damp(this.par.y, this.panel ? 0 : inp.ndcY, 2.5, rdt);
+    const still = !!this.panel || !!this.extras?.busy;
+    this.par.x = damp(this.par.x, still ? 0 : inp.ndcX, 2.5, rdt);
+    this.par.y = damp(this.par.y, still ? 0 : inp.ndcY, 2.5, rdt);
     const fwd = this.v1.subVectors(L, P).normalize();
     const right = this.v2.crossVectors(fwd, UP).normalize();
     this.camPos.copy(P).addScaledVector(right, this.par.x * 0.07 + Math.sin(t * 0.11) * 0.02).addScaledVector(UP, this.par.y * 0.04 + Math.sin(t * 0.15) * 0.012);

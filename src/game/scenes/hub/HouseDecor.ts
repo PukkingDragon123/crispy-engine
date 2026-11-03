@@ -6,6 +6,8 @@
 // them, a carved plaque with the mounted head of each boss you have beaten.
 import * as THREE from 'three';
 import { RigInstance, buildRigGeo, RigSpec } from '../../../engine/voxel/Rig';
+import { buildVoxelGeometry } from '../../../engine/voxel/Mesher';
+import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
 import { makeVoxelMaterial, sharedVoxelMaterial } from '../../../engine/render/VoxelMaterial';
 import * as HX from '../../models/props/hideout';
 import * as WS from '../../models/props/workshop';
@@ -13,6 +15,8 @@ import { modelEntry } from '../../models/lookup';
 import { IconFactory } from '../../ui/IconFactory';
 import { PARCHMENT_GLSL } from '../../ui/Choice';
 import { Codex, F_SEEN, F_CLAIM } from '../../meta/Codex';
+import { Blueprints, RELICS } from '../../meta/Blueprints';
+import * as PM from '../../models/props';
 import { damp } from '../../../engine/math/rand';
 import { BuildKit, HubHost, HubStation, HeroBubble, SM, safe, geoOf, meshOf, engrave, clamp01, ease } from './HubKit';
 
@@ -35,6 +39,9 @@ const TALES: Record<string, string> = {
   ironclad: 'The Ironclad missed the last train out.',
   thornback: 'Old Thornback. Still picking needles out of my ribs.',
 };
+/** the short name on each trophy's brass plate */
+const PLATE: Record<string, string> = { khonsu: 'KHONSU', khonsuSand: 'KHONSU', sethos: 'SETHOS', setAvatar: 'SET', bertha: 'BERTHA', marshal: 'MARSHAL', sunroller: 'SUNROLLER', pharaoh: 'NEKH-AMUN', gulp: 'OLD GULP', ironclad: 'IRONCLAD', thornback: 'THORNBACK' };
+const WS_TV = 1 / 96;
 const UNBEATEN = ['Plenty of wall left.', 'Still out there. Not for long.', 'One day, the whole wall.', 'Every nail is a promise.'];
 
 interface BossRow {
@@ -197,8 +204,8 @@ export class HouseDecor {
     }
     // ---- a cowhide in front of the trophy wall
     k.put(safe(() => WS.cowhideRug()), 0.95, 2.18, 0.1, 0.004, 1, false);
-    // ---- the pet scorpion's tank on a cabinet under the front-right window
-    const cab = k.against(safe(() => WS.sideCabinet(19)), 'front', 3.02, 0, 0.05, 0.92);
+    // ---- the pet scorpion's tank on a cabinet under the front-left window
+    const cab = k.against(safe(() => WS.sideCabinet(19)), 'front', -1.2, 0, 0.05, 0.92);
     if (cab) {
       const top = new THREE.Box3().setFromObject(cab).max.y;
       const ts = safe(() => WS.terrarium());
@@ -214,9 +221,10 @@ export class HouseDecor {
           glass.renderOrder = 3;
           tank.add(glass);
         }
-        tank.position.set(3.02, top, WALL_Z - 0.3);
+        tank.position.set(-1.2, top, WALL_Z - 0.3);
         tank.rotation.y = Math.PI + 0.06;
         s.add(tank);
+        tank.updateMatrixWorld(true);
         this.tankAt.copy(tank.position);
         // the heat lamp's glow on the sand
         k.lamp(0xffb070, 0.55, 0.9, 2, new THREE.Vector3(...(ts.meta.lamp as number[])).applyMatrix4(tank.matrixWorld).add(new THREE.Vector3(0, -0.06, 0)), 0.04);
@@ -226,6 +234,8 @@ export class HouseDecor {
         this.buildPet();
       }
     }
+    // ---- the relics you have dug up, on a curio shelf over the wax bench (one shelf per region)
+    this.buildRelics(k);
     // ---- a cobweb high in the front-right corner
     k.put(safe(() => HX.cobweb(3)), IN.right - 0.05, IN.front - 0.05, Math.PI, 2.1, 1, false);
     // ---- the trophy wall: a picture light, the bills, the plaques
@@ -277,6 +287,36 @@ export class HouseDecor {
       stand, face: -0.72, at: new THREE.Vector3(0.9, 1.7, WALL_Z), r: 0.9, objs: [], pose: 'trophies',
       via: [new THREE.Vector2(2.0, 0.25), new THREE.Vector2(2.05, 1.4)], slot: [-0.86, 0.84, 'left'],
       shot: { pos: new THREE.Vector3(1.28, 1.5, 0.12), look: new THREE.Vector3(), fov: 47, subject: new THREE.Vector3(stand.x, 1.5, stand.y), ndc: [0.38, 0.02] },
+    });
+  }
+
+  private buildRelics(k: BuildKit) {
+    const cs = safe(() => WS.curioShelf());
+    const shelf = k.against(cs, 'left', -2.3, 1.46, 0.02, 1, false);
+    if (!shelf || !cs) return;
+    shelf.updateMatrixWorld(true);
+    const P: Record<string, () => SM> = PM as unknown as Record<string, () => SM>;
+    let regions: ReturnType<typeof Blueprints.relics> = [];
+    try {
+      regions = Blueprints.relics();
+    } catch {
+      return;
+    }
+    regions.forEach((r, ri) => {
+      const y = cs.meta.shelves[2 - ri] ?? 0;
+      r.list.forEach((rel, i) => {
+        if (!rel.found) return;
+        const def = RELICS.find((q) => q.id === rel.id);
+        const g = geoOf(safe(() => P[def?.model ?? '']?.()));
+        if (!g) return;
+        const m = meshOf(g);
+        const size = g.boundingBox!.getSize(this.v);
+        m.scale.setScalar(Math.min(0.11 / Math.max(size.x, size.z, 0.01), 0.15 / Math.max(size.y, 0.01)));
+        const n = r.list.length;
+        m.position.set(-0.42 + (i + 0.5) * (0.84 / n), y + 0.002, -0.005);
+        m.rotation.y = Math.sin(i * 2.3 + ri) * 0.5;
+        shelf.add(m);
+      });
     });
   }
 
@@ -344,12 +384,30 @@ export class HouseDecor {
     const p = this.slots[slot];
     const pq = WS.trophyPlaque(31 + slot * 7);
     const [x0, y0, x1, y1, z] = pq.meta.plate;
-    engrave(pq.model, b.name.replace(/^The /, '').toUpperCase(), (x0 + x1 + 1) / 2, (y0 + y1 + 1) / 2, z, x1 - x0 - 3, y1 - y0 - 1, 0x3a2410, 4);
     const g = geoOf(pq);
     if (!g) return;
     const grp = new THREE.Group();
     const pm = meshOf(g);
     grp.add(pm);
+    // the name plate: fine brass (1/256) with the name engraved in Alagard, screwed over the plaque's plate
+    const NV = 1 / 256, W = 23, Hh = 7;
+    const nm = new VoxelModel('name_plate');
+    for (let x = -W; x < W; x++)
+      for (let y = -Hh; y < Hh; y++) {
+        const rim = x === -W || x === W - 1 || y === -Hh || y === Hh - 1;
+        nm.set(x, y, 0, 0x6a4a1c);
+        nm.set(x, y, 1, rim ? 0x9a7430 : y > Hh - 3 ? 0xf0cc78 : 0xd8a850, VF.METAL);
+      }
+    for (const sx of [-W + 2, W - 3]) nm.set(sx, 0, 2, 0x8a6a30, VF.METAL);
+    try {
+      engrave(nm, PLATE[b.id] ?? b.name.split(' ').pop()!.toUpperCase(), 0, -0.5, 1, W * 2 - 10, 8, 0x3a2410, VF.METAL);
+    } catch {
+      /* no canvas: a blank plate */
+    }
+    const plate = meshOf(buildVoxelGeometry(nm, { voxelSize: NV, pivot: [0, 0, 0] }), sharedVoxelMaterial, false);
+    const pb = pq.model.bounds();
+    plate.position.set(((x0 + x1 + 1) / 2 - (pb.minX + pb.maxX + 1) / 2) * WS_TV, ((y0 + y1 + 1) / 2 - pb.minY) * WS_TV, (z + 1 - (pb.minZ + pb.maxZ + 1) / 2) * WS_TV);
+    grp.add(plate);
     const back = -g.boundingBox!.min.z;
     grp.position.set(p.x, p.y - 0.165, WALL_Z - back - 0.004);
     grp.rotation.y = Math.PI;

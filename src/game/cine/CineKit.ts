@@ -19,6 +19,9 @@ export interface KitWorld {
   env?: { fog?: THREE.Fog | null };
 }
 
+/** who owns the screen right now (so cutscenes never stack) */
+export const cineFlags = { choice: false, zone: false };
+
 export const SAND = [0xf6dfb0, 0xeccb8f, 0xe0b373, 0xcf9a5a];
 export const GRAIN = ['grain0', 'grain1', 'grain2', 'grain3'];
 export const PUFF = ['puff0', 'puff1', 'cloud0', 'cloud1'];
