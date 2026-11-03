@@ -46,7 +46,7 @@ const SANDS = [P.sand1, P.sand0, P.sand2, P.sand3];
 /** a dust-storm dusk under a pale moon (sun azimuth is kept from the zone) */
 const DUSK: Partial<EnvPreset> = {
   zenith: 0x2b2a4a, horizon: 0xd9965a, ground: 0x9c6a3e, sunColor: 0xffc48a, sunIntensity: 2.3, sunElev: 13,
-  hemiSky: 0x8a90c8, hemiGround: 0xa86a3a, hemiIntensity: 0.95, fog: 0xc4905a, fogNear: 55, fogFar: 320, exposure: 1.06, stars: 0.4, clouds: 0.75, cloudColor: 0xd9a072,
+  hemiSky: 0x8a90c8, hemiGround: 0xa86a3a, hemiIntensity: 0.95, fog: 0xc4905a, fogNear: 55, fogFar: 320, exposure: 1.06, stars: 0.4, clouds: 0.6, cloudColor: 0xf6d2b0,
 };
 const POUR_LEN: Record<string, number> = { pour_sh1: 7.5, pour_sh2: 6.2, pour_el: 6.4, pour_beak: 3.8 };
 const ARMY = ['husk', 'husk', 'mummy', 'jackal', 'sandWolf', 'gunslinger', 'bandageWhipper', 'scarab'];
@@ -726,10 +726,11 @@ export class KhonsuSandAvatar extends Boss {
     for (const s of [0, 1]) this.aim(s, this.root.localToWorld(new THREE.Vector3(s === 0 ? 12 : -12, 14, 9)), 2.6, -0.1, -0.2);
     this.ctx.sfx('divine_whisper', this.pos, 1, 0.6);
     // every living thing on the field is engulfed and turned
+    const crowd = clamp(24 / Math.max(1, this.d.enemies.list.length), 0.3, 1); // keep the sand storm affordable in a crowd
     for (const e of this.d.enemies.list) {
       if (!e.alive || this.sandForms.has(e)) continue;
       const delay = Math.min(1.2, e.pos.distanceTo(this.pos) / 45);
-      this.ctx.engine.tweens.after(delay, () => this.engulf(e));
+      this.ctx.engine.tweens.after(delay, () => this.engulf(e, crowd));
     }
     await this.wait(1.3);
     // he pours sand from his palms; it rises as a wave of soldiers
@@ -750,7 +751,7 @@ export class KhonsuSandAvatar extends Boss {
     const ridge = this.addSand({ kind: 'ridge', x: mid.x, z: mid.z, dir: { x: fx, z: fz }, speed: 6.5, height: 2.4, width: 3.2, halfLen: 12, life: 5.5, rise: 0.6, fall: 1.2 });
     this.waves.push({ shape: ridge, kind: 'ridge', dmg: 0, knock: 0, hit: true, crossed: true, prev: NaN, harmless: true });
     const types = ARMY.filter((t) => ENEMIES[t]);
-    const n = Math.min(4 + this.phase * 2, Math.max(0, 34 - this.d.enemies.list.length));
+    const n = Math.max(2, Math.min(4 + this.phase * 2, 90 - this.d.enemies.list.length)); // his army, even in a crowd
     for (let i = 0; i < n; i++) {
       await this.wait(0.36);
       const l = (rnd.next() - 0.5) * 20;
@@ -766,16 +767,16 @@ export class KhonsuSandAvatar extends Boss {
     await this.wait(0.6);
     this.stopArms();
   }
-  private engulf(e: Enemy) {
+  private engulf(e: Enemy, k = 1) {
     if (!e.alive || this.sandForms.has(e) || this.dead) return;
     const p = { x: e.pos.x, y: e.pos.y, z: e.pos.z };
-    for (let i = 0; i < 3; i++)
+    for (let i = 0; i < Math.max(1, Math.round(3 * k)); i++)
       this.ctx.engine.tweens.after(i * 0.12, () => {
         const a = rnd.next() * Math.PI * 2;
         this.ctx.particles.emit({ pos: { x: p.x + Math.cos(a) * 1.2, y: p.y + 0.2, z: p.z + Math.sin(a) * 1.2 }, count: 10, vel: { x: -Math.sin(a) * 3, y: 4.5, z: Math.cos(a) * 3 }, spread: 1.4, jitter: 0.5, life: [0.5, 0.9], size: [0.18, 0.1], sprite: GRAINS, color: SANDS, gravity: 6, drag: 1 });
       });
-    this.ctx.fx.dust(p, 1.2 * e.scale, P.sand1, 4);
-    this.ctx.sfx('sand_rise', p, 0.6, 0.9);
+    if (rnd.chance(k)) this.ctx.fx.dust(p, 1.2 * e.scale, P.sand1, 4);
+    if (rnd.chance(k)) this.ctx.sfx('sand_rise', p, 0.6, 0.9);
     this.ctx.engine.tweens.after(0.45, () => this.makeSandForm(e));
   }
   /**
@@ -1235,7 +1236,7 @@ export class KhonsuSandAvatar extends Boss {
     this.glowNow = damp(this.glowNow, this.glowT, 2, dt);
     this.coreLight.intensity = this.root.visible ? 2 + this.chestNow * 14 + this.glowNow * 4 + Math.sin(t * 3) * 0.8 : 0;
     const fx = this.rig.material.userData.fx.value;
-    fx.z = 0.1 + this.glowNow * 0.9 + this.chestNow * 0.4;
+    fx.z = 0.1 + this.glowNow * 0.7 + this.chestNow * 0.25;
     this.root.updateMatrixWorld(true);
     // arms (IK onto the dune), hands, fingers
     for (let s = 0; s < 2; s++) this.solveArm(s, dt);

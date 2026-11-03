@@ -229,6 +229,8 @@ export class Enemy implements EnemyLike {
   life = 0;
   flipped = 0;
   tint = new THREE.Color(1, 1, 1);
+  /** Khonsu's sand-forms (wave 75): sand tint, burst into sand on death instead of a corpse. Set by KhonsuSandAvatar. */
+  sandForm = false;
   lassoT = 0;
   telegraph: THREE.Line | null = null;
   quirk = rnd.next();
@@ -771,7 +773,12 @@ export class Enemies implements EnemyApi {
     // violent deaths send the bones flying; everything else collapses procedurally first
     const headI = e.part('head');
     const violent = !collapse && (!hit || (hit.knock ?? 0) >= 9 || hit.source === 'explosion' || hit.source === 'board' || (crit && rnd.chance(0.35)) || (headI >= 0 && e.hidden[headI] === 1));
-    if (violent) {
+    if (e.sandForm) {
+      // a sand-form just falls apart into the dune
+      ctx.fx.sandBurst(c, 1.3 * e.scale);
+      ctx.fx.dust({ x: e.pos.x, y: e.pos.y + 0.3, z: e.pos.z }, 1.1 * e.scale, P.sand1, 5);
+      ctx.sfx('sand_burst', c, 0.7);
+    } else if (violent) {
       const force = 5 + (hit?.knock ?? 2) * 1.5 + (crit ? 3 : 0);
       const W = this.poseWorld(e);
       const pieces = new Map<number, RagPiece>();
@@ -1016,7 +1023,7 @@ export class Enemies implements EnemyApi {
         if (e.status.has('burn')) ctx.fx.flames({ x: e.pos.x, y: e.pos.y + e.height * 0.5, z: e.pos.z }, 1, e.scale);
       }
       // tint by status (subtle)
-      const tr = e.status.has('poison') ? [0.82, 1.0, 0.78] : e.status.has('burn') ? [1, 0.8, 0.65] : e.status.has('curse') ? [0.9, 0.82, 1] : [1, 1, 1];
+      const tr = e.sandForm ? [1.0, 0.8, 0.52] : e.status.has('poison') ? [0.82, 1.0, 0.78] : e.status.has('burn') ? [1, 0.8, 0.65] : e.status.has('curse') ? [0.9, 0.82, 1] : [1, 1, 1];
       e.tint.setRGB(damp(e.tint.r, tr[0], 6, dt), damp(e.tint.g, tr[1], 6, dt), damp(e.tint.b, tr[2], 6, dt));
       this.think(e, dt, time, ppos);
       if (!e.alive) continue;

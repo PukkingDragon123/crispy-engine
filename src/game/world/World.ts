@@ -114,7 +114,8 @@ export class World {
   /** board surface query: height includes water, friction by material */
   surface = (x: number, z: number, out: SurfaceInfo): SurfaceInfo => {
     const f = this.sa.field;
-    const h = f.heightSmooth(x, z);
+    // the board rides the living sand too (dune waves, rings, the vortex)
+    const h = f.heightSmooth(x, z) + (this.sand.n ? this.sand.offset(x, z) : 0);
     const wl = this.sa.waterLevel;
     if (h < wl - 0.05) {
       out.h = wl;

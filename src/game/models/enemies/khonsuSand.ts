@@ -159,9 +159,9 @@ function majorF(sy: number) {
   const B = sy / 2.4 + 0.35 * Math.sin(sy * 0.23);
   return B - Math.floor(B);
 }
-/** 1 inside a vertical joint fissure (2D cellular borders, ~2.2 m blocks), 0 elsewhere */
+/** 1 inside a vertical joint fissure (2D cellular borders, ~3 m blocks), 0 elsewhere */
 function jointAt(x: number, y: number, z: number) {
-  const u = x * 0.45 + y * 0.05, v = z * 0.45 - y * 0.04;
+  const u = x * 0.33 + y * 0.04, v = z * 0.33 - y * 0.03;
   const iu = Math.floor(u), iv = Math.floor(v);
   let f1 = 9, f2 = 9;
   for (let a = -1; a <= 1; a++)
@@ -173,7 +173,7 @@ function jointAt(x: number, y: number, z: number) {
         f1 = dd;
       } else if (dd < f2) f2 = dd;
     }
-  return 1 - sstep(0.04, 0.11, Math.sqrt(f2) - Math.sqrt(f1));
+  return 1 - sstep(0.03, 0.08, Math.sqrt(f2) - Math.sqrt(f1));
 }
 /** sandstone colour: moon cracks, sand settled on shelves, strata bands with lit lips, dark joints */
 function rockPaint(x: number, y: number, z: number, ny: number, crackK: number, sandK = 1): number {
@@ -374,7 +374,7 @@ function skirtH(x: number, z: number) {
   h -= 0.5 * gullyAt(x, z) * sstep(3.6, 5.5, rho);
   h += 0.45 * Math.pow(Math.max(0, Math.sin(9 * th + 1.3)), 3) * Math.exp(-(((rho - 5.6) / 1.0) ** 2)); // slump lobes
   h += (vn(x * 0.33, 1.7, z * 0.33, 31) - 0.5) * 0.6;
-  return h;
+  return h - 1.6 * sstep(6.6, 7.6, rho); // tuck the rim under the terrain mound
 }
 function gullyAt(x: number, z: number) {
   const rho = Math.hypot(x, z), th = Math.atan2(x, z);
@@ -397,7 +397,7 @@ function outcropF(x: number, y: number, z: number) {
   return d > 1.6 ? d : d + erode(x, y, z, 41, 1.1, 0.4);
 }
 function buildSkirt(m: VoxelModel) {
-  const g = new Grid(S, -8.8, -1.6, -8.8, 8.8, 8.0, 8.8);
+  const g = new Grid(S, -7.8, -1.6, -7.8, 7.8, 8.0, 7.8);
   const { nx, ny, nz, occ } = g;
   const top = new Int32Array(nx * nz).fill(-1);
   for (let k = 1; k < nz - 1; k++)

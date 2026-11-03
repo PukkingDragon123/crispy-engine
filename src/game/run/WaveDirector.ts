@@ -51,7 +51,7 @@ export class WaveDirector {
   constructor(private ctx: Ctx, private enemies: Enemies, private getPlayer: () => { pos: THREE.Vector3 }) {}
 
   specFor(n: number): WaveSpec {
-    const major = n === 50 || n === 75 || n === 100;
+    const major = n === 50 || n === 75 || n === 85 || n === 100;
     const mini = !major && n % 5 === 0;
     let theme: WaveSpec['theme'];
     if (!mini && !major && n > 3 && n % 5 === 3) {
