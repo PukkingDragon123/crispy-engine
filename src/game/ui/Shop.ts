@@ -1118,9 +1118,11 @@ export class Shop {
       this.t = 0;
     }
     this.pt = 0;
-    this.clearSpeech();
+    if (!arrivedHer) this.clearSpeech(); // (her arrival greeting is allowed to finish)
     this.commented.clear();
     this.leaveSplit = false;
+    this.coinsAt = -1;
+    this.punch = 0;
     this.camK = 0;
     this.focusK = 0;
     this.heaved = false;
@@ -2009,8 +2011,7 @@ export class Shop {
         this.scolded = true;
         her.onOut = () => {
           if (!this.active || this.her !== her) return;
-          ctx.toast(TITLE, '#ffd36b', rnd.pick(LINES.shot));
-          her.say('squinty', 1.4);
+          this.speak(rnd.pick(LINES.shot), 'squinty');
           her.shake();
         };
       }

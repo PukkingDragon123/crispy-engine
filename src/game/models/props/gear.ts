@@ -20,6 +20,8 @@
 import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
 import { TOON, Ramp } from '../style';
 import { hash3 } from '../../../engine/math/rand';
+import type { RigSpec } from '../../../engine/voxel/Rig';
+import { skeletonCowboyRig } from '../characters';
 
 export const GEAR_VS = 1 / 48;
 type V3 = [number, number, number];
@@ -27,9 +29,25 @@ type V3 = [number, number, number];
 export type GearAnchor = 'face' | 'torso' | 'shoulder_l' | 'shoulder_r' | 'hand_l' | 'hand_r' | 'foot_l' | 'foot_r' | 'sling' | 'neck';
 export type GearJoint = 'swing' | 'spin' | 'focus' | 'hook';
 
+/** rig parts gear can be skinned onto (their own voxel models, in their own grid) */
+export type SkinPartName = 'fore_l' | 'fore_r' | 'shin_l' | 'shin_r' | 'torso';
+export interface SkinPart {
+  model: VoxelModel;
+  /** the part's joint in its voxel coords (the rig meshes it around this) */
+  pivot: V3;
+  vs: number;
+  /** hand socket in the part's voxel coords (forearms) */
+  sock?: V3;
+}
+
 export interface GearPiece {
   name: string;
   anchor: GearAnchor;
+  /**
+   * skinned piece: the model is sculpted in this rig part's own voxel grid, hugging
+   * its surface, and mounted on that part (then `at` = the piece's pivot in part coords)
+   */
+  skin?: SkinPartName;
   /** pivot of this piece in the anchor frame (gear voxels); the model is built around (0,0,0) = pivot */
   at: V3;
   model: VoxelModel;
@@ -46,6 +64,8 @@ export interface GearFit {
   hand_l: Box;
   hand_r: Box;
   foot: { hw: number; toe: number; heel: number; h: number; shinHW: number; shinZ0: number; shinZ1: number };
+  /** the body's own part models for skinned pieces (from the live rig, or Sundown's reference rig) */
+  parts?: Partial<Record<SkinPartName, SkinPart>>;
 }
 export interface Box {
   x0: number;
@@ -887,6 +907,448 @@ function deadMansHand(): GearPiece[] {
   return [neckCord(LACQ), piece('hand', 'neck', CHARM_AT, m, { joint: 'swing', group: 'charm' })];
 }
 
+
+// ================================================================== SKINNED PIECES
+// Gloves, boots and body armour are sculpted straight onto the hero's own part
+// voxels (same grid, same pivot), slice by slice, so they hug bony hands, jean
+// legs and the jacket exactly, whatever the hero looks like.
+
+const SKIN_PARTS: SkinPartName[] = ['fore_l', 'fore_r', 'shin_l', 'shin_r', 'torso'];
+
+/** pull the skinnable parts (and hand sockets) out of a rig spec */
+export function partsFromSpec(spec: RigSpec): Partial<Record<SkinPartName, SkinPart>> {
+  const out: Partial<Record<SkinPartName, SkinPart>> = {};
+  for (const p of spec.parts) if ((SKIN_PARTS as string[]).includes(p.name)) out[p.name as SkinPartName] = { model: p.model, pivot: p.pivot, vs: spec.voxelSize };
+  for (const [k, part] of [['hand_l', 'fore_l'], ['hand_r', 'fore_r']] as const) {
+    const sk = spec.sockets?.[k];
+    if (sk && sk.part === part && out[part]) out[part]!.sock = sk.at;
+  }
+  return out;
+}
+
+let REF: Partial<Record<SkinPartName, SkinPart>> | null = null;
+/** Sundown's default body, for showcase models (drops, shop, HUD, card photos) */
+export function referenceParts() {
+  if (!REF) {
+    try {
+      REF = partsFromSpec(skeletonCowboyRig({ hat: 'stetson', outfit: 'punk' } as any));
+    } catch {
+      REF = {};
+    }
+  }
+  return REF;
+}
+
+interface Slice { n: number; x0: number; x1: number; z0: number; z1: number }
+function slices(m: VoxelModel) {
+  const S = new Map<number, Slice>();
+  m.forEach((x, y, z) => {
+    const r = S.get(y);
+    if (!r) S.set(y, { n: 1, x0: x, x1: x, z0: z, z1: z });
+    else {
+      r.n++;
+      if (x < r.x0) r.x0 = x;
+      if (x > r.x1) r.x1 = x;
+      if (z < r.z0) r.z0 = z;
+      if (z > r.z1) r.z1 = z;
+    }
+  });
+  return S;
+}
+/** a slice at y, or the nearest one below/above */
+function sliceAt(S: Map<number, Slice>, y: number) {
+  for (let d = 0; d < 6; d++) {
+    const a = S.get(y - d) ?? S.get(y + d);
+    if (a) return a;
+  }
+  return null;
+}
+/** solid rounded rectangle in the XZ plane at height y (corners cut) */
+function slab(m: VoxelModel, y: number, x0: number, x1: number, z0: number, z1: number, col: (x: number, z: number, edge: boolean) => number, cut = 1, flags?: number) {
+  for (let x = x0; x <= x1; x++)
+    for (let z = z0; z <= z1; z++) {
+      const dx = Math.min(x - x0, x1 - x), dz = Math.min(z - z0, z1 - z);
+      if (dx + dz < cut) continue;
+      m.set(x, y, z, col(x, z, dx === 0 || dz === 0), flags);
+    }
+}
+/** front (sign +1) or back (−1) surface z of every (x, y) column of a part */
+function surface(m: VoxelModel, sign: 1 | -1) {
+  const S = new Map<number, number>();
+  m.forEach((x, y, z) => {
+    const k = (x + 512) * 1024 + (y + 512);
+    const o = S.get(k);
+    if (o === undefined || (sign > 0 ? z > o : z < o)) S.set(k, z);
+  });
+  return (x: number, y: number) => S.get((x + 512) * 1024 + (y + 512));
+}
+
+// ------------------------------------------------------------------ hands
+function handLevels(part: SkinPart) {
+  const S = slices(part.model);
+  const ys = [...S.keys()].sort((a, b) => a - b);
+  const sy = Math.round(part.sock?.[1] ?? (ys[0] + ys[ys.length - 1]) / 2);
+  let maxN = 1;
+  for (const y of ys) if (y >= sy && y <= sy + 8) maxN = Math.max(maxN, S.get(y)!.n);
+  let wrist = Math.min(ys[ys.length - 1], sy + 9);
+  for (const y of ys) if (y > sy + 2 && S.get(y)!.n <= Math.max(3, maxN * 0.3)) {
+    wrist = y;
+    break;
+  }
+  return { S, sy, wrist, top: ys[ys.length - 1] };
+}
+
+/** extents of the hand between two heights (the union, so the wrap reads as one piece of leather) */
+function handBox(S: Map<number, Slice>, y0: number, y1: number) {
+  const b = { x0: 1e9, x1: -1e9, z0: 1e9, z1: -1e9 };
+  for (let y = y0; y <= y1; y++) {
+    const s = S.get(y);
+    if (!s) continue;
+    b.x0 = Math.min(b.x0, s.x0);
+    b.x1 = Math.max(b.x1, s.x1);
+    b.z0 = Math.min(b.z0, s.z0);
+    b.z1 = Math.max(b.z1, s.z1);
+  }
+  return b;
+}
+
+/**
+ * fingerless glove on a skeletal hand: a leather wrap over the back of the hand and
+ * palm (finger bones stay bare), and a gauntlet cuff that flares up the forearm
+ */
+function skinGlove(part: SkinPart, out: 1 | -1, rp: Ramp, o: { cuff: number; flare: number; studs?: Ramp; fringe?: boolean; bands?: Ramp }) {
+  const m = new VoxelModel('gear_skin_glove');
+  const { S, sy, wrist } = handLevels(part);
+  const w0 = sy + 1, w1 = wrist - 1;
+  const hb = handBox(S, w0, w1);
+  // the wrap tapers a little toward the knuckles: per-row extents blended with the union
+  for (let y = w0; y <= w1; y++) {
+    const s = sliceAt(S, y) ?? { x0: hb.x0, x1: hb.x1, z0: hb.z0, z1: hb.z1, n: 0 };
+    const k = (y - w0) / Math.max(1, w1 - w0);
+    const x0 = Math.round(s.x0 * (1 - k) * 0.5 + hb.x0 * (0.5 + k * 0.5)) - 1, x1 = Math.round(s.x1 * (1 - k) * 0.5 + hb.x1 * (0.5 + k * 0.5)) + 1;
+    const z0 = Math.min(s.z0, hb.z0 + 1) - 1, z1 = Math.max(s.z1, hb.z1 - 1) + 1;
+    slab(m, y, x0, x1, z0, z1, (x, z, edge) => {
+      const back = out > 0 ? x === x1 : x === x0;
+      if (y === w0 && edge) return rp.dark; // rolled edge over the knuckles
+      if (back && (y + z) % 2 === 0 && z === Math.round((z0 + z1) / 2)) return TOON.linen.base; // stitched seam
+      return back ? rp.hi : y === w1 ? rp.shade : rp.base;
+    });
+    if (o.studs && y === w0 + 1) for (let z = z0 + 1; z <= z1 - 1; z += 2) m.set(out > 0 ? x1 + 1 : x0 - 1, y, z, o.studs.hi, M);
+  }
+  // gauntlet cuff up the forearm
+  const fb = handBox(S, wrist, wrist + o.cuff);
+  for (let k = 0; k < o.cuff; k++) {
+    const y = wrist + k;
+    const g = Math.round((k / Math.max(1, o.cuff - 1)) * o.flare);
+    const x0 = fb.x0 - 1 - g, x1 = fb.x1 + 1 + g, z0 = fb.z0 - 1 - g, z1 = fb.z1 + 1 + g;
+    slab(m, y, x0, x1, z0, z1, (_x, _z, edge) => (k === o.cuff - 1 ? (edge ? rp.hi : rp.shade) : o.bands && k % 2 === 1 ? o.bands.base : edge ? rp.base : rp.shade), 1);
+    if (o.fringe && k === o.cuff - 1) for (let z = z0 + 1; z <= z1 - 1; z += 2) for (let f = 1; f <= 3; f++) m.set(out > 0 ? x1 + 1 : x0 - 1, y - f, z, f === 3 ? rp.shade : rp.base);
+  }
+  return { m, sy, wrist, hb, fb };
+}
+
+function skinGloves(P: Partial<Record<SkinPartName, SkinPart>>): GearPiece[] | null {
+  if (!P.fore_l || !P.fore_r) return null;
+  const l = skinGlove(P.fore_l, 1, LE, { cuff: 5, flare: 1, studs: BR, fringe: true });
+  const r = skinGlove(P.fore_r, -1, LE, { cuff: 5, flare: 1, studs: BR, fringe: true });
+  return [piece('glove_l', 'hand_l', P.fore_l.pivot, l.m, { skin: 'fore_l' }), piece('glove_r', 'hand_r', P.fore_r.pivot, r.m, { skin: 'fore_r' })];
+}
+
+function skinStinger(P: Partial<Record<SkinPartName, SkinPart>>): GearPiece[] | null {
+  if (!P.fore_l || !P.fore_r) return null;
+  const g = skinGlove(P.fore_l, 1, CHIT, { cuff: 7, flare: 1, bands: r(0x6e3c16, 0x5a3012, 0x8a5020, 0x2e1608) });
+  const m = g.m;
+  // the stinger: chitin segments arching from the cuff over the back of the hand to a venom bulb
+  const bx = g.hb.x1 + 2, mz = Math.round((g.fb.z0 + g.fb.z1) / 2);
+  const segs: V3[] = [[bx - 1, g.wrist + 5, mz], [bx + 1, g.wrist + 3, mz], [bx + 2, g.wrist, mz + 1], [bx + 2, g.sy + 2, mz + 2], [bx + 1, g.sy, mz + 3]];
+  segs.forEach(([x, y, z], i) => {
+    const rr = 1.5 - i * 0.15;
+    m.ellipsoid(x, y, z, rr, rr, rr, i % 2 ? CHIT.shade : CHIT.base);
+    m.set(x + 1, y + 1, z, CHIT.hi);
+  });
+  const [ex, ey, ez] = segs[segs.length - 1];
+  m.ellipsoid(ex, ey - 2, ez + 1, 1.5, 1.5, 1.5, TOON.serket.base, VF.EMISSIVE);
+  m.set(ex - 1, ey - 2, ez + 2, TOON.serket.hi, VF.EMISSIVE);
+  m.set(ex - 1, ey - 4, ez + 2, LACQ.dark).set(ex - 1, ey - 5, ez + 3, LACQ.base);
+  // a matching chitin bracer on the gun hand
+  const rr = handLevels(P.fore_r);
+  const c = new VoxelModel('gear_skin_cuff');
+  const fb = handBox(rr.S, rr.wrist, rr.wrist + 3);
+  for (let k = 0; k < 3; k++) slab(c, rr.wrist + k, fb.x0 - 1, fb.x1 + 1, fb.z0 - 1, fb.z1 + 1, (_x, _z, e) => (k === 1 ? CHIT.shade : e ? CHIT.hi : CHIT.base));
+  return [piece('gauntlet', 'hand_l', P.fore_l.pivot, m, { skin: 'fore_l' }), piece('cuff', 'hand_r', P.fore_r.pivot, c, { skin: 'fore_r' })];
+}
+
+function skinKnuckles(P: Partial<Record<SkinPartName, SkinPart>>): GearPiece[] | null {
+  if (!P.fore_l || !P.fore_r) return null;
+  const make = (part: SkinPart) => {
+    const m = new VoxelModel('gear_skin_knuckles');
+    const { S, sy, wrist } = handLevels(part);
+    // brass rings over the finger bones just below the knuckles, joined by a grip bar
+    const yk = sy - 1;
+    const s = sliceAt(S, yk);
+    if (s) {
+      const zf = s.z1 + 1;
+      for (let x = s.x0 - 1; x <= s.x1 + 1; x++) m.set(x, yk - 2, zf, BR.shade, M).set(x, yk - 2, zf - 1, BR.base, M);
+      const n = 4;
+      for (let i = 0; i < n; i++) {
+        const cx = Math.round(s.x0 + ((i + 0.5) / n) * (s.x1 - s.x0 + 1) - 0.5);
+        for (const [dx, dy] of [[0, 1], [-1, 0], [1, 0], [0, -1]] as [number, number][]) m.set(cx + dx, yk + dy, zf + 1, dy > 0 ? BR.hi : BR.base, M);
+        m.set(cx, yk, zf, BR.shade, M);
+      }
+    }
+    // linen tape round the wrist
+    const fb = handBox(S, wrist - 1, wrist + 2);
+    for (let k = 0; k < 3; k++) slab(m, wrist - 1 + k, fb.x0 - 1, fb.x1 + 1, fb.z0 - 1, fb.z1 + 1, (x, z) => ((x + z + k) % 3 ? LI.base : LI.shade));
+    return m;
+  };
+  return [piece('knuckles_l', 'hand_l', P.fore_l.pivot, make(P.fore_l), { skin: 'fore_l' }), piece('knuckles_r', 'hand_r', P.fore_r.pivot, make(P.fore_r), { skin: 'fore_r' })];
+}
+
+// ------------------------------------------------------------------ feet
+function footLevels(part: SkinPart) {
+  const S = slices(part.model);
+  const ys = [...S.keys()].sort((a, b) => a - b);
+  const b = ys[0];
+  const span = (y: number) => {
+    const s = S.get(y);
+    return s ? s.z1 - s.z0 : 0;
+  };
+  const base = Math.max(span(b), span(b + 1), span(b + 2));
+  let ankle = b + 3;
+  for (const y of ys) if (y > b && span(y) < base * 0.6) {
+    ankle = y;
+    break;
+  }
+  return { S, bottom: b, ankle, top: ys[ys.length - 1] };
+}
+
+/** a boot sculpted over the hero's own foot (slice by slice) with a shaft up the leg */
+function skinBoot(part: SkinPart, shaft: number, col: (x: number, y: number, z: number, at: 'sole' | 'foot' | 'toe' | 'shaft' | 'rim', edge: boolean) => number, soleFlare = 0) {
+  const m = new VoxelModel('gear_skin_boot');
+  const { S, bottom, ankle, top } = footLevels(part);
+  const leg = handBox(S, ankle, Math.min(top, ankle + shaft));
+  let zt = -1e9;
+  for (let y = bottom; y < ankle; y++) zt = Math.max(zt, S.get(y)?.z1 ?? -1e9);
+  for (let y = bottom; y < ankle; y++) {
+    const s = sliceAt(S, y)!;
+    const fl = y === bottom ? soleFlare : 0;
+    slab(m, y, s.x0 - 1 - fl, s.x1 + 1 + fl, s.z0 - 1 - fl, s.z1 + 1 + fl, (x, z, edge) => (y === bottom ? col(x, y, z, 'sole', edge) : z >= zt - 1 ? col(x, y, z, 'toe', edge) : col(x, y, z, 'foot', edge)));
+  }
+  for (let y = ankle; y < ankle + shaft; y++) {
+    const s = S.get(y) ?? { x0: leg.x0, x1: leg.x1, z0: leg.z0, z1: leg.z1, n: 0 };
+    slab(m, y, s.x0 - 1, s.x1 + 1, s.z0 - 1, s.z1 + 1, (x, z, edge) => col(x, y, z, y === ankle + shaft - 1 ? 'rim' : 'shaft', edge));
+  }
+  return { m, bottom, ankle, leg, zt };
+}
+
+function skinSnakeBoots(P: Partial<Record<SkinPartName, SkinPart>>): GearPiece[] | null {
+  if (!P.shin_l || !P.shin_r) return null;
+  const SK = r(0x8e6a3a, 0x6c4e28, 0xb08a52, 0x3e2a14);
+  const out: GearPiece[] = [];
+  for (const [part, side] of [[P.shin_l, 'l'], [P.shin_r, 'r']] as const) {
+    const b = skinBoot(part, 7, (x, y, z, at, edge) => {
+      if (at === 'sole') return LD.dark;
+      if (at === 'rim') return SK.hi;
+      if (at === 'toe') return edge ? SK.dark : SK.shade;
+      // rattlesnake diamonds: a dark diamond chain down the boot, pale scales between
+      const d = (((y + z) % 4) + 4) % 4 === 0 || (((y - z) % 4) + 4) % 4 === 0;
+      return d ? SK.dark : hash3(x + 7, y, z) > 0.8 ? SK.hi : SK.base;
+    });
+    const m = b.m;
+    // two little fangs at the toe tip, a stacked heel, pull tabs
+    const s0 = sliceAt(P.shin_l === part ? slices(part.model) : slices(part.model), b.bottom)!;
+    const cx = Math.round((s0.x0 + s0.x1) / 2);
+    m.set(cx - 1, b.bottom, b.zt + 2, BO.base).set(cx + 1, b.bottom, b.zt + 2, BO.base);
+    for (let x = s0.x0; x <= s0.x1; x++) m.set(x, b.bottom - 1, s0.z0, LD.dark).set(x, b.bottom - 1, s0.z0 + 1, LD.dark);
+    for (const tx of [b.leg.x0 - 1, b.leg.x1 + 1]) m.set(tx, b.ankle + 7, Math.round((b.leg.z0 + b.leg.z1) / 2), LE.hi);
+    out.push(piece('boot_' + side, side === 'l' ? 'foot_l' : 'foot_r', part.pivot, m, { skin: side === 'l' ? 'shin_l' : 'shin_r' }));
+    // the rattle tassel swinging at the back of the shaft
+    const rt = new VoxelModel('gear_skin_rattle');
+    for (let k = 0; k < 6; k++) {
+      const w = k < 4 ? 1 : 0;
+      for (let x = -w; x <= w; x++) rt.set(x, -k, 0, k % 2 ? 0xd8c090 : 0xb89a66);
+    }
+    rt.set(0, 1, 0, LE.shade);
+    const at: V3 = [b.leg.x0 + (side === 'l' ? b.leg.x1 - b.leg.x0 : 0), b.ankle + 5, b.leg.z0 - 2];
+    // re-centre the rattle around its pivot (pieces with a joint are built around `at`)
+    const rr = new VoxelModel('gear_skin_rattle_at');
+    rt.forEach((x, y, z, c, f) => rr.set(x + at[0], y + at[1], z + at[2], c, f));
+    out.push(piece('rattle_' + side, side === 'l' ? 'foot_l' : 'foot_r', at, rr, { skin: side === 'l' ? 'shin_l' : 'shin_r', joint: 'swing' }));
+  }
+  return out;
+}
+
+function skinStriders(P: Partial<Record<SkinPartName, SkinPart>>): GearPiece[] | null {
+  if (!P.shin_l || !P.shin_r) return null;
+  const out: GearPiece[] = [];
+  for (const [part, side] of [[P.shin_l, 'l'], [P.shin_r, 'r']] as const) {
+    const b = skinBoot(part, 5, (_x, y, z, at, edge) => {
+      if (at === 'sole') return edge ? TOON.woodGrey.shade : TOON.woodGrey.base;
+      if (at === 'toe') return edge ? BO.shade : BO.base;
+      if (at === 'rim') return CAMEL.hi;
+      return (((y * 2 + z) % 5) + 5) % 5 < 2 ? CAMEL.shade : y % 2 ? CAMEL.base : CAMEL.hi;
+    }, 1);
+    for (const dx of [-1, 1]) {
+      const x = Math.round((b.leg.x0 + b.leg.x1) / 2) + dx;
+      b.m.set(x, b.ankle + 4, b.leg.z1 + 2, TOON.red.base).set(x, b.ankle + 3, b.leg.z1 + 2, TOON.red.shade).set(x, b.ankle + 2, b.leg.z1 + 2, TOON.red.dark);
+    }
+    out.push(piece('strider_' + side, side === 'l' ? 'foot_l' : 'foot_r', part.pivot, b.m, { skin: side === 'l' ? 'shin_l' : 'shin_r' }));
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------ torso
+function torsoLevels(part: SkinPart) {
+  const S = slices(part.model);
+  const ys = [...S.keys()].sort((a, b) => a - b);
+  // the body proper: rows wide enough to be the chest (skips the waist stub and the collar)
+  let maxW = 0;
+  for (const y of ys) maxW = Math.max(maxW, S.get(y)!.x1 - S.get(y)!.x0);
+  const body = ys.filter((y) => S.get(y)!.x1 - S.get(y)!.x0 > maxW * 0.6);
+  const y0 = body[0] ?? ys[0], y1 = body[body.length - 1] ?? ys[ys.length - 1];
+  const cx = (S.get(Math.round((y0 + y1) / 2))?.x0 ?? 0) / 2 + (S.get(Math.round((y0 + y1) / 2))?.x1 ?? 0) / 2;
+  return { S, y0, y1, cx, front: surface(part.model, 1), back: surface(part.model, -1) };
+}
+
+/** a carapace shell over the front (and a smaller one over the back) that follows the jacket */
+function skinScarabPlate(P: Partial<Record<SkinPartName, SkinPart>>): GearPiece[] | null {
+  const part = P.torso;
+  if (!part) return null;
+  const L = TOON.lapis;
+  const T = torsoLevels(part);
+  const m = new VoxelModel('gear_skin_scarab');
+  const top = T.y1 - 3, bot = T.y0 + Math.round((T.y1 - T.y0) * 0.12);
+  const shell = (sign: 1 | -1, scale: number) => {
+    const surf = sign > 0 ? T.front : T.back;
+    for (let y = bot; y <= top; y++) {
+      const s = sliceAt(T.S, y)!;
+      const v = (y - (top + bot) / 2) / ((top - bot) / 2);
+      const hw = ((s.x1 - s.x0) / 2) * scale * (0.8 - 0.14 * v * v - (v > 0.55 ? (v - 0.55) * 0.8 : 0));
+      const W = Math.round(hw);
+      for (let x = Math.round(T.cx - W); x <= Math.round(T.cx + W); x++) {
+        const z0 = surf(x, y);
+        if (z0 === undefined) continue;
+        const u = (x - T.cx) / Math.max(1, hw);
+        const rim = Math.abs(x - T.cx) >= W - 0.5 || y === top || y === bot;
+        const seam = Math.abs(x - T.cx) < 0.6 && sign > 0;
+        const ridge = Math.abs(Math.abs(x - T.cx) - Math.round(hw * 0.5)) < 0.5;
+        const t = 2 + (rim ? 0 : Math.round((1 - u * u) * (1 - v * v) * 1.6));
+        for (let k = 1; k <= t; k++) {
+          const z = z0 + sign * k;
+          const surfV = k === t;
+          let c = L.shade, f: number | undefined;
+          if (surfV) {
+            if (rim) (c = GO.base), (f = M);
+            else if (seam) (c = GO.shade), (f = M);
+            else if (ridge) c = L.hi;
+            else c = v > 0.35 ? L.hi : v < -0.5 ? L.shade : L.base;
+          }
+          m.set(x, y, z, c, f);
+        }
+      }
+    }
+  };
+  shell(1, 1);
+  shell(-1, 0.85);
+  // scarab head at the collar with turquoise eyes, forelegs hugging the neckline
+  const cz = (T.front(Math.round(T.cx), top) ?? 0) + 2;
+  m.ellipsoid(Math.round(T.cx), top + 1, cz, 3, 1.8, 1.8, GO.base, M);
+  m.set(Math.round(T.cx) - 1, top + 3, cz + 1, GO.hi, M).set(Math.round(T.cx) + 1, top + 3, cz + 1, GO.hi, M).set(Math.round(T.cx) - 2, top + 1, cz + 2, TOON.turquoise.base).set(Math.round(T.cx) + 2, top + 1, cz + 2, TOON.turquoise.base);
+  for (const s of [1, -1])
+    for (let i = 0; i < 7; i++) {
+      const x = Math.round(T.cx + s * (3 + i));
+      const z = (T.front(x, top) ?? cz - 2) + 1;
+      m.set(x, top + 1 - Math.round(Math.sin((i / 6) * Math.PI) * 1.5), z, i === 6 ? GO.hi : GO.base, M);
+    }
+  // leather straps round the sides at two heights, with brass buckles
+  for (const y of [bot + 2, Math.round((top + bot) / 2) + 3]) {
+    const s = sliceAt(T.S, y)!;
+    for (let z = s.z0 - 1; z <= s.z1 + 1; z++)
+      for (const x of [s.x0 - 1, s.x1 + 1]) m.set(x, y, z, z === Math.round((s.z0 + s.z1) / 2) ? BR.hi : LD.base, z === Math.round((s.z0 + s.z1) / 2) ? M : undefined);
+  }
+  return [piece('plate', 'torso', part.pivot, m, { skin: 'torso' })];
+}
+
+/** linen turns wound around the jacket (tilted, crossing), two loose tails that swing */
+function skinMummyWrap(P: Partial<Record<SkinPartName, SkinPart>>): GearPiece[] | null {
+  const part = P.torso;
+  if (!part) return null;
+  const T = torsoLevels(part);
+  const m = new VoxelModel('gear_skin_wrap');
+  const col = (x: number, y: number, z: number) => {
+    const h = hash3(x + 70, y, z);
+    return h < 0.07 ? 0xb8a47a : (((y + x) % 5) + 5) % 5 === 0 ? LI.shade : h > 0.82 ? LI.hi : LI.base;
+  };
+  const turns = 5;
+  for (let i = 0; i < turns; i++) {
+    const yc = Math.round(T.y0 + 2 + (i / (turns - 1)) * (T.y1 - T.y0 - 6));
+    const tilt = i % 2 ? 0.2 : -0.2;
+    const s = sliceAt(T.S, yc)!;
+    for (let x = s.x0 - 1; x <= s.x1 + 1; x++)
+      for (let h = 0; h < 2; h++) {
+        const y = yc + h + Math.round((x - T.cx) * tilt);
+        const zf = T.front(x, y), zb = T.back(x, y);
+        if (zf !== undefined) m.set(x, y, zf + 1, col(x, y, zf + 1));
+        if (zb !== undefined) m.set(x, y, zb - 1, col(x, y, zb - 1));
+        if (x === s.x0 - 1 || x === s.x1 + 1) {
+          const ss = sliceAt(T.S, y) ?? s;
+          for (let z = ss.z0; z <= ss.z1; z++) m.set(x, y, z, col(x, y, z));
+        }
+      }
+  }
+  const tails: GearPiece[] = [];
+  const yb = T.y0 + 3;
+  for (const [i, sx] of [[0, 3], [1, -4]] as [number, number][]) {
+    const x = Math.round(T.cx + sx);
+    const z = (T.back(x, yb) ?? 0) - 2;
+    const t = new VoxelModel('gear_skin_tail');
+    for (let k = 0; k <= 9; k++) {
+      const dx = Math.round(Math.sin(k * 0.55 + i) * 1.1);
+      t.set(x + dx, yb - k, z, col(x + dx, yb - k, i)).set(x + dx + 1, yb - k, z, k % 3 ? LI.base : LI.shade);
+    }
+    tails.push(piece('tail' + i, 'torso', [x, yb, z], t, { skin: 'torso', joint: 'swing' }));
+  }
+  return [piece('wraps', 'torso', part.pivot, m, { skin: 'torso' }), ...tails];
+}
+
+/** cactus-hide panels over the jacket: ribs, spine tufts, a bloom, rawhide lacing across an open front */
+function skinCactusJerkin(P: Partial<Record<SkinPartName, SkinPart>>): GearPiece[] | null {
+  const part = P.torso;
+  if (!part) return null;
+  const T = torsoLevels(part);
+  const m = new VoxelModel('gear_skin_jerkin');
+  const top = T.y1 - 2, bot = T.y0 + 1;
+  for (const sign of [1, -1] as const) {
+    const surf = sign > 0 ? T.front : T.back;
+    for (let y = bot; y <= top; y++) {
+      const s = sliceAt(T.S, y)!;
+      for (let x = s.x0; x <= s.x1; x++) {
+        const dx = x - T.cx;
+        if (sign > 0 && Math.abs(dx) < 1.2 + Math.max(0, y - bot) * 0.22) continue; // the open V front
+        const z0 = surf(x, y);
+        if (z0 === undefined) continue;
+        const rib = ((Math.round(dx) % 3) + 3) % 3 === 1;
+        const z = z0 + sign;
+        m.set(x, y, z, y === bot ? CACT.dark : rib ? CACT.hi : y === top ? CACT.hi : CACT.base);
+        if (rib && (y - bot) % 4 === 2 && hash3(x + 30, y, sign) > 0.4) m.set(x, y, z + sign, TOON.white.base).set(x + (dx > 0 ? 1 : -1), y + 1, z + sign * 2, TOON.white.hi);
+      }
+    }
+  }
+  // rawhide lacing across the V and a desert bloom on the left breast
+  for (let y = bot + 2; y <= Math.round((top + bot) / 2); y += 3) {
+    const w = Math.round(1.2 + Math.max(0, y - bot) * 0.22);
+    for (let x = Math.round(T.cx) - w; x <= Math.round(T.cx) + w; x++) {
+      const z = (T.front(x, y) ?? 0) + 2;
+      m.set(x, y, z, LE.hi);
+    }
+  }
+  const fx = Math.round(T.cx + (T.S.get(top - 4)?.x1 ?? 8) * 0.45), fy = top - 5;
+  const fz = (T.front(fx, fy) ?? 0) + 2;
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]] as [number, number][]) m.set(fx + dx, fy + dy, fz, Math.abs(dx) + Math.abs(dy) === 2 ? TOON.flower.shade : TOON.flower.base);
+  m.set(fx, fy, fz + 1, 0xffd84a).set(fx, fy, fz, TOON.flower.hi);
+  return [piece('jerkin', 'torso', part.pivot, m, { skin: 'torso' })];
+}
+
 // ================================================================== registry
 export type GearModelId =
   | 'sunGoggles' | 'thothSpecs' | 'jackalMask' | 'respirator'
@@ -900,6 +1362,18 @@ export const GEAR_MODEL_IDS: GearModelId[] = ['sunGoggles', 'thothSpecs', 'jacka
 
 /** the wearable pieces of one gear item, fitted to a body */
 export function gearPieces(id: GearModelId, fit: GearFit = DEFAULT_FIT): GearPiece[] {
+  const P = fit.parts ?? referenceParts();
+  const skinned =
+    id === 'gunslingerGloves' ? skinGloves(P)
+    : id === 'stingerGauntlet' ? skinStinger(P)
+    : id === 'brassKnuckles' ? skinKnuckles(P)
+    : id === 'rattlesnakeBoots' ? skinSnakeBoots(P)
+    : id === 'duneStriders' ? skinStriders(P)
+    : id === 'scarabPlate' ? skinScarabPlate(P)
+    : id === 'mummyWrap' ? skinMummyWrap(P)
+    : id === 'cactusJerkin' ? skinCactusJerkin(P)
+    : null;
+  if (skinned) return skinned;
   switch (id) {
     case 'sunGoggles': return goggles(fit);
     case 'thothSpecs': return thothSpecs(fit);
@@ -932,26 +1406,61 @@ const SHOW: Record<GearAnchor, V3> = {
   foot_l: [5, 0, 0], foot_r: [-5, 0, 0],
 };
 
-/**
- * One showcase arrangement of a gear item for world drops, the shop, card photos
- * and the HUD: every piece at its pivot, pairs laid side by side. `glass` holds
- * the see-through pieces separately (null if none).
- */
-export function gearDisplay(id: GearModelId, fit: GearFit = DEFAULT_FIT): { model: VoxelModel; glass: VoxelModel | null; voxelSize: number } {
-  const model = new VoxelModel('gear_show_' + id);
-  let glass: VoxelModel | null = null;
-  for (const p of gearPieces(id, fit)) {
-    const o = SHOW[p.anchor];
-    const dst = p.glass ? (glass ??= new VoxelModel('gear_show_glass_' + id)) : model;
-    dst.merge(p.model, p.at[0] + o[0], p.at[1] + o[1], p.at[2] + o[2]);
-  }
-  return { model, glass, voxelSize: GEAR_VS };
+/** showcase offsets for skinned pairs (metres, side by side) */
+const SKIN_SHOW: Record<SkinPartName, number> = { fore_l: 0.11, fore_r: -0.11, shin_l: 0.1, shin_r: -0.1, torso: 0 };
+
+export interface DisplayPart {
+  model: VoxelModel;
+  voxelSize: number;
+  /** voxel coords mapped to the origin when meshing */
+  pivot: V3;
+  /** where that origin sits in the showcase (metres) */
+  pos: V3;
+  glass: boolean;
 }
 
-/** registry form (one opaque model; glass baked in as tinted voxels) for the shop rug and model viewer */
+/**
+ * One showcase arrangement of a gear item for world drops, the shop, card photos
+ * and the HUD: every piece where it sits on the body, pairs laid side by side.
+ * Skinned pieces keep their own (body) grid.
+ */
+export function gearDisplayParts(id: GearModelId, fit: GearFit = DEFAULT_FIT): DisplayPart[] {
+  const P = fit.parts ?? referenceParts();
+  const pieces = gearPieces(id, fit);
+  const out: DisplayPart[] = [];
+  // skinned pieces: centre each body part's group on its own bounds, then set pairs apart
+  const groups = new Map<SkinPartName, { x0: number; x1: number; y0: number; y1: number; z0: number; z1: number }>();
+  for (const p of pieces) {
+    if (!p.skin) continue;
+    const b = p.model.bounds();
+    const g = groups.get(p.skin);
+    if (!g) groups.set(p.skin, { x0: b.minX, x1: b.maxX + 1, y0: b.minY, y1: b.maxY + 1, z0: b.minZ, z1: b.maxZ + 1 });
+    else Object.assign(g, { x0: Math.min(g.x0, b.minX), x1: Math.max(g.x1, b.maxX + 1), y0: Math.min(g.y0, b.minY), y1: Math.max(g.y1, b.maxY + 1), z0: Math.min(g.z0, b.minZ), z1: Math.max(g.z1, b.maxZ + 1) });
+  }
+  for (const p of pieces) {
+    if (p.skin) {
+      const part = P[p.skin];
+      const g = groups.get(p.skin)!;
+      const vs = part?.vs ?? GEAR_VS;
+      const c: V3 = [(g.x0 + g.x1) / 2, (g.y0 + g.y1) / 2, (g.z0 + g.z1) / 2];
+      out.push({ model: p.model, voxelSize: vs, pivot: p.at, pos: [(p.at[0] - c[0]) * vs + SKIN_SHOW[p.skin], (p.at[1] - c[1]) * vs, (p.at[2] - c[2]) * vs], glass: !!p.glass });
+    } else {
+      const o = SHOW[p.anchor];
+      out.push({ model: p.model, voxelSize: GEAR_VS, pivot: [0.5, 0.5, 0.5], pos: [(p.at[0] + o[0]) * GEAR_VS, (p.at[1] + o[1]) * GEAR_VS, (p.at[2] + o[2]) * GEAR_VS], glass: !!p.glass });
+    }
+  }
+  return out;
+}
+
+/** registry form (one model, one grid; glass baked in as tinted voxels) for the shop rug and model viewer */
 export function gearStatic(id: GearModelId) {
-  const d = gearDisplay(id);
-  const m = d.model.clone();
-  if (d.glass) m.merge(d.glass);
-  return { model: m, voxelSize: d.voxelSize };
+  const parts = gearDisplayParts(id);
+  const vs = parts.some((p) => p.voxelSize !== GEAR_VS) ? parts.find((p) => p.voxelSize !== GEAR_VS)!.voxelSize : GEAR_VS;
+  const m = new VoxelModel('gear_static_' + id);
+  for (const p of parts) {
+    if (p.voxelSize !== vs) continue; // (items never mix grids; guard anyway)
+    const dx = Math.round(p.pos[0] / vs - p.pivot[0]), dy = Math.round(p.pos[1] / vs - p.pivot[1]), dz = Math.round(p.pos[2] / vs - p.pivot[2]);
+    m.merge(p.model, dx, dy, dz);
+  }
+  return { model: m, voxelSize: vs };
 }

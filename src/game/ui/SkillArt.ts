@@ -33,6 +33,11 @@ const FAMILY: Record<string, string> = {
   momentum: 'board', rodeoStar: 'board', driftKing: 'board',
   license: 'star', sheriffStar: 'star', dynamiteBelt: 'dynamite',
   sunDisk: 'ra', anubisScale: 'anubis', thothLedger: 'thoth', sekhmetClaw: 'sekhmet', moonCharm: 'moon', bastetBell: 'bastet',
+  // the extra cards (run/UpgradesExtra.ts)
+  bankShot: 'bottles', sixthChamber: 'dynamite', thunderhead: 'gunstorm', deadCalm: 'horus', trickShot: 'board',
+  venomPuddles: 'venom', mirrorBrood: 'brood', scorpionWhip: 'pinch',
+  hellfireTrail: 'fire', bulletBallet: 'board', grappleSlam: 'tumbleweed', lodestone: 'coins', comboFever: 'blood',
+  thunderChamber: 'gunstorm', hellrider: 'fire', venomBrood: 'brood',
 };
 const CAT_FALLBACK: Record<string, string> = { gun: 'gun', insect: 'swarm', passive: 'oasis', gear: 'rounds', relic: 'ra', evolution: 'venom' };
 

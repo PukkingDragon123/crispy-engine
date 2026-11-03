@@ -19,7 +19,7 @@ import { RARITY, Rarity } from '../run/Upgrades';
 import type { RigInstance } from '../../engine/voxel/Rig';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
-import { GEAR_VS, GearAnchor, GearFit, GearModelId, GearPiece, DEFAULT_FIT, gearPieces, gearDisplay, Box } from '../models/props/gear';
+import { GEAR_VS, GearAnchor, GearFit, GearModelId, GearPiece, DEFAULT_FIT, gearPieces, gearDisplayParts, partsFromSpec, Box } from '../models/props/gear';
 
 export type GearSlot = 'head' | 'body' | 'hands' | 'feet' | 'tool' | 'charm';
 export type GearId = GearModelId;
@@ -126,6 +126,7 @@ function vbox(a: ArrayLike<number> | null, keep: (x: number, y: number, z: numbe
  */
 export function measureRig(rig: RigInstance): { fit: GearFit; frames: Partial<Record<GearAnchor, Frame>> } {
   const fit: GearFit = JSON.parse(JSON.stringify(DEFAULT_FIT));
+  fit.parts = partsFromSpec(rig.geo.spec);
   const frames: Partial<Record<GearAnchor, Frame>> = {};
   const S = rig.sockets, N = rig.nodes;
   const g = (m: number) => m / VS;
@@ -243,31 +244,27 @@ function pieceGeo(key: string, p: GearPiece) {
  * world drops, the HUD and card photos. `size` = the largest dimension in metres.
  */
 export function buildGearDisplay(id: GearId, opaque: THREE.Material, glass: THREE.Material, size = 0.5) {
-  const d = gearDisplay(id);
   const group = new THREE.Group();
   const inner = new THREE.Group();
   group.add(inner);
-  const meshes: THREE.Mesh[] = [];
-  for (const [k, model, mat] of [['o', d.model, opaque], ['g', d.glass, glass]] as const) {
-    if (!model || !model.map.size) continue;
-    const key = 'show:' + id + ':' + k;
+  const box = new THREE.Box3();
+  gearDisplayParts(id).forEach((d, i) => {
+    if (!d.model.map.size) return;
+    const key = 'show:' + id + ':' + i;
     let geo = geoCache.get(key);
     if (!geo) {
-      geo = buildVoxelGeometry(model, { voxelSize: VS, pivot: [0.5, 0.5, 0.5] });
+      geo = buildVoxelGeometry(d.model, { voxelSize: d.voxelSize, pivot: d.pivot });
       geoCache.set(key, geo);
     }
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.castShadow = k === 'o';
-    mesh.receiveShadow = k === 'o';
-    if (k === 'g') mesh.renderOrder = 2;
+    const mesh = new THREE.Mesh(geo, d.glass ? glass : opaque);
+    mesh.position.set(d.pos[0], d.pos[1], d.pos[2]);
+    mesh.castShadow = !d.glass;
+    mesh.receiveShadow = !d.glass;
+    if (d.glass) mesh.renderOrder = 2;
     inner.add(mesh);
-    meshes.push(mesh);
-  }
-  const box = new THREE.Box3();
-  for (const m of meshes) {
-    m.geometry.computeBoundingBox();
-    box.union(m.geometry.boundingBox!);
-  }
+    geo.computeBoundingBox();
+    box.union(geo.boundingBox!.clone().translate(mesh.position));
+  });
   const c = box.getCenter(new THREE.Vector3()), sz = box.getSize(new THREE.Vector3());
   const k = size / Math.max(0.01, sz.x, sz.y, sz.z);
   inner.position.copy(c).multiplyScalar(-k);
@@ -312,24 +309,37 @@ export class GearRig {
     const groups = new Map<string, THREE.Group>();
     const pieces = gearPieces(id, this.fit);
     pieces.forEach((p, i) => {
-      const f = this.frames[p.anchor];
-      if (!f) return;
-      const mesh = new THREE.Mesh(pieceGeo(`${id}:${i}:${this.rig.geo.spec.name}`, p), p.glass ? this.glass : this.opaque);
+      // skinned pieces live on their body part, in its grid; framed pieces on their anchor
+      const part = p.skin ? this.fit.parts?.[p.skin] : undefined;
+      const node: THREE.Object3D | undefined = p.skin ? this.rig.nodes[p.skin] : this.frames[p.anchor]?.node;
+      if (!node || (p.skin && !part)) return;
+      const gkey = `${id}:${i}:${this.rig.geo.spec.name}`;
+      let geo = geoCache.get(gkey);
+      if (!geo) {
+        geo = part ? buildVoxelGeometry(p.model, { voxelSize: part.vs, pivot: p.at }) : pieceGeo(gkey, p);
+        geoCache.set(gkey, geo);
+      }
+      const mesh = new THREE.Mesh(geo, p.glass ? this.glass : this.opaque);
       mesh.castShadow = !p.glass;
       mesh.receiveShadow = !p.glass;
       if (p.glass) mesh.renderOrder = 2;
       const key = p.group ?? (p.joint ? p.name : '');
-      let holder = key ? groups.get(p.anchor + ':' + key) : undefined;
+      const gk = (p.skin ?? p.anchor) + ':' + key;
+      let holder = key ? groups.get(gk) : undefined;
       if (!holder) {
         holder = new THREE.Group();
         holder.name = 'gear:' + id + ':' + (key || p.name);
-        _v.set(p.at[0], p.at[1], p.at[2]).multiplyScalar(VS);
-        if (f.rotY) _v.applyAxisAngle(_v2.set(0, 1, 0), f.rotY);
-        holder.position.copy(f.pos).add(_v);
-        holder.rotation.y = f.rotY ?? 0;
-        f.node.add(holder);
+        if (part) holder.position.set((p.at[0] - part.pivot[0]) * part.vs, (p.at[1] - part.pivot[1]) * part.vs, (p.at[2] - part.pivot[2]) * part.vs);
+        else {
+          const f = this.frames[p.anchor]!;
+          _v.set(p.at[0], p.at[1], p.at[2]).multiplyScalar(VS);
+          if (f.rotY) _v.applyAxisAngle(_v2.set(0, 1, 0), f.rotY);
+          holder.position.copy(f.pos).add(_v);
+          holder.rotation.y = f.rotY ?? 0;
+        }
+        node.add(holder);
         w.roots.push(holder);
-        if (key) groups.set(p.anchor + ':' + key, holder);
+        if (key) groups.set(gk, holder);
         if (p.joint) {
           const j: Joint = { kind: p.joint, node: holder, rest: holder.position.clone(), a: new THREE.Vector2(), w: new THREE.Vector2(), prev: null, pv: new THREE.Vector3(), t: Math.random() * 9 };
           w.joints.push(j);

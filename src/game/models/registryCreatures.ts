@@ -18,3 +18,13 @@ export const CREATURE_MODELS: Record<string, ModelEntry> = {
   meerkat_stall: () => meerkatStallModel(),
   giant_jerboa: () => giantJerboaRig(),
 };
+
+// ---- the hideout toads (creatures/toad.ts): Mama Toad by the hearth and her toadlets
+import { mamaToadRig, toadletRig } from './creatures/toad';
+export const TOAD_MODELS: Record<string, ModelEntry> = {
+  mama_toad: () => mamaToadRig(undefined),
+  toadlet: () => toadletRig({ variant: 0 }),
+  toadlet_v1: () => toadletRig({ variant: 1 }),
+  toadlet_v2: () => toadletRig({ variant: 2 }),
+  toadlet_v3: () => toadletRig({ variant: 3 }),
+};
