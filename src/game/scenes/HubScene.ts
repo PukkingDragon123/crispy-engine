@@ -2529,11 +2529,17 @@ export class HubScene implements GameScene {
     this.tip.style.display = 'none';
     this.prompt.style.opacity = '0';
     document.body.style.cursor = 'default';
+    // the hideout's own screen furniture steps aside while the book is open
+    const els = [this.bank, this.hint, this.title, this.prompt, this.bubble, this.tip, ...this.arrows.map((a) => a.label)];
+    const was = els.map((e) => e.style.visibility);
+    for (const e of els) e.style.visibility = 'hidden';
     const book = new CodexBook(this.engine, {
       hero: this.heroSpec,
       back: { scene: this.scene, camera: this.camera },
       onClosed: () => {
         if (this.book === book) this.book = null;
+        els.forEach((e, i) => (e.style.visibility = was[i]));
+        this.updateBank();
         book.dispose();
         this.active = null;
         this.engine.input.setWantLock(false);

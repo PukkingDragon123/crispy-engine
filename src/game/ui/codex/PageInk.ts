@@ -76,6 +76,8 @@ class Pen {
   c: CanvasRenderingContext2D;
   y = M;
   links: Link[] = [];
+  /** type scale (long entries step down a size to fit the page) */
+  k = 1;
   constructor(public cv: HTMLCanvasElement) {
     cv.width = INK_W;
     cv.height = INK_H;
@@ -87,8 +89,13 @@ class Pen {
   font(px: number) {
     this.c.font = `${px}px Alagard`;
   }
+  /** a design size → this page's size */
+  z(px: number) {
+    return Math.round(px * this.k);
+  }
   text(s: string, px: number, color = INK, align: CanvasTextAlign = 'center', x?: number, adv = 1.28) {
     const c = this.c;
+    px = this.z(px);
     this.font(px);
     c.fillStyle = color;
     c.textAlign = align;
@@ -97,12 +104,14 @@ class Pen {
   }
   /** the biggest size (≤ px) that fits the line */
   fit(s: string, px: number, maxW = INK_W - M * 2) {
+    px = this.z(px);
     this.font(px);
     while (px > 14 && this.c.measureText(s).width > maxW) this.font(--px);
-    return px;
+    return px / this.k;
   }
   para(s: string, px: number, color = INK, dropCap = false) {
     const c = this.c;
+    px = this.z(px);
     this.font(px);
     const lh = Math.round(px * 1.3);
     let indent = 0;
@@ -131,6 +140,7 @@ class Pen {
   /** label ......... value */
   leader(k: string, v: string, px = 22, faded = false) {
     const c = this.c;
+    px = this.z(px);
     this.font(px);
     const x0 = M, x1 = INK_W - M;
     c.textAlign = 'left';
@@ -153,14 +163,14 @@ class Pen {
   }
   folio(n: number, left: boolean) {
     const c = this.c;
-    this.font(20);
+    this.font(24);
     c.fillStyle = SEPIA;
     c.textAlign = left ? 'left' : 'right';
     c.fillText(`- ${n} -`, left ? M : INK_W - M, INK_H - M + 6);
   }
   head(s: string, left: boolean) {
     const c = this.c;
-    this.font(18);
+    this.font(21);
     c.fillStyle = FADE;
     c.textAlign = left ? 'left' : 'right';
     c.fillText(s.toUpperCase(), left ? M : INK_W - M, M - 30);
@@ -266,8 +276,8 @@ export function paintPage(spec: PageSpec, folio: number, left: boolean, cv = doc
         }
       }
       const avail = INK_H - M - 30 - p.y;
-      const lh = Math.max(26, Math.min(40, Math.floor(avail / Math.max(1, rows.length))));
-      const px = Math.min(25, Math.round(lh * 0.66));
+      const lh = Math.max(28, Math.min(46, Math.floor(avail / Math.max(1, rows.length))));
+      const px = Math.min(29, Math.round(lh * 0.7));
       for (const e of rows) {
         const f = Codex.flags(e.key);
         const known = (f & (F_SEEN | F_CLAIM)) !== 0;
@@ -291,21 +301,21 @@ export function paintPage(spec: PageSpec, folio: number, left: boolean, cv = doc
       const sec = secs.find((s) => s.cat === e.cat)!;
       const known = Codex.known(e.key);
       p.head(sec.name, true);
-      p.y = Math.round(INK_H * 0.04);
-      p.text(`PLATE ${ROMAN(e.n)}.`, 20, SEPIA);
-      p.y = Math.round(INK_H * PLATE_RECT[3]) + 18;
+      p.y = Math.round(INK_H * 0.045);
+      p.text(`PLATE ${ROMAN(e.n)}.`, 24, SEPIA);
+      p.y = Math.round(INK_H * PLATE_RECT[3]) + 20;
       const nm = known ? e.name : 'Unknown';
-      p.text(nm, p.fit(nm, 34), INK);
-      p.text(known ? (e.cat === 'blueprint' ? '- drawn to scale -' : e.cat === 'place' ? '- as it stands -' : '- as drawn from life -') : '- glimpsed in the dark -', 19, SEPIA);
-      p.y += 10;
+      p.text(nm, p.fit(nm, 46), INK);
+      p.text(known ? (e.cat === 'blueprint' ? '- drawn to scale -' : e.cat === 'place' ? '- as it stands -' : '- as drawn from life -') : '- glimpsed in the dark -', 24, SEPIA);
+      p.y += 12;
       if (known && e.cat === 'bounty') {
         const k = Codex.kills(e.id);
-        p.text(k > 0 ? `Laid low: ${k}` : 'Not yet laid low', 22, k > 0 ? INK : FADE);
-        if (k > 0) p.text(tally(k), 22, RED);
-      } else if (known && e.cat === 'boss') p.text(Codex.flags(e.key) & F_CLAIM ? 'Defeated.' : 'Met, but not beaten.', 22, Codex.flags(e.key) & F_CLAIM ? INK : RED);
+        p.text(k > 0 ? `Laid low: ${k}` : 'Not yet laid low', 28, k > 0 ? INK : FADE);
+        if (k > 0) p.text(tally(k), 28, RED);
+      } else if (known && e.cat === 'boss') p.text(Codex.flags(e.key) & F_CLAIM ? 'Defeated.' : 'Met, but not beaten.', 28, Codex.flags(e.key) & F_CLAIM ? INK : RED);
       if (known && (e.enemy || (e.model && e.cat !== 'place'))) {
-        p.y = INK_H - M - 44;
-        p.text(e.enemy || e.cat === 'boss' || e.cat === 'wildlife' || e.cat === 'legend' ? 'hold the cursor on the plate to provoke it' : 'hold the cursor on the plate to turn it', 17, FADE);
+        p.y = INK_H - M - 50;
+        p.text(e.enemy || e.cat === 'boss' || e.cat === 'wildlife' || e.cat === 'legend' ? 'hold the cursor on the plate to provoke it' : 'hold the cursor on the plate to turn it', 21, FADE);
       }
       p.folio(folio, true);
       break;
@@ -315,50 +325,58 @@ export function paintPage(spec: PageSpec, folio: number, left: boolean, cv = doc
       const sec = secs.find((s) => s.cat === e.cat)!;
       const f = Codex.flags(e.key);
       const known = (f & (F_SEEN | F_CLAIM)) !== 0;
-      p.head(`${sec.name}  ·  No. ${e.n}`, false);
-      p.y = 60;
       if (!known) {
-        p.y = 120;
-        p.text('? ? ?', 70, INK);
-        p.text('Not yet recorded.', 24, SEPIA);
-        p.rule();
-        p.y += 20;
-        p.text('RUMOUR HAS IT', 20, RED);
-        p.para(e.hint, 24, SEPIA);
-        p.y += 30;
-        p.text('WORTH', 20, SEPIA);
-        if (e.pts.sight) p.leader('First sighting', `+${e.pts.sight}`, 22, true);
-        if (e.pts.kill) p.leader(e.cat === 'boss' ? 'Defeated' : e.cat === 'bounty' ? 'First kill' : e.cat === 'blueprint' ? 'Owned' : 'Found', `+${e.pts.kill}`, 22, true);
-        if (e.pts.master) p.leader(`Mastered (${MASTER_KILLS} kills)`, `+${e.pts.master}`, 22, true);
+        p.head(`${sec.name}  ·  No. ${e.n}`, false);
+        p.y = 130;
+        p.text('? ? ?', 84, INK);
+        p.text('Not yet recorded.', 30, SEPIA);
+        p.rule('~  *  ~', SEPIA, 26);
+        p.y += 24;
+        p.text('RUMOUR HAS IT', 24, RED);
+        p.para(e.hint, 30, SEPIA);
+        p.y += 34;
+        p.text('WORTH', 24, SEPIA);
+        if (e.pts.sight) p.leader('First sighting', `+${e.pts.sight}`, 27, true);
+        if (e.pts.kill) p.leader(e.cat === 'boss' ? 'Defeated' : e.cat === 'bounty' ? 'First kill' : e.cat === 'blueprint' ? 'Learned / owned' : 'Found', `+${e.pts.kill}`, 27, true);
+        if (e.pts.master) p.leader(`Mastered (${MASTER_KILLS} kills)`, `+${e.pts.master}`, 27, true);
         p.folio(folio, false);
         break;
       }
-      p.text(e.name.toUpperCase(), p.fit(e.name.toUpperCase(), 48), INK, 'center', undefined, 1.12);
-      p.text(`"${e.title}"`, p.fit(`"${e.title}"`, 23), SEPIA);
-      p.rule();
-      p.para(e.lore, 22, INK, true);
-      if (e.stats?.length) {
-        p.y += 4;
-        for (const [k, v] of e.stats) p.leader(k, v, 21);
-      }
-      if (e.moves?.length) {
-        p.y += 6;
-        p.text('KNOWN MOVES', 18, SEPIA);
-        p.para(e.moves.map((m) => `"${m}"`).join('   '), 21, RED);
-      }
-      if (e.weak) {
-        p.text('WEAKNESS', 18, SEPIA);
-        p.para(e.weak, 21, INK);
+      const limit = INK_H - M - 70;
+      for (const k of [1, 0.9, 0.8, 0.7, 0.62]) {
+        p.c.clearRect(0, 0, INK_W, INK_H);
+        p.links = [];
+        p.k = k;
+        p.head(`${sec.name}  ·  No. ${e.n}`, false);
+        p.y = 58;
+        p.text(e.name.toUpperCase(), p.fit(e.name.toUpperCase(), 60), INK, 'center', undefined, 1.1);
+        p.text(`"${e.title}"`, p.fit(`"${e.title}"`, 29), SEPIA);
+        p.rule('~  *  ~', SEPIA, 24);
+        p.para(e.lore, 29, INK, true);
+        if (e.stats?.length) {
+          p.y += 4;
+          for (const [a, b] of e.stats) p.leader(a, b, 26);
+        }
+        if (e.moves?.length) {
+          p.y += 8;
+          p.text('KNOWN MOVES', 22, SEPIA);
+          p.para(e.moves.map((m) => `"${m}"`).join('   '), 26, RED);
+        }
+        if (e.weak) {
+          p.text('WEAKNESS', 22, SEPIA);
+          p.para(e.weak, 26, INK);
+        }
+        if (p.y <= limit) break;
       }
       // the points it was worth, achieved in ink, the rest in pencil
-      p.y = Math.max(p.y + 4, INK_H - M - 120);
+      p.y = Math.max(p.y + 4, INK_H - M - 64);
       const parts: [string, number | undefined, boolean][] = [
         ['Seen', e.pts.sight, !!(f & F_SEEN)],
         [e.cat === 'boss' ? 'Beaten' : e.cat === 'bounty' ? 'Slain' : e.cat === 'blueprint' ? 'Owned' : 'Found', e.pts.kill, !!(f & F_CLAIM)],
         ['Mastered', e.pts.master, !!(f & F_MASTER)],
       ];
       const c = p.c;
-      p.font(20);
+      p.font(24);
       let x = M;
       c.textAlign = 'left';
       for (const [lab, v, on] of parts) {

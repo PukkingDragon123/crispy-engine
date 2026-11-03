@@ -231,6 +231,9 @@ export class Plate {
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.look);
     this.camera.updateProjectionMatrix();
+    // the painted backdrop always sits inside the far plane
+    this.back.position.copy(this.camPos);
+    this.back.scale.setScalar((this.camera.far * 0.85) / 40);
     // a warm key from the front-left, a cool rim from behind
     const L = Math.max(1, dist);
     this.key.position.set(c.x - L * 0.8, c.y + L * 1.2, c.z + L * 0.9);
