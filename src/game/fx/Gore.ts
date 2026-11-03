@@ -5,6 +5,9 @@
 //  - arterial jets that pump in heartbeats (a fountain from a neck), droplets
 //    stretched by speed, mist puffs, landing splats soaked into the sand
 //  - spreading pools under collapsed corpses, voxel gibs for violent deaths
+//  - skulls that burst on a crit headshot (bone chips, red mist, a neck fountain),
+//    exit-wound sprays through the back of a shot body, bodies torn at the waist
+//  - every count is capped so a horde can die all at once
 //  - every creature bleeds what it is made of: blood, sand, embalming dust,
 //    green ichor, acid
 import * as THREE from 'three';
@@ -102,7 +105,11 @@ function capModel(kind: 0 | 1 | 2) {
   return m;
 }
 
-const MAXCAP = 96;
+const MAXCAP = 128;
+/** live arterial jets (oldest stop first) */
+const MAXJETS = 40;
+/** live spreading pools */
+const MAXPOOLS = 32;
 
 interface Holder {
   /** follow a live / dying enemy part: resolved through partWorld */
@@ -205,7 +212,10 @@ export class Gore {
     /** the flying limb piece + its world matrix at the cut, for a cap on the cut end */
     piece?: { pos: THREE.Vector3; quat: THREE.Quaternion; scale: number; life: number } | null;
     pieceW?: THREE.Matrix4 | null;
+    /** stump jet strength multiplier (a burst skull pumps a fountain) */
+    fountain?: number;
   }) {
+    const fo = o.fountain ?? 1;
     const F = FLUIDS[o.fluid];
     const scale = Math.max(0.35, Math.min(2.6, (o.size * 1.15) / 0.22));
     // the stump on the body
@@ -216,16 +226,16 @@ export class Gore {
       // the jet rides the stump: local point + local direction in the holder frame
       const lp = o.joint.clone().applyMatrix4(inv);
       const ld = o.dir.clone().transformDirection(inv);
-      this.jets.push({
+      this.addJet({
         h: { e: o.e, part: o.holder, rag: null },
         lp,
         ld,
         t: 0,
-        life: o.head ? 3.2 : 1.6 + Math.random() * 0.6,
-        power: o.head ? 1.6 : 1,
-        speed: o.head ? 7.5 : 4.2,
+        life: (o.head ? 3.8 : 2.0 + Math.random() * 0.8) * (fo > 1 ? 1.25 : 1),
+        power: (o.head ? 1.7 : 1.15) * fo,
+        speed: (o.head ? 9.2 : 5.4) * (fo > 1 ? 1.15 : 1),
         fluid: o.fluid,
-        size: Math.min(1.6, scale),
+        size: Math.min(1.7, scale),
         acc: 0,
         markT: 0,
       });
@@ -237,13 +247,16 @@ export class Gore {
       const capW = this.capMatrix(o.joint, back, scale, _m);
       const h: Holder = { e: null, part: -1, rag: o.piece };
       this.addCap(h, new THREE.Matrix4().multiplyMatrices(inv, capW), F.cap);
-      this.jets.push({ h, lp: o.joint.clone().applyMatrix4(inv), ld: back.clone().transformDirection(inv), t: 0, life: 1.1, power: 0.45, speed: 1.6, fluid: o.fluid, size: Math.min(1.2, scale), acc: 0, markT: 0 });
+      this.addJet({ h, lp: o.joint.clone().applyMatrix4(inv), ld: back.clone().transformDirection(inv), t: 0, life: 1.6, power: 0.55, speed: 2.2, fluid: o.fluid, size: Math.min(1.2, scale), acc: 0, markT: 0 });
     }
     // the burst at the moment of the cut
     const p = this.ctx.particles;
-    p.emit({ pos: o.joint, count: Math.round(16 * Math.min(1.5, scale)), vel: { x: o.dir.x * 3, y: 2.2, z: o.dir.z * 3 }, spread: 3.2, gravity: F.gravity, drag: 0.6, life: [0.4, 0.9], size: [0.06, 0.03], sprite: F.sprite, color: F.cols, ground: true, stretch: 0.018 });
-    p.emit({ pos: o.joint, count: 2, vel: { x: o.dir.x * 0.8, y: 0.6, z: o.dir.z * 0.8 }, spread: 0.5, life: [0.3, 0.55], size: [0.1, 0.26], sprite: ['puff0', 'puff1'], color: F.mist, alpha: 0.32, drag: 2.5 });
-    if (F.mark >= 0) this.ctx.events.emit('groundMark', o.joint.x + o.dir.x * 0.6, o.joint.z + o.dir.z * 0.6, 0.35 + Math.random() * 0.25, F.mark);
+    p.emit({ pos: o.joint, count: Math.round(22 * Math.min(1.5, scale)), vel: { x: o.dir.x * 3.6, y: 2.6, z: o.dir.z * 3.6 }, spread: 3.6, gravity: F.gravity, drag: 0.6, life: [0.45, 1.0], size: [0.065, 0.032], sprite: F.sprite, color: F.cols, ground: true, stretch: 0.018 });
+    p.emit({ pos: o.joint, count: 3, vel: { x: o.dir.x * 0.8, y: 0.6, z: o.dir.z * 0.8 }, spread: 0.6, life: [0.35, 0.7], size: [0.12, 0.34], sprite: ['puff0', 'puff1'], color: F.mist, alpha: 0.36, drag: 2.5 });
+    if (F.mark >= 0) {
+      this.ctx.events.emit('groundMark', o.joint.x + o.dir.x * 0.6, o.joint.z + o.dir.z * 0.6, 0.45 + Math.random() * 0.3, F.mark);
+      this.ctx.events.emit('groundMark', o.joint.x + o.dir.x * 1.5, o.joint.z + o.dir.z * 1.5, 0.22 + Math.random() * 0.2, F.mark);
+    }
   }
 
   /** move every cap / jet held by (e, part) onto its ragdoll piece */
@@ -252,20 +265,70 @@ export class Gore {
     for (const j of this.jets) if (j.h.e === e && j.h.part === part) j.h = { e: null, part: -1, rag: piece };
   }
 
-  /** a pool spreading under a corpse */
+  /** a pool spreading under a corpse (slow seep, soaked deep into the sand) */
   pool(x: number, z: number, r: number, fluid: Fluid) {
     if (FLUIDS[fluid].mark < 0) return;
-    if (this.pools.length > 24) this.pools.shift();
-    this.pools.push({ x, z, t: 0, r, fluid, next: 0 });
+    if (this.pools.length >= MAXPOOLS) this.pools.shift();
+    this.pools.push({ x, z, t: 0, r: r * 1.35, fluid, next: 0 });
+  }
+
+  private addJet(j: Jet) {
+    if (this.jets.length >= MAXJETS) this.jets.shift();
+    this.jets.push(j);
+  }
+
+  /**
+   * A skull bursting on a crit headshot: bone chips and voxel gibs blown out
+   * along the shot, a hanging cloud of mist, a spray painted on the sand
+   * behind. (The neck stump + fountain come from sever(head, fountain).)
+   */
+  skullBurst(at: { x: number; y: number; z: number }, dir: { x: number; z: number }, fluid: Fluid, scale = 1) {
+    const F = FLUIDS[fluid];
+    const P = this.ctx.particles;
+    const bone = [0xf3e8cf, 0xe1d0ab, 0xc9b994];
+    const wet = fluid === 'blood' || fluid === 'acid' ? [0xd88a8a, 0xb84a4a, 0x8a1010] : F.gib;
+    this.ctx.events.emit('gibs', at.x, at.y, at.z, Math.round(10 * scale), 0.055 * scale, [...bone, ...wet], 6.5, 4.5);
+    this.ctx.events.emit('gibs', at.x + dir.x * 0.2, at.y, at.z + dir.z * 0.2, Math.round(6 * scale), 0.035 * scale, F.gib, 8, 3);
+    P.emit({ pos: at, count: 12, vel: { x: dir.x * 5, y: 3, z: dir.z * 5 }, spread: 5, life: [0.6, 1.2], size: [0.06, 0.05], sprite: ['bone', 'pebble'], color: bone, gravity: 15, ground: true, bounce: 0.3, rot: 6, rotSpeed: 12 });
+    P.emit({ pos: at, count: Math.round(40 * scale), vel: { x: dir.x * 5.5, y: 2.6, z: dir.z * 5.5 }, spread: 5.5, gravity: F.gravity, drag: 0.5, life: [0.5, 1.2], size: [0.075, 0.035], sprite: F.sprite, color: F.cols, ground: true, stretch: 0.022 });
+    P.emit({ pos: at, count: 6, vel: { x: dir.x * 1.6, y: 0.5, z: dir.z * 1.6 }, spread: 1.2, life: [0.9, 1.8], size: [0.25, 1.1 * scale], sprite: ['puff0', 'puff1', 'puff2', 'cloud0'], color: F.mist, alpha: 0.42, drag: 2.4, rot: 6, rotSpeed: 0.8, gravity: 0.6 });
+    if (F.mark >= 0)
+      for (let i = 0; i < 6; i++) {
+        const k = 0.6 + i * 0.55 + Math.random() * 0.4;
+        this.ctx.events.emit('groundMark', at.x + dir.x * k + (Math.random() - 0.5) * 0.8, at.z + dir.z * k + (Math.random() - 0.5) * 0.8, 0.5 - i * 0.05 + Math.random() * 0.2, F.mark);
+      }
+  }
+
+  /** a round through and out the back: a cone of droplets and mist along the shot, painted on the sand behind */
+  exitWound(at: { x: number; y: number; z: number }, dir: { x: number; y: number; z: number }, fluid: Fluid, power = 1) {
+    const F = FLUIDS[fluid];
+    const P = this.ctx.particles;
+    const s = 4.5 * power;
+    P.emit({ pos: at, count: Math.round(14 * power), vel: { x: dir.x * s, y: dir.y * s + 1.2, z: dir.z * s }, spread: 1.8, gravity: F.gravity, drag: 0.7, life: [0.35, 0.8], size: [0.055, 0.028], sprite: F.sprite, color: F.cols, ground: true, stretch: 0.02 });
+    P.emit({ pos: at, count: 1, vel: { x: dir.x * 2, y: 0.3, z: dir.z * 2 }, spread: 0.4, life: [0.3, 0.6], size: [0.1, 0.4 * power], sprite: ['puff0', 'puff1'], color: F.mist, alpha: 0.3, drag: 3 });
+    if (F.mark >= 0) this.ctx.events.emit('groundMark', at.x + dir.x * (1.2 + power), at.z + dir.z * (1.2 + power), 0.22 + 0.12 * power + Math.random() * 0.12, F.mark);
+  }
+
+  /** a body torn at the waist: a gush, strings of offal and a wide soak */
+  split(at: { x: number; y: number; z: number }, dir: { x: number; z: number }, fluid: Fluid, scale = 1) {
+    const F = FLUIDS[fluid];
+    const offal = fluid === 'blood' || fluid === 'acid' ? [0xc86a6a, 0xa84848, 0xe0a090, 0x7a1010, 0xd8b8a0] : F.gib;
+    this.ctx.events.emit('gibs', at.x, at.y, at.z, Math.round(12 * scale), 0.06 * scale, offal, 4.5, 3.5);
+    this.ctx.particles.emit({ pos: at, count: Math.round(34 * scale), vel: { x: dir.x * 2, y: 3.2, z: dir.z * 2 }, spread: 4.5, gravity: F.gravity, drag: 0.5, life: [0.5, 1.2], size: [0.075, 0.035], sprite: F.sprite, color: F.cols, ground: true, stretch: 0.02 });
+    this.ctx.particles.emit({ pos: at, count: 4, spread: 1.4, up: 0.6, life: [0.6, 1.3], size: [0.25, 0.8], sprite: ['puff0', 'puff1', 'cloud1'], color: F.mist, alpha: 0.34, drag: 2.2, rot: 6, rotSpeed: 0.6 });
+    if (F.mark >= 0) {
+      for (let i = 0; i < 5; i++) this.ctx.events.emit('groundMark', at.x + (Math.random() - 0.5) * 2.4, at.z + (Math.random() - 0.5) * 2.4, 0.35 + Math.random() * 0.45, F.mark);
+      this.pool(at.x, at.z, 0.9 * scale, fluid);
+    }
   }
 
   /** voxel chunks for violent deaths */
   gibs(at: { x: number; y: number; z: number }, fluid: Fluid, n = 10, power = 1) {
     this.ctx.events.emit('gibs', at.x, at.y, at.z, n, 0.07, FLUIDS[fluid].gib, 5 + power * 3, 3 + power * 2);
     const F = FLUIDS[fluid];
-    this.ctx.particles.emit({ pos: at, count: Math.round(26 * power), spread: 5, up: 3, gravity: F.gravity, drag: 0.5, life: [0.5, 1.1], size: [0.07, 0.035], sprite: F.sprite, color: F.cols, ground: true, stretch: 0.02 });
-    this.ctx.particles.emit({ pos: at, count: 3, spread: 1.2, up: 0.8, life: [0.4, 0.8], size: [0.2, 0.5], sprite: ['puff0', 'puff1'], color: F.mist, alpha: 0.3, drag: 2.2 });
-    if (F.mark >= 0) for (let i = 0; i < 4; i++) this.ctx.events.emit('groundMark', at.x + (Math.random() - 0.5) * 3, at.z + (Math.random() - 0.5) * 3, 0.3 + Math.random() * 0.5, F.mark);
+    this.ctx.particles.emit({ pos: at, count: Math.round(32 * power), spread: 5.5, up: 3.4, gravity: F.gravity, drag: 0.5, life: [0.5, 1.2], size: [0.075, 0.035], sprite: F.sprite, color: F.cols, ground: true, stretch: 0.02 });
+    this.ctx.particles.emit({ pos: at, count: 4, spread: 1.3, up: 0.8, life: [0.5, 1.0], size: [0.22, 0.65], sprite: ['puff0', 'puff1'], color: F.mist, alpha: 0.34, drag: 2.2 });
+    if (F.mark >= 0) for (let i = 0; i < 6; i++) this.ctx.events.emit('groundMark', at.x + (Math.random() - 0.5) * 3.4, at.z + (Math.random() - 0.5) * 3.4, 0.35 + Math.random() * 0.55, F.mark);
   }
 
   private capMatrix(at: THREE.Vector3, dir: THREE.Vector3, scale: number, out: THREE.Matrix4) {
@@ -316,25 +379,25 @@ export class Gore {
       _d.copy(j.ld).transformDirection(_m);
       const fade = Math.pow(1 - j.t / j.life, 1.4);
       const beat = 0.25 + 0.75 * Math.pow(Math.max(0, Math.sin(j.t * 9.5)), 2);
-      const rate = 70 * j.power * fade * beat;
+      const rate = 82 * j.power * fade * beat;
       j.acc += rate * dt;
       const cnt = Math.floor(j.acc);
       if (cnt > 0) {
         j.acc -= cnt;
         const sp = j.speed * (0.55 + beat * 0.6) * (0.5 + fade * 0.5);
-        P.emit({ pos: _v, count: cnt, vel: { x: _d.x * sp, y: _d.y * sp + 0.6, z: _d.z * sp }, spread: 0.45 + (1 - beat) * 0.35, gravity: F.gravity, drag: 0.4, life: [0.45, 0.9], size: [0.05 * j.size, 0.028 * j.size], sprite: F.sprite, color: F.cols, ground: true, stretch: 0.02 });
+        P.emit({ pos: _v, count: cnt, vel: { x: _d.x * sp, y: _d.y * sp + 0.9, z: _d.z * sp }, spread: 0.45 + (1 - beat) * 0.35, gravity: F.gravity, drag: 0.35, life: [0.5, 1.0], size: [0.058 * j.size, 0.03 * j.size], sprite: F.sprite, color: F.cols, ground: true, stretch: 0.02 });
         if (Math.random() < 0.05 * j.power) P.emit({ pos: _v, count: 1, vel: { x: _d.x * 1.2, y: 0.4, z: _d.z * 1.2 }, spread: 0.3, life: [0.25, 0.5], size: [0.08, 0.2], sprite: ['puff0', 'puff1'], color: F.mist, alpha: 0.28, drag: 2.5 });
       }
       // where the stream lands: soak the sand
       j.markT -= dt;
-      if (F.mark >= 0 && j.markT <= 0 && beat > 0.5) {
-        j.markT = 0.14;
+      if (F.mark >= 0 && j.markT <= 0 && beat > 0.45) {
+        j.markT = 0.09;
         const sp = j.speed * 0.9;
-        const vy = _d.y * sp + 0.6;
+        const vy = _d.y * sp + 0.9;
         const g = F.gravity;
         const hgt = Math.max(0.05, _v.y - ctx.world.groundAt(_v.x, _v.z));
         const tl = (vy + Math.sqrt(vy * vy + 2 * g * hgt)) / g;
-        ctx.events.emit('groundMark', _v.x + _d.x * sp * tl, _v.z + _d.z * sp * tl, 0.12 + Math.random() * 0.14 * j.power, F.mark);
+        ctx.events.emit('groundMark', _v.x + _d.x * sp * tl, _v.z + _d.z * sp * tl, 0.15 + Math.random() * 0.2 * Math.min(2, j.power), F.mark);
       }
     }
     // pools
@@ -343,11 +406,11 @@ export class Gore {
       p.t += dt;
       p.next -= dt;
       if (p.next <= 0) {
-        p.next = 0.12;
-        const k = 1 - Math.pow(1 - Math.min(1, p.t / 1.6), 2);
+        p.next = 0.14;
+        const k = 1 - Math.pow(1 - Math.min(1, p.t / 3), 2);
         ctx.events.emit('groundMark', p.x, p.z, p.r * (0.3 + 0.7 * k), FLUIDS[p.fluid].mark);
       }
-      if (p.t > 1.7) this.pools.splice(i, 1);
+      if (p.t > 3.1) this.pools.splice(i, 1);
     }
   }
 

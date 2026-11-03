@@ -1,5 +1,6 @@
-// Bounty chips (XP), gold coins, health bandages: physics pop-out, magnet pull,
-// satisfying pitch-climbing pickup sounds.
+// Gold coins, health bandages, boost: physics pop-out, magnet pull, satisfying
+// pitch-climbing pickup sounds. Bounty (XP) is no longer a pickup: a kill pays
+// it straight onto the bounty meter with a small gold number over the body.
 import * as THREE from 'three';
 import { SpriteBatch } from '../fx/SpriteBatch';
 import type { Ctx } from '../Ctx';
@@ -31,12 +32,21 @@ export class Pickups {
   private pitchStep = 0;
   private pitchTimer = 0;
   onCollect?: (k: PickupKind, v: number, at: THREE.Vector3) => void;
+  /** bounty awarded straight to the meter (wire to RunScene.addBounty); falls back to onCollect('bounty') */
+  onBounty?: (v: number, at: THREE.Vector3) => void;
+  private bountyPitch = 0;
+  private bountyPitchT = 0;
+  private hidden = new THREE.Vector3();
 
   constructor(private ctx: Ctx, private getPlayer: () => { pos: THREE.Vector3; stats: { get(s: string): number }; alive: boolean }) {
     ctx.scene.add(this.batch.mesh);
   }
 
   drop(kind: PickupKind, value: number, at: { x: number; y: number; z: number }, n = 1) {
+    if (kind === 'bounty' || kind === 'bountyBig') {
+      this.dropBounty(value * n, at);
+      return;
+    }
     for (let i = 0; i < n; i++) {
       const a = rnd.next() * Math.PI * 2;
       const s = 1.5 + rnd.next() * 3;
@@ -45,15 +55,29 @@ export class Pickups {
     if (this.list.length > 900) this.list.splice(0, this.list.length - 900);
   }
 
-  /** split a bounty value into chips */
+  /**
+   * Pay a bounty straight onto the meter: a small gold number rises from the
+   * body with a couple of glints and a soft chip click (pitch climbs on
+   * multi-kills). Nothing to collect.
+   */
   dropBounty(total: number, at: { x: number; y: number; z: number }) {
-    let v = total;
-    while (v >= 10) {
-      this.drop('bountyBig', 10, at);
-      v -= 10;
+    if (!(total > 0)) return;
+    const ctx = this.ctx;
+    const p = new THREE.Vector3(at.x, at.y + 1.15, at.z);
+    const big = total >= 20;
+    ctx.fx.number(p, '+' + Math.max(1, Math.round(total)), big ? 0xffc94a : 0xf0b43c, big ? 0.82 : 0.6, 0.85);
+    ctx.particles.emit({ pos: p, count: big ? 4 : 2, spread: 0.7, up: 0.8, life: [0.25, 0.55], size: [0.1, 0.02], sprite: 'star4', additive: true, color: [0xffd36b, 0xf5c84a, 0xfff2c0], jitter: 0.2 });
+    this.bountyPitch = this.bountyPitchT > 0 ? Math.min(this.bountyPitch + 1, 12) : 0;
+    this.bountyPitchT = 0.7;
+    ctx.sfx('pickup_bounty', null, big ? 0.22 : 0.14, 1 + this.bountyPitch * 0.03);
+    if (this.onBounty) this.onBounty(total, p);
+    else {
+      // legacy wiring: onCollect('bounty') also flies a HUD chip from `at`, so hand it an
+      // anchor behind the camera (the HUD skips off-screen anchors) and only the meter fills
+      const cam = ctx.camera;
+      cam.getWorldDirection(this.hidden).multiplyScalar(-6).add(cam.position);
+      this.onCollect?.('bounty', total, this.hidden);
     }
-    const chips = Math.max(1, Math.round(v));
-    for (let i = 0; i < Math.min(chips, 6); i++) this.drop('bounty', v / Math.min(chips, 6), at);
   }
 
   /** pull every pickup to the player (end of wave vacuum) */
@@ -68,6 +92,7 @@ export class Pickups {
     const ctx = this.ctx;
     this.pitchTimer -= dt;
     if (this.pitchTimer <= 0) this.pitchStep = 0;
+    this.bountyPitchT -= dt;
     this.batch.begin();
     for (let i = this.list.length - 1; i >= 0; i--) {
       const p = this.list[i];
