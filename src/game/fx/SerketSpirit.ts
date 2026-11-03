@@ -670,12 +670,12 @@ export function spiritMotes(p: Particles, at: { x: number; y: number; z: number 
 }
 
 /** the guide's size beside a rider (the summoned goddess is ~1.35) */
-export const GUIDE_SCALE = 0.6;
+export const GUIDE_SCALE = 0.72;
 /** where Serket floats as a guide: ahead of and left of the camera's view of the rider, hovering over the sand */
 export function guideSpot(pos: THREE.Vector3, camYaw: number, groundAt: (x: number, z: number) => number, out = { pos: new THREE.Vector3(), yaw: 0, scale: GUIDE_SCALE }) {
   const fx = Math.sin(camYaw), fz = Math.cos(camYaw);
   const lx = Math.cos(camYaw), lz = -Math.sin(camYaw); // camera-left
-  out.pos.set(pos.x + lx * 2.5 + fx * 3.3, 0, pos.z + lz * 2.5 + fz * 3.3);
+  out.pos.set(pos.x + lx * 2.2 + fx * 2.9, 0, pos.z + lz * 2.2 + fz * 2.9);
   out.pos.y = Math.max(groundAt(out.pos.x, out.pos.z), pos.y - 0.4) + 0.4;
   out.yaw = Math.atan2(pos.x - out.pos.x, pos.z - out.pos.z);
   out.scale = GUIDE_SCALE;

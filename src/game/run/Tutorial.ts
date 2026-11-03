@@ -78,10 +78,16 @@ export class Tutorial {
   private prevJump: ((c: number, b: boolean) => void) | undefined;
   private prevLand: ((l: LandingInfo) => void) | undefined;
   private skipEl: HTMLDivElement;
-  private skipHold = 0;
-  private skipKey = false;
+  /** when BACKSPACE went down (real ms), 0 while up */
+  private skipDown = 0;
   private onKey = (e: KeyboardEvent) => {
-    if (e.code === 'Backspace') this.skipKey = e.type === 'keydown';
+    if (e.code !== 'Backspace') return;
+    if (e.type === 'keydown') {
+      if (!this.skipDown) this.skipDown = performance.now();
+    } else {
+      if (this.skipDown && performance.now() - this.skipDown > 600) this.skip();
+      this.skipDown = 0;
+    }
   };
   private spot = { pos: new THREE.Vector3(), yaw: 0, scale: 0.6 };
   private vel = new THREE.Vector3();
@@ -276,7 +282,7 @@ export class Tutorial {
     this.spirit.setExpression(expr);
     this.spirit.pose = pose;
     this.speech?.show(false);
-    const t = new FloatText3D(s, { size: 0.21, color: JADE, glow: JADE_GLOW, cps: 40, wrap: 32, hdr: 1.6 });
+    const t = new FloatText3D(s, { size: 0.12, color: JADE, glow: JADE_GLOW, cps: 40, wrap: 30, hdr: 1.6 });
     this.ctx.scene.add(t.mesh);
     this.texts.push(t);
     this.speech = t;
@@ -291,7 +297,7 @@ export class Tutorial {
   /** a short aside without blocking the step */
   private quip(s: string) {
     this.speech?.show(false);
-    const t = new FloatText3D(s, { size: 0.19, color: JADE, glow: JADE_GLOW, cps: 44, wrap: 30, hdr: 1.5 });
+    const t = new FloatText3D(s, { size: 0.11, color: JADE, glow: JADE_GLOW, cps: 44, wrap: 30, hdr: 1.5 });
     this.ctx.scene.add(t.mesh);
     this.texts.push(t);
     this.speech = t;
@@ -334,7 +340,7 @@ export class Tutorial {
     this.goals = labels.map((l) => ({ label: l, done: false, text: this.keyText(l, false) }));
   }
   private keyText(s: string, done: boolean) {
-    const t = new FloatText3D(s, done ? { size: 0.17, color: '#c8ff9a', glow: '#3cff6a', cps: 0, wrap: 60, hdr: 1.5 } : { size: 0.17, color: KEYS, glow: KEY_GLOW, cps: 60, wrap: 60, hdr: 1.3 });
+    const t = new FloatText3D(s, done ? { size: 0.1, color: '#c8ff9a', glow: '#3cff6a', cps: 0, wrap: 60, hdr: 1.5 } : { size: 0.1, color: KEYS, glow: KEY_GLOW, cps: 60, wrap: 60, hdr: 1.3 });
     this.ctx.scene.add(t.mesh);
     this.texts.push(t);
     return t;
@@ -469,10 +475,10 @@ export class Tutorial {
     if (b.grounded && b.speed > 3) this.rideDist += b.speed * dt;
     if (b.grounded && b.speed > 4 && Math.abs(b.turnSpeed) > 0.7) this.carveT += dt;
     if (b.grounded && b.tucked && b.speed > 2) this.tuckT += dt;
-    // skip by holding Backspace
-    this.skipHold = this.skipKey ? this.skipHold + dt : 0;
-    this.skipEl.style.opacity = String(0.7 + Math.min(0.3, this.skipHold));
-    if (this.skipHold > 0.6) this.skip();
+    // skip by holding Backspace (real time, so a slow frame can't swallow it)
+    const held = this.skipDown ? (performance.now() - this.skipDown) / 1000 : 0;
+    this.skipEl.style.opacity = String(0.7 + Math.min(0.3, held * 0.5));
+    if (held > 0.6) this.skip();
     // the script
     if (typeof this.wait === 'number') {
       this.wait -= dt;
@@ -513,12 +519,15 @@ export class Tutorial {
       p.halo.appear = Math.min(1, p.halo.appear + dt * 1.2);
       p.halo.update(dt);
     }
-    // floating words: her lines by her head, the key prompts above the rider
+    // floating words, held at a fixed distance from the lens so they always read: her lines
+    // beside her head, the key prompts hanging in the air above the rider
     const cam = this.ctx.camera;
-    if (this.speech) this.speech.anchor.copy(sp.socket('head_top')).add(new THREE.Vector3(0, 0.25, 0));
-    const f = this.cam.forward();
-    const base = pl.pos.clone().add(new THREE.Vector3(f.x * 2.2, 2.55, f.z * 2.2));
-    this.goals.forEach((g, i) => g.text.anchor.copy(base).add(new THREE.Vector3(0, -i * 0.24, 0)));
+    const lens = (at: THREE.Vector3, out: THREE.Vector3) => out.copy(cam.position).addScaledVector(at.sub(cam.position).normalize(), 3.4);
+    if (this.speech) lens(sp.socket('head_top').add(new THREE.Vector3(0, 0.3, 0)), this.speech.anchor);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+    const fw = cam.getWorldDirection(new THREE.Vector3());
+    const base = cam.position.clone().addScaledVector(fw, 3.4).addScaledVector(up, 0.78);
+    this.goals.forEach((g, i) => g.text.anchor.copy(base).addScaledVector(up, -i * 0.15));
     for (let i = this.texts.length - 1; i >= 0; i--) {
       const t = this.texts[i];
       t.update(dt, cam, t === this.speech && sp.talking ? () => this.ctx.sfx('ui_hover', null, 0.05, 0.9 + Math.random() * 0.4) : undefined);

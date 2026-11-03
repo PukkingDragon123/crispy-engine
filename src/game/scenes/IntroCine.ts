@@ -958,6 +958,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     hisShot();
     actor.setExpression('determined');
     const a1 = await ask(['Who in tarnation are you?', "Evenin', ma'am.  *tips hat*", "Lady, I'm on the clock."]);
+    phase('reply');
     if (a1 === 1) {
       armPose = 'read';
       eng.audio.play('skeleton_rattle', { volume: 0.4 });

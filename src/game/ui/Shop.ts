@@ -12,6 +12,17 @@
 // shell (squash, thump, muffled grumble). 1.5-2.5 s after the threat is gone
 // she peeks — eyes first — then slides back out. Her world idle lives here too
 // (`animateMerchant`), driven by whoever owns her rig each frame.
+//
+// Arrival: ride slowly into ~13 m of her (or head straight for her) and a short
+// cutscene takes over — letterbox, the board brakes to a stop in a spray of
+// sand, the camera cranes up past the TRADING POST sign and swings down to her;
+// startled by the board she has ducked into her shell, so she peeks out, eyes
+// first, then greets you in floating Alagard text and the shop opens. Leaving
+// gets a farewell beat (she waves her cane) before the dolly back. It re-arms
+// once you have ridden off and stayed away a few seconds; never with enemies
+// within 15 m or during a boss fight. In the shop each ware sits in its own
+// soft pool of light, she has something to say about whatever you hover, and a
+// purchase pays her in a spray of coins.
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Input } from '../../engine/Input';
@@ -20,11 +31,27 @@ import type { RigInstance } from '../../engine/voxel/Rig';
 import * as PM from '../models/props';
 import { modelEntry } from '../models/lookup';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
-import { sharedVoxelMaterial } from '../../engine/render/VoxelMaterial';
+import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { P } from '../../engine/voxel/palette';
 import { ITEMS, ItemId } from '../player/Items';
 import { clamp, damp, noise, rnd } from '../../engine/math/rand';
 import { Ease } from '../../engine/Tween';
+import { FloatText3D } from '../fx/FloatText3D';
+
+/** what the run hands her each frame so she can stage her own arrival scene */
+export interface MerchantHooks {
+  /** the hunter's board (braked to a stop when the arrival scene starts) */
+  board?: { vel: THREE.Vector3 };
+  /** her wares, the same stock the T-key path uses; without it there is no arrival scene */
+  stock?: () => Ware[];
+  /** something else owns the screen (a mission cinematic, a notice, the hunter is dead) */
+  busy?: () => boolean;
+}
+
+const ARRIVE_R = 13; // ride inside this to be greeted
+const REARM_R = 17; // ...and out past this (for REARM_T seconds) before it can happen again
+const REARM_T = 4;
+const CALM_R = 15; // no scene with an enemy this close to the hunter
 
 export interface Ware {
   id: string;
@@ -40,9 +67,75 @@ const LINES = {
   hello: ['Ahh, a customer with no skin! Fewer things to sell you lotion for.', 'Welcome, bone-friend! Everything is cursed only a little.', 'My camel says you have an honest skull.'],
   poor: ['No coin, no camel milk.', 'I accept gold, not rattling.', 'Come back with heavier pockets, friend.'],
   thanks: ['A fine choice! Serket smiles.', 'Sold! No refunds, no curses. Mostly.', 'You have the eye of a falcon. Or a skull.'],
-  bye: ['Ride safe! Or don\'t, more customers for Anubis.', 'Go with sand in your boots!'],
+  bye: ['Ride safe! Or don\'t, more customers for Anubis.', 'Go with sand in your boots!', 'Off you clatter, dearie. Come back richer.'],
   shot: ['Not at the merchandise, dearie!', 'I am two hundred years old. Put that away.', 'Shoot the outlaws, not my wares!'],
+  // after the board has skidded in and she has peeked out of her shell
+  arrive: ['Oh! Only you, bone-friend. Come, come, look at my things.', 'Such a racket! Ah, a customer. Then it was worth it.', 'You nearly scraped my shell, dearie. Buy something.'],
 };
+
+/** what she says about the ware you are looking at (a fresh line each time) */
+const COMMENT: Record<string, string[]> = {
+  bandage: ['Clean linen. Mostly clean.', 'Wraps a scratch, hides a hole.', 'My third husband swore by these.'],
+  goldBandage: ['Pharaoh-grade linen, dearie.', 'Wrapped a king once. He never complained.', 'Still smells of myrrh. And of king.'],
+  dagger: ['Sharp end goes away from you.', 'A little of you for a lot of oomph.', 'Cursed? Only on Tuesdays.'],
+  smoke: ['Pop it and you were never here.', 'Smells of burnt sage and debts.', 'For leaving parties early.'],
+  shield: ['Tin, but very confident tin.', 'Stops a bullet. Probably two.', 'A sheriff swapped it for soup.'],
+  charm: ['Serket blessed it. I watched.', 'Do not lick the scorpion.', 'Pricey. Gods are greedy.'],
+  dynamite: ['Not near my shell, please.', 'Light it, throw it, run.', 'Hold it like a grandchild.'],
+  snakeoil: ['Doc Hapi swears it works.', 'Quick feet. Loud hiccups.', 'Tastes of a snake\'s regrets.'],
+  whiskey: ['Cactus-aged. Most spines out.', 'Steadies the aim. Then it does not.', 'One sip and you see two of me.'],
+  heal: ['Fresh from my camel. Do not ask.', 'Heals everything but pride.', 'It is warm. That is not a good sign.'],
+  card: ['Your fortune, sealed in wax.', 'Pick one, regret the other two.', 'The cards like you. Mostly.'],
+  _: ['A fine thing, that.', 'Old, but so am I.', 'Lovely, isn\'t it?'],
+};
+
+/**
+ * Theatre lighting for the shop without adding a single scene light (no shader
+ * recompiles): the rug's voxel shader gets up to six soft pools of warm light
+ * under the wares, and each ware's shader a light from straight above. Both are
+ * computed per fragment in view space; the shop writes the uniforms just before
+ * each draw (onBeforeRender), so they never lag the moving camera.
+ */
+const SPOT_N = 6;
+interface SpotUniforms {
+  uSpots: { value: THREE.Vector4[] };
+  uSpotR: { value: number };
+  uSpotCol: { value: THREE.Color };
+  uTop: { value: THREE.Vector4 };
+}
+function spotMaterial(): { m: VoxelMaterial; u: SpotUniforms } {
+  const m = makeVoxelMaterial();
+  const u: SpotUniforms = {
+    uSpots: { value: Array.from({ length: SPOT_N }, () => new THREE.Vector4()) },
+    uSpotR: { value: 0.3 },
+    uSpotCol: { value: new THREE.Color(1.0, 0.82, 0.56) },
+    uTop: { value: new THREE.Vector4(0, 1, 0, 0) },
+  };
+  const base = m.onBeforeCompile;
+  m.onBeforeCompile = (sh, r) => {
+    base.call(m, sh, r);
+    Object.assign(sh.uniforms, u);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>\nuniform vec4 uSpots[${SPOT_N}];\nuniform float uSpotR;\nuniform vec3 uSpotCol;\nuniform vec4 uTop;`)
+      .replace(
+        '#include <emissivemap_fragment>',
+        /* glsl */ `#include <emissivemap_fragment>
+        {
+          vec3 vp = -vViewPosition;
+          float pool = 0.0;
+          for (int i = 0; i < ${SPOT_N}; i++) {
+            float d = length(vp - uSpots[i].xyz);
+            // a theatre spot: soft rim, a little hotter in the middle
+            pool += uSpots[i].w * smoothstep(uSpotR, uSpotR * 0.45, d) * (0.65 + 0.35 * smoothstep(uSpotR * 0.8, 0.0, d));
+          }
+          float top = uTop.w * max(dot(normal, uTop.xyz), 0.0);
+          totalEmissiveRadiance += diffuseColor.rgb * uSpotCol * (pool + top);
+        }`
+      );
+  };
+  m.customProgramCacheKey = () => 'shop-spot-v1';
+  return { m, u };
+}
 
 // ------------------------------------------------------------------ small math helpers
 const UP = new THREE.Vector3(0, 1, 0);
@@ -65,6 +158,17 @@ const _c = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _q2 = new THREE.Quaternion();
 const _kj = new THREE.Vector3();
+const _l = new THREE.Vector3();
+/** uniform Catmull-Rom through pts (clamped ends), u in [0, pts.length - 1] */
+function catmull(pts: THREE.Vector3[], u: number, out: THREE.Vector3) {
+  const n = pts.length - 1;
+  const i = Math.min(n - 1, Math.max(0, Math.floor(u)));
+  const t = clamp(u - i, 0, 1);
+  const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(n, i + 2)];
+  const t2 = t * t, t3 = t2 * t;
+  const f = (a: number, b: number, c: number, d: number) => 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+  return out.set(f(p0.x, p1.x, p2.x, p3.x), f(p0.y, p1.y, p2.y, p3.y), f(p0.z, p1.z, p2.z, p3.z));
+}
 const _f = new THREE.Vector3();
 const _kr = new THREE.Vector3();
 
@@ -138,6 +242,13 @@ class Tamsin {
   near = false;
   /** called once when she is fully back out of her shell */
   onOut: (() => void) | null = null;
+  /** a cutscene holds her in her shell (she only peeks when coaxed) */
+  hold = false;
+  // arrival-scene trigger state (per merchant)
+  armed = true;
+  awayT = 0;
+  dwell = 0;
+  readonly lastHunter = new THREE.Vector3(NaN, 0, 0);
 
   constructor(private ctx: Ctx, readonly rig: RigInstance | null, readonly root: THREE.Object3D, meta: any) {
     const swing: string[] = Array.isArray(meta?.swing) ? meta.swing : SWING_DEFAULT;
@@ -166,12 +277,16 @@ class Tamsin {
   /** world-space centre of her shell (aim / blast tests) */
   center(out: THREE.Vector3) {
     const s = this.n.shell;
-    return s ? s.localToWorld(out.set(0, 0.4, -0.06)) : out.copy(this.root.position).add(_a.set(0, 0.75, 0));
+    if (s) return s.localToWorld(out.set(0, 0.4, -0.06));
+    out.copy(this.root.position).y += 0.75;
+    return out;
   }
   /** world-space centre of her head (only meaningful while she is out) */
   headPos(out: THREE.Vector3) {
     const h = this.n.head;
-    return h ? h.localToWorld(out.set(0, 0.13, 0.2)) : out.copy(this.root.position).add(_a.set(0, 1.35, 0.2));
+    if (h) return h.localToWorld(out.set(0, 0.13, 0.2));
+    out.copy(this.root.position).y += 1.35;
+    return out;
   }
 
   /** something scary happened (aim, gunfire, blast): into the shell she goes */
@@ -188,11 +303,12 @@ class Tamsin {
     this.setMode('hiding');
   }
 
-  /** the shop opened: if she is in her shell, she comes out for a customer */
-  coax() {
+  /** a customer: if she is in her shell she peeks (holding `peekHold` s), then comes out */
+  coax(peekHold = 0.25) {
+    this.hold = false;
     if (!this.hidden) return;
     this.setMode('peek');
-    this.peekHold = 0.25;
+    this.peekHold = peekHold;
   }
 
   /** seconds until she is all the way out */
@@ -290,7 +406,7 @@ class Tamsin {
       }
       case 'hidden':
         ch.neck = ch.limb = ch.tail = ch.drop = ch.tuck = 1;
-        this.calm += dt;
+        if (!this.hold) this.calm += dt;
         if (this.calm >= this.calmNeed) {
           this.setMode('peek');
           this.peekHold = 0.55 + rnd.next() * 0.45;
@@ -480,6 +596,11 @@ interface Body {
   clack: number;
   arc0: THREE.Vector3;
   sound: 'metal' | 'glass' | 'soft';
+  /** its spotlight (0 dark .. 1 hovered) and the shader uniforms it drives */
+  lit: number;
+  spot: { m: VoxelMaterial; u: SpotUniforms };
+  /** time spent hovered (she comments after a beat) */
+  gaze: number;
 }
 
 const G = 10.5;
@@ -489,7 +610,7 @@ const SLOP = 0.004;
 const CORNERS: [number, number, number][] = [];
 for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) CORNERS.push([x, y, z]);
 
-function itemObject(key: string): { obj: THREE.Group; he: THREE.Vector3 } {
+function itemObject(key: string, mat: THREE.Material): { obj: THREE.Group; he: THREE.Vector3 } {
   const g = new THREE.Group();
   for (const k of [key, 'bottle', 'crate']) {
     try {
@@ -500,7 +621,7 @@ function itemObject(key: string): { obj: THREE.Group; he: THREE.Vector3 } {
       geo.computeBoundingBox();
       const s = Math.min(2.5, 0.17 / Math.max(0.05, geo.boundingSphere!.radius));
       const bb = geo.boundingBox!;
-      const m = new THREE.Mesh(geo, sharedVoxelMaterial);
+      const m = new THREE.Mesh(geo, mat);
       m.castShadow = true;
       m.receiveShadow = true;
       m.scale.setScalar(s);
@@ -517,6 +638,21 @@ function itemObject(key: string): { obj: THREE.Group; he: THREE.Vector3 } {
   return { obj: g, he: new THREE.Vector3(0.08, 0.08, 0.08) };
 }
 
+interface Arrival {
+  her: Tamsin;
+  hooks: MerchantHooks;
+  t: number;
+  /** the board has stopped and the world is held */
+  modal: boolean;
+  /** camera keys: riding rig, the sign beat, the close-up on her (+ looks, fovs) */
+  P: THREE.Vector3[];
+  L: THREE.Vector3[];
+  F: number[];
+  coaxed: boolean;
+  /** scene time she was all the way out (-1: not yet) */
+  outAt: number;
+}
+
 export class Shop {
   active = false;
   private group = new THREE.Group();
@@ -531,7 +667,7 @@ export class Shop {
   private bar: HTMLDivElement;
   private done: (() => void) | null = null;
   private t = 0;
-  private phase: 'off' | 'browse' | 'leave' = 'off';
+  private phase: 'off' | 'arrive' | 'browse' | 'leave' = 'off';
   private pt = 0;
   private puppets = new Map<object, Tamsin>();
   private her: Tamsin | null = null;
@@ -554,6 +690,27 @@ export class Shop {
   private unsub: (() => void)[] = [];
   private gq = new THREE.Quaternion();
   private herHeight = 1.53;
+  // arrival cutscene
+  private arrival: Arrival | null = null;
+  private inputWas = true;
+  // where the leaving dolly lands (the riding camera) and where it starts
+  private camHome = { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 72 };
+  private leaveFrom = { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 46 };
+  private leaveSplit = false;
+  private warm = 0;
+  private punch = 0;
+  // her floating Alagard lines
+  private speech: FloatText3D | null = null;
+  private fading: FloatText3D[] = [];
+  private speechT = 0;
+  private speechSide = 1;
+  private pendingLine: { text: string; mood: 'neutral' | 'laugh' | 'squinty'; at: number } | null = null;
+  private lastComment = new Map<string, number>();
+  private commented = new Set<Body>();
+  private greeted = false;
+  // the rug's light pools
+  private rugSpot: { m: VoxelMaterial; u: SpotUniforms } | null = null;
+  private bosses = new Set<{ alive?: boolean }>();
 
   constructor(private ctx: Ctx, private input: Input, private cam: CameraRig) {
     ctx.scene.add(this.group);
@@ -566,6 +723,15 @@ export class Shop {
     this.unsub.push(ctx.events.on('shot', () => this.onGunfire()));
     this.unsub.push(ctx.events.on('explosion', (p: { x: number; y: number; z: number }, r: number) => this.onBlast(p, r ?? 3)));
     this.unsub.push(ctx.events.on('propShot', (_c: unknown, p: THREE.Vector3) => p && this.onBlast(p, -4)));
+    // no arrival scene while a boss is up
+    this.unsub.push(ctx.events.on('bossIntro', (b: { alive?: boolean }) => b && this.bosses.add(b)));
+    for (const ev of ['bossKilled', 'bossDefeated'])
+      this.unsub.push(ctx.events.on(ev, (b: { alive?: boolean }) => this.bosses.delete(b)));
+  }
+
+  /** the open shop (or its arrival scene) is driving this puppet */
+  private owns(p: Tamsin) {
+    return (this.active || !!this.arrival) && this.her === p;
   }
 
   // ---------------------------------------------------------------- Tamsin in the world
@@ -573,14 +739,14 @@ export class Shop {
    * World idle + shyness for a merchant rig. Call every frame for her rig
    * (game dt) from wherever she lives; `hunter` is the player's live position.
    */
-  animateMerchant(rig: RigInstance, dt: number, hunter?: THREE.Vector3) {
+  animateMerchant(rig: RigInstance, dt: number, hunter?: THREE.Vector3, hooks?: MerchantHooks) {
     if (hunter) this.hunter = hunter;
     let p = this.puppets.get(rig);
     if (!p) {
       p = new Tamsin(this.ctx, rig, rig.root, rig.geo.spec.meta ?? {});
       this.puppets.set(rig, p);
     }
-    if (this.active && this.her === p) return; // the open shop drives her
+    if (this.owns(p)) return; // the shop / its arrival scene drives her
     const h = Math.min(dt, 1 / 20);
     if (h <= 0) return;
     const d = hunter ? hunter.distanceTo(rig.root.position) : 99;
@@ -588,6 +754,310 @@ export class Shop {
     p.near = d < 12;
     p.lookAt = hunter && d < 14 ? _w.copy(hunter).add(_a.set(0, 1.45, 0)) : null;
     p.update(h);
+    if (hunter && hooks?.stock) this.watchArrival(p, hunter, hooks, h);
+  }
+
+  /**
+   * Ride into her radius slowly, or head straight for her, and the arrival
+   * scene plays. Riding past at speed, or anything going on, and it does not.
+   */
+  private watchArrival(p: Tamsin, hunter: THREE.Vector3, hooks: MerchantHooks, h: number) {
+    const H = p.root.position;
+    const d = Math.hypot(hunter.x - H.x, hunter.z - H.z);
+    // velocity: the board's own, else from his last position
+    const vel = _b.set(0, 0, 0);
+    if (hooks.board) vel.copy(hooks.board.vel);
+    else if (Number.isFinite(p.lastHunter.x)) vel.subVectors(hunter, p.lastHunter).multiplyScalar(1 / h);
+    p.lastHunter.copy(hunter);
+    if (!p.armed) {
+      p.dwell = 0;
+      p.awayT = d > REARM_R ? p.awayT + h : 0;
+      if (p.awayT > REARM_T) p.armed = true;
+      return;
+    }
+    if (d > ARRIVE_R || this.active || this.arrival || !p.root.parent) {
+      p.dwell = 0;
+      return;
+    }
+    const speed = Math.hypot(vel.x, vel.z);
+    const toHer = _c.set(H.x - hunter.x, 0, H.z - hunter.z).normalize();
+    const heading = speed > 0.5 ? (vel.x * toHer.x + vel.z * toHer.z) / speed : 1;
+    const willing = (speed < 6.5 || (heading > 0.8 && speed < 20)) && Math.abs(vel.y) < 4;
+    if (!willing || this.sceneBlocked(hunter, hooks)) {
+      p.dwell = 0;
+      return;
+    }
+    p.dwell += h;
+    if (p.dwell > 0.2) this.startArrival(p, hooks);
+  }
+
+  private sceneBlocked(hunter: THREE.Vector3, hooks: MerchantHooks) {
+    if (this.ctx.engine.paused || this.cam.cine || hooks.busy?.()) return true;
+    return this.danger(hunter);
+  }
+
+  /** a boss is up, or an outlaw is within CALM_R of the hunter */
+  private danger(hunter: THREE.Vector3) {
+    for (const b of this.bosses) if (b.alive === false) this.bosses.delete(b);
+    if (this.bosses.size) return true;
+    for (const e of this.ctx.enemies.list) {
+      if (!e.alive) continue;
+      if (e.isBoss) return true;
+      if (Math.hypot(e.pos.x - hunter.x, e.pos.z - hunter.z) <= CALM_R) return true;
+    }
+    return false;
+  }
+
+  // ---------------------------------------------------------------- the arrival scene
+  private startArrival(her: Tamsin, hooks: MerchantHooks) {
+    const ctx = this.ctx, eng = ctx.engine;
+    her.armed = false;
+    her.awayT = 0;
+    her.dwell = 0;
+    this.her = her;
+    this.borrowed = false;
+    this.herHeight = (her.rig?.geo.spec.meta?.height as number | undefined) ?? 1.53;
+    const H = her.root.position, a = her.root.rotation.y;
+    const F = new THREE.Vector3(Math.sin(a), 0, Math.cos(a)), L = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a));
+    this.pivot.copy(H);
+    this.fwdAng = a;
+    // the post's door is 1.6 m to her right (Missions' layout); the big
+    // TRADING POST sign hangs on the false front above it
+    const door = H.clone().addScaledVector(L, -1.6);
+    const sign = door.clone().addScaledVector(F, -2.33);
+    sign.y = H.y + 6.3;
+    const cam = this.cam.camera;
+    const p0 = cam.position.clone();
+    cam.getWorldDirection(_v);
+    const l0 = p0.clone().addScaledVector(_v, 6);
+    // a high beat in front of the porch, looking up at the sign...
+    const pSign = door.clone().addScaledVector(F, 5).addScaledVector(L, -2);
+    pSign.y = Math.max(H.y, this.ctx.world.groundAt(pSign.x, pSign.z)) + 4.6;
+    // ...then down and across to a low close-up on her
+    const look = H.clone().addScaledVector(F, 0.15);
+    look.y = H.y + 0.72;
+    let pNear: THREE.Vector3 | null = null;
+    for (const k of [1, 0.8])
+      for (const s of [1, -1]) {
+        if (pNear) break;
+        const q = H.clone().addScaledVector(F, 2.1 * k).addScaledVector(L, 0.9 * k * s);
+        q.y = Math.max(H.y, ctx.world.groundAt(q.x, q.z)) + 0.78;
+        if (this.clearView(q, look)) pNear = q;
+      }
+    if (!pNear) {
+      pNear = H.clone().addScaledVector(F, 1.9).addScaledVector(L, 0.6);
+      pNear.y = H.y + 1.1;
+    }
+    this.arrival = { her, hooks, t: 0, modal: false, P: [p0, pSign, pNear], L: [l0, sign, look], F: [cam.fov, 50, 38], coaxed: false, outAt: -1 };
+    this.shot.pos.copy(p0);
+    this.shot.look.copy(l0);
+    this.shot.fov = cam.fov;
+    this.shot.roll = 0;
+    this.cam.setCine(this.shot, false);
+    eng.letterbox(true, 0.5);
+    this.inputWas = eng.input.enabled;
+    eng.input.enabled = false; // the hunter lets go of the reins
+    this.phase = 'arrive';
+    this.pt = 0;
+    this.greeted = false;
+    this.pendingLine = null;
+    this.warm = 0;
+    // the board skids in; startled, she ducks into her shell
+    her.threat(1);
+    her.hold = true;
+    ctx.sfx('sand_spray', this.hunter ?? H, 0.7, 0.9);
+  }
+
+  private updateArrival(h: number) {
+    const A = this.arrival!;
+    const ctx = this.ctx, eng = ctx.engine, inp = this.input, her = A.her;
+    if (!A.modal && eng.paused) return; // the player paused the game mid-approach
+    A.t += h;
+    // ---- brake the board (the world still runs until it has stopped)
+    if (!A.modal) {
+      const b = A.hooks.board;
+      let sp = 0;
+      if (b) {
+        const k = Math.exp(-7 * h);
+        b.vel.x *= k;
+        b.vel.z *= k;
+        sp = Math.hypot(b.vel.x, b.vel.z);
+        const hp = this.hunter;
+        if (hp && sp > 1.2 && rnd.chance(0.75)) ctx.fx.sandSpray({ x: hp.x, y: hp.y + 0.05, z: hp.z }, { x: -b.vel.x * 0.25, y: 1.4, z: -b.vel.z * 0.25 }, Math.min(1.3, sp * 0.14));
+      }
+      if (this.hunter && this.danger(this.hunter)) return this.abortArrival(); // trouble rode in too
+      if (A.t > 0.8 || (A.t > 0.35 && sp < 0.4)) {
+        if (b) {
+          b.vel.x = 0;
+          b.vel.z = 0;
+        }
+        A.modal = true;
+        this.active = true; // modal from here: the world holds still
+        eng.paused = true;
+      }
+    } else if (inp.wasPressed('Escape')) return this.abortArrival();
+    else if (A.t > 0.9 && (inp.wasPressed('Mouse0') || inp.wasPressed('Space') || inp.wasPressed('KeyT') || inp.wasPressed('Enter'))) return this.openFromArrival();
+    // ---- the camera: riding rig -> up past the sign -> down to her
+    const T = 2.7;
+    const u = smoother(A.t / T) * 2;
+    catmull(A.P, u, this.shot.pos);
+    catmull(A.L, u, this.shot.look);
+    const i = Math.min(1, Math.floor(u)), f = u - i;
+    this.shot.fov = mix(A.F[i], A.F[i + 1], f);
+    const gy = ctx.world.groundAt(this.shot.pos.x, this.shot.pos.z) + 0.4;
+    if (this.shot.pos.y < gy) this.shot.pos.y = gy;
+    if (A.t > T) {
+      // a slow push-in while she peeks and talks
+      const k = Math.min(1, (A.t - T) / 4);
+      this.shot.pos.lerp(this.shot.look, 0.1 * k);
+    }
+    this.handheld(Math.min(1, A.t / 1.5));
+    // ---- her: in the shell until the camera finds her, then eyes first, then out
+    if (!A.coaxed && A.t > 2.45) {
+      A.coaxed = true;
+      her.coax(0.85);
+    }
+    her.lookAt = this.hunter ? _w.copy(this.hunter).add(_a.set(0, 1.4, 0)) : null;
+    her.near = false;
+    her.update(h);
+    if (A.coaxed && A.outAt < 0 && her.mode === 'out') {
+      A.outAt = A.t;
+      this.greeted = true;
+      this.speak(rnd.pick(LINES.arrive), 'laugh');
+      her.wave(1.7);
+      ctx.sfx('merchant_greet', her.root.position, 1);
+    }
+    this.updateSpeech(h);
+    this.warmUp(h, 1);
+    if (A.outAt >= 0 && A.t > A.outAt + 1.8) this.openFromArrival();
+  }
+
+  /** the scene hands over to the shop (the wares tumble out, the camera arcs to the shop view) */
+  private openFromArrival() {
+    const A = this.arrival;
+    if (!A) return;
+    this.arrival = null;
+    const wares = A.hooks.stock?.() ?? [];
+    void this.open(A.her.root.position.clone(), 0, wares, A.her.root.position, { her: A.her });
+  }
+
+  /** called off (outlaws, ESC): hand the camera and the reins straight back */
+  private abortArrival() {
+    const A = this.arrival;
+    if (!A) return;
+    this.arrival = null;
+    const eng = this.ctx.engine;
+    A.her.coax(0.5);
+    A.her.lookAt = null;
+    this.cam.setCine(null);
+    eng.letterbox(false, 0.4);
+    eng.input.enabled = this.inputWas;
+    if (this.active) {
+      this.active = false;
+      eng.paused = false;
+    }
+    this.restoreGrade();
+    this.holdLight(0);
+    this.clearSpeech();
+    this.her = null;
+    this.phase = 'off';
+  }
+
+  /** where the riding rig would put the camera right now (the leaving dolly lands here) */
+  private ridingPose(out: { pos: THREE.Vector3; look: THREE.Vector3; fov: number }) {
+    const c = this.cam, T = this.hunter ?? this.pivot;
+    const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw), rx = -Math.cos(c.yaw), rz = Math.sin(c.yaw);
+    const cp = Math.cos(c.pitch), sp = Math.sin(c.pitch);
+    const hx = T.x + rx * c.shoulder, hy = T.y + c.height, hz = T.z + rz * c.shoulder;
+    out.pos.set(hx - fx * cp * c.dist, hy - sp * c.dist, hz - fz * cp * c.dist);
+    out.pos.y = Math.max(out.pos.y, this.ctx.world.groundAt(out.pos.x, out.pos.z) + 0.45);
+    out.look.set(hx + fx * cp * 30, hy + sp * 30 + 0.2, hz + fz * cp * 30);
+    out.fov = 72;
+    return out;
+  }
+
+  private handheld(amt: number) {
+    const t = this.t, hh = 0.3 + 0.7 * amt;
+    this.shot.pos.x += noise.n2(t * 0.35, 1.3) * 0.016 * hh;
+    this.shot.pos.y += noise.n2(t * 0.3, 7.7) * 0.011 * hh;
+    this.shot.pos.z += noise.n2(t * 0.33, 4.1) * 0.016 * hh;
+    this.shot.look.x += noise.n2(t * 0.27, 9.2) * 0.012 * hh;
+    this.shot.look.y += noise.n2(t * 0.25, 2.9) * 0.009 * hh;
+    this.shot.look.z += noise.n2(t * 0.29, 6.6) * 0.012 * hh;
+    this.shot.roll = noise.n2(t * 0.21, 5.5) * 0.007 * hh;
+  }
+
+  /** warm grade + the warm fill light, eased toward k */
+  private warmUp(h: number, k: number) {
+    this.warm = damp(this.warm, k, 3, h);
+    this.applyGrade(this.warm);
+    this.holdLight(this.warm);
+  }
+
+  // ---------------------------------------------------------------- her floating lines
+  /** she says something: one line of Alagard floating beside her head, typed out */
+  private speak(text: string, mood: 'neutral' | 'laugh' | 'squinty' = 'neutral') {
+    const her = this.her;
+    if (!her) {
+      this.ctx.toast(TITLE, '#ffd36b', text);
+      return;
+    }
+    if (this.speech) {
+      this.speech.show(false);
+      this.fading.push(this.speech);
+    }
+    const cam = this.ctx.camera;
+    const dist = her.headPos(_v).distanceTo(cam.position);
+    const ft = new FloatText3D(text, { size: clamp(dist * 0.034, 0.07, 0.17), px: 48, cps: 40, wrap: 28, hdr: 1.3 });
+    ft.anchor.copy(_v);
+    this.ctx.scene.add(ft.mesh);
+    this.speech = ft;
+    this.speechT = 1.7 + text.length / 40;
+    her.say(mood, text.length / 40 + 0.3);
+  }
+
+  private updateSpeech(h: number) {
+    const her = this.her, cam = this.ctx.camera;
+    const pl = this.pendingLine;
+    if (pl && her && her.mode === 'out' && this.pt >= pl.at) {
+      this.pendingLine = null;
+      this.speak(pl.text, pl.mood);
+    }
+    if (this.speech) {
+      this.speechT -= h;
+      if (this.speechT <= 0 || !her) {
+        this.speech.show(false);
+        this.fading.push(this.speech);
+        this.speech = null;
+      } else {
+        // beside her head, on the open side of the frame
+        const head = her.headPos(_v);
+        const nx = _b.copy(head).project(cam).x;
+        if (nx > 0.3) this.speechSide = -1;
+        else if (nx < -0.1) this.speechSide = 1;
+        const right = _a.set(1, 0, 0).applyQuaternion(cam.quaternion);
+        this.speech.anchor.copy(head).addScaledVector(right, this.speechSide * (0.24 + this.speech.mesh.scale.x * 0.5));
+        this.speech.anchor.y += 0.16;
+        this.speech.update(h, cam, () => this.ctx.engine.audio.play('ui_hover', { volume: 0.05, pitch: 0.65 + Math.random() * 0.35 }));
+      }
+    }
+    for (let i = this.fading.length - 1; i >= 0; i--) {
+      const f = this.fading[i];
+      f.update(h, cam);
+      if (f.visibleAmount < 0.02) {
+        f.dispose();
+        this.fading.splice(i, 1);
+      }
+    }
+  }
+
+  private clearSpeech() {
+    this.speech?.dispose();
+    this.speech = null;
+    for (const f of this.fading) f.dispose();
+    this.fading = [];
+    this.pendingLine = null;
+    this.speechT = 0;
   }
 
   private aimedAt(p: Tamsin) {
@@ -606,7 +1076,7 @@ export class Shop {
     const o = _b, d = _c;
     this.cam.aimRay(o, d);
     for (const p of this.puppets.values()) {
-      if (!p.root.parent || (this.active && p === this.her)) continue;
+      if (!p.root.parent || this.owns(p)) continue;
       const c = p.center(_v);
       const close = this.hunter ? this.hunter.distanceTo(c) < 7 : false;
       const t = _a.copy(c).sub(o).dot(d);
@@ -618,7 +1088,7 @@ export class Shop {
   /** r < 0: a bullet impact (radius |r|), otherwise an explosion radius */
   private onBlast(pos: { x: number; y: number; z: number }, r: number) {
     for (const p of this.puppets.values()) {
-      if (!p.root.parent || (this.active && p === this.her)) continue;
+      if (!p.root.parent || this.owns(p)) continue;
       const c = p.center(_v);
       const reach = r < 0 ? -r : r + 7;
       if (c.distanceTo(_a.set(pos.x, pos.y, pos.z)) < reach) p.threat(1.5);
@@ -627,24 +1097,37 @@ export class Shop {
 
   // ---------------------------------------------------------------- the shop
   /** open at a rug position in front of the merchant; resolves when the player leaves */
-  open(rugAt: THREE.Vector3, facing: number, wares: Ware[], merchantPos: THREE.Vector3): Promise<void> {
+  open(rugAt: THREE.Vector3, facing: number, wares: Ware[], merchantPos: THREE.Vector3, _opts?: unknown): Promise<void> {
+    const viaArrival = !!_opts && typeof _opts === 'object' && (_opts as { her?: Tamsin }).her instanceof Tamsin ? (_opts as { her: Tamsin }).her : null;
+    return this.begin(rugAt, facing, wares, merchantPos, viaArrival);
+  }
+
+  private begin(rugAt: THREE.Vector3, facing: number, wares: Ware[], merchantPos: THREE.Vector3, arrivedHer: Tamsin | null): Promise<void> {
     const ctx = this.ctx;
     const eng = ctx.engine;
-    if (this.active) this.finish();
+    if (this.arrival) this.abortArrival();
+    if (this.active && !arrivedHer) this.finish();
     this.active = true;
     eng.paused = true;
     eng.input.setWantLock(false);
-    ctx.sfx('merchant_greet', merchantPos, 1);
-    ctx.toast(TITLE, '#ffd36b', rnd.pick(LINES.hello));
-    this.t = 0;
+    if (arrivedHer) eng.input.enabled = this.inputWas; // the arrival scene borrowed the reins
+    else {
+      // walked up and pressed T: she greets you once she is out of her shell
+      ctx.sfx('merchant_greet', merchantPos, 1);
+      this.greeted = false;
+      this.t = 0;
+    }
     this.pt = 0;
+    this.clearSpeech();
+    this.commented.clear();
+    this.leaveSplit = false;
     this.camK = 0;
     this.focusK = 0;
     this.heaved = false;
     this.scolded = false;
     this.hovered = null;
     this.shotCd = 0;
-    this.her = this.findHer(rugAt, merchantPos);
+    this.her = arrivedHer ?? this.findHer(rugAt, merchantPos);
     const her = this.her;
     this.herHeight = (her?.rig?.geo.spec.meta?.height as number | undefined) ?? 1.53;
     // ---- where everything goes: rug in front of her, the camera on the customer side
@@ -683,8 +1166,10 @@ export class Shop {
           const bb = geo.boundingBox!;
           this.rugHalf.set(Math.max(-bb.min.x, bb.max.x) - 0.06, Math.max(-bb.min.z, bb.max.z) - 0.04);
           this.rugTop = bb.max.y;
-          const m = new THREE.Mesh(geo, sharedVoxelMaterial);
+          this.rugSpot = spotMaterial();
+          const m = new THREE.Mesh(geo, this.rugSpot.m);
           m.receiveShadow = true;
+          m.onBeforeRender = (_r, _s, camera) => this.lightRug(camera);
           this.rug = m;
         }
       } catch {
@@ -701,7 +1186,8 @@ export class Shop {
     this.tumbleAt = (her ? her.outIn() : 0) + 0.45;
     const nW = wares.length;
     this.bodies = wares.map((w, i) => {
-      const { obj, he } = itemObject(w.model);
+      const spot = spotMaterial();
+      const { obj, he } = itemObject(w.model, spot.m);
       obj.visible = false;
       g.add(obj);
       const x = (i - (nW - 1) / 2) * 0.42 + (rnd.next() - 0.5) * 0.06;
@@ -715,14 +1201,31 @@ export class Shop {
         p: new THREE.Vector3(), v: new THREE.Vector3(), q: new THREE.Quaternion(), w: new THREE.Vector3(),
         state: 'wait' as BodyState, t: 0, launch: this.tumbleAt + 0.14 + i * 0.13, slot, rest: slot.clone(),
         still: 0, asleep: false, spin: rnd.next() * 6, landed: false, clack: 0, arc0: new THREE.Vector3(), sound,
+        lit: 0, spot, gaze: 0,
       };
     });
+    // each ware's light from above (written just before it draws)
+    for (const b of this.bodies) {
+      const mesh = b.obj.children[0] as THREE.Mesh | undefined;
+      if (mesh)
+        mesh.onBeforeRender = (_r, _s, camera) => {
+          const d = _l.set(0, 1, 0).transformDirection(camera.matrixWorldInverse);
+          b.spot.u.uTop.value.set(d.x, d.y, d.z, b.lit * 0.34);
+        };
+    }
     // ---- camera: arc off the riding rig into the three-quarter shot
     const cam = this.cam.camera;
-    this.camFrom.pos.copy(cam.position);
-    cam.getWorldDirection(_v);
-    this.camFrom.look.copy(cam.position).addScaledVector(_v, 6);
-    this.camFrom.fov = cam.fov;
+    if (arrivedHer) {
+      // straight on from the arrival close-up
+      this.camFrom.pos.copy(this.shot.pos);
+      this.camFrom.look.copy(this.shot.look);
+      this.camFrom.fov = this.shot.fov;
+    } else {
+      this.camFrom.pos.copy(cam.position);
+      cam.getWorldDirection(_v);
+      this.camFrom.look.copy(cam.position).addScaledVector(_v, 6);
+      this.camFrom.fov = cam.fov;
+    }
     this.planShot();
     this.shot.pos.copy(this.camFrom.pos);
     this.shot.look.copy(this.camFrom.look);
@@ -733,7 +1236,10 @@ export class Shop {
     this.updateBar();
     this.bar.style.display = 'block';
     this.phase = 'browse';
-    if (her) her.say('neutral', 1.6);
+    if (!this.greeted) {
+      this.greeted = true;
+      this.pendingLine = { text: rnd.pick(LINES.hello), mood: 'laugh', at: (her ? her.outIn() : 0) + 0.15 };
+    }
     return new Promise((res) => (this.done = res));
   }
 
@@ -889,28 +1395,30 @@ export class Shop {
   }
 
   dispose() {
+    if (this.arrival) this.abortArrival();
     if (this.active) this.finish();
     for (const u of this.unsub) u();
     this.unsub = [];
     this.tip.remove();
     this.bar.remove();
+    this.rugSpot?.m.dispose();
   }
 
-  /** start leaving: wares go back in her pack, the camera dollies back to the saddle */
+  /** start leaving: a farewell beat (she waves her cane), wares back in her pack, then the dolly back to the saddle */
   close() {
     if (!this.active || this.phase === 'leave') return;
-    const ctx = this.ctx;
-    ctx.toast(TITLE, '#ffd36b', rnd.pick(LINES.bye));
     this.phase = 'leave';
     this.pt = 0;
+    this.leaveSplit = false;
     this.hovered = null;
     this.tip.style.display = 'none';
     this.bar.style.display = 'none';
-    ctx.engine.letterbox(false, 0.5);
-    if (this.her) {
-      this.her.say('laugh', 1.1);
-      this.her.wave(1.4);
-    }
+    this.pendingLine = null;
+    this.ridingPose(this.camHome);
+    if (this.her && !this.her.hidden) {
+      this.speak(rnd.pick(LINES.bye), 'laugh');
+      this.her.wave(2.0);
+    } else this.ctx.toast(TITLE, '#ffd36b', rnd.pick(LINES.bye));
     let i = 0;
     for (const b of this.bodies) {
       if (b.state === 'wait') {
@@ -919,7 +1427,7 @@ export class Shop {
       }
       if (b.state !== 'free' && b.state !== 'held') continue;
       b.state = 'pack';
-      b.t = -0.06 * i++;
+      b.t = -(0.3 + 0.06 * i++); // once she has started waving
       b.arc0.copy(b.p);
     }
   }
@@ -931,6 +1439,7 @@ export class Shop {
     for (const b of this.bodies) {
       this.group.remove(b.obj);
       (b.obj.children[0] as THREE.Mesh | undefined)?.geometry.dispose();
+      b.spot.m.dispose();
     }
     this.bodies = [];
     if (this.rug) this.group.remove(this.rug);
@@ -940,11 +1449,18 @@ export class Shop {
     eng.letterbox(false, 0.4);
     this.restoreGrade();
     this.holdLight(0);
-    if (this.her && this.borrowed) this.her.restPose();
-    if (this.her) this.her.lookAt = null;
+    this.clearSpeech();
+    if (this.her) {
+      if (this.borrowed) this.her.restPose();
+      this.her.lookAt = null;
+      // the arrival scene only comes back once he has ridden off and stayed away
+      this.her.armed = false;
+      this.her.awayT = 0;
+    }
     this.her = null;
     this.borrowed = false;
     this.hovered = null;
+    this.warm = 0;
     eng.paused = false;
     eng.input.setWantLock(true);
     this.active = false;
@@ -959,10 +1475,9 @@ export class Shop {
     if (b.state !== 'held' && b.state !== 'free') return;
     if (ctx.run.gold < b.ware.price) {
       ctx.sfx('ui_error', null, 0.8);
-      ctx.toast(TITLE, '#ffd36b', rnd.pick(LINES.poor));
+      this.speak(rnd.pick(LINES.poor), 'squinty');
       this.kick(b, _v.set(0, 1.6, 0), null);
       this.her?.shake();
-      this.her?.say('squinty', 0.9);
       return;
     }
     if (!b.ware.buy()) {
@@ -973,17 +1488,35 @@ export class Shop {
     ctx.run.gold -= b.ware.price;
     ctx.sfx('gold_burst', null, 0.8);
     ctx.sfx('pickup_gold', null, 0.7);
-    ctx.toast(b.ware.name.toUpperCase(), '#9dff3a', rnd.pick(LINES.thanks));
+    ctx.toast(b.ware.name.toUpperCase(), '#9dff3a', `-${b.ware.price} gold · into your satchel`);
     b.state = 'sold';
     b.t = 0;
     b.arc0.copy(b.p);
     b.asleep = false;
     if (this.hovered === b) this.hovered = null;
-    ctx.sfx('whoosh', this.group.localToWorld(_v.copy(b.p)), 0.35, 1.3);
-    this.her?.say('laugh', 1.3);
-    this.her?.nod();
+    const wp = this.group.localToWorld(_v.copy(b.p));
+    ctx.sfx('whoosh', wp, 0.35, 1.3);
+    // the flourish: a warm flash on the rug, the lens leans in, his coins arc into her claws
+    ctx.fx.light(wp, 0xffd27a, 1.8, 0.35, 4);
+    ctx.fx.sparkle({ x: wp.x, y: wp.y + 0.1, z: wp.z }, P.gold0, 8, 0.15);
+    this.punch = 1;
+    const her = this.her;
+    if (her && this.hunter) {
+      const from = this.satchel(new THREE.Vector3());
+      const to = her.center(new THREE.Vector3()).add(_a.set(Math.sin(this.fwdAng) * 0.38, 0.2, Math.cos(this.fwdAng) * 0.38));
+      const T = 0.6, g = 14;
+      const vel = to.clone().sub(from).multiplyScalar(1 / T);
+      vel.y += 0.5 * g * T;
+      ctx.particles.emit({ pos: from, count: Math.min(14, 4 + Math.round(b.ware.price / 12)), vel, spread: 0.45, life: [T, T + 0.06], size: [0.11, 0.11], sprite: ['coinspin0', 'coinspin1', 'coinspin2', 'coinspin3'], color: 0xffffff, gravity: g, sizeJitter: 0.1 });
+      this.coinsAt = T;
+      this.coinsTo.copy(to);
+    }
+    this.speak(rnd.pick(LINES.thanks), 'laugh');
+    her?.nod();
     this.updateBar();
   }
+  private coinsAt = -1;
+  private coinsTo = new THREE.Vector3();
 
   /** where the hunter keeps his loot (his hip), or just below the lens */
   private satchel(out: THREE.Vector3) {
@@ -1002,16 +1535,20 @@ export class Shop {
 
   // ---------------------------------------------------------------- per frame
   update(rdt: number) {
-    if (!this.active) return;
+    if (!this.active && !this.arrival) return;
     const h = Math.min(rdt, 0.05);
+    const ctx = this.ctx;
     this.t += h;
     this.pt += h;
-    const ctx = this.ctx;
+    // the world is paused: keep the dust and flashes alive for the scene
+    // (only once we were already modal, so nothing ticks twice)
+    if (this.active) {
+      ctx.fx.update(h);
+      ctx.particles.update(h, ctx.world.env.fog);
+    }
+    if (this.arrival) return this.updateArrival(h);
     const inp = this.input;
     if (this.phase !== 'leave' && (inp.wasPressed('Escape') || inp.wasPressed('KeyT'))) this.close();
-    // the world is paused: keep the dust and flashes alive for the shop
-    ctx.fx.update(h);
-    ctx.particles.update(h, ctx.world.env.fog);
     const her = this.her;
     // ---- her pack spills
     if (this.phase === 'browse' && !this.heaved && this.pt >= this.tumbleAt) {
@@ -1030,21 +1567,47 @@ export class Shop {
       if (this.hovered && inp.wasPressed('Mouse0')) this.buy(this.hovered);
     }
     this.updateTip();
+    // ---- spotlights, dust in the beams, her commentary
+    const hb = this.hovered;
+    for (const b of this.bodies) {
+      const up = b.state === 'held' || (b.state === 'free' && b.landed);
+      b.lit = damp(b.lit, up ? (b === hb ? 1 : 0.55) : 0, 3.5, h);
+      b.gaze = b === hb && b.state === 'held' ? b.gaze + h : 0;
+      if (b.lit > 0.3 && rnd.chance(h * (1.2 + b.lit * 1.6))) {
+        const c = this.group.localToWorld(_v.set(b.rest.x + (rnd.next() - 0.5) * 0.24, this.rugTop + 0.06 + rnd.next() * 0.45, b.rest.z + (rnd.next() - 0.5) * 0.24));
+        ctx.particles.emit({ pos: { x: c.x, y: c.y, z: c.z }, count: 1, vel: { x: 0, y: 0.05, z: 0 }, spread: 0.04, life: [1.4, 2.4], size: [0.026, 0.012], sprite: 'glow8', additive: true, color: 0xffe2a8, alpha: 0.5, drag: 0.6, fadeIn: 0.3 });
+      }
+    }
+    if (hb && hb.gaze > 0.35 && !this.commented.has(hb) && this.speechT < 0.8 && !this.pendingLine && her && her.mode === 'out') {
+      this.commented.add(hb);
+      const pool = COMMENT[hb.ware.id] ?? COMMENT._;
+      let i = Math.floor(rnd.next() * pool.length);
+      if (i === this.lastComment.get(hb.ware.id)) i = (i + 1) % pool.length;
+      this.lastComment.set(hb.ware.id, i);
+      this.speak(pool[i]);
+    }
+    // the coins land in her claws
+    if (this.coinsAt >= 0) {
+      this.coinsAt -= h;
+      if (this.coinsAt < 0) {
+        ctx.sfx('pickup_gold', this.coinsTo, 0.6, 1.15);
+        ctx.fx.sparkle({ x: this.coinsTo.x, y: this.coinsTo.y, z: this.coinsTo.z }, P.gold0, 6, 0.18);
+        her?.nod();
+      }
+    }
     // ---- Tamsin
     if (her) {
       her.near = false;
-      const hb = this.hovered;
       her.lookAt = hb ? this.group.localToWorld(_w.copy(hb.p)) : _w.copy(this.ctx.camera.position);
       her.update(h);
     }
+    this.updateSpeech(h);
     // ---- camera, light, grade
-    if (this.phase === 'leave') this.camK = Math.max(0, this.camK - h / 0.95);
-    else this.camK = Math.min(1, this.camK + h / 1.6);
+    this.camK = Math.min(1, this.camK + h / 1.6);
+    this.punch = Math.max(0, this.punch - h * 3);
     this.updateCamera(h);
-    const warm = smoother(this.camK);
-    this.applyGrade(warm);
-    this.holdLight(warm);
-    if (this.phase === 'leave' && ((this.camK <= 0 && this.bodies.every((b) => b.state === 'gone')) || this.pt > 1.6)) this.finish();
+    this.warmUp(h, this.phase === 'leave' && this.leaveSplit ? 0 : 1);
+    if (this.phase === 'leave' && this.pt > 2.0 && (this.bodies.every((b) => b.state === 'gone') || this.pt > 2.6)) this.finish();
   }
 
   private updateCamera(h: number) {
@@ -1059,21 +1622,56 @@ export class Shop {
     // ease in on the hovered ware, but keep her in the shot behind it
     const P1 = _a.copy(this.camMain.pos).lerp(this.focus, 0.22 * f);
     const L1 = _b.copy(this.camMain.look).lerp(this.focus, 0.42 * f);
-    const fov1 = this.camMain.fov - 6 * f;
+    let fov1 = this.camMain.fov - 6 * f;
+    if (this.phase === 'leave' && this.her) {
+      // farewell: lean in on her while she waves her cane...
+      const k = smoother(this.pt / 0.7);
+      const head = this.her.headPos(_c);
+      P1.lerp(head, 0.18 * k);
+      L1.lerp(head, 0.45 * k);
+      fov1 -= 5 * k;
+      if (this.pt > 0.9) {
+        // ...then the dolly back to the saddle
+        if (!this.leaveSplit) {
+          this.leaveSplit = true;
+          this.leaveFrom.pos.copy(this.shot.pos);
+          this.leaveFrom.look.copy(this.shot.look);
+          this.leaveFrom.fov = this.shot.fov;
+          this.ctx.engine.letterbox(false, 0.7);
+        }
+        const kb = smoother((this.pt - 0.9) / 1.1);
+        this.orbit(this.leaveFrom.pos, this.camHome.pos, kb, this.shot.pos);
+        this.shot.look.copy(this.leaveFrom.look).lerp(this.camHome.look, smoother(kb * 1.2));
+        this.shot.fov = mix(this.leaveFrom.fov, this.camHome.fov, kb);
+        this.handheld(1 - kb);
+        return;
+      }
+    }
     const e = smoother(this.camK);
     this.orbit(this.camFrom.pos, P1, e, this.shot.pos);
     const el = smoother(this.camK * 1.25);
     this.shot.look.copy(this.camFrom.look).lerp(L1, el);
-    this.shot.fov = mix(this.camFrom.fov, fov1, e);
-    // handheld: a slow, breathing drift (never a shake)
-    const t = this.t, hh = 0.3 + 0.7 * e;
-    this.shot.pos.x += noise.n2(t * 0.35, 1.3) * 0.016 * hh;
-    this.shot.pos.y += noise.n2(t * 0.3, 7.7) * 0.011 * hh;
-    this.shot.pos.z += noise.n2(t * 0.33, 4.1) * 0.016 * hh;
-    this.shot.look.x += noise.n2(t * 0.27, 9.2) * 0.012 * hh;
-    this.shot.look.y += noise.n2(t * 0.25, 2.9) * 0.009 * hh;
-    this.shot.look.z += noise.n2(t * 0.29, 6.6) * 0.012 * hh;
-    this.shot.roll = noise.n2(t * 0.21, 5.5) * 0.007 * hh;
+    this.shot.fov = mix(this.camFrom.fov, fov1, e) - 2.5 * this.punch * this.punch;
+    this.handheld(e);
+  }
+
+  /** the rug's light pools, in view space, just before it draws */
+  private lightRug(camera: THREE.Camera) {
+    const S = this.rugSpot?.u.uSpots.value;
+    if (!S) return;
+    let i = 0;
+    for (const b of this.bodies) {
+      if (i >= SPOT_N) break;
+      const s = S[i++];
+      if (b.lit < 0.01) {
+        s.w = 0;
+        continue;
+      }
+      const x = b.state === 'held' ? b.rest.x : b.p.x, z = b.state === 'held' ? b.rest.z : b.p.z;
+      this.group.localToWorld(_l.set(x, this.rugTop, z)).applyMatrix4(camera.matrixWorldInverse);
+      s.set(_l.x, _l.y, _l.z, b.lit * 0.45);
+    }
+    for (; i < SPOT_N; i++) S[i].w = 0;
   }
 
   // ---------------------------------------------------------------- picking & tooltip
@@ -1217,6 +1815,11 @@ export class Shop {
         b.p.set(0, 0, 0).addScaledVector(b.arc0, u * u).addScaledVector(ctrl, 2 * u * e).addScaledVector(to, e * e);
         b.q.multiply(_q.setFromAxisAngle(_a.set(0.6, 1, 0.3).normalize(), h * 11));
         b.obj.scale.setScalar(1 - 0.55 * smoother((k - 0.55) / 0.45));
+        if (sold && rnd.chance(0.8)) {
+          // a glittering wake behind the sold ware
+          const tp = this.group.localToWorld(_l.copy(b.p));
+          this.ctx.particles.emit({ pos: { x: tp.x, y: tp.y, z: tp.z }, count: 1, spread: 0.25, life: [0.25, 0.5], size: [0.09, 0.01], sprite: ['star4', 'spark'], additive: true, color: [P.gold0, 0xfff2c0] });
+        }
         if (k >= 1) {
           b.state = 'gone';
           b.obj.visible = false;

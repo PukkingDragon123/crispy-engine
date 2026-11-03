@@ -74,7 +74,8 @@ export class GearPickups {
   private pending: GearId | null = null;
   private offs: (() => void)[] = [];
 
-  constructor(private ctx: Ctx, private player: Player, public equipment: Equipment, private input: Input) {
+  /** hud: optional, hidden while the reveal owns the screen (RunScene's Hud) */
+  constructor(private ctx: Ctx, private player: Player, public equipment: Equipment, private input: Input, private hud?: { setVisible(on: boolean): void }) {
     ctx.scene.add(this.group);
     this.ui = document.createElement('div');
     this.ui.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:7;display:none;font-family:'Alagard';color:#fff3d6;text-shadow:0 2px 0 #2a1810,0 0 12px rgba(0,0,0,0.5);letter-spacing:1px;text-align:center";
@@ -153,7 +154,7 @@ export class GearPickups {
   // ------------------------------------------------------------------ world drops
   dropAt(id: GearId, at: { x: number; y: number; z: number }, o: { pop?: number; arm?: number } = {}) {
     const obj = new THREE.Group();
-    const show = buildGearDisplay(id, sharedVoxelMaterial, gearGlassMaterial(), 0.5);
+    const show = buildGearDisplay(id, sharedVoxelMaterial, gearGlassMaterial(), 0.6);
     obj.add(show);
     this.group.add(obj);
     const pop = o.pop ?? 6;
@@ -235,6 +236,7 @@ export class GearPickups {
     this.input.enabled = false;
     eng.audio.setMuffle(0.5);
     this.input.setWantLock(false);
+    this.hud?.setVisible(false);
     ctx.sfx('loot_reveal', null, 0.8);
     const def = GEAR[id];
     const color = RARITY[def.rarity].color;
@@ -344,6 +346,7 @@ export class GearPickups {
       this.input.enabled = true;
       eng.audio.setMuffle(0);
       this.input.setWantLock(true);
+      this.hud?.setVisible(true);
     }, true);
   }
 
@@ -409,6 +412,7 @@ export class GearPickups {
     if (this.active) {
       this.ctx.engine.paused = false;
       this.input.enabled = true;
+      this.hud?.setVisible(true);
     }
   }
 }

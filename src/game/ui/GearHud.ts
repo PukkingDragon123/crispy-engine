@@ -39,9 +39,11 @@ function socketModel() {
 }
 
 function gemModel(color: number) {
+  // a little cut cabochon: rarity colour with a lighter facet, glowing softly
   const m = new VoxelModel('hud_gear_gem');
-  for (const [x, y, z] of [[0, 0, 0], [-1, 0, 0], [0, 1, 0], [-1, 1, 0], [0, 0, 1], [-1, 1, 1]] as [number, number, number][]) m.set(x, y, z, z ? 0xffffff : color, VF.EMISSIVE);
-  m.set(0, 1, 1, color, VF.EMISSIVE);
+  const hi = (((color >> 16) & 255) * 0.6 + 102) << 16 | (((color >> 8) & 255) * 0.6 + 102) << 8 | ((color & 255) * 0.6 + 102);
+  for (const [x, y] of [[-1, 0], [0, 0], [-1, 1], [0, 1]] as [number, number][]) m.set(x, y, 0, color, VF.EMISSIVE);
+  m.set(-1, 1, 1, hi, VF.EMISSIVE).set(0, 0, 1, color, VF.EMISSIVE);
   return m;
 }
 

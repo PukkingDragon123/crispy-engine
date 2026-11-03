@@ -40,9 +40,9 @@ const ANUBIS_AT = new THREE.Vector3(0, 1.2, -21);
 const COL_X = 5.6;
 const COL_Z = [19, 10, 1, -8];
 const BRAZ: [number, number, number][] = [[3.5, 14.5, 1], [-3.5, 14.5, 1], [3.5, 5.5, 1], [-3.5, 5.5, 1], [7.4, -16.4, 1.5], [-7.4, -16.4, 1.5]];
-const MOON_DIR = new THREE.Vector3(-0.42, -1, 0.08).normalize();
+const MOON_DIR = new THREE.Vector3(-0.3, -1, -0.32).normalize();
 const FOG = { color: 0x060c16, near: 8, far: 60 };
-const SLIT_X = 6.2;
+const SLIT_X = 3.6;
 
 const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 const damp = (a: number, b: number, l: number, dt: number) => a + (b - a) * (1 - Math.exp(-l * dt));
@@ -346,7 +346,7 @@ export class AnubisTrial {
     // --- light: low cold ambience, a moon through roof slits, brazier fires, the god's glow
     this.hemi = new THREE.HemisphereLight(0x2a4a70, 0x06080c, 0.55);
     s.add(this.hemi);
-    const moon = new THREE.DirectionalLight(0x9cc4ff, 0.9);
+    const moon = new THREE.DirectionalLight(0xa8c4ea, 1.0);
     const tgt = V(0, 0, 8);
     moon.position.copy(tgt).addScaledVector(MOON_DIR, -48);
     moon.target.position.copy(tgt);
@@ -363,11 +363,11 @@ export class AnubisTrial {
     moon.shadow.normalBias = 0.04;
     s.add(moon, moon.target);
     this.aura = new THREE.PointLight(0x7fe0ff, 0, 24, 1.5);
-    this.aura.position.set(0, 7.5, -17.5);
+    this.aura.position.set(0, 6, -15);
     this.backLight = new THREE.PointLight(0xa8f0ff, 0, 20, 1.4);
-    this.backLight.position.set(0, 6, -23.3);
+    this.backLight.position.set(0, 8.5, -22.6);
     this.spill = new THREE.PointLight(0x6ac8ff, 0, 26, 1.4);
-    this.spill.position.set(0, 4.5, 25);
+    this.spill.position.set(0, 4.5, 21);
     this.scalesLight = new THREE.PointLight(0xffc27a, 0, 9, 1.8);
     this.scalesLight.position.set(0, 3.4, SCALES_Z + 1.6);
     s.add(this.aura, this.backLight, this.spill, this.scalesLight);
@@ -376,7 +376,7 @@ export class AnubisTrial {
     const roofMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
     this.mats.push(roofMat);
     // the slits: x from SLIT_X, over [z0, z1]; the moon comes in from +x, so the roof runs far out that side
-    const slits: [number, number][] = [[9.2, 13.6], [0.2, 4.6], [-8.8, -4.4]];
+    const slits: [number, number][] = [[16.5, 20.9], [7.5, 11.9], [-1.5, 2.9]];
     const zs = [-26, ...slits.flat(), 27];
     const roofBox = (x0: number, x1: number, z0: number, z1: number) => {
       const g = new THREE.BoxGeometry(x1 - x0, 0.6, z1 - z0);
@@ -472,7 +472,7 @@ export class AnubisTrial {
     for (let i = 0; i < 4; i++) {
       const z = 26 - i * 12.5;
       this.mesh(i & 1 ? wb.geo : wa.geo, this.wallMat, V(-10, 0, z), { ry: Math.PI / 2, shadow: false });
-      this.mesh(i & 1 ? wa.geo : wb.geo, this.wallMat, V(10, 0, z), { ry: -Math.PI / 2, sx: -1, shadow: false });
+      this.mesh(i & 1 ? wa.geo : wb.geo, this.wallMat, V(10, 0, z), { ry: -Math.PI / 2, sx: -1, shadow: true });
     }
     const we = this.stat('realm_wall_end', [0, 0, 7]);
     this.mesh(we.geo, this.wallMat, V(-10, 0, -24), { shadow: false });
@@ -491,7 +491,7 @@ export class AnubisTrial {
     await this.tick();
 
     // --- moonlight shafts down through the roof slits
-    for (const [z0, z1] of slits) this.addShaft(V(SLIT_X, 18, z0), V(3.2, 0, 0), V(0, 0, z1 - z0), MOON_DIR.clone().multiplyScalar(18 / -MOON_DIR.y), 0x8fc0ff, 0.05);
+    for (const [z0, z1] of slits) this.addShaft(V(SLIT_X, 18, z0), V(3.2, 0, 0), V(0, 0, z1 - z0), MOON_DIR.clone().multiplyScalar(18 / -MOON_DIR.y), 0x8fc0ff, 0.075);
     // the judgement shaft over the kneeling soul (wakes at the verdict)
     this.addShaft(V(-1.1, 19, KNEEL.z - 1.1), V(2.2, 0, 0), V(0, 0, 2.2), V(0.05, -19.5, 0.08), 0xfff0c8, 0.0);
 
@@ -512,7 +512,7 @@ export class AnubisTrial {
     this.anubis.material.envMapIntensity = 1.4;
     this.anubis.root.position.copy(ANUBIS_AT);
     s.add(this.anubis.root);
-    this.shell = spiritMaterial(0x0a5a8a, 0xa8f4ff, { inflate: 0.045, power: 2.0, core: 0.12, lumRim: 0, gain: 0.25, vein: 0.35 });
+    this.shell = spiritMaterial(0x0a5a8a, 0xa8f4ff, { inflate: 0.04, power: 3.2, core: 0.04, lumRim: 0, gain: 0.15, vein: 0.3 });
     this.mats.push(this.shell);
     this.anubisMirror = new RigInstance(anGeo, { material: this.anubis.material });
     this.mirror.add(this.anubisMirror.root);
@@ -572,9 +572,9 @@ export class AnubisTrial {
         this.spirits.push({ kind, rig, mat, seed: i + rnd.next() * 0.5, pos: V(0, -50, 0), prev: V(0, -50, 0), vis: 0, rise: 0, home: V(0, 0, 0) });
       }
     };
-    add('wraith', wg, 10, 0x0c4a70, 0xc8f4ff, { inflate: 0.01, power: 1.8, core: 0.55, gain: 0.85, vein: 0.5 });
-    add('hand', hg, 8, 0x0c4a70, 0xd8f8ff, { inflate: 0.008, power: 1.9, core: 0.6, gain: 0.8, vein: 0.4 });
-    add('wisp', pg, 18, 0x1a6aa0, 0xe8fcff, { inflate: 0.006, power: 1.5, core: 1.0, gain: 1.0, vein: 0.3 });
+    add('wraith', wg, 10, 0x0c4a70, 0xc8f4ff, { inflate: 0.01, power: 2.2, core: 0.3, gain: 0.5, vein: 0.4 });
+    add('hand', hg, 8, 0x0c4a70, 0xd8f8ff, { inflate: 0.008, power: 2.2, core: 0.4, gain: 0.6, vein: 0.35 });
+    add('wisp', pg, 18, 0x1a6aa0, 0xe8fcff, { inflate: 0.006, power: 1.8, core: 0.8, gain: 0.8, vein: 0.3 });
     // hands claw over the terrace edges and the gate's foot
     const homes = [V(-12.4, 0, 34), V(12.6, 0, 36.5), V(-11.8, 0, 40.5), V(12, 0, 42.5), V(-6, 0, 45.2), V(5.5, 0, 45.6), V(-9.5, 0, 30.6), V(9.2, 0, 30.6)];
     this.spirits.filter((q) => q.kind === 'hand').forEach((q, i) => q.home.copy(homes[i]));
@@ -810,18 +810,19 @@ export class AnubisTrial {
     if (on) {
       this.saved = {
         spirit: u.uSpirit.value, desat: u.uDesat.value, vig: u.uVignette.value, sat: u.uSaturation.value, grain: u.uGrain.value,
-        tS: u.uTintShadows.value.clone(), tH: u.uTintHighlights.value.clone(), bloom: [bl.strength, bl.radius, bl.threshold],
+        tS: u.uTintShadows.value.clone(), tH: u.uTintHighlights.value.clone(), bloom: [bl.strength, bl.radius, bl.threshold], con: u.uContrast.value,
       };
       u.uSpirit.value = 0.08;
       u.uDesat.value = 0;
       u.uVignette.value = 0.55;
       u.uSaturation.value = 1.06;
       u.uGrain.value = 0.03;
-      u.uTintShadows.value.set(0.92, 1.0, 1.12);
+      u.uTintShadows.value.set(0.94, 1.0, 1.08);
       u.uTintHighlights.value.set(1.06, 1.0, 0.93);
-      bl.strength = 0.42;
-      bl.radius = 0.55;
-      bl.threshold = 0.85;
+      u.uContrast.value = 1.14;
+      bl.strength = 0.26;
+      bl.radius = 0.4;
+      bl.threshold = 1.05;
     } else if (this.saved.bloom) {
       const sv = this.saved;
       u.uSpirit.value = 0;
@@ -829,6 +830,7 @@ export class AnubisTrial {
       u.uVignette.value = sv.vig;
       u.uSaturation.value = sv.sat;
       u.uGrain.value = sv.grain;
+      u.uContrast.value = sv.con;
       u.uTintShadows.value.copy(sv.tS);
       u.uTintHighlights.value.copy(sv.tH);
       [bl.strength, bl.radius, bl.threshold] = sv.bloom;
@@ -853,7 +855,7 @@ export class AnubisTrial {
   };
   private shotGate: ShotFn = (t) => {
     const u = sstep(0, 1, t / 7);
-    return { p: V(5.2 - 1.2 * u, 1.4 + 0.2 * u, 47 - 1.5 * u), l: V(-0.3, 8.6 - 0.6 * u, GATE_Z), fov: mixN(46, 43, u) };
+    return { p: V(3.6 - 0.8 * u, 0.95 + 0.1 * u, 45.5 - 1.2 * u), l: V(-0.4, 7.4 - 0.4 * u, GATE_Z), fov: mixN(60, 57, u) };
   };
   private shotFollow: ShotFn = () => {
     const s = this.soulPos;
@@ -865,7 +867,7 @@ export class AnubisTrial {
   };
   private shotHero: ShotFn = (t) => {
     const u = sstep(0, 1, t / 4.2);
-    return { p: V(3.6, 0.5, -9.0).lerp(V(3.0, 0.7, -10.5), u), l: V(0, 9.4, -19.4), fov: mixN(42, 36, u) };
+    return { p: V(3.6, 0.5, -9.0).lerp(V(3.0, 0.7, -10.5), u), l: V(0, 7.4, -19.4), fov: mixN(44, 40, u) };
   };
   private shotSpeech: ShotFn = (t) => {
     const u = sstep(0, 1, t / 8);
@@ -935,8 +937,8 @@ export class AnubisTrial {
     const n = this.gate.nodes;
     if (n['door_l']) n['door_l'].rotation.y = -1.72 * k;
     if (n['door_r']) n['door_r'].rotation.y = 1.72 * k;
-    this.gate.material.userData.emissiveStrength.value = 0.15 + 2.6 * k + (this.phase === 'gate' ? 0.4 * Math.sin(this.t * 3) * k : 0);
-    this.spill.intensity = 140 * k;
+    this.gate.material.userData.emissiveStrength.value = 0.12 + 1.5 * k + (this.phase === 'gate' ? 0.25 * Math.sin(this.t * 3) * k : 0);
+    this.spill.intensity = 70 * k;
     if (this.gateOpen > prev && this.gateOpen < 1 && !this.skipping) {
       // grinding dust off the lintel, a cold breath out of the doorway
       if (rnd.next() < dt * 30) this.fx.emit({ pos: { x: (rnd.next() - 0.5) * 6, y: 9.2, z: GATE_Z + 1.4 }, count: 2, spread: 0.3, life: [1.0, 1.8], size: [0.07, 0.05], sprite: ['grain0', 'grain1', 'grain2', 'pebble'], color: [0x8a8478, 0x5a5650], gravity: 7 });
@@ -1162,7 +1164,7 @@ export class AnubisTrial {
     set('lthumb', 0.3 * (g.point + this.grip), 0, -0.4 * (g.point + this.grip));
     // spirit shell, eyes, glow
     const gold = this.blaze, red = this.anger;
-    this.shell.uniforms.uGain.value = (0.25 + 0.75 * w) * (0.92 + 0.08 * Math.sin(t * 2.3)) * (1 + gold * 0.45);
+    this.shell.uniforms.uGain.value = (0.15 + 0.35 * w) * (0.92 + 0.08 * Math.sin(t * 2.3)) * (1 + gold * 0.45);
     (this.shell.uniforms.uA.value as THREE.Color).setRGB(0.04 + 0.5 * gold + 0.3 * red, 0.35 + 0.15 * gold - 0.3 * red, 0.54 - 0.4 * gold - 0.2 * red);
     (this.shell.uniforms.uB.value as THREE.Color).setRGB(0.66 + 0.34 * gold + 0.2 * red, 0.96 - 0.1 * gold - 0.6 * red, 1 - 0.45 * gold - 0.5 * red);
     const eyeK = sstep(0.15, 0.7, w);
@@ -1172,9 +1174,9 @@ export class AnubisTrial {
       const base = e.parent?.name.endsWith('eye_l') ? 0.32 : -0.32;
       e.rotation.set(Math.max(-0.2, Math.min(0.25, pitch * 0.4)), base + yaw * 0.3, 0);
     }
-    this.aura.intensity = (6 + 60 * w) * (1 + gold * 0.6) * (1 - red * 0.4);
+    this.aura.intensity = (4 + 16 * w) * (1 + gold * 0.6) * (1 - red * 0.4);
     this.aura.color.setRGB(0.5 + 0.5 * gold + 0.4 * red, 0.88 - 0.5 * red, 1 - 0.5 * gold - 0.6 * red);
-    this.backLight.intensity = 20 + 90 * w;
+    this.backLight.intensity = 12 + 30 * w;
     this.wallMat.userData.emissiveStrength.value = 0.25 + 0.9 * w + this.wallPulse * 2.5 + gold * 1.2;
     this.wallPulse = damp(this.wallPulse, 0, 2, dt);
     copyPose(this.anubis, this.anubisMirror);
@@ -1307,7 +1309,7 @@ export class AnubisTrial {
       }
       s.rig.root.position.copy(p);
       s.vis = damp(s.vis, want, 2.2, dt);
-      const near = sstep(0.8, 3.0, p.distanceTo(cam));
+      const near = sstep(1.5, 6.0, p.distanceTo(cam));
       s.mat.uniforms.uFade.value = s.vis * near * (0.85 + 0.15 * Math.sin(t * 5 + q * 7));
       s.rig.root.visible = s.vis > 0.01;
     }
@@ -1341,10 +1343,10 @@ export class AnubisTrial {
       if (q.y > 0.2 && q.y < 12) this.fx.emit({ pos: q, count: 1, spread: 0.04, up: 0.03, life: [4, 8], size: [0.022, 0.022], sprite: 'dot3', color: 0xd8ecff, additive: true, alpha: 0.9, drag: 0.3, jitter: 0.05, fadeIn: 1 });
     }
     // low cold mist creeping over the floor and the terrace
-    if (rnd.next() < dt * 9) {
+    if (rnd.next() < dt * 5) {
       const hall = inHall;
       const x = (rnd.next() - 0.5) * (hall ? 18 : 22), z = hall ? -20 + rnd.next() * 44 : 30 + rnd.next() * 14;
-      this.fx.emit({ pos: { x, y: 0.25 + rnd.next() * 0.4, z }, vel: { x: (rnd.next() - 0.5) * 0.3, y: 0.02, z: hall ? 0.25 : -0.2 }, count: 1, life: [5, 8], size: [1.6, 3.2], sprite: ['cloud0', 'cloud1', 'cloud2'], color: 0x2a5878, alpha: 0.09, additive: true, rot: 3, rotSpeed: 0.08, fadeIn: 2 });
+      this.fx.emit({ pos: { x, y: 0.15 + rnd.next() * 0.3, z }, vel: { x: (rnd.next() - 0.5) * 0.3, y: 0.01, z: hall ? 0.25 : -0.2 }, count: 1, life: [5, 8], size: [1.4, 2.6], sprite: ['cloud0', 'cloud1', 'cloud2'], color: 0x1c3c56, alpha: 0.04, additive: true, rot: 3, rotSpeed: 0.08, fadeIn: 2 });
     }
     // the blaze: a column of light round the rising soul
     if (ph === 'grant' && rnd.next() < dt * 70) {
