@@ -100,6 +100,7 @@ export interface WoodSpecies {
   end: readonly number[];
   check: number;
 }
+/** the wood species palette library (pass a name as `species` to any wood material) */
 export const WOOD = {
   /** warm golden oak */
   oak: { tones: [0x6a4426, 0x8a5c34, 0xa36e40, 0xb8834f, 0xcd9c66], late: 0x6e4628, knot: 0x3e2614, end: [0x9a6c40, 0xc2925e, 0xd8ae7c], check: 0x2e1c10 },
