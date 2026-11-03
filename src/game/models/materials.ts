@@ -309,17 +309,20 @@ export function charredWood(o: { along: Axis; seed?: number; depth?: number; blo
 // METALS
 // =============================================================================
 const IRON = [0x2c2a29, 0x403d3a, 0x56524d, 0x6e6962, 0x8a857c];
-const RUST = [0x4e2414, 0x6e3218, 0x8c4422, 0xa85a2c, 0xc27a40];
+const RUST_T = [0x4e2414, 0x6e3218, 0x8c4422, 0xa85a2c, 0xc27a40];
+/** deep, old rust for blackened hardware (no bright orange) */
+const RUST_DARK = [0x34201a, 0x42261a, 0x50301e, 0x5e3a24, 0x6a4430];
 
 /**
  * Rusted iron: dark forged iron, rust blooms with pitting in their hearts, and
  * vertical rust streaks running down (-y) below them. rust 0..1.
  */
-export function rustedIron(o: { seed?: number; rust?: number; pitting?: number; streaks?: boolean; tones?: number[] } = {}): Mat {
+export function rustedIron(o: { seed?: number; rust?: number; pitting?: number; streaks?: boolean; tones?: number[]; rustTones?: number[] } = {}): Mat {
   const seed = o.seed ?? 0;
   const rust = o.rust ?? 0.45;
   const pit = o.pitting ?? 0.5;
   const it = o.tones ?? IRON;
+  const RUST = o.rustTones ?? RUST_T;
   return (x, y, z) => {
     const r = fbm(x * 0.16, y * 0.16, z * 0.16, seed) + n3(x * 0.6, y * 0.6, z * 0.6, seed + 1) * 0.15;
     const thr = 0.5 - rust * 0.9;
@@ -337,7 +340,7 @@ export function rustedIron(o: { seed?: number; rust?: number; pitting?: number; 
   };
 }
 /** blackened wrought iron (straps, hinges, chain): mostly dark iron with rust only at the edges of blooms */
-export const blackIron = (seed = 0, rust = 0.25) => rustedIron({ seed, rust, pitting: 0.3, streaks: false });
+export const blackIron = (seed = 0, rust = 0.25) => rustedIron({ seed, rust, pitting: 0.3, streaks: false, rustTones: RUST_DARK });
 
 /** brass with verdigris patina in blooms and a tarnished brown cast; polish 0..1 adds bright worn highlights */
 export function brass(o: { seed?: number; patina?: number; polish?: number } = {}): Mat {
@@ -360,9 +363,9 @@ export function tin(o: { seed?: number; rust?: number; rustBelow?: number } = {}
   const seed = o.seed ?? 0;
   const T = [0x6a6862, 0x8c8a84, 0xa8a6a0, 0xc2c0ba, 0xd8d6d0];
   return (x, y, z) => {
-    if (o.rustBelow !== undefined && y <= o.rustBelow && n3(x * 0.3, y * 0.15, z * 0.3, seed + 5) > -0.2 + (y - o.rustBelow) * 0.15) return RUST[1 + ((hash3(x >> 1, y, z >> 1) * 3) | 0)];
+    if (o.rustBelow !== undefined && y <= o.rustBelow && n3(x * 0.3, y * 0.15, z * 0.3, seed + 5) > -0.2 + (y - o.rustBelow) * 0.15) return RUST_T[1 + ((hash3(x >> 1, y, z >> 1) * 3) | 0)];
     const rr = o.rust ?? 0.15;
-    if (fbm(x * 0.18, y * 0.18, z * 0.18, seed + 3) > 0.55 - rr * 0.8) return RUST[2];
+    if (fbm(x * 0.18, y * 0.18, z * 0.18, seed + 3) > 0.55 - rr * 0.8) return RUST_T[2];
     const [f1] = cellular(x / 5, y / 5, z / 5, seed);
     const cell = hash3(Math.floor(x / 5 + f1), Math.floor(y / 5), seed);
     return T[1 + Math.floor(cell * 3)];
@@ -640,7 +643,9 @@ export function nailHead(m: VoxelModel, p: V3, face: Face, o: { size?: 1 | 2 | 3
   const n = normalOf(face);
   const [tu, tv] = tangentsOf(face);
   const size = o.size ?? 1;
-  const mat = o.mat ?? rustedIron({ seed: o.seed ?? 0, rust: o.rust ?? 0.4, streaks: false });
+  // old nail heads: near-black iron with a little deep rust (bright orange reads as noise at distance)
+  const rr = o.rust ?? 0.4;
+  const mat: Mat = o.mat ?? ((x, y, z) => (hash3(x, y, z + (o.seed ?? 0)) < rr * 0.55 ? 0x5a3220 : 0x34302c));
   const h = add(p, n);
   if (size === 1) m.set(h[0], h[1], h[2], mat, VF.METAL);
   else if (size === 2) for (const [i, j] of [[0, 0], [1, 0], [0, 1], [1, 1]]) m.set(h[0] + tu[0] * i + tv[0] * j, h[1] + tu[1] * i + tv[1] * j, h[2] + tu[2] * i + tv[2] * j, mat, VF.METAL);

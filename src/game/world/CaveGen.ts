@@ -27,6 +27,7 @@ import { ATMO, globalUniforms, atmoFogUniforms, makeVoxelMaterial, sharedVoxelMa
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import type { VoxelModel } from '../../engine/voxel/VoxelModel';
 import { modelEntry } from '../models/lookup';
+import { caveColumn } from '../models/cave/props';
 
 // ============================================================================ layout
 export const CAVE_SIZE = 176;
@@ -165,15 +166,12 @@ export function generateCave(seed = 1): CaveLayout {
       // the mound of sand poured down the chute (the wake-up spot)
       const ds = Math.hypot(x - chute.x, z - chute.z);
       if (ds < 9) h += 2.4 * (1 - ds / 9) ** 2;
-      // rock columns (floor to ceiling) with flared bases
+      // the flowstone columns' feet (the columns themselves are sculpted models): rubble mounds
       for (const c of columns) {
-        const d = Math.hypot(x - c.x, z - c.z) * (1 + 0.12 * noise.n2(Math.atan2(z - c.z, x - c.x) * 2 + c.x, 1));
-        if (d < c.r) {
-          h = 72;
-          m = MAT.ROCK;
-        } else if (d < c.r + 4) {
-          h += (c.r + 4 - d) ** 2 * 0.35;
-          if (d < c.r + 2) m = MAT.DARK_ROCK;
+        const d = Math.hypot(x - c.x, z - c.z);
+        if (d < c.r + 6) {
+          h += (c.r + 6 - d) ** 2 * 0.05;
+          if (d < c.r + 3) m = MAT.DARK_ROCK;
         }
       }
       field.base[i + j * n] = h;
@@ -300,8 +298,8 @@ export function generateCave(seed = 1): CaveLayout {
 
 // ============================================================================ runtime
 const CAVE_PRESET: EnvPreset = {
-  zenith: 0x5b8ad6, horizon: 0xffd9a6, ground: 0x0c0a10, sunColor: 0xffe0b0, sunIntensity: 2.4, sunElev: SUN_ELEV, sunAzim: SUN_AZIM,
-  hemiSky: 0x4a6aa8, hemiGround: 0x2a1e2c, hemiIntensity: 1.25, fog: 0x0b1822, fogNear: 6, fogFar: 150, exposure: 1, stars: 0, clouds: 0, cloudColor: 0x203040,
+  zenith: 0x5b8ad6, horizon: 0x24384a, ground: 0x0c0a10, sunColor: 0xffe0b0, sunIntensity: 2.4, sunElev: SUN_ELEV, sunAzim: SUN_AZIM,
+  hemiSky: 0x4a6aa8, hemiGround: 0x2a1e2c, hemiIntensity: 1.25, fog: 0x091219, fogNear: 8, fogFar: 135, exposure: 1, stars: 0, clouds: 0, cloudColor: 0x203040,
 };
 
 const lakeVert = /* glsl */ `
@@ -387,9 +385,10 @@ function shaftMaterial(O: THREE.Vector3, U: THREE.Vector3, V: THREE.Vector3, L: 
           vec3 q = ro + rd * t;
           vec2 e2 = (q.xy - 0.5) * 2.0;
           float r = length(e2);
-          float edge = 1.0 - smoothstep(0.55, 1.0, r);
+          float edge = 1.0 - smoothstep(0.25, 1.0, r);
+          edge *= edge;
           float streak = 0.55 + 0.45 * vn(vec2(atan(e2.y, e2.x) * 3.0 + q.z * 0.6, uTime * 0.25));
-          float along = smoothstep(0.0, 0.08, q.z) * (1.0 - smoothstep(0.55, 1.0, q.z));
+          float along = smoothstep(0.0, 0.12, q.z) * (1.0 - smoothstep(0.45, 1.0, q.z)) * (0.55 + 0.45 * vn(vec2(q.z * 6.0 - uTime * 0.2, atan(e2.y, e2.x) * 2.0)));
           vec3 wp = cameraPosition + rdW * t;
           float dust = 0.65 + 0.35 * vn(wp.xz * 0.9 + vec2(uTime * 0.11, -uTime * 0.07) + wp.y * 0.3);
           acc += edge * streak * along * dust;
@@ -436,6 +435,7 @@ export class CaveWorld {
   private rip = 0;
   stir = 0;
   private batches: Batch[] = [];
+  private columnMeshes: THREE.Mesh[] = [];
   private crystalMat = makeVoxelMaterial({ emissiveStrength: 2.6 });
   private drops: { x: number; z: number; t: number; y: number; land: number }[] = [];
   private dripT = 0.5;
@@ -459,12 +459,14 @@ export class CaveWorld {
     this.env.setHazeFloor(-1);
     ATMO.shafts = 0.75;
     ATMO.u[10] = 6; // a deeper dust layer
-    ATMO.u[11] = 0.4;
+    ATMO.u[11] = 0.22;
     scene.background = new THREE.Color(0x05080c);
     // ---- floor + mirrored ceiling
     this.terrain = new Terrain(L.field, this.sa.wind, this.sand);
     this.ceiling = new Terrain(L.ceil, this.sa.wind);
     this.ceiling.group.scale.y = -1;
+    // the vault is cool, dark rock (no sun reaches it): tint the ceiling's strata down
+    this.ceiling.material.color.setRGB(0.42, 0.42, 0.5);
     this.ceiling.group.name = 'cave-ceiling';
     this.group.add(this.terrain.group, this.ceiling.group);
     this.sand.ground = (x, z) => L.field.heightSmooth(x, z);
@@ -677,7 +679,20 @@ export class CaveWorld {
       this.group.add(mesh);
       this.batches.push({ mesh });
     }
-    for (const c of L.columns) this.colliders.circle(c.x, c.z, c.r + 0.5, -5, 80, { tag: 'cave', bullets: true, solid: true, data: { material: 'rock' } });
+    // the flowstone columns: one sculpted model each, floor to vault
+    L.columns.forEach((c, i) => {
+      const g = this.field.heightAt(c.x, c.z);
+      const H = L.ceilingAt(c.x, c.z) - g + 1.5;
+      const sm = caveColumn(H, c.r * 0.62, i * 5 + 1);
+      const mesh = new THREE.Mesh(buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: [0, 0, 0] }), sharedVoxelMaterial);
+      mesh.position.set(c.x, g - 0.3, c.z);
+      mesh.rotation.y = i * 1.7;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.group.add(mesh);
+      this.columnMeshes.push(mesh);
+      this.colliders.circle(c.x, c.z, c.r * 0.62 * 0.75 + 0.4, -5, 80, { tag: 'cave', bullets: true, solid: true, data: { material: 'rock' } });
+    });
   }
 
   private makeShafts() {
@@ -693,7 +708,7 @@ export class CaveWorld {
       const geo = new THREE.BoxGeometry(1, 1, 1).translate(0.5, 0.5, 0.5);
       const M = new THREE.Matrix4().makeBasis(U.clone().multiplyScalar(2), V.clone().multiplyScalar(2), Ld).setPosition(O.clone().sub(U).sub(V));
       geo.applyMatrix4(M);
-      const mesh = new THREE.Mesh(geo, shaftMaterial(O, U, V, Ld, col.clone(), k.exit ? 0.07 : 0.055));
+      const mesh = new THREE.Mesh(geo, shaftMaterial(O, U, V, Ld, col.clone(), k.exit ? 0.024 : 0.017));
       mesh.renderOrder = 10;
       mesh.frustumCulled = false;
       this.group.add(mesh);
@@ -801,6 +816,7 @@ export class CaveWorld {
     this.terrain.dispose();
     this.ceiling.dispose();
     for (const b of this.batches) b.mesh.geometry.dispose();
+    for (const m of this.columnMeshes) m.geometry.dispose();
     for (const s of this.shafts) {
       s.mesh.geometry.dispose();
       (s.mesh.material as THREE.Material).dispose();

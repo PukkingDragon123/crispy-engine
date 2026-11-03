@@ -735,7 +735,7 @@ export function plankDebris(seed = 0): RuinModel {
   const vs = 1 / 32;
   const rng = new RNG(5501 + seed * 7);
   const m = new VoxelModel('plank_debris' + seed);
-  const sand = sandMat({ seed, tones: [DS.low, DS.mid, DS.top, DS.ripple] });
+  const sand = sandMat({ seed, tones: [DS.low, DS.mid, DS.mid, DS.top] });
   for (let x = -28; x <= 28; x++)
     for (let z = -24; z <= 24; z++) {
       const d = Math.hypot(x / 28, z / 24);

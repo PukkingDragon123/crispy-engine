@@ -10,6 +10,9 @@ import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
 import { sharedVoxelMaterial } from '../../../engine/render/VoxelMaterial';
 import type { Particles } from '../../fx/Particles';
 import { Voice } from '../../audio/Voice';
+import { armIK } from '../../anim/playerAnim';
+import * as WSK from '../../models/props/workshop';
+import { buy, owns } from '../../meta/Save';
 
 export type SM = { model: VoxelModel; voxelSize: number; meta?: any } | undefined | null;
 export type HubPose = 'door' | 'bench' | 'board' | 'mirror' | 'book' | 'hearth' | 'music' | 'range' | 'cards' | 'trophies';
@@ -283,5 +286,136 @@ export class HeroBubble {
   }
   dispose() {
     this.el.remove();
+  }
+}
+
+// ------------------------------------------------------------------ hands
+const _m4 = new THREE.Matrix4(), _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _tv = new THREE.Vector3(), _hint = new THREE.Vector3(0, 0.3, 1);
+/** two-bone reach: put Sundown's hand on a world point (pole in the torso frame), blended in by w */
+export function reach(h: HubHost, side: 'l' | 'r', target: THREE.Vector3, pole: THREE.Vector3, w: number) {
+  const hero = h.hero;
+  if (!hero || w <= 0.001) return;
+  const n = hero.nodes;
+  const A = n['arm_' + side], F = n['fore_' + side], torso = n['torso'];
+  if (!A || !F || !torso) return;
+  torso.updateWorldMatrix(true, false);
+  _m4.copy(torso.matrixWorld).invert();
+  _tv.copy(target).applyMatrix4(_m4);
+  armIK(A.position, _tv, pole, h.armL1, h.armL2, _hint, _qa, _qb);
+  A.quaternion.slerp(_qa, Math.min(1, w));
+  F.quaternion.slerp(_qb, Math.min(1, w));
+}
+/** a joint to rest + offset (radians), blended in by w */
+export function joint(h: HubHost, name: string, x: number, y: number, z: number, w = 1) {
+  const hero = h.hero;
+  const n = hero?.nodes[name];
+  if (!hero || !n || w <= 0.001) return;
+  const p = hero.geo.parts[hero.geo.index[name]];
+  const e = new THREE.Euler((p?.rest.x ?? 0) + x, (p?.rest.y ?? 0) + y, (p?.rest.z ?? 0) + z);
+  n.quaternion.slerp(_qa.setFromEuler(e), Math.min(1, w));
+}
+
+// ------------------------------------------------------------------ locks: a chain, a padlock and a price tag (Alagard)
+/**
+ * What you can't have yet hangs chained, with its price on a manila tag. The
+ * first click rattles the lock and asks; a second click within a few seconds
+ * buys it (the chain drops away), or the lock just rattles if the bank is short.
+ */
+export class PriceLock {
+  grp = new THREE.Group();
+  private chain: THREE.Mesh | null = null;
+  private tag: THREE.Group | null = null;
+  private armed = 0;
+  private shake = 0;
+  private drop = -1;
+  private tex: THREE.CanvasTexture | null = null;
+  gone = false;
+  constructor(private h: HubHost, public key: string, public price: number, span = 26, scale = 1) {
+    const cg = geoOf(safe(() => WSK.lockChain(span, price % 7)), 'center');
+    if (cg) {
+      this.chain = meshOf(cg, sharedVoxelMaterial, false);
+      this.grp.add(this.chain);
+    }
+    const ts = safe(() => WSK.priceTag());
+    const tg = geoOf(ts, 'center');
+    if (ts && tg) {
+      const tag = new THREE.Group();
+      tag.add(meshOf(tg, sharedVoxelMaterial, false));
+      const cv = document.createElement('canvas');
+      cv.width = 96;
+      cv.height = 56;
+      const c = cv.getContext('2d')!;
+      c.fillStyle = '#2a160a';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.font = '30px Alagard';
+      c.fillText(String(price), 48, 22);
+      c.font = '15px Alagard';
+      c.fillText('GOLD', 48, 46);
+      this.tex = new THREE.CanvasTexture(cv);
+      this.tex.colorSpace = THREE.SRGBColorSpace;
+      const [w, hgt] = ts.meta.size as [number, number];
+      const pl = new THREE.Mesh(new THREE.PlaneGeometry(w, hgt), new THREE.MeshStandardMaterial({ map: this.tex, transparent: true, roughness: 0.9, depthWrite: false }));
+      const f = ts.meta.face as number[], b = tg.boundingBox!;
+      const cy = (b.min.y + b.max.y) / 2;
+      pl.position.set(f[0] - (b.min.x + b.max.x) / 2 + 0.004, f[1] - cy + (b.max.y - b.min.y) / 2 - 0.004, 0.009);
+      tag.add(pl);
+      tag.position.set(span * 0.004, -span * 0.005 - 0.07, 0.02);
+      tag.rotation.z = -0.12;
+      this.grp.add(tag);
+      this.tag = tag;
+    }
+    this.grp.scale.setScalar(scale);
+  }
+  get open() {
+    return this.gone || owns(this.key);
+  }
+  tip(name: string) {
+    if (this.open) return '';
+    return this.armed > 0 ? `${name}: buy for ${this.price} gold? Click again` : `${name} (locked, ${this.price} gold)`;
+  }
+  /** returns true once it is bought (the caller then carries on and uses the thing) */
+  click(): boolean {
+    if (this.open) return true;
+    const eng = this.h.engine;
+    if (this.armed <= 0) {
+      this.armed = 3.5;
+      this.shake = 1;
+      eng.audio.play('rev_dry', { volume: 0.5, pitch: 0.7 });
+      return false;
+    }
+    if (!buy(this.key)) {
+      this.shake = 1;
+      this.armed = 0;
+      eng.audio.play('ui_error', { volume: 0.7 });
+      if (this.h.mamaCd < 8) {
+        this.h.say("Can't afford it yet, sugar. Go bring home some bounty.");
+        this.h.mamaCd = 12;
+      }
+      return false;
+    }
+    eng.audio.play('chest_unlock', { volume: 0.8 });
+    eng.audio.play('gold_burst', { volume: 0.7 });
+    this.h.updateBank();
+    this.drop = 0;
+    this.gone = true;
+    return true;
+  }
+  update(rdt: number) {
+    this.armed = Math.max(0, this.armed - rdt);
+    this.shake = Math.max(0, this.shake - rdt * 2.5);
+    const t = performance.now() * 0.001;
+    if (this.chain) this.chain.rotation.z = Math.sin(t * 40) * 0.08 * this.shake;
+    if (this.tag) this.tag.rotation.z = -0.12 + Math.sin(t * 2.1) * 0.04 + Math.sin(t * 30) * 0.15 * this.shake + (this.armed > 0 ? Math.sin(t * 6) * 0.06 : 0);
+    if (this.drop >= 0) {
+      this.drop += rdt;
+      this.grp.position.y -= rdt * this.drop * 6;
+      this.grp.rotation.z += rdt * 2;
+      if (this.drop > 0.6) this.grp.visible = false;
+    } else this.grp.visible = !owns(this.key);
+  }
+  dispose() {
+    this.tex?.dispose();
+    this.grp.removeFromParent();
   }
 }

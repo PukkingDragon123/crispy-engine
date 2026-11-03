@@ -308,20 +308,20 @@ export function crate(seed = 0): StaticModel {
   const k = mod(seed, 4);
   const panel = k === 2 ? PR.woodLight : k === 1 ? PR.woodGrey : PR.wood;
   const s = 29, h = -14;
-  crateBody(m, h, 0, h, s, panel, PR.woodDark, k === 1 ? '/' : k === 3 ? 'none' : 'x', seed);
+  crateBody(m, h, 0, h, s, panel, PR.woodDark, k === 0 ? 'x' : k === 1 ? '/' : 'none', seed);
   const front = h + s - 1;
   if (k === 2 || k === 3) {
     const word = k === 2 ? 'AMMO' : r.pick(CRATE_WORDS);
     const tw = textWidth(word, 1, k === 2 ? 2 : 1);
     stampText(m, 'z+', word, -Math.floor(tw / 2), k === 2 ? 20 : 17, front + 1, { color: 0x2a2018, scale: k === 2 ? 2 : 1 });
-    chipPaint(m, [h, 0, front - 2, h + s, s, front], 0x2a2018, woodFor(panel, 'x', seed), { chip: 0.35, seed });
+    chipPaint(m, [h, 0, front - 2, h + s, s, front], 0x2a2018, woodFor(panel, 'x', seed), { chip: 0.14, seed });
   }
   // wear: scratches on the lid, a split plank, a burst-out board on one side
   scratches(m, [h + 3, s - 1, h + 3, h + s - 4, s - 1, h + s - 4], 'y+', { n: 5, seed, len: 6, tone: 0xe8d0a0, amount: 0.35 });
   if (r.chance(0.6)) split(m, [h + s - 2, 3 + r.int(0, 3) * 5, h + 8], 'x+', [0, 0, 1], 10, { seed, depth: 2 });
   if (k === 0) {
     const hy = 8 + r.int(0, 2) * 5;
-    for (let z = h + 9; z <= h + 16 + r.int(0, 3); z++) for (let y = hy; y <= hy + 3; y++) if (hash3(z, y, seed) < 0.85 || (y > hy && y < hy + 3)) for (const x of [h - 0, h + 1]) m.del(x, y, z);
+    for (let z = h + 9; z <= h + 16 + r.int(0, 3); z++) for (let y = hy; y <= hy + 3; y++) if (hash3(z, y, seed) < 0.85 || (y > hy && y < hy + 3)) for (const x of [h, h + 1, h + 2]) m.del(x, y, z);
   }
   if (k === 3) crateBody(m, -9 + r.int(-2, 2), s, -10, 19, PR.woodLight, PR.woodDark, 'none', seed + 9);
   return S(m, CVS);
@@ -344,7 +344,7 @@ export function tntCrate(seed = 0): StaticModel {
     while (z > f - 3 && !m.has(x, y, z)) z--;
     if (m.has(x, y, z)) m.set(x, y, z, mod(x + y, 6) < 3 ? 0xe0b040 : 0x2a2018);
   }
-  chipPaint(m, [h - 1, 0, h - 1, f + 1, s, f + 1], cream, woodFor(PR.barnRed, 'x', seed), { chip: 0.32, seed });
+  chipPaint(m, [h - 1, 0, h - 1, f + 1, s, f + 1], cream, woodFor(PR.barnRed, 'x', seed), { chip: 0.14, seed });
   // the lid: one plank prised up and gone, straw packing and dynamite sticks poking out
   for (let x = h + 4; x <= f - 4; x++) for (let z = -3; z <= 3; z++) for (let y = s - 3; y < s; y++) m.del(x, y, z);
   for (let x = h + 4; x <= f - 4; x++) for (let z = -3; z <= 3; z++) if (hash3(x, z, seed) < 0.7) m.set(x, s - 3 + (hash3(z, x, seed) < 0.3 ? 1 : 0), z, hash3(x, z, 9) < 0.5 ? 0xd8b866 : 0xc09a4a, VF.SOFTAO);
@@ -411,7 +411,7 @@ function barrelBodyHD(m: VoxelModel, cx: number, cz: number, y0: number, H: numb
   const hoops: [number, number][] = [[y0 + 2, y0 + 3], [y0 + 8, y0 + 9], [y0 + H - 9, y0 + H - 8], [y0 + H - 3, y0 + H - 2]];
   const sp = wood === PR.woodDark ? WOOD.walnut : wood === PR.woodLight ? WOOD.pine : wood === PR.woodGrey ? WOOD.weathered : WOOD.oak;
   const rust = rustedIron({ seed, rust: 0.5, streaks: false, pitting: 0.4 });
-  const band = o.band ? paintedWood(o.band.base, { along: 'y', seed: seed + 3, chip: 0.45, under: rust }) : rust;
+  const band = o.band ? paintedWood(mixRGB(o.band.base, 0x3a0e08, 0.25), { along: 'y', seed: seed + 3, chip: 0.45, fade: 0, under: rust }) : rust;
   const stTone = (i: number) => sp.tones[1 + Math.floor(hash3(i, seed, 3) * 2.99)];
   const radius = (y: number) => R - 1.6 + Math.sin(((y - y0) / H) * Math.PI) * 1.8;
   for (let y = y0; y <= y0 + H; y++) {
@@ -491,9 +491,10 @@ export function whiskeyBarrel(seed = 0): StaticModel {
     m.set(-1, 6, fz + 3, bm, VF.METAL).set(-1, 5, fz + 3, bm, VF.METAL);
     m.set(-1, 8, fz + 2, bm, VF.METAL).set(-1, 9, fz + 2, bm, VF.METAL).set(-2, 9, fz + 2, bm, VF.METAL);
     // tin cup hanging by its handle from the tap
+    // a tin cup left on the ground by the tap
     const cup = tin({ seed: seed + 2, rust: 0.25 });
-    for (let y = 1; y <= 4; y++) for (let x = 2; x <= 5; x++) for (let z = 14; z <= 16; z++) if (!(y > 1 && x > 2 && x < 5 && z === 15)) m.set(x, y, z, cup, VF.METAL);
-    m.set(1, 4, 15, cup, VF.METAL).set(1, 3, 15, cup, VF.METAL);
+    for (let y = 0; y <= 3; y++) for (let x = 7; x <= 10; x++) for (let z = 12; z <= 15; z++) if (!(y > 0 && x > 7 && x < 10 && z > 12 && z < 15) && !((x === 7 || x === 10) && (z === 12 || z === 15))) m.set(x, y, z, cup, VF.METAL);
+    m.set(11, 1, 13, cup, VF.METAL).set(11, 2, 13, cup, VF.METAL).set(11, 1, 14, cup, VF.METAL).set(11, 2, 14, cup, VF.METAL);
     return S(m, CVS);
   }
   // lying along z in a cradle: a standing barrel turned on its side, axis at y = cy

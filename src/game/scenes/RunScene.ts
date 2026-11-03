@@ -60,6 +60,7 @@ import { ZoneCine } from './ZoneCine';
 import { Tutorial } from '../run/Tutorial';
 import { RuinNests } from '../run/RuinNests';
 import { Wildlife } from '../run/Wildlife';
+import { TreasureHunt } from '../run/TreasureHunt';
 import { Barks } from '../audio/Barks';
 import { DeathCine, deathCineFromRun } from './DeathCine';
 import { CodexRun } from '../ui/codex/CodexRun';
@@ -189,6 +190,7 @@ export class RunScene implements GameScene {
   tutorial: Tutorial | null = null;
   ruins: RuinNests | null = null;
   wildlife: Wildlife | null = null;
+  treasure: TreasureHunt | null = null;
   private codexRun: CodexRun | null = null;
   equipment!: Equipment;
   gearLoot!: GearPickups;
@@ -315,6 +317,11 @@ export class RunScene implements GameScene {
       addBounty: (v) => this.addBounty(v),
     });
     this.ruins = new RuinNests({ ctx: this.ctx, player: this.player, enemies: this.enemies, props: this.props, inter: this.inter, chest: (x, z, t, r) => this.spawnChest(x, z, t, r) });
+    this.treasure = new TreasureHunt({
+      ctx: this.ctx, player: this.player, inter: this.inter, input: e.input, area: this.opts.area, hud: this.hud, items: this.items,
+      pickups: { drop: (k, v, at, n) => this.pickups?.drop(k, v, at, n) },
+      chest: (x, z, t, r) => this.spawnChest(x, z, t, r),
+    });
     this.wildlife = new Wildlife({ ctx: this.ctx, player: this.player, enemies: this.enemies, inter: this.inter });
     this.populateZone(this.world.sa.zones[0]);
     if (this.world.sa.zones[1]) this.populateZone(this.world.sa.zones[1]);
@@ -416,6 +423,7 @@ export class RunScene implements GameScene {
     this.tutorial?.dispose();
     this.ruins?.dispose();
     this.wildlife?.dispose();
+    this.treasure?.dispose();
     this.codexRun?.dispose();
     this.engine.paused = false;
     this.engine.post.u.uDesat.value = 0;
@@ -625,6 +633,7 @@ export class RunScene implements GameScene {
     // ruins: chests, webs, nests and egg sacs; outposts; oasis drinking
     this.ruins?.populateZone(z);
     this.wildlife?.populateZone(z);
+    this.treasure?.populateZone(z);
   }
 
   spawnChest(x: number, z: number, tier: 'wood' | 'silver' | 'gold' | 'divine', rot = rnd.next() * 6.28) {
@@ -934,11 +943,12 @@ export class RunScene implements GameScene {
       e.input.setWantLock(false);
       e.audio.play('book_open', { volume: 0.6 });
     }
-    const modal = this.choice.active || this.shop.active || this.ledger.open || !!this.colony?.modal || !!this.jerboa?.modal || this.gearLoot.active;
+    const modal = this.choice.active || this.shop.active || this.ledger.open || !!this.colony?.modal || !!this.jerboa?.modal || this.gearLoot.active || !!this.treasure?.modal;
     if (!modal && !this.picker.active && e.input.hit('pause')) this.setPaused(!this.pausedByUser);
     this.qte.update(rdt);
     this.picker.update(rdt);
     this.gearLoot.update(dt, rdt);
+    this.treasure?.update(dt, rdt);
     this.choice.update(rdt);
     this.shop.update(rdt);
     this.colony?.update(dt, rdt);
@@ -949,7 +959,7 @@ export class RunScene implements GameScene {
     }
     this.hud.suppressHint = this.picker.active || this.ult.active || modal || this.pausedByUser;
     // cinematic moments own the screen: no HUD over the rank-up, the turtle-house visit or a gear reveal
-    const cineHud = this.picker.active || this.shop.active || this.gearLoot.active;
+    const cineHud = this.picker.active || this.shop.active || this.gearLoot.active || !!this.treasure?.modal;
     if (cineHud !== this.cineHudHidden) {
       this.cineHudHidden = cineHud;
       this.hud.setVisible(!cineHud);
@@ -1164,6 +1174,8 @@ export class RunScene implements GameScene {
       rank: this.run.rank,
       bountyFrac: this.run.bounty / this.run.bountyToNext,
       bountyTotal: this.run.totalBounty,
+      weapon: this.player.weapons?.hud(),
+      treasure: this.treasure?.waypoints() ?? [],
       gold: this.run.gold,
       wave: d.wave,
       waveTime: d.timeLeft,

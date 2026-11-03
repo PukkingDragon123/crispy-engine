@@ -10,6 +10,7 @@ import { atlas } from '../fx/PixelArt';
 import { STATUS_INFO, StatusId } from '../combat/Status';
 import { UI, FONT, woodPanel, ironPlate, slot, parchment, ribbon, barFrame, drawBarFill, keycap, starBadge, chain, text, measure, px } from './PixelUI';
 import type { PaperQuest } from './MissionPaper';
+import type { WeaponHud } from '../player/Weapons';
 import type { SoulAnchor } from './SoulBar';
 import { WATCH_DROP, type OutlawAnchors } from './OutlawHud';
 import { isTouchDevice } from './TouchControls';
@@ -18,6 +19,10 @@ import { isTouchDevice } from './TouchControls';
 export type HudQuest = PaperQuest;
 
 export interface HudState {
+  /** active gun and the carried strip (Weapons.hud) */
+  weapon?: WeaponHud;
+  /** off-screen markers for revealed X spots, maps and blueprints lying around */
+  treasure?: { x: number; y: number; z: number; kind: 'x' | 'blueprint' | 'map' }[];
   hp: number;
   maxHp: number;
   shield: number;
@@ -332,7 +337,7 @@ export class Hud {
   private drawCylinder(dt: number, s: HudState, cx: number, cy: number) {
     const c = this.ctx;
     const R = 19;
-    const n = Math.max(6, s.maxAmmo);
+    const n = Math.min(9, Math.max(6, s.maxAmmo));
     const rel = s.reload;
     // shot rotation: when ammo drops, rotate one chamber
     if (this.lastAmmo >= 0 && s.ammo < this.lastAmmo) this.cylRot -= ((Math.PI * 2) / n) * (this.lastAmmo - s.ammo);

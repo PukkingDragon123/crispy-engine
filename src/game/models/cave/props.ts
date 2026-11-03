@@ -266,3 +266,42 @@ export function pitThroat(r: number, depth: number) {
   s.disc([0, -depth - vs, 0], r * 0.4, vs * 2, 'y', 0x040302, VF.SOFTAO);
   return { model: s.m, voxelSize: vs };
 }
+
+/**
+ * A flowstone column where a stalactite and a stalagmite grew into one: a wide
+ * fluted foot spilling rimstone, a waist pinched like an hourglass and ringed with
+ * melted-candle lobes, a crown that flares into the ceiling. Hollow shell (only the
+ * skin is ever seen). `H` = floor-to-ceiling height (m), `R` = waist radius scale.
+ * Origin = ground centre (mesh with pivot [0, 0, 0]).
+ */
+export function caveColumn(H: number, R: number, seed = 0) {
+  const vs = 1 / 5;
+  const s = new Sc(new VoxelModel(`cave_column_${seed}`), vs);
+  const col = flowstone(vs, seed, H, 0);
+  const rAt = (t: number, a: number) => {
+    const flare = 1 + 1.1 * Math.exp(-t * 9) + 0.9 * Math.exp(-(1 - t) * 7);
+    const waist = 0.6 + 0.4 * Math.abs(t - 0.52) * 2;
+    const lobes = 1 + 0.09 * Math.sin(t * H * 1.3 + seed) + 0.05 * Math.sin(t * H * 3.3 + seed * 2);
+    const flutes = 1 + 0.07 * Math.sin(a * 7 + t * 4 + seed) + 0.1 * noise.n3(Math.cos(a) * 1.4 + seed, Math.sin(a) * 1.4, t * 5);
+    return R * flare * waist * lobes * flutes;
+  };
+  const N = Math.ceil(H / vs);
+  const rMax = R * 2.3;
+  for (let j = -2; j <= N; j++) {
+    const t = Math.max(0, j / N);
+    const y = j * vs;
+    for (let i = -Math.ceil(rMax / vs); i <= Math.ceil(rMax / vs); i++)
+      for (let k = -Math.ceil(rMax / vs); k <= Math.ceil(rMax / vs); k++) {
+        const x = (i + 0.5) * vs, z = (k + 0.5) * vs;
+        const d = Math.hypot(x, z);
+        if (d > rMax) continue;
+        const r = rAt(t, Math.atan2(z, x));
+        if (d > r || d < r - vs * 3) continue;
+        s.m.set(i, j, k, col);
+      }
+  }
+  // rimstone dams spilling around the foot
+  for (let k = 0; k < 3; k++) s.disc([0, k * 0.08, 0], R * (2.3 + k * 0.45), 0.14 + 0.05 * (2 - k), 'y', col, undefined, R * (2.0 + k * 0.45));
+  wetGlints(s, 0.03, 0xffffff, seed);
+  return { model: s.m, voxelSize: vs };
+}

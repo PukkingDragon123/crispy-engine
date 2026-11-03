@@ -25,7 +25,8 @@
 //   field:   treasure: TreasureHunt | null = null;
 //   enter(): right after `this.ruins = new RuinNests({...})` (before the first populateZone):
 //              this.treasure = new TreasureHunt({ ctx: this.ctx, player: this.player, inter: this.inter, input: e.input,
-//                area: this.opts.area, hud: this.hud, items: this.items, pickups: this.pickups,
+//                area: this.opts.area, hud: this.hud, items: this.items,
+//                pickups: { drop: (k, v, at, n) => this.pickups?.drop(k, v, at, n) }, // pickups is built later in enter()
 //                chest: (x, z, t, r) => this.spawnChest(x, z, t, r) });
 //   populateZone(z): at the end:   this.treasure?.populateZone(z);
 //   update():  next to `this.gearLoot.update(dt, rdt);` (before the modal early return):

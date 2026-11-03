@@ -388,6 +388,8 @@ export class Hud3D {
 
   private buildCylinder(n: number) {
     this.cylN = n;
+    // the cylinder model exists for 5-9 chambers; long guns (drums) clamp here
+    n = Math.max(5, Math.min(9, n));
     for (const g of [this.cylGroup, ...this.ghosts]) g.clear();
     // the floating magazine: the hi-res rusty cylinder (fallback: the simple procedural one)
     let geo: THREE.BufferGeometry;
