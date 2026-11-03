@@ -26,6 +26,7 @@ import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { modelEntry } from '../models/lookup';
 import { FloatText3D } from '../fx/FloatText3D';
+import { Voice } from '../audio/Voice';
 import { GlyphRings, SandVortex, SerketSpirit, guideSpot, spiritMotes, type SpiritPose } from '../fx/SerketSpirit';
 
 export interface TutorialDeps {
@@ -530,7 +531,7 @@ export class Tutorial {
     this.goals.forEach((g, i) => g.text.anchor.copy(base).addScaledVector(up, -i * 0.15));
     for (let i = this.texts.length - 1; i >= 0; i--) {
       const t = this.texts[i];
-      t.update(dt, cam, t === this.speech && sp.talking ? () => this.ctx.sfx('ui_hover', null, 0.05, 0.9 + Math.random() * 0.4) : undefined);
+      t.update(dt, cam, t === this.speech && sp.talking ? (c, i, s) => Voice.syllable('serket', c, { index: i, text: s }) : undefined);
       if (t !== this.speech && !this.goals.some((g) => g.text === t) && t.visibleAmount < 0.01) {
         t.dispose();
         this.texts.splice(i, 1);

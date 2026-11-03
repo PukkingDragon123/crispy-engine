@@ -882,14 +882,14 @@ export class RankUpCine {
       if (this.vortex) {
         const v = this.vortex;
         const inCards = t >= this.tPull;
-        v.intensity = (inCards ? 0.5 : sm((t - 0.3) / 0.8)) * (1 - rel * 0.5) * (1 - this.dim * 0.6);
+        v.intensity = (inCards ? 0.5 : sm((t - 0.3) / 0.8)) * (1 - rel * 0.5) * (1 - this.dim);
         v.height = inCards ? 2.6 : 1.6 + 1.8 * sm((t - 0.3) / 1.0);
         v.burst = rel;
         v.update(rdt, fog, ctx.camera.position);
       }
       if (this.rings) {
         this.rings.appear = sat((t - 0.5) / 0.8);
-        this.rings.fade = (1 - rel) * (1 - this.dim * 0.8);
+        this.rings.fade = (1 - rel) * (1 - this.dim);
         this.rings.update(rdt);
       }
       // jade motes off the sigil, glyph sparks while it traces
@@ -2157,7 +2157,7 @@ export class SkillUnlock {
         ctx.sfx('poison_burst', S, 0.8);
         this.cine.kick(0.4);
         p.emit({ pos: S, count: 1, life: [0.25, 0.25], size: [1.6, 0.3], sprite: ['flash0', 'flash1'], additive: true, color: 0xffd8a0, sizeJitter: 0 });
-        p.emit({ pos: S, count: 12, spread: 1.6, up: 0.8, life: [1.4, 2.4], size: [0.5, 1.4], sprite: PUFF, color: [0x9dcf4a, 0x7fae3a, 0xb8e070], alpha: 0.6, drag: 1.6, rot: 6, rotSpeed: 0.5, jitter: 0.4 });
+        p.emit({ pos: S, count: 6, spread: 1.4, up: 0.8, life: [1.2, 2.0], size: [0.35, 0.9], sprite: PUFF, color: [0x9dcf4a, 0x7fae3a, 0xb8e070], alpha: 0.45, drag: 1.6, rot: 6, rotSpeed: 0.5, jitter: 0.35 });
         p.emit({ pos: S, count: 30, spread: 4, up: 3, life: [0.5, 1.0], size: [0.07, 0.04], sprite: GRAIN, color: SAND, gravity: 10, ground: true, bounce: 0.15 });
       }, true);
     }
@@ -2289,7 +2289,7 @@ export class GambleShow {
     this.G.copy(H).addScaledVector(f, 1.45);
     this.G.y = ctx.world.groundAt(this.G.x, this.G.z);
     const side = _v2.crossVectors(W_UP, this.toCam).normalize();
-    cine.dim = 0.7;
+    cine.dim = 1;
     cine.gaze = this.G;
     if (o.prop === 'dice') {
       const n = o.dice?.length ?? 2;
@@ -2336,7 +2336,7 @@ export class GambleShow {
       const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(at, cine.B.pos, W_UP));
       const end = -(o.stop ?? 0) * (Math.PI / 3);
       this.cyl = { mesh, mat, ham, at, q, spin: Math.PI * 2 * 6, end, lastStep: 0 };
-      this.shot = makePose(at.clone().addScaledVector(_v3.copy(cine.B.pos).sub(at).normalize(), 1.15).addScaledVector(W_UP, 0.06), at.clone(), 34);
+      this.shot = makePose(at.clone().addScaledVector(_v3.copy(cine.B.pos).sub(at).normalize(), 1.75).addScaledVector(W_UP, 0.12), at.clone().addScaledVector(W_UP, 0.08), 36);
       this.tReveal = 2.55;
       this.light = new THREE.PointLight(0xffd8a0, 0, 2.5, 1.5);
       this.light.castShadow = false;
@@ -2403,11 +2403,12 @@ export class GambleShow {
         ctx.sfx('divine_power', at, 0.8);
         ctx.sfx('quake_rumble', at, 0.6);
       }
-      cine.p.emit({ pos: at, count: o.jackpot ? 60 : 30, spread: 4.5, up: 2.5, life: [0.5, 1.1], size: [0.12, 0.04], sprite: ['coinspin0', 'coinspin1', 'coinspin2', 'star4', 'spark'], color: [0xffffff, 0xffd36b], gravity: 6, ground: true, bounce: 0.35, drag: 0.4 });
+      cine.p.emit({ pos: at, count: o.jackpot ? 60 : 30, spread: 4.5, up: 2.5, life: [0.5, 1.1], size: [0.08, 0.03], sprite: ['coinspin0', 'coinspin1', 'coinspin2', 'star4', 'spark'], color: [0xffffff, 0xffd36b], gravity: 6, ground: true, bounce: 0.35, drag: 0.4 });
       cine.p.emit({ pos: at, count: 1, life: [0.5, 0.5], size: [0.4, 2.8], sprite: 'ring', additive: true, color: 0x9dff5a, sizeJitter: 0 });
     } else {
       ctx.sfx('sting_negative', at, 0.9);
-      cine.p.emit({ pos: at, count: 10, spread: 1.4, up: 1.0, life: [0.9, 1.6], size: [0.3, 0.9], sprite: PUFF, color: [0x3a2a2a, 0x5a4040, 0x2a2020], alpha: 0.6, drag: 1.8, rot: 6, rotSpeed: 0.5 });
+      const back = _v.copy(at).addScaledVector(this.toCam, -0.35);
+      cine.p.emit({ pos: back, count: 4, spread: 0.6, up: 0.9, life: [0.9, 1.5], size: [0.12, 0.38], sprite: PUFF, color: [0x3a2a2a, 0x5a4040, 0x2a2020], alpha: 0.45, drag: 1.8, rot: 6, rotSpeed: 0.5 });
       cine.p.emit({ pos: at, count: 24, spread: 4, up: 1, life: [0.4, 0.8], size: [0.08, 0.02], sprite: ['spark', 'star4'], additive: true, color: [0xff4a2a, 0xffa080], drag: 2.5 });
     }
     for (const d of this.dice) d.mat.userData.fx.value.x = 0.7;
@@ -2416,7 +2417,8 @@ export class GambleShow {
     this.stamp = new TextStamp(ctx.scene, lines, o.win ? 'gold' : 'blood', 0.95);
     // a live round has cut to the hero: the verdict lands in that shot
     const bang = o.prop === 'chamber' && !o.win;
-    this.stamp.place(bang ? cine.A : this.shot, ctx.engine.width / ctx.engine.height, bang ? 0.3 : 0, bang ? 0.45 : 0.5, 1.5, this.t, 0.15);
+    const zs = o.prop === 'chamber' && !bang ? 1.1 : 1.5;
+    this.stamp.place(bang ? cine.A : this.shot, ctx.engine.width / ctx.engine.height, bang ? 0.3 : 0, bang ? 0.45 : o.prop === 'chamber' ? 0.62 : 0.5, zs, this.t, 0.15);
   }
 
   // ---- dice

@@ -27,6 +27,7 @@ import { makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
 import type { VoxelModel } from '../../engine/voxel/VoxelModel';
 import { modelEntry } from '../models/lookup';
 import { FloatText3D } from '../fx/FloatText3D';
+import { Voice } from '../audio/Voice';
 import { IconFactory } from '../ui/IconFactory';
 import { PARCHMENT_GLSL } from '../ui/Choice';
 import { GlyphRings, LightSigil, SandVortex, SerketSpirit, spiritMotes, guideSpot } from '../fx/SerketSpirit';
@@ -665,11 +666,12 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     for (const t of texts) {
       const w = nearLens.get(t);
       if (w) t.anchor.copy(camera.position).addScaledVector(w.clone().sub(camera.position).normalize(), 3.4);
-      t.update(dt, camera, t === speaking ? () => eng.audio.play('ui_hover', { volume: 0.08, pitch: 0.8 + Math.random() * 0.5 }) : undefined);
+      t.update(dt, camera, t === speaking ? (c, i, s) => Voice.syllable(speakingAs, c, { index: i, text: s }) : undefined);
     }
   };
   let choices: FloatText3D[] = [];
   let speaking: FloatText3D | null = null;
+  let speakingAs: 'serket' | 'sundown' | 'pinch' = 'serket';
   const nearLens = new Map<FloatText3D, THREE.Vector3>();
   let last = performance.now();
   // ?cinedt=0.5 lets slow headless test machines get through the scene
@@ -711,6 +713,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     const t = text(line, at, who === 'serket' ? { size: 0.135, color: JADE, glow: JADE_GLOW, cps: 36, wrap: 28, hdr: 1.7 } : { size: 0.11, color: who === 'pinch' ? '#c8ff8a' : '#fff3d6', glow: who === 'pinch' ? '#6aff1a' : '#ffb070', cps: 40, wrap: 28, hdr: 1.3 });
     nearLens.set(t, at.clone());
     speaking = t;
+    speakingAs = who;
     if (who === 'serket') {
       spirit.talking = true;
       eng.audio.play('divine_whisper', { volume: 0.5 });

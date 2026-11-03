@@ -39,6 +39,7 @@ import { meerkatRig, beatleMeerkatRig, BEATLE_IDS, BEATLES, BAND_NAME } from '..
 import { meerkatWarrenModel, meerkatStallModel, BurrowHole } from '../models/creatures/colony';
 import { MeerkatAnim, MeerkatMode } from '../models/creatures/anim';
 import { MeerkatTrade, buildOffers, InventoryLike, TradeReaction } from '../ui/MeerkatTrade';
+import { Voice } from '../audio/Voice';
 
 export interface ColonyPlayer {
   pos: THREE.Vector3;
@@ -295,12 +296,14 @@ export class MeerkatColony {
       if (k.role === 'rock' && k.state === 'rock') {
         this.go(k, 'bark', 0.55);
         this.chirp(k, 1.35, 0.6);
+        Voice.chatter('meerkat', 'alarm', { pos: this.world(k, _v), key: 'meerkat:alarm' });
       }
     }
   }
 
   private react(kind: TradeReaction) {
     const tr = this.kats.find((k) => k.role === 'trader')!;
+    Voice.chatter('meerkat', kind, { pos: this.world(tr, _v) });
     const set = (m: MeerkatMode, s: number) => {
       tr.mode = m;
       tr.modeUntil = this.time + s;

@@ -35,6 +35,7 @@ import { modelEntry } from '../models/lookup';
 import { buildRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { clamp, damp, dampAngle, rnd } from '../../engine/math/rand';
 import { SpringF } from '../anim/spring';
+import { Voice } from '../audio/Voice';
 
 const TAU = Math.PI * 2;
 const _v = new THREE.Vector3();
@@ -434,6 +435,7 @@ export class TravelerEscort {
     ctx.sfx('merchant_greet', this.npc.pos, 0.8, 1.2);
     if (this.d.items) {
       const ok = this.d.items.add('snakeoil', 2);
+      if (ok) ctx.engine.tweens.after(1.4, () => Voice.say('peddler', 'On the house, partner.', { pos: this.npc.pos, follow: true }));
       ctx.engine.tweens.after(1.4, () => ctx.toast(ok ? "DOC HAPI'S SNAKE OIL ×2" : 'POCKETS FULL', ok ? '#9dff3a' : '#ff8a6a', ok ? '"On the house, partner."' : 'He keeps the tonics for next time'));
     }
     if (this.d.card && this.ambushes >= 2 && this.hp > this.maxHp * 0.6) ctx.engine.tweens.after(2.4, () => this.d.card?.());
@@ -552,6 +554,7 @@ export class TravelerEscort {
         this.callCd = 10;
         npc.talk = 1.4;
         ctx.toast(`${this.name.toUpperCase()}`, '#ffd36b', '"Partner? Don\'t leave me out here!"');
+        Voice.say('peddler', "Partner? Don't leave me out here!", { pos: npc.pos, follow: true });
       }
     } else {
       npc.mode = 'walk';

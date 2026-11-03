@@ -43,6 +43,7 @@ import { sharedVoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { clamp, damp, dampAngle, rnd, hash3, smoothstep, lerp } from '../../engine/math/rand';
 import { SpringF } from '../anim/spring';
 import { frogWigHat, frogWigPivot } from '../models/enemies/frog';
+import { Voice } from '../audio/Voice';
 
 export interface FrogFamilyDeps {
   ctx: Ctx;
@@ -491,6 +492,7 @@ export class FrogFamily {
             this.mama.squash.kick(3);
             ctx.sfx('squeak', this.mama.pos, 0.8, 0.75);
             ctx.sfx('squeak', b.pos, 0.5, 1.8);
+            Voice.chatter('frog', 'joy', { pos: this.mama.pos });
             ctx.particles.emit({ pos: { x: slot.x, y: slot.y + 0.05, z: slot.z }, count: 6, spread: 1, up: 1.2, life: [0.3, 0.6], size: [0.05, 0.03], sprite: 'dot3', color: [0xe0c08a, 0xc9a06a], gravity: 12, ground: true });
             if (this.returned >= 5) this.finale();
             else ctx.toast(`FROGLET HOME (${this.returned}/5)`, '#9fd8e0', this.returned === 4 ? 'One more out there…' : 'Mama squeaks with joy');
@@ -508,6 +510,7 @@ export class FrogFamily {
     this.rainT = 6;
     this.mamaInter.label = 'Say goodbye';
     ctx.toast('REUNITED', '#9fd8e0', 'Mama Rain Frog sings "Rain" to her babies', true);
+    Voice.say('frog', 'Rain... rain, rain... rain. Mmm, mmm.', { pos: this.mama.pos, sing: [0, 3, 5, 7, 5, 3, 0], delay: 0.5, duck: 0.6 });
     ctx.sfx('sting_positive', null, 0.9);
     ctx.sfx('divine_chime', this.mama.pos, 0.6);
     ctx.engine.tweens.after(0.6, () => ctx.sfx('thunder', this.mama.pos, 0.25, 1.4));
@@ -560,6 +563,7 @@ export class FrogFamily {
     f.wailIn = 2.6 + rnd.next() * 2.4;
     const ctx = this.d.ctx;
     ctx.sfx('squeak', f.pos, loud ? 0.9 : 0.6, 0.5 + rnd.next() * 0.1);
+    Voice.chatter('frog', 'wail', { pos: f.pos, pitch: f.mama ? 1 : 2.3, key: `frog:${f.idx}`, volume: loud ? 1 : 0.7 });
   }
 
   // ------------------------------------------------------------- update

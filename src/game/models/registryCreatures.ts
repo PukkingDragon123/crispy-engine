@@ -62,3 +62,10 @@ export const WILDLIFE_MODELS: Record<string, ModelEntry> = {
   heal_cactus_barrel: () => healCactusRig(0, 'barrel'),
   heal_cactus_barrel_v1: () => healCactusRig(1, 'barrel'),
 };
+
+// ---- the Oasis King (creatures/oasisKingRig.ts): the 17.5 m land-walking catfish boss of the
+// Heart of the Oasis. Heavy (built off the main thread in-game by bosses/OasisKing.ts).
+import { oasisKingRig } from './creatures/oasisKingRig';
+export const OASIS_KING_MODELS: Record<string, ModelEntry> = {
+  oasis_king: () => oasisKingRig(),
+};

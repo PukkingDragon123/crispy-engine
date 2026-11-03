@@ -17,6 +17,7 @@ import { Cloth, ClothRenderer } from '../../engine/physics/Cloth';
 import { clamp, damp, dampAngle, rnd } from '../../engine/math/rand';
 import { Spring } from '../../engine/Tween';
 import { RigEyes, EyeStyle } from '../fx/FaceFx';
+import { Voice, voiceFor } from '../audio/Voice';
 
 export class Cancelled extends Error {}
 
@@ -205,6 +206,7 @@ export abstract class Boss implements ExternalTarget {
   }
   taunt(text: string, color = '#ffb070') {
     this.ctx.toast(`${this.name}: “${text}”`, color);
+    Voice.say(voiceFor(this.name), text, { pos: this.pos, follow: true, key: `boss:${this.id}` });
   }
   async qte(spec: Parameters<Qte['run']>[0]): Promise<QteResult> {
     this.check();

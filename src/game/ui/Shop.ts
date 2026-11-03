@@ -44,6 +44,7 @@ import { ITEMS, ItemId } from '../player/Items';
 import { clamp, damp, noise, rnd } from '../../engine/math/rand';
 import { Ease } from '../../engine/Tween';
 import { FloatText3D } from '../fx/FloatText3D';
+import { Voice } from '../audio/Voice';
 
 /** what the run hands her each frame so she can stage her own arrival scene */
 export interface MerchantHooks {
@@ -1951,7 +1952,7 @@ export class Shop {
         const right = _a.set(1, 0, 0).applyQuaternion(cam.quaternion);
         this.speech.anchor.copy(head).addScaledVector(right, this.speechSide * (0.24 + this.speech.mesh.scale.x * 0.5));
         this.speech.anchor.y += 0.16;
-        this.speech.update(h, cam, () => this.ctx.engine.audio.play('ui_hover', { volume: 0.05, pitch: 0.65 + Math.random() * 0.35 }));
+        this.speech.update(h, cam, (c, i, s) => Voice.syllable(her.kind === 'turtle' ? 'ozymandias' : 'tamsin', c, { index: i, text: s, pos: head }));
       }
     }
     for (let i = this.fading.length - 1; i >= 0; i--) {

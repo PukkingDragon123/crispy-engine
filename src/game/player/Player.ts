@@ -109,6 +109,16 @@ export const DODGE = {
 
 const DEG = Math.PI / 180;
 const _o = new THREE.Vector3();
+
+/** the gun's kick spring, substepped: a slow frame (under ~12 fps) can't make it diverge */
+class KickSpring extends Spring {
+  update(target: number, dt: number) {
+    const n = Math.max(1, Math.ceil(dt / 0.016));
+    for (let i = 0; i < n; i++) super.update(target, dt / n);
+    if (!Number.isFinite(this.x + this.v)) this.x = this.v = 0;
+    return this.x;
+  }
+}
 const _pt = new THREE.Vector3();
 
 export class Player {
@@ -138,7 +148,7 @@ export class Player {
   aiming = false;
   firing = false;
   fanning = false;
-  gunKick = new Spring(0, 260, 18);
+  gunKick = new KickSpring(0, 260, 18);
   cylAngle = 0;
   // melee / counter
   meleeCd = 0;

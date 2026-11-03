@@ -103,3 +103,19 @@ export const RUIN_SPIDER_MODELS: Record<string, ModelEntry> = {
   ruin_spider_v1: () => ruinSpiderRig({ variant: 1 }),
   ruin_spider_alpha: () => ruinSpiderRig({ alpha: true }),
 };
+
+// ---- the Heart of the Oasis army (creatures/oasis*.ts): crocodiles, land catfish on stumpy
+// legs and walking flytraps (two colour morphs each, alphas). Defs: run/OasisHeart.ts
+import { oasisCrocRig } from './creatures/oasisCroc';
+import { oasisCatfishRig } from './creatures/oasisCatfish';
+import { oasisFlytrapRig } from './creatures/oasisFlytrap';
+export const OASIS_ARMY_MODELS: Record<string, ModelEntry> = {
+  oasis_croc: () => oasisCrocRig(),
+  oasis_croc_alpha: () => oasisCrocRig({ alpha: true }),
+  oasis_catfish: () => oasisCatfishRig(),
+  oasis_catfish_v1: () => oasisCatfishRig({ variant: 1 }),
+  oasis_catfish_alpha: () => oasisCatfishRig({ alpha: true }),
+  oasis_flytrap: () => oasisFlytrapRig(),
+  oasis_flytrap_v1: () => oasisFlytrapRig({ variant: 1 }),
+  oasis_flytrap_alpha: () => oasisFlytrapRig({ alpha: true }),
+};

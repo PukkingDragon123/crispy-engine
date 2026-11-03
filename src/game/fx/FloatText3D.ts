@@ -113,12 +113,12 @@ export class FloatText3D {
     this.tex.needsUpdate = true;
   }
 
-  update(dt: number, camera: THREE.Camera, onChar?: () => void) {
+  update(dt: number, camera: THREE.Camera, onChar?: (ch: string, index: number, text: string) => void) {
     this.t += dt;
     if (this.prog < this.full.length) {
       const before = Math.floor(this.prog);
       this.prog = Math.min(this.full.length, this.prog + dt * this.o.cps);
-      if (Math.floor(this.prog) !== before && onChar && this.full[Math.floor(this.prog) - 1] !== ' ') onChar();
+      if (Math.floor(this.prog) !== before && onChar && this.full[Math.floor(this.prog) - 1] !== ' ') onChar(this.full[Math.floor(this.prog) - 1], Math.floor(this.prog) - 1, this.full);
     }
     this.draw();
     this.fade += (this.fadeTarget - this.fade) * Math.min(1, dt * 6);

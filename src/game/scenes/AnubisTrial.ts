@@ -28,6 +28,7 @@ import { buildRigGeo, clearRigCache, RigGeo, RigInstance, RigSpec } from '../../
 import { globalUniforms, makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { Particles } from '../fx/Particles';
 import { FloatText3D, FloatTextOpts } from '../fx/FloatText3D';
+import { Voice } from '../audio/Voice';
 import { rnd } from '../../engine/math/rand';
 import { REALM_MODELS, StaticModel, spiritNormals } from '../models/anubis/realm';
 
@@ -1385,7 +1386,7 @@ export class AnubisTrial {
     for (let i = this.lines.length - 1; i >= 0; i--) {
       const l = this.lines[i];
       if (!l.dying || l.who !== 'title') l.ft.anchor.lerp(this.textAnchor(l.who), 1 - Math.exp(-6 * dt));
-      l.ft.update(dt, this.camera, l.who === 'anubis' ? () => (this.speak = 1) : undefined);
+      l.ft.update(dt, this.camera, l.who === 'anubis' ? (c, i, s) => ((this.speak = 1), Voice.syllable('anubis', c, { index: i, text: s })) : undefined);
       if (l.dying && l.ft.visibleAmount < 0.02) {
         l.ft.dispose();
         this.lines.splice(i, 1);

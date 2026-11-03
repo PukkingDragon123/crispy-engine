@@ -430,6 +430,7 @@ export class OutlawHud {
 
   private build() {
     this.built = true;
+    const T0 = performance.now(); setTimeout(() => console.log('[TMPPERF] build', 'OutlawHud.ts', Math.round(performance.now() - T0)), 0);
     const mk = (fn: () => ReturnType<typeof sculpt>, vph: number) => {
       try {
         return new THREE.Mesh(geoOf(fn(), vph), this.mat);
@@ -448,7 +449,7 @@ export class OutlawHud {
     this.board.add(this.boardText.mesh);
     // plaque + chains + tag
     this.plaque.add(mk(plaqueModel, V2));
-    this.plaqueText.mesh.position.set(0, -0.5, 2.62);
+    this.plaqueText.mesh.position.set(0, -0.5, 3.05);
     this.plaque.add(this.plaqueText.mesh);
     const linkGeo = geoOf(linkModel(), 4);
     for (const [rx, ry] of RINGS)

@@ -427,6 +427,7 @@ export class SoulBar {
   /** the voxel parts are sculpted on first use (keeps scene start snappy) */
   private build() {
     this.built = true;
+    const T0 = performance.now(); setTimeout(() => console.log('[TMPPERF] build', 'SoulBar.ts', Math.round(performance.now() - T0)), 0);
     try {
       const vs = 1 / VPH;
       const foot = new THREE.Mesh(buildVoxelGeometry(footModel(), { voxelSize: vs, pivot: [0, 0, 0] }), this.brassMat);

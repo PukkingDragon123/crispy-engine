@@ -98,12 +98,13 @@ function heightFn(seed: number) {
   return (x: number, z: number) => {
     const u = x * 0.8 + z * 0.6, v = -x * 0.6 + z * 0.8;
     const r = Math.hypot(x, z);
-    const big = n.ridged2(u * 0.0075 + 3.1, v * 0.014, 3) * 15;
-    const mid = n.fbm2(x * 0.03 + 7, z * 0.03, 3) * 2.6;
-    const fl = Math.min(1, Math.max(0, (r - 2.4) / 22));
+    const big = n.ridged2(u * 0.006 + 3.1, v * 0.011, 3) * 9;
+    const mid = n.fbm2(x * 0.022 + 7, z * 0.022, 3) * 1.6;
+    const fl = Math.min(1, Math.max(0, (r - 5) / 70));
     const flat = fl * fl * (3 - 2 * fl);
+    const swell = n.fbm2(x * 0.05 + 2, z * 0.05 - 4, 2) * 0.35 * Math.min(1, r / 6);
     const ripple = Math.sin(u * 2.1 + n.n2(x * 0.18, z * 0.18) * 2.6) * 0.03;
-    return (big + mid - 2.4) * flat + ripple;
+    return (big + mid - 1.6) * flat + swell + ripple;
   };
 }
 
@@ -126,7 +127,7 @@ function nearGround(h: (x: number, z: number) => number, area: string, seed: num
       if (n < 0.004) c = 0x8a7660; // a pebble
       for (let k = lo; k <= y; k++) m.set(i, k, j, k === y ? c : pal[1]);
     }
-  return buildVoxelGeometry(m, { voxelSize: VS, pivot: [0.5, 1, 0.5], ao: 0.8 });
+  return buildVoxelGeometry(m, { voxelSize: VS, pivot: [0.5, 1, 0.5], ao: 0.45 });
 }
 
 /** the dunes out to the horizon (smooth, sampled from the same field; sunk under the near patch) */
@@ -191,9 +192,11 @@ void main(){
   vec3 hz = atmoHaze(d, fogColor);
   float t = clamp(y, 0.0, 1.0);
   float mu = max(dot(d, uSunDir), 0.0);
-  float g = pow(smoothstep(0.0, 0.75, t), 0.55);
-  g *= 1.0 - 0.3 * pow(mu, 3.0) * (1.0 - t);
-  vec3 col = mix(hz, uZenith, g);
+  float g = pow(smoothstep(0.0, 0.62, t), 0.48);
+  g *= 1.0 - 0.22 * pow(mu, 4.0) * (1.0 - t);
+  vec3 col = mix(hz, uZenith * 1.08, g);
+  // painted bands: a warm low glow under a cooler upper sky
+  col = mix(col, col * vec3(1.05, 0.97, 0.9), smoothstep(0.25, 0.0, y) * (1.0 - uNight) * 0.5);
   col += hz * 0.07 * exp(-abs(y) * 36.0);
   if (y < 0.0) col = mix(hz, uGround, smoothstep(0.0, 0.35, -y) * 0.35);
   // stars: fixed to the celestial sphere, wheeling round the pole; a faint milky way
@@ -211,7 +214,7 @@ void main(){
     col += vec3(0.42, 0.46, 0.7) * band * cl * 0.09 * uStars * lowFade;
   }
   // the sun: forward glow + a limb-darkened disk
-  col += uSunCol * 0.05 * (pow(mu, 6.0) * 0.45 + pow(mu, 48.0) * 1.1 + pow(mu, 420.0) * 3.0) * uSunVis;
+  col += uSunCol * 0.05 * (pow(mu, 12.0) * 0.28 + pow(mu, 64.0) * 1.0 + pow(mu, 480.0) * 3.0) * uSunVis;
   float disk = smoothstep(0.99955, 0.99972, dot(d, uSunDir));
   col = mix(col, uSunCol * (0.72 + 0.28 * smoothstep(0.99955, 0.99993, dot(d, uSunDir))), disk * uSunVis);
   // the moon: a pale cratered disk with a soft halo, lit on the sun side
@@ -526,8 +529,8 @@ export class DeathCine implements GameScene {
       const kp = this.killer!.root.position;
       this.particles.emit({ pos: { x: kp.x, y: kp.y + 1.3, z: kp.z - 0.4 }, count: 6, spread: 0.4, up: 0.4, life: [0.8, 1.4], size: [0.2, 0.6], sprite: ['puff0', 'puff1'], color: 0xe8e0d0, alpha: 0.6, drag: 2 });
     }
-    this.particles.emit({ pos: chest, count: 18, spread: 2.2, up: 1.6, vel: { x: 0, y: 0.6, z: -1.8 }, life: [0.6, 1.4], size: [0.05, 0.03], sprite: ['twig', 'dot3'], color: [0xf2dcb4, 0xd6b78a, 0xfff1d6], gravity: 6, ground: true, drag: 0.4 });
-    this.particles.emit({ pos: chest, count: 5, spread: 0.6, up: 0.4, life: [0.9, 1.6], size: [0.3, 0.9], sprite: ['puff0', 'puff1'], color: 0xe6cf9f, alpha: 0.5, drag: 1.6 });
+    this.particles.emit({ pos: chest, count: 16, spread: 2.2, up: 1.6, vel: { x: 0, y: 0.6, z: -1.8 }, life: [0.6, 1.4], size: [0.024, 0.014], sprite: ['twig', 'dot3'], color: [0xf2dcb4, 0xd6b78a, 0xfff1d6], gravity: 6, ground: true, drag: 0.4 });
+    this.particles.emit({ pos: chest, count: 3, spread: 0.5, up: 0.3, life: [0.7, 1.2], size: [0.18, 0.5], sprite: ['puff0', 'puff1'], color: 0xe6cf9f, alpha: 0.35, drag: 1.6 });
   }
 
   /** a thing flies off him: the hat, the gun, the board */
@@ -559,8 +562,8 @@ export class DeathCine implements GameScene {
         o.position.y = g;
         const p = { x: o.position.x, y: g - b.r, z: o.position.z };
         const hard = -b.vel.y;
-        this.particles.emit({ pos: p, count: 4 + Math.round(hard), spread: 0.6, up: 0.5, life: [0.6, 1.2], size: [0.18, 0.5], sprite: ['puff0', 'puff1'], color: [0xe6cf9f, 0xd8b98a], alpha: 0.6, drag: 2.2 });
-        this.particles.emit({ pos: p, count: 8 + Math.round(hard * 3), spread: 1.2, up: 1.6, life: [0.4, 0.9], size: [0.05, 0.03], sprite: ['dot3', 'dot4'], color: this.sand, gravity: 10, ground: true, jitter: 0.3 });
+        this.particles.emit({ pos: p, count: 3 + Math.round(hard), spread: 0.5, up: 0.4, life: [0.6, 1.2], size: [0.14, 0.4], sprite: ['puff0', 'puff1'], color: [0xe6cf9f, 0xd8b98a], alpha: 0.5, drag: 2.2 });
+        this.particles.emit({ pos: p, count: 8 + Math.round(hard * 3), spread: 1.2, up: 1.6, life: [0.4, 0.9], size: [0.03, 0.02], sprite: ['dot3', 'dot4'], color: this.sand, gravity: 10, ground: true, jitter: 0.3 });
         this.engine.audio.play(b.sfx, { volume: Math.min(1, 0.3 + hard * 0.12) });
         if (hard > 1.4 && b.bounces < 2) {
           b.bounces++;
@@ -625,8 +628,8 @@ export class DeathCine implements GameScene {
 
   private thump(x: number, z: number, k: number) {
     const p = { x, y: this.h(x, z), z };
-    this.particles.emit({ pos: p, count: Math.round(8 * k), spread: 1.2, up: 0.6, life: [0.8, 1.6], size: [0.3, 0.9], sprite: ['puff0', 'puff1'], color: [0xe6cf9f, 0xd8b98a, 0xc9a77a], alpha: 0.6, drag: 2, rot: 3, rotSpeed: 0.4 });
-    this.particles.emit({ pos: p, count: Math.round(22 * k), spread: 2, up: 2.2, life: [0.4, 0.9], size: [0.05, 0.03], sprite: ['dot3', 'dot4'], color: this.sand, gravity: 11, ground: true, jitter: 0.6 });
+    this.particles.emit({ pos: p, count: Math.round(6 * k), spread: 1.1, up: 0.5, life: [0.8, 1.6], size: [0.22, 0.7], sprite: ['puff0', 'puff1'], color: [0xe6cf9f, 0xd8b98a, 0xc9a77a], alpha: 0.45, drag: 2, rot: 3, rotSpeed: 0.4 });
+    this.particles.emit({ pos: p, count: Math.round(22 * k), spread: 2, up: 2.2, life: [0.4, 0.9], size: [0.03, 0.02], sprite: ['dot3', 'dot4'], color: this.sand, gravity: 11, ground: true, jitter: 0.6 });
     this.engine.audio.play('sand_burst', { volume: 0.5 * k });
   }
 
@@ -662,6 +665,8 @@ export class DeathCine implements GameScene {
     env.hemi.intensity = p.hemiIntensity * (0.34 + 0.46 * night);
     globalUniforms.uSunCol.value.copy(env.sun.color).multiplyScalar(env.sun.intensity);
     ATMO.u[3] = 0.8 - 0.55 * night;
+    ATMO.u[11] = this.tlOn ? ATMO.u[11] * 0.7 : 0.12;
+    ATMO.u[10] = this.tlOn ? 3.2 : 1.2;
     this.scene.environmentIntensity = 0.52 - 0.4 * night;
     const u = this.skyU;
     (u.uZenith.value as THREE.Color).setHex(p.zenith);
@@ -695,14 +700,16 @@ export class DeathCine implements GameScene {
     c.updateProjectionMatrix();
   }
 
-  /** low and to the side, looking up past the killer */
+  /** the duel, side-on and a little low: the hunter on one third, his killer on the other, a dutch tilt */
   private shotA(rdt: number, snap = false) {
     const g = this.h(0, 0);
     const kz = this.killer ? this.killer.root.position.z : 1.5;
-    const push = Math.min(1, this.t / 4) * 0.35;
-    const pos = this.v1.set(2.25 - push, g + 0.32, kz * 0.45 + 0.2);
-    const look = this.v2.set(0.05, g + 1.05, kz * 0.38);
-    this.setCam(pos, look, 36, 0.14, rdt, snap);
+    const kh = this.killer ? Math.min(3, this.killer.height * (this.killer.root.scale.y || 1)) : 1.7;
+    const push = Math.min(1, this.t / 5) * 0.3;
+    const d = 2.2 + kz * 0.55 + kh * 0.35 - push;
+    const pos = this.v1.set(d, g + 0.62, kz * 0.5 + 0.35);
+    const look = this.v2.set(0.1, g + 0.95 + kh * 0.08, kz * 0.48);
+    this.setCam(pos, look, 40, 0.07, rdt, snap);
   }
 
   // ---------------------------------------------------------------- frame
@@ -749,7 +756,7 @@ export class DeathCine implements GameScene {
         // drift round as he goes down, settling above him
         const k = ss(clamp01((sinceHit - 0.6) / 2.6));
         const a = 0.15 + k * 1.2;
-        this.setCam(this.v1.set(Math.cos(a) * (2.4 - k * 0.6), g + 0.35 + k * 1.1, Math.sin(a) * (2.4 - k * 0.6) * 0.6 + 0.4 - k * 0.6), this.v2.set(0.1, g + 0.9 - k * 0.65, -0.35 * k), 36 + k * 6, 0.14 * (1 - k), rdt);
+        this.setCam(this.v1.set(Math.cos(a) * (2.6 - k * 0.8), g + 0.62 + k * 0.85, Math.sin(a) * (2.6 - k * 0.8) * 0.6 + 0.4 - k * 0.6), this.v2.set(0.1, g + 0.95 - k * 0.7, -0.35 * k), 40 + k * 4, 0.07 * (1 - k), rdt);
       }
     } else if (fd < 2.4) {
       // past his skull, down the length of him, to the killer gloating over the body

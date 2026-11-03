@@ -28,9 +28,9 @@ const G = {
   padL: 0x8fbe72,
   padD: 0x4a783c,
   bloom: 0x9cc88a,
-  areole: 0xd6c08a,
+  areole: 0xbca46a,
   areoleD: 0x8c6c42,
-  spine: 0xf0eadc,
+  spine: 0xe6d8a8,
   bead: 0xd6f6aa,
   fruit: 0xc82c5c,
   fruitL: 0xe4507a,
@@ -88,10 +88,16 @@ interface Pad {
 const padHW = (p: Pad, t: number) => (p.W / 2) * Math.sqrt(Math.max(0, 1 - ((t - 0.56) / 0.56) ** 2));
 /** voxelise one paddle: pillowy obovate slab with a rim, a waxy bloom, rows of areoles */
 function drawPad(m: VoxelModel, p: Pad, R: () => number, spines: { at: V3; n: V3 }[]) {
-  const ext = Math.max(p.L, p.W) + p.T + 0.02;
-  const c0 = add3(p.o, scl3(p.u, p.L / 2));
-  const lo = V(sub3(c0, [ext, ext, ext])), hi = V(add3(c0, [ext, ext, ext]));
-  const sp = 0.052;
+  // tight bounds from the paddle's own frame
+  const lo: V3 = [1e9, 1e9, 1e9], hi: V3 = [-1e9, -1e9, -1e9];
+  for (const a of [-0.03, 1.13]) for (const b of [-0.52, 0.52]) for (const c of [-1, 1]) {
+    const q = V(add3(add3(add3(p.o, scl3(p.u, a * p.L)), scl3(p.w, b * p.W)), scl3(p.n, c * (p.T * 0.6 + Math.abs(p.curl) * p.T + VS))));
+    for (let i = 0; i < 3; i++) {
+      lo[i] = Math.min(lo[i], q[i] - 1);
+      hi[i] = Math.max(hi[i], q[i] + 1);
+    }
+  }
+  const sp = 0.075;
   for (let x = Math.floor(lo[0]); x <= hi[0]; x++)
     for (let y = Math.max(0, Math.floor(lo[1])); y <= hi[1]; y++)
       for (let z = Math.floor(lo[2]); z <= hi[2]; z++) {
@@ -119,7 +125,7 @@ function drawPad(m: VoxelModel, p: Pad, R: () => number, spines: { at: V3; n: V3
           const ob = ia % 2 === 0 ? 0 : sp / 2;
           const ib = Math.round((b - ob) / sp);
           const da = a - (ia + 0.5) * sp, db = b - (ib * sp + ob);
-          if (Math.hypot(da, db) < VS * 0.95 && t > 0.08) col = Math.hypot(da, db) < VS * 0.4 ? G.areoleD : G.areole;
+          if (Math.hypot(da, db) < VS * 0.6 && t > 0.08) col = G.areole;
         }
         m.set(x, y, z, col);
       }
@@ -135,7 +141,7 @@ function drawPad(m: VoxelModel, p: Pad, R: () => number, spines: { at: V3; n: V3
       const e = b / hw;
       const hn = (p.T / 2) * (0.42 + 0.58 * Math.sqrt(Math.max(0, 1 - e * e))) * (0.75 + 0.25 * Math.sin(Math.PI * Math.min(1, t)));
       for (const s of sides) {
-        if (R() > 0.42) continue;
+        if (R() > 0.2) continue;
         const at = add3(add3(add3(p.o, scl3(p.u, a)), scl3(p.w, b)), scl3(p.n, s * hn + p.curl * e * e * p.T));
         spines.push({ at, n: scl3(p.n, s) });
       }
@@ -173,7 +179,7 @@ function buildPear(seed: number): RigSpec {
     let n = norm3(sub3(nHint, scl3(u, dot3(nHint, u))));
     const w = norm3(cross3(u, n));
     n = norm3(cross3(w, u));
-    return { o, u, w, n, L, W: L * (0.68 + R() * 0.12), T: 0.055 + R() * 0.015, curl: (R() - 0.5) * 0.5, kids: [] };
+    return { o, u, w, n, L, W: L * (0.74 + R() * 0.1), T: 0.07 + R() * 0.016, curl: (R() - 0.5) * 0.45, kids: [] };
   };
   const grow = (p: Pad, depth: number) => {
     if (depth >= 3) {
@@ -203,7 +209,7 @@ function buildPear(seed: number): RigSpec {
     const o: V3 = [Math.sin(az) * 0.025, trunkTop[1] - 0.02, Math.cos(az) * 0.025];
     const u = norm3([Math.sin(az) * Math.sin(tilt), Math.cos(tilt), Math.cos(az) * Math.sin(tilt)]);
     const fa = az + Math.PI / 2 + (R() - 0.5) * 1.2;
-    const p = mkPad(o, u, [Math.sin(fa), 0, Math.cos(fa)], 0.34 + R() * 0.07);
+    const p = mkPad(o, u, [Math.sin(fa), 0, Math.cos(fa)], 0.39 + R() * 0.07);
     grow(p, 0);
     const name = 'branch' + (b + 1);
     const m = rig.part(name, 'stump', V(o));
@@ -234,7 +240,7 @@ function buildPear(seed: number): RigSpec {
       continue;
     }
     const dir = norm3(add3(s.n, [(R() - 0.5) * 0.9, (R() - 0.2) * 0.8, (R() - 0.5) * 0.9]));
-    const len = VS * (2 + R() * 2.2);
+    const len = VS * (2.2 + R() * 1.6);
     line(m, [V(add3(s.at, scl3(s.n, VS * 0.6))), V(add3(s.at, scl3(dir, len)))], G.spine);
   }
   // ---- fruits (tunas) on the top rims of the outer paddles, a flower or two
@@ -324,7 +330,7 @@ function buildBarrel(seed: number): RigSpec {
         }
     // areoles along the crests
     for (let k = 0; k < N; k++)
-      for (let Y = 0.06; Y < h * 0.98; Y += 0.045) {
+      for (let Y = 0.07; Y < h * 0.96; Y += 0.068) {
         const th = (k / N) * Math.PI * 2 - Y * twist;
         const rb = r * Math.sqrt(Math.max(0, 1 - ((Y - yc) / hy) ** 2));
         if (rb < 0.03) continue;
@@ -336,7 +342,7 @@ function buildBarrel(seed: number): RigSpec {
       i++;
       const v = V(a.at);
       m.set(Math.floor(v[0]), Math.floor(v[1]), Math.floor(v[2]), G.felt);
-      if (i % 2) continue;
+      if (i % 3) continue;
       // red hooked central spine, pale radials
       const tip = add3(a.at, scl3(a.n, VS * 3.2));
       line(m, [V(add3(a.at, scl3(a.n, VS * 0.6))), V(tip)], G.hook);

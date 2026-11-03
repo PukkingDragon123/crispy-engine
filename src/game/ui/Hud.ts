@@ -12,6 +12,7 @@ import { UI, FONT, woodPanel, ironPlate, slot, parchment, ribbon, barFrame, draw
 import type { PaperQuest } from './MissionPaper';
 import type { SoulAnchor } from './SoulBar';
 import type { OutlawAnchors } from './OutlawHud';
+import { isTouchDevice } from './TouchControls';
 
 /** one quest note on the mission paper stack */
 export type HudQuest = PaperQuest;
@@ -142,6 +143,7 @@ export class Hud {
   private parts: HP[] = [];
   private signSwing = 0;
   private lastCombo = 0;
+  private touch = isTouchDevice();
   private streakPop = 0;
   /** the 3D outlaw pieces' layout, rebuilt each frame */
   private outlawBase: OutlawAnchors = { k: 1, star: { x: 0, y: 0, rank: 1 }, tally: { x: 0, y: 0, amount: 0 }, plaque: null, watch: null };
@@ -481,7 +483,7 @@ export class Hud {
         const jx = x - 11, jy = y - 15;
         const ready = s.ult >= 1;
         this.anchors.soul = { x: jx, y: jy, k, frac: s.ult, ready, heroX: hx, heroY: hy };
-        const tx = Math.round(jx + 17 * k), ty0 = Math.round(jy - 50 * k);
+        const tx = Math.round(jx + 17 * k), ty0 = Math.round(jy - 56 * k);
         if (ready) {
           const kc = keycap('Z');
           const pulse = Math.round(Math.sin(this.t * 6) * 1.5);
@@ -598,7 +600,7 @@ export class Hud {
         // under the watch: how to cut the break short
         const wy = Math.round(py + 15 * k + 47 * k * 0.95 + 21 * k) - drop;
         const kc = keycap('T');
-        const label = (s.bell ?? 0) > 0.02 ? 'RINGING THE BELL…' : 'HOLD TO RING THE BELL';
+        const label = (s.bell ?? 0) > 0.02 ? 'RINGING THE BELL...' : 'HOLD TO RING THE BELL';
         const tw = Math.ceil(measure(c, label, 16));
         const bx = cx - (tw + kc.width + 5) / 2;
         this.blit(kc, bx, wy + 2);
@@ -742,7 +744,8 @@ export class Hud {
       }
     }
     // ---------------------------------------------------------- objective + marker
-    this.anchors.paper = { x: W - 10 - 78 * k + slide * 220, y: 10 * k, k, compact: H < 250 || W < 520, speed: s.speed };
+    // (on touch screens the pause / tab buttons own the top-right corner: hang the note under them)
+    this.anchors.paper = { x: W - 10 - 78 * k + slide * 220, y: 10 * k + (this.touch ? 32 : 0), k, compact: H < 250 || W < 520, speed: s.speed };
     if (s.objective && !this.use3D) {
       const ow = Math.max(150, Math.ceil(Math.max(measure(c, s.objective.text, 16), measure(c, s.objective.sub, 16))) + 20);
       const ox = W - ow - 8 + slide * 200, oy = 8;

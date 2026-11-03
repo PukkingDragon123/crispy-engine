@@ -965,9 +965,15 @@ export class Weapons {
     const rig = P.rig;
     const n = rig.nodes;
     this.updateDropped(dt);
-    // spring for the long-gun kick (separate from the revolver's wrist chain)
-    this.kickV += (-this.kick * 260 - this.kickV * 22) * dt;
-    this.kick += this.kickV * dt;
+    // spring for the long-gun kick (separate from the revolver's wrist chain), substepped:
+    // a slow frame must never blow it up
+    const ksteps = Math.max(1, Math.ceil(dt / 0.016));
+    for (let i = 0; i < ksteps; i++) {
+      const h = dt / ksteps;
+      this.kickV += (-this.kick * 260 - this.kickV * 22) * h;
+      this.kick += this.kickV * h;
+    }
+    if (!Number.isFinite(this.kick + this.kickV)) this.kick = this.kickV = 0;
     const g = this.current;
     const gunRig = this.rigs[g];
     const wrapped = !!(this.ctx.enemies as unknown as { wrapping?: unknown }).wrapping;
@@ -1009,16 +1015,17 @@ export class Weapons {
     const poleL = new THREE.Vector3(0.55, -1, -0.15);
     if (this.lw > 0.001 && gunRig) {
       const aimW = pa.aimW, ads = P.cam.aim;
-      // low ready → hip fire → shouldered
-      H.set(S_R.x + 0.07 * sc, S_R.y - 0.42 * sc, S_R.z + 0.2 * sc);
-      H.lerp(_v.set(S_R.x + 0.06 * sc, S_R.y - 0.33 * sc, S_R.z + 0.27 * sc), aimW);
-      H.lerp(_v.set(S_R.x + 0.1 * sc, S_R.y - 0.13 * sc, S_R.z + 0.27 * sc), ads);
-      const carry = _v2.set(0.42, -0.52, 1).normalize();
+      // port arms (grip by the right hip, muzzle up across the chest) → hip fire (stock tucked
+      // under the right arm) → shouldered. Placed so the support hand always reaches the foregrip.
+      H.set(S_R.x + 0.1 * sc, S_R.y - 0.41 * sc, S_R.z + 0.095 * sc);
+      H.lerp(_v.set(S_R.x + 0.052 * sc, S_R.y - 0.241 * sc, S_R.z + 0.075 * sc), aimW);
+      H.lerp(_v.set(S_R.x + 0.082 * sc, S_R.y - 0.091 * sc, S_R.z + 0.115 * sc), ads);
+      const carry = _v2.set(0.75, 0.3, 0.55).normalize();
       const aimDir = _v3.copy(this.aimT).sub(H).normalize();
       D.copy(carry).lerp(aimDir, aimW).normalize();
       Up.lerp(_v.set(-0.35, 1, 0).normalize(), (1 - aimW) * 0.6).normalize();
-      // ride the swell: sway with the board
-      poleR.lerp(_v.set(-1, -0.35, -0.2), ads);
+      // the gun elbow winged out, tighter when shouldered
+      poleR.set(-1, -0.45, -0.3).lerp(_v.set(-1, -0.2, -0.1), ads);
       // recoil: back into the shoulder and the muzzle climbs
       const kk = clamp(this.kick * 0.02, -0.3, 1);
       H.addScaledVector(D, -0.07 * kk * sc);
@@ -1026,7 +1033,7 @@ export class Weapons {
       // the reload choreography
       if (R.active) {
         const k = R.t, ph = R.phase;
-        const Hr = _v.set(S_R.x + 0.12 * sc, S_R.y - 0.33 * sc, S_R.z + 0.22 * sc);
+        const Hr = _v.set(S_R.x + 0.14 * sc, S_R.y - 0.3 * sc, S_R.z + 0.16 * sc);
         const rw = smooth(k / 0.08) * smooth((1 - k) / 0.08);
         H.lerp(Hr, rw);
         let dr = _v2.set(0.3, -0.3, 1).normalize();

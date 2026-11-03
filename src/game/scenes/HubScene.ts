@@ -43,6 +43,7 @@ import { TECHNIQUES, isUnlocked } from '../player/Techniques';
 import { leg } from '../anim/gait';
 import { legIK, LegPose, armIK } from '../anim/playerAnim';
 import { FloatText3D } from '../fx/FloatText3D';
+import { Voice } from '../audio/Voice';
 import { damp, rnd } from '../../engine/math/rand';
 import { Codex } from '../meta/Codex';
 import { CodexBook } from '../ui/CodexBook';
@@ -1536,6 +1537,7 @@ export class HubScene implements GameScene {
     this.bubbleT = 0;
     this.mamaTalk = 1.4 + text.length * 0.045;
     this.engine.audio.play('squeak', { volume: 0.4, pitch: 0.42 + Math.random() * 0.08 });
+    Voice.say('mamaToad', text, { pos: this.mamaHead });
   }
 
   /** use a station (Sundown is standing at it) */

@@ -22,7 +22,7 @@
 // dizzy poses.
 import * as THREE from 'three';
 import type { RigInstance } from '../../../engine/voxel/Rig';
-import { CRig, VoxelModel, VF, V3, RigSpec, Prim, blob, ell, cap, tube, line, paint, exposed, splitInto, mixc, n01, h01, wetEye, add3, sub3, scl3, dot3, norm3, sstep, invXYZ, memoBy } from './ckit';
+import { CRig, VoxelModel, VF, V3, RigSpec, Prim, ell, cap, tube, line, paint, exposed, splitInto, mixc, n01, h01, wetEye, add3, sub3, scl3, dot3, norm3, sstep, invXYZ, memoBy } from './ckit';
 
 // ============================================================================ palette
 const HIDE = {
@@ -55,7 +55,7 @@ const HIDE = {
 // ============================================================================ design (adult metres)
 type Look = { baby: boolean; dv: number; s: number; bw: number; bl: number; drop: number; hk: number; lift: number; eyeK: number; lr: number };
 const ADULT: Look = { baby: false, dv: 1 / 32, s: 1, bw: 1, bl: 1, drop: 0, hk: 1, lift: 0, eyeK: 1, lr: 1 };
-const BABY: Look = { baby: true, dv: 1 / 24, s: 0.34, bw: 1.12, bl: 0.8, drop: 0.13, hk: 1.32, lift: 0.07, eyeK: 1.32, lr: 1.12 };
+const BABY: Look = { baby: true, dv: 1 / 24, s: 0.36, bw: 1.1, bl: 0.9, drop: 0.03, hk: 1.1, lift: 0.25, eyeK: 1.5, lr: 1.12 };
 
 const J = {
   bodyC: [0, 0.98, -0.05] as V3,
@@ -75,8 +75,71 @@ const J = {
   tail1: [0, 1.11, -1.56] as V3,
   tail2: [0, 0.94, -1.61] as V3,
 };
-const EYE_R = 0.072;
+const EYE_R = 0.08;
 const mir = (v: V3): V3 => [-v[0], v[1], v[2]];
+
+// ---- organic implicit forms, culled: each cell only evaluates the primitives whose padded
+// bounds reach it (exact: a primitive farther than k + the cut-off can't change a smooth union)
+const smin = (a: number, b: number, k: number) => {
+  const h = Math.max(k - Math.abs(a - b), 0) / k;
+  return Math.min(a, b) - h * h * k * 0.25;
+};
+function primSdf(q: Prim, px: number, py: number, pz: number) {
+  if (q.a && q.b) {
+    const a = q.a, b = q.b;
+    const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+    const L2 = dx * dx + dy * dy + dz * dz || 1e-6;
+    const ax = px - a[0], ay = py - a[1], az = pz - a[2];
+    const t = Math.max(0, Math.min(1, (ax * dx + ay * dy + az * dz) / L2));
+    const r = (q.r0 ?? 1) + ((q.r1 ?? q.r0 ?? 1) - (q.r0 ?? 1)) * t;
+    return Math.hypot(ax - dx * t, ay - dy * t, az - dz * t) - r;
+  }
+  const c = q.c!, r = q.r!;
+  const vx = px - c[0], vy = py - c[1], vz = pz - c[2];
+  const k0 = Math.hypot(vx / r[0], vy / r[1], vz / r[2]);
+  const k1 = Math.hypot(vx / (r[0] * r[0]), vy / (r[1] * r[1]), vz / (r[2] * r[2])) || 1e-6;
+  return (k0 * (k0 - 1)) / k1;
+}
+function fblob(m: VoxelModel, prims: Prim[], col: (x: number, y: number, z: number) => number, o: { k: number; disp?: (x: number, y: number, z: number) => number; keep?: (x: number, y: number, z: number) => boolean }) {
+  const pad = o.k + 4;
+  const box = prims.map((q) => {
+    if (q.a && q.b) {
+      const R = Math.max(q.r0 ?? 1, q.r1 ?? 1) + pad;
+      return [Math.min(q.a[0], q.b[0]) - R, Math.min(q.a[1], q.b[1]) - R, Math.min(q.a[2], q.b[2]) - R, Math.max(q.a[0], q.b[0]) + R, Math.max(q.a[1], q.b[1]) + R, Math.max(q.a[2], q.b[2]) + R];
+    }
+    const R = Math.max(q.r![0], q.r![1], q.r![2]) + pad;
+    return [q.c![0] - R, q.c![1] - R, q.c![2] - R, q.c![0] + R, q.c![1] + R, q.c![2] + R];
+  });
+  const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+  box.forEach((b) => {
+    for (let a = 0; a < 3; a++) {
+      lo[a] = Math.min(lo[a], b[a]);
+      hi[a] = Math.max(hi[a], b[a + 3]);
+    }
+  });
+  for (let i = Math.floor(lo[0]); i <= Math.ceil(hi[0]); i++)
+    for (let j = Math.floor(lo[1]); j <= Math.ceil(hi[1]); j++)
+      for (let kk = Math.floor(lo[2]); kk <= Math.ceil(hi[2]); kk++) {
+        const x = i + 0.5, y = j + 0.5, z = kk + 0.5;
+        let d = 1e9;
+        let first = true;
+        for (let p = 0; p < prims.length; p++) {
+          const b = box[p];
+          if (x < b[0] || y < b[1] || z < b[2] || x > b[3] || y > b[4] || z > b[5]) continue;
+          const di = primSdf(prims[p], x, y, z);
+          if (first) {
+            d = di;
+            first = false;
+          } else d = smin(d, di, o.k);
+        }
+        if (d > 2.5) continue;
+        if (o.keep && !o.keep(i, j, kk)) continue;
+        if (o.disp) d += o.disp(x, y, z);
+        if (d > 0) continue;
+        m.set(i, j, kk, col(i, j, kk));
+      }
+  return m;
+}
 const mouthY = (q: V3) => 0.99 + 0.06 * sstep(1.72, 1.45, q[2]);
 
 function buildHippo(L: Look): RigSpec {
@@ -120,18 +183,20 @@ function buildHippo(L: Look): RigSpec {
   /** the hide at an adult-space point q (i, j, k = voxel for per-voxel variation) */
   const skin = (q: V3, i: number, j: number, k: number, vy: number) => {
     let c = HIDE.base;
-    const m = n01(q[0], q[1], q[2], 2.6, 3);
-    if (m > 0.63) c = mixc(c, HIDE.dark, 0.32);
-    else if (m < 0.35) c = mixc(c, HIDE.light, 0.38);
-    if (vy > 0.45) c = mixc(c, HIDE.light, sstep(0.45, 0.95, vy) * 0.45); // sun-bleached back
-    if (vy < -0.38) c = mixc(c, HIDE.belly, sstep(-0.38, -0.78, vy) * 0.75); // soft pink belly
-    // wind-scoured patches: pale, chalky, scratched along the wind by blown sand
-    if (!baby && vy > -0.15) {
-      const pm = n01(q[0] * 1.3, q[1] * 1.7, q[2], 2.1, 17);
-      if (pm > 0.635) {
-        const g = (q[2] + q[1] * 0.45) * 21 + n01(q[0], q[1], q[2], 9, 5) * 2.4;
-        c = g - Math.floor(g) < 0.22 ? HIDE.scratch : mixc(HIDE.scour, HIDE.light, h01(i, j, k, 4) * 0.35);
-      } else if (pm > 0.605) c = mixc(c, HIDE.dark, 0.28);
+    const m = n01(q[0], q[1], q[2], 1.5, 3);
+    if (m > 0.66) c = mixc(c, HIDE.dark, 0.18 * sstep(0.66, 0.8, m));
+    else if (m < 0.34) c = mixc(c, HIDE.light, 0.2 * sstep(0.34, 0.2, m));
+    if (vy > 0.45) c = mixc(c, HIDE.light, sstep(0.45, 0.95, vy) * 0.4); // sun-bleached back
+    if (vy < -0.38) c = mixc(c, HIDE.belly, sstep(-0.38, -0.78, vy) * 0.7); // soft pink belly
+    // wind-scoured patches on the back: pale and chalky, finely scratched along the wind by blown sand
+    if (!baby && vy > 0.3) {
+      const pm = n01(q[0] * 1.3, q[1] * 1.7, q[2], 1.7, 17);
+      if (pm > 0.66) {
+        const f = sstep(0.66, 0.72, pm) * sstep(0.3, 0.5, vy);
+        c = mixc(c, HIDE.scour, 0.6 * f);
+        const g = (q[2] + q[1] * 0.45) * 19 + n01(q[0], q[1], q[2], 6, 5) * 1.6;
+        if (g - Math.floor(g) < 0.16) c = mixc(c, HIDE.scratch, 0.45 * f);
+      }
     }
     for (const [a, b] of SCARS) {
       const d = segD(q, a, b);
@@ -139,7 +204,7 @@ function buildHippo(L: Look): RigSpec {
       else if (d < 0.045) c = mixc(c, HIDE.dark, 0.25);
     }
     if (q[1] < 0.5) c = mixc(c, HIDE.dust, sstep(0.5, 0.18, q[1]) * 0.55); // caked sand
-    if (h01(i, j, k, 9) < 0.028) c = mixc(c, HIDE.pore, 0.4);
+    if (h01(i, j, k, 9) < 0.012) c = mixc(c, HIDE.pore, 0.25);
     return babyPink(c);
   };
   const bodyCol = (i: number, j: number, k: number) => {
@@ -162,7 +227,7 @@ function buildHippo(L: Look): RigSpec {
     EB([0, 1.5, -0.25], [0.42, 0.12, 0.6]), // a low ridge along the spine
   ];
   const fdisp = dv / 0.15;
-  blob(body, bodyPrims, bodyCol, { k: U(0.16), disp: (x, y, z) => (n01(x, y, z, fdisp, 11) - 0.5) * 0.9, keep: (_x, y) => y >= 0 });
+  fblob(body, bodyPrims, bodyCol, { k: U(0.16), disp: (x, y, z) => (n01(x, y, z, fdisp, 11) - 0.5) * 0.45, keep: (_x, y) => y >= 0 });
   // thick skin creases ringing the neck
   {
     const creaseZ = (q: V3, c: number) => 1.02 + c * 0.12 + (1.2 - q[1]) * 0.12 + Math.sin(q[0] * 4 + c) * 0.02;
@@ -190,9 +255,9 @@ function buildHippo(L: Look): RigSpec {
   const headCol = (i: number, j: number, k: number) => {
     const q = invH(Mv(i, j, k));
     let c = HIDE.base;
-    const m = n01(q[0], q[1], q[2], 3.2, 23);
-    if (m > 0.64) c = mixc(c, HIDE.dark, 0.3);
-    else if (m < 0.34) c = mixc(c, HIDE.light, 0.35);
+    const m = n01(q[0], q[1], q[2], 2.2, 23);
+    if (m > 0.66) c = mixc(c, HIDE.dark, 0.16);
+    else if (m < 0.34) c = mixc(c, HIDE.light, 0.18);
     if (q[1] > 1.38) c = mixc(c, HIDE.light, sstep(1.38, 1.62, q[1]) * 0.4);
     // pink skin round the eyes, the ears and the cheeks; a pink-lipped mouth
     const de = Math.min(Math.hypot(q[0] - 0.33, q[1] - 1.48, q[2] - 1.66), Math.hypot(q[0] + 0.33, q[1] - 1.48, q[2] - 1.66));
@@ -200,9 +265,8 @@ function buildHippo(L: Look): RigSpec {
     if (q[1] < 1.12 && Math.abs(q[0]) > 0.3) c = mixc(c, HIDE.pink, sstep(1.12, 0.92, q[1]) * 0.45);
     if (Math.abs(q[1] - mouthY(q)) < 0.06 && q[2] > 1.5) c = mixc(c, HIDE.pink, 0.35);
     // freckled muzzle (bristle pores), dusty chin
-    if (q[2] > 2.0 && h01(i, j, k, 13) < 0.09) c = mixc(c, HIDE.pore, 0.55);
+    if (q[2] > 2.08 && q[1] > 0.95 && h01(i, j, k, 13) < 0.035) c = mixc(c, HIDE.pore, 0.4);
     if (q[1] < 0.7) c = mixc(c, HIDE.dust, 0.3);
-    if (h01(i, j, k, 9) < 0.02) c = mixc(c, HIDE.pore, 0.35);
     return babyPink(c);
   };
   const headPrims: Prim[] = [
@@ -225,7 +289,7 @@ function buildHippo(L: Look): RigSpec {
     CH([0, 1.1, 1.3], [0, 1.12, 1.45], 0.46, 0.46), // neck join (stays inside the body's neck)
   ];
   const headMass = new VoxelModel('headMass');
-  blob(headMass, headPrims, headCol, { k: U(0.09 * L.hk), disp: (x, y, z) => (n01(x, y, z, fdisp * 1.3, 21) - 0.5) * 0.8, keep: (_x, y) => y >= 0 });
+  fblob(headMass, headPrims, headCol, { k: U(0.09 * L.hk), disp: (x, y, z) => (n01(x, y, z, fdisp * 1.3, 21) - 0.5) * 0.4, keep: (_x, y) => y >= 0 });
   const head = rig.part('head', 'body', V(H(J.neck)));
   const jaw = rig.part('jaw', 'head', V(H(J.hinge)));
   splitInto(headMass, head, jaw, (x, y, z) => {
@@ -312,19 +376,6 @@ function buildHippo(L: Look): RigSpec {
       }
     }
   });
-  // ---- stiff pale bristles on the muzzle and chin
-  for (const m of [head, jaw]) {
-    const add: V3[] = [];
-    m.forEach((x, y, z) => {
-      const q = invH(Mv(x, y, z));
-      if (q[2] < 2.12 || h01(x, y, z, 77) > (baby ? 0.01 : 0.02) || !exposed(m, x, y, z)) return;
-      const d = norm3(sub3(q, [0, 1.02, 1.92]));
-      const p: V3 = [x + Math.round(d[0]), y + Math.round(d[1]), z + Math.round(d[2])];
-      if (!m.has(p[0], p[1], p[2]) && !head.has(p[0], p[1], p[2]) && !jaw.has(p[0], p[1], p[2])) add.push(p);
-    });
-    for (const [x, y, z] of add) m.set(x, y, z, HIDE.bristle);
-  }
-
   // ================================================================ eyes on periscope turrets, lids, ears
   const RE = EYE_R * L.hk * L.eyeK;
   const fwdL = norm3([0.55, 0.25, 0.8]);
@@ -354,8 +405,10 @@ function buildHippo(L: Look): RigSpec {
           if (l < r0 || l > r1 || head.has(x, y, z)) continue;
           const n = scl3(d, 1 / l);
           const du = dot3(n, up);
-          if (du < 0.1 || dot3(n, fwdL) < -0.2) continue;
-          lid.set(x, y, z, du < 0.24 ? HIDE.lash : mixc(headCol(x, y, z), HIDE.pink, 0.25));
+          // the hood only caps the eye (a heavy-lidded adult, a wide-eyed calf); it rotates down to blink
+          const cut = baby ? 0.62 : 0.42;
+          if (du < cut || dot3(n, fwdL) < -0.2) continue;
+          lid.set(x, y, z, du < cut + 0.1 ? 0x5a3a2e : mixc(headCol(x, y, z), HIDE.pink, 0.25));
         }
     rig.mirror('lid_l', 'lid_r');
   }
@@ -386,7 +439,7 @@ function buildHippo(L: Look): RigSpec {
   const lr = L.lr;
   const foot = (m: VoxelModel, at: V3) => {
     const pad = add3(at, [0, 0.07, 0.02]);
-    blob(m, [
+    fblob(m, [
       { c: V(G(pad)), r: [U(0.21 * lr), U(0.085 * legK), U(0.23 * lr)] },
       { c: V(G(add3(at, [0, 0.04, 0.08]))), r: [U(0.25 * lr), U(0.042 * legK), U(0.24 * lr)] }, // wide snowshoe sole
     ], legCol, { k: U(0.05), keep: (_x, y) => y >= 0 });
@@ -659,9 +712,9 @@ export class HippoAnim {
       this.blink = 0.16;
     }
     this.blink = Math.max(0, this.blink - dt);
-    let lid = 0.18 + 0.35 * d.rage + 0.5 * d.yawn + 0.25 * bur + (mode === 'dizzy' ? 0.55 : 0);
-    if (mode === 'thrown' || mode === 'carried') lid = 0;
-    if (this.blink > 0) lid = 1.15;
+    let lid = (this.baby ? 0 : 0.1) + 0.4 * d.rage + 0.6 * d.yawn + 0.35 * bur + (mode === 'dizzy' ? 0.7 : 0);
+    if (mode === 'thrown' || mode === 'carried') lid = -0.25;
+    if (this.blink > 0) lid = this.baby ? 1.35 : 1.25;
     for (let e = 0; e < 2; e++) {
       const node = n[e === 0 ? 'lid_l' : 'lid_r'];
       if (node) node.quaternion.copy(_q.setFromAxisAngle(_ax.copy(this.lidAxis[e]), lid));
