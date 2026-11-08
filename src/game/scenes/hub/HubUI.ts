@@ -349,22 +349,7 @@ export class HubUI {
     const plaque = bankPlaque(g);
     const x = 14, y = 12 - (1 - a) * 40;
     this.blit(plaque, x, y, a);
-    // the tally strip under it: runs, best wave, outlaws
-    const items: [HTMLCanvasElement, string][] = [[ICON_SHOE(), `${this.bank.runs} runs`], [ICON_FLAG(), `wave ${this.bank.best}`], [ICON_SKULL(), `${this.bank.kills}`]];
-    let wx = 0;
-    const gap = 8;
-    for (const [ic, s] of items) wx += ic.width * S + 4 + this.textW(s, 16) + gap * 2;
-    const sw = Math.ceil(wx / S) + 6;
-    const strip = sprite(`tally:${sw}`, sw, 13, (c) => c.drawImage(parchment(sw, 13, 4), 0, 0));
-    const sy = y + plaque.height * S - 3;
-    this.blit(strip, x + 4, sy, a);
-    let cx = x + 4 + 3 * S + gap / 2;
-    for (const [ic, s] of items) {
-      this.blit(ic, cx, sy + (13 * S - ic.height * S) / 2, a);
-      cx += ic.width * S + 4;
-      this.ink(s, cx, sy + (13 * S - 16) / 2 + 1, '#3a2414', 16, 'left', false, a);
-      cx += this.textW(s, 16) + gap * 2;
-    }
+    // (no run-stats tally: the user wants the corner kept to the bank alone)
   }
 
   private drawSign() {
