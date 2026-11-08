@@ -42,6 +42,7 @@ import { TAROT, Kit } from '../ui/TarotCards';
 import { TECHNIQUES, isUnlocked } from '../player/Techniques';
 import { leg } from '../anim/gait';
 import { legIK, LegPose, armIK } from '../anim/playerAnim';
+import { DrunkGait } from '../anim/drunkWalk';
 import { FloatText3D } from '../fx/FloatText3D';
 import { Voice } from '../audio/Voice';
 import { damp, rnd } from '../../engine/math/rand';
@@ -446,6 +447,8 @@ export class HubScene implements GameScene {
   private lastStep = [0, 0];
   private headYaw = 0;
   private headPitch = 0;
+  /** the whiskey swagger layered over his walk (anim/drunkWalk.ts) */
+  private drunk = new DrunkGait(5.1, { weave: 0.07, stumbleEvery: [4.5, 8] });
   private lp: LegPose = { x: 0, z: 0, knee: 0, roll: 0 };
   // life
   private fireLight!: THREE.PointLight;
@@ -703,12 +706,11 @@ export class HubScene implements GameScene {
     }
     this.futon = fut;
     put(B(() => WS.plaidChair()), -0.32, -1.55, Math.PI / 2 - 0.25);
-    // between the bench and the futon: a cabinet with the guitar hung above
+    // between the bench and the futon: a cabinet with bottles (the gun rack hangs over it, see hub/GunRack.ts);
+    // the guitar hangs on the front wall by the garage, over the steamer trunk
     const cab = against(B(() => WS.sideCabinet()), 'back', -0.04, 0, 0.05);
-    if (cab) {
-      this.guitar = against(B(() => WS.guitar()), 'back', -0.02, 1.2, 0.02, 1, false);
-      put(B(() => HX.bottlesCraft(2)), 0.0, IN.back + 0.25, 0.3, topOf(cab), 0.7, false);
-    }
+    if (cab) put(B(() => HX.bottlesCraft(2)), 0.0, IN.back + 0.25, 0.3, topOf(cab), 0.7, false);
+    this.guitar = against(B(() => WS.guitar()), 'front', -2.08, 1.02, 0.02, 1, false);
     // Mama Toad in her rocking chair by the fire, knitting; her basket at her feet; the toadlets about
     const chSpec = safe(() => WS.rockingChairRig());
     const CH_AT = new THREE.Vector3(2.62, 0, -1.42), CH_YAW = -0.5;
@@ -825,13 +827,14 @@ export class HubScene implements GameScene {
       spot.target.position.copy(lp).add(new THREE.Vector3(-0.15, -1, 0.2));
       s.add(spot, spot.target);
       this.flick.push({ l: spot, base: spot.intensity, k: 0.015 });
-      put(B(() => HX.barStool(2, 'ok')), -0.34, -2.64, 0.4);
+      put(B(() => HX.barStool(2, 'ok')), -2.05, -2.18, 0.9);
       const bst = new THREE.Vector2(gp.x - 0.36, gp.z + 0.6);
       station({
-        id: 'bench', label: 'Weapon Bench', title: 'THE WORKBENCH', short: 'WORKBENCH', sub: 'tune your iron', verb: 'Tune the gun',
+        id: 'bench', label: 'Weapon Bench', title: 'THE WORKBENCH', short: 'WORKBENCH', sub: 'the gun rack and the bench', verb: 'Open the gun rack',
         stand: bst, face: Math.PI, at: gp.clone(), r: 0.75, objs: [wb], pose: 'bench',
         via: [new THREE.Vector2(-1.15, LANE_Z), new THREE.Vector2(bst.x + 0.4, bst.y + 0.75)], slot: [-0.86, 0.84, 'left'], surf: wbSm.meta.top, reach: 0.4,
-        shot: { pos: new THREE.Vector3(bst.x + 1.32, 1.5, bst.y - 0.08), look: new THREE.Vector3(), fov: 46, subject: new THREE.Vector3(bst.x, 1.18, bst.y), ndc: [-0.26, -0.02] },
+        // back by the plaid chair, so the gun rack over the cabinet is in the shot with him at the bench
+        shot: { pos: new THREE.Vector3(bst.x + 2.15, 1.68, bst.y + 1.5), look: new THREE.Vector3(), fov: 50, subject: new THREE.Vector3(bst.x, 1.18, bst.y), ndc: [-0.3, -0.05] },
       });
     }
 
@@ -1600,7 +1603,9 @@ export class HubScene implements GameScene {
       }
       if (this.route.length) {
         const sp = last ? Math.min(this.speed, d * 2.6 + 0.06) : this.speed;
-        want.set(dx, dz).multiplyScalar(sp / Math.max(d, 1e-4));
+        // uneven, lurching steps (a stumble surges him forward); the last stretch onto the stand stays exact
+        const lurch = last ? 1 : this.drunk.tempo * (1 + 0.45 * this.drunk.trip);
+        want.set(dx, dz).multiplyScalar((sp / Math.max(d, 1e-4)) * lurch);
       }
     }
     this.vel.x = damp(this.vel.x, want.x, 6, rdt);
@@ -1775,6 +1780,11 @@ export class HubScene implements GameScene {
     const bob = (0.016 + 0.02 * rk) * mk * Math.cos(this.phase * Math.PI * 4);
     const breathe = Math.sin(t * 1.5) * 0.004 * (1 - mk);
     h.root.position.set(shiftX, drop + bob + breathe, 0);
+    // the whiskey swagger rides on the walk: a weaving line, swaying hips, lurches, loose arms, a lolling head
+    const dw = this.drunk;
+    dw.update(rdt, 0, mk * (1 - P), this.phase * Math.PI * 2 + Math.PI / 2);
+    h.root.position.x += dw.pelvisPos.x;
+    h.root.position.y += dw.pelvisPos.y * 0.4;
     const lift = 0.07 + 0.06 * rk;
     const legs: [string, string, number, number][] = [['thigh_l', 'shin_l', 0, 1], ['thigh_r', 'shin_r', 0.5, -1]];
     const sweeps = [0, 0];
@@ -1792,11 +1802,11 @@ export class HubScene implements GameScene {
       shin.rotation.set(this.lp.knee, 0, this.lp.roll);
     });
     const [sL, sR] = sweeps;
-    if (n['pelvis']) n['pelvis'].rotation.set(0, -0.12 * sL, 0.035 * Math.sin(this.phase * Math.PI * 2) * mk + Math.sin(t * 0.37) * 0.012 * (1 - mk) - shiftX * 1.6);
+    if (n['pelvis']) n['pelvis'].rotation.set(dw.pelvisRot.x * 0.6, -0.12 * sL + dw.pelvisRot.y * 0.6, 0.035 * Math.sin(this.phase * Math.PI * 2) * mk + Math.sin(t * 0.37) * 0.012 * (1 - mk) - shiftX * 1.6 + dw.pelvisRot.z * 0.7);
     const LEAN: Record<HeroPose, number> = { door: -0.02, bench: 0.3, board: 0.42, mirror: -0.06, book: 0.18, hearth: 0.12, music: 0.02, range: 0, cards: 0.1, trophies: -0.04 };
     const lean = 0.03 + 0.06 * mk + 0.1 * rk + Math.sin(t * 1.5) * 0.008 * (1 - mk) + P * LEAN[pose] + groove * 0.03;
     const twist = P * (pose === 'mirror' ? Math.sin(t * 0.5) * 0.14 : pose === 'door' ? -0.08 : 0) + groove * Math.sin(beat * 0.5) * 0.1;
-    if (n['torso']) n['torso'].rotation.set(lean, 0.17 * sL + twist, -0.02 * Math.sin(this.phase * Math.PI * 2) * mk + groove * Math.sin(beat * 0.5) * 0.04);
+    if (n['torso']) n['torso'].rotation.set(lean + dw.torsoRot.x * 0.8, 0.17 * sL + twist + dw.torsoRot.y * 0.7, -0.02 * Math.sin(this.phase * Math.PI * 2) * mk + groove * Math.sin(beat * 0.5) * 0.04 + dw.torsoRot.z * 0.9);
     // arms: the walking swing, bent toward the pose's IK targets as he settles in
     const swing = 0.42 + 0.35 * rk;
     const al = -swing * sR + 0.04, ar = -swing * sL + 0.04;
@@ -1823,8 +1833,10 @@ export class HubScene implements GameScene {
       A.quaternion.slerp(this.qa, k);
       F.quaternion.slerp(this.qb, k);
     };
-    arm('l', al, zl, fl);
-    arm('r', ar, zr, fr);
+    // drunk, the arms hang loose and fall out of step with the legs
+    const ds = 1 - 0.55 * dw.amt;
+    arm('l', al * ds + dw.armL.x, zl + dw.armL.z * 0.8, fl + (dw.armL.fore + 0.22) * 0.8);
+    arm('r', ar * ds + dw.armR.x, zr + dw.armR.z * 0.8, fr + (dw.armR.fore + 0.28) * 0.8);
     // the duster's skirt trails the stride
     if (n['coat']) n['coat'].rotation.set(0.05 * mk + 0.12 * rk + Math.abs(sL) * 0.05, 0, 0.03 * Math.sin(this.phase * Math.PI * 2) * mk);
     // head: down the road while walking; at a station, the work, the mirror, the dunes, the fire, Mama when she talks
@@ -1874,7 +1886,7 @@ export class HubScene implements GameScene {
     const lpch = Math.atan2(1.62 - look.y, Math.hypot(dx, dz));
     this.headYaw = damp(this.headYaw, Math.max(-0.95, Math.min(0.95, ly)) - 0.17 * sL - twist * 0.6, 5, rdt);
     this.headPitch = damp(this.headPitch, Math.max(-0.4, Math.min(0.62, lpch)) - lean * 0.6, 5, rdt);
-    if (n['head']) n['head'].rotation.set(this.headPitch + groove * Math.sin(beat * 2) * 0.07, this.headYaw, Math.sin(t * 0.5) * 0.02 + groove * Math.sin(beat) * 0.05);
+    if (n['head']) n['head'].rotation.set(this.headPitch + groove * Math.sin(beat * 2) * 0.07 + dw.head.x, this.headYaw + dw.head.y * 0.6, Math.sin(t * 0.5) * 0.02 + groove * Math.sin(beat) * 0.05 + dw.head.z);
     h.root.updateMatrixWorld(true);
   }
 
@@ -2494,7 +2506,8 @@ export class HubScene implements GameScene {
       return;
     }
     const win = HX.CABIN_OPEN.backWin;
-    const gx = this.guitar ? new THREE.Box3().setFromObject(this.guitar).max.x + 0.04 : -0.2;
+    const rk = this.extras?.bench.rack;
+    const gx = rk?.grp ? rk.box.max.x + 0.04 : -0.2;
     const fx = this.fireBox ? this.fireBox.min.x - 0.04 : 2.65;
     const L = { c: (gx + win.x0) / 2, w: win.x0 - 0.04 - gx }, R = { c: (win.x1 + fx) / 2, w: fx - win.x1 - 0.04 };
     const spot = L.w >= R.w ? L : R;

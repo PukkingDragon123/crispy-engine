@@ -1,15 +1,16 @@
-// The worn-gear rack in the run HUD: six little sculpted bronze sockets beside
-// the consumable slots (above the health bar), each holding a real, lit,
-// slowly turning miniature of the piece in that slot and a cut gem in its
-// rarity colour. Lives in Hud3D's overlay scene (orthographic, CSS pixels,
-// y down = negative) and follows the HUD's own anchors, so it slides away with
-// the rest of the HUD.
+// The worn-gear rack in the run HUD: little sculpted bronze sockets beside the
+// consumable slots (above the health bar), each holding the piece worn in that
+// slot and a cut gem in its rarity colour — flat pixel art: the socket, the gem
+// and each gear piece are photographs of their 3D models (HudSprites), painted
+// into the HUD canvas (Hud.painters) on its pixel grid. It follows the HUD's own
+// anchors, so it slides away with the rest of the HUD.
 import * as THREE from 'three';
-import type { Hud } from './Hud';
+import type { Hud, HudPainter } from './Hud';
 import { VoxelModel, VF } from '../../engine/voxel/VoxelModel';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
-import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
+import { makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { Equipment, GEAR_SLOTS, GearId, GearSlot, buildGearDisplay, gearGlassMaterial, gearHex } from '../player/Equipment';
+import { SpriteBank, Shot, blitC, variant, wrap, framingBox } from './HudSprites';
 
 const BRONZE = { base: 0xbf8446, shade: 0x8e5a2c, hi: 0xe8b070, dark: 0x4e2c12 };
 const WALNUT = { base: 0x3a2618, shade: 0x2a1a10, hi: 0x4e3422 };
@@ -49,94 +50,95 @@ function gemModel(color: number) {
 
 interface Slot {
   slot: GearSlot;
-  socket: THREE.Mesh;
-  gem: THREE.Mesh;
-  model: THREE.Group | null;
   id: GearId | null;
   pop: number;
-  spin: number;
 }
 
-export class GearHud {
-  private root = new THREE.Group();
-  private mat: VoxelMaterial;
-  private gemMat: VoxelMaterial;
-  /** empty sockets sit a little darker */
-  private dimMat: VoxelMaterial;
+let socketRig: THREE.Group | null = null;
+const gemRigs = new Map<number, THREE.Group>();
+let gemMat: THREE.Material | null = null;
+
+export class GearHud implements HudPainter {
   private slots: Slot[] = [];
+  private bank = SpriteBank.get();
   private t = 0;
-  private socketGeo: THREE.BufferGeometry;
-  private gems = new Map<number, THREE.BufferGeometry>();
 
   constructor(scene: THREE.Scene, private hud: Hud, private eq: Equipment) {
-    this.mat = makeVoxelMaterial({ fog: false });
-    this.gemMat = makeVoxelMaterial({ fog: false, emissiveStrength: 1.8 });
-    this.dimMat = makeVoxelMaterial({ fog: false });
-    this.dimMat.userData.tint?.value.setRGB(0.62, 0.56, 0.52);
-    this.socketGeo = buildVoxelGeometry(socketModel(), { voxelSize: 1, pivot: [0, 0, 0] });
-    scene.add(this.root);
-    GEAR_SLOTS.forEach((slot, i) => {
-      const socket = new THREE.Mesh(this.socketGeo, this.mat);
-      const gem = new THREE.Mesh(this.gemGeo(0x6a5440), this.gemMat);
-      this.root.add(socket, gem);
-      this.slots.push({ slot, socket, gem, model: null, id: null, pop: 0, spin: i * 1.1 });
+    GEAR_SLOTS.forEach((slot) => this.slots.push({ slot, id: null, pop: 0 }));
+    hud.painters.push(this);
+    void scene;
+  }
+
+  private socket() {
+    return this.bank.get('gear:socket', 18, 46, (): Shot => {
+      socketRig ??= wrap(new THREE.Mesh(buildVoxelGeometry(socketModel(), { voxelSize: 1, pivot: [0, 0, 0] }), SpriteBank.get().material()), framingBox([-PW / 2 - 0.5, -PH / 2 - 0.5, -0.5], [PW / 2 + 0.5, PH / 2 + 1.5, 4]));
+      return { obj: socketRig, w: PW + 2, h: PH + 3, yaw: 0.06, pitch: 0.12, fit: true };
+    });
+  }
+  private gem(color: number) {
+    return this.bank.get('gear:gem:' + color.toString(16), 6, 44, (): Shot => {
+      let g = gemRigs.get(color);
+      if (!g) {
+        gemMat ??= (() => {
+          const m = makeVoxelMaterial({ fog: false, emissiveStrength: 1.8 });
+          m.envMap = SpriteBank.get().envTexture();
+          return m;
+        })();
+        g = wrap(new THREE.Mesh(buildVoxelGeometry(gemModel(color), { voxelSize: 1, pivot: [0, 0, 0] }), gemMat), framingBox([-1.6, -0.6, -0.5], [1.6, 2.6, 2]));
+        gemRigs.set(color, g);
+      }
+      return { obj: g, w: 6, h: 5, yaw: 0, pitch: 0.2, fit: true };
+    });
+  }
+  private piece(id: GearId) {
+    return this.bank.get('gear:item:' + id, 15, 45, (): Shot | null => {
+      const m = buildGearDisplay(id, SpriteBank.get().material(), gearGlassMaterial(true), 1);
+      if (!m) return null;
+      return { obj: wrap(m), w: 15, h: 15, yaw: 0.6, pitch: 0.35, fit: true };
     });
   }
 
-  private gemGeo(color: number) {
-    let g = this.gems.get(color);
-    if (!g) {
-      g = buildVoxelGeometry(gemModel(color), { voxelSize: 1, pivot: [0, 0, 0] });
-      this.gems.set(color, g);
-    }
-    return g;
+  /** RunScene still ticks it; the rack itself is painted with the HUD (paint) */
+  update(dt: number) {
+    void dt;
   }
 
-  update(dt: number) {
+  paint(c: CanvasRenderingContext2D, dt: number) {
     this.t += dt;
     const hud = this.hud;
-    const s = hud.scale;
     const A = hud.anchors;
-    const visible = hud.visible && A.slide < 0.98;
-    this.root.visible = visible;
-    if (!visible) return;
+    if (!hud.visible || A.slide >= 0.98) return;
     // sit right of the consumable slots (or above the heart if there are none)
     const last = A.items[A.items.length - 1];
     const x0 = last ? last.x + last.size / 2 + 6 + PW / 2 : A.heart.x + 30;
     const y0 = last ? last.y : A.heart.y - 23;
+    const sock = this.socket();
     for (let i = 0; i < this.slots.length; i++) {
       const sl = this.slots[i];
       const id = this.eq.get(sl.slot);
       if (id !== sl.id) {
-        sl.model?.removeFromParent();
-        sl.model = id ? buildGearDisplay(id, this.mat, gearGlassMaterial(true), 1) : null;
-        if (sl.model) this.root.add(sl.model);
-        sl.gem.geometry = this.gemGeo(id ? gearHex(id) : 0x6a5440);
         sl.pop = sl.id === null && id === null ? 0 : 1;
         sl.id = id;
       }
       sl.pop = Math.max(0, sl.pop - dt * 2.5);
-      const cx = (x0 + i * (PW + 2)) * s, cy = -y0 * s;
-      const bob = Math.sin(this.t * 1.7 + i) * 0.4 * s;
-      sl.socket.position.set(cx, cy + bob, -6 * s);
-      sl.socket.scale.setScalar(s);
-      sl.socket.rotation.set(0.12, Math.sin(this.t * 0.5 + i) * 0.08, 0);
-      sl.gem.position.set(cx - 0.5 * s, cy + bob + (-PH / 2 + 1.2) * s, -2 * s);
-      sl.gem.scale.setScalar(s * (1 + sl.pop * 0.6));
-      sl.socket.material = id ? this.mat : this.dimMat;
-      if (sl.model) {
-        const k = (13 * s) * (1 + Math.sin(Math.min(1, sl.pop) * Math.PI) * 0.45);
-        sl.spin += dt * (0.8 + sl.pop * 14);
-        sl.model.position.set(cx, cy + bob + 1 * s, 10 * s);
-        sl.model.scale.setScalar(k);
-        sl.model.rotation.set(0.35, sl.spin, 0.08);
+      const cx = x0 + i * (PW + 2), cy = y0 + Math.round(Math.sin(this.t * 1.7 + i) * 0.4);
+      if (sock) blitC(c, id ? sock : variant(sock, 'dim'), cx, cy);
+      const gem = this.gem(id ? gearHex(id) : 0x6a5440);
+      const gp = Math.round(Math.sin(Math.min(1, sl.pop) * Math.PI) * 1.5);
+      if (gem) blitC(c, gem, cx - 0.5, cy + PH / 2 - 2 - gp);
+      if (id) {
+        const pc = this.piece(id);
+        if (pc) {
+          const hop = Math.round(Math.sin(Math.min(1, sl.pop) * Math.PI) * 4);
+          blitC(c, pc, cx, cy - 1 - hop);
+          if (sl.pop > 0.4) blitC(c, variant(pc, 'flash'), cx, cy - 1 - hop, (sl.pop - 0.4) * 1.4);
+        }
       }
     }
   }
 
   dispose() {
-    this.root.removeFromParent();
-    this.socketGeo.dispose();
-    for (const g of this.gems.values()) g.dispose();
+    const i = this.hud.painters.indexOf(this);
+    if (i >= 0) this.hud.painters.splice(i, 1);
   }
 }

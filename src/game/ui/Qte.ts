@@ -181,10 +181,22 @@ export class Qte {
     });
   }
 
+  /** drop the live prompt without a verdict (resolves 'fail', no sound, nothing drawn) */
+  cancel() {
+    const a = this.active;
+    this.active = null;
+    if (a && !a.done) a.resolve('fail');
+  }
+
   /** is a quick prompt waiting on this action right now (callers may swallow that press) */
   quickWants(action: Action) {
     const q = this.quickActive;
     return !!q && !q.done && q.spec.action === action;
+  }
+  private eaten: { action: Action; time: number } | null = null;
+  /** did a quick prompt take this action's press this frame (so the caller must not act on it too) */
+  ate(action: Action) {
+    return !!this.eaten && this.eaten.action === action && this.eaten.time === this.time;
   }
 
   private pressed(code: string) {
@@ -327,8 +339,8 @@ export class Qte {
         const sweet = 0.5;
         const e = Math.abs(x - sweet);
         this.track(cx, cy, w, width, width * 0.35, x, e < width);
-        this.keycap(KEYNAME[key] ?? key, cx, cy + 19);
-        if (s.duration) this.gauge(cx - w / 2, cy + 29, w, 3, 1 - a.t / s.duration, BONE_D);
+        if (s.duration) this.gauge(cx - w / 2, cy + 10, w, 2, 1 - a.t / s.duration, BONE_D);
+        this.keycap(KEYNAME[key] ?? key, cx, cy + (s.duration ? 25 : 20));
         if (this.pressed(key) || (key === 'Mouse0' && this.pressed('Space'))) this.finish(e < width * 0.35 ? 'perfect' : e < width ? 'good' : 'fail');
         else if (s.duration && a.t > s.duration) this.finish('fail');
         break;
@@ -385,9 +397,17 @@ export class Qte {
       this.text(q.spec.label, cx, cy - QR0 - 12, BONE, 16);
       this.ctx.globalAlpha = 1;
     }
+    // the key that answers it, small in the middle of the sight (touch: tap the ring itself)
+    const code = this.input.bindings[q.spec.action]?.[0];
+    if (code) {
+      this.ctx.globalAlpha = fadeIn;
+      this.keycap(KEYNAME[code] ?? code.replace(/^Key|^Digit/, ''), cx, cy, 0.85);
+      this.ctx.globalAlpha = 1;
+    }
     const hit = this.input.hit(q.spec.action) || q.tapped;
     q.tapped = false;
     if (hit) {
+      this.eaten = { action: q.spec.action, time: this.time };
       const err = Math.abs(r - QRT);
       this.endQuick(err < 2.6 ? 'perfect' : err < 6.5 ? 'good' : 'fail');
     } else if (q.t > dur) this.endQuick('skip');

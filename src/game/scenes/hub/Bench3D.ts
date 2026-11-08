@@ -1,40 +1,49 @@
-// The gunsmith's bench, fully 3D (it replaces the old drag-and-drop panel).
-// The six-shooter sits on its felt cradle; the long guns you own hang on forged
-// hooks over the tool wall and come down onto the oilcloth when you work on
-// them (click one; click it again on the bench to sling it for the ride). Every
-// part you own lies in the walnut tray at the front edge as a real 3D piece:
-// click it and it flies onto the gun, Sundown sets it with a wrench in a spray
-// of sparks, and the gun is rebuilt with it. Click a fitted part on the gun to
-// take it off. The six-shooter's barrels, cylinders, grips and sights are parts
-// too (chained with a price tag until you buy them). Blueprints you have not
-// found yet are pinned to the wall over the board rack, each one a photograph
-// of its own schematic; weapon upgrades you own stand on the bench as live
-// cartridges with their coloured tips.
+// The gunsmith's corner, fully 3D: the gun rack on the wall over the side
+// cabinet (GunRack.ts) and the bench beside it.
+//
+// Browse the rack: drag or swipe, A / D, the arrows or the wheel. The camera
+// glides from gun to gun and the one you look at lifts in its cradle under a
+// warm spot. Click it and it comes down onto the gunsmith's turntable on the
+// bench, close up. Every part slot is a brass marking pin stuck in the gun with
+// a manila work tag on a twine (slot, the part in it, what else you own): click
+// a tag or its pin to cycle the parts you own for that slot, or click a loose
+// part in the walnut tray, or a fitted part on the gun to take it off. Sundown
+// steps up and sets each part with a wrench in a spray of sparks; the gun is
+// rebuilt with it and saved (Blueprints.fit / unfit; the six-shooter's gold
+// parts through the save, chained with a price tag in the tray until bought).
+// The tag tied to the turntable's crank picks which long gun rides on the
+// sling. The work order on the clipboard reads out whatever you point at. Drag
+// to turn the gun on the turntable; Esc or a click away from it puts it back.
+// Blueprints you have not found are still pinned over the board rack.
 import * as THREE from 'three';
-import type { RigSpec } from '../../../engine/voxel/Rig';
+import type { RigSpec, RigInstance } from '../../../engine/voxel/Rig';
 import { buildVoxelGeometry } from '../../../engine/voxel/Mesher';
-import { VoxelModel } from '../../../engine/voxel/VoxelModel';
 import { sharedVoxelMaterial } from '../../../engine/render/VoxelMaterial';
+import { damp } from '../../../engine/math/rand';
 import * as CH from '../../models/characters';
 import * as WS from '../../models/props/workshop';
 import * as HX from '../../models/props/hideout';
-import { revolverLaserModel, cartridgeTrio } from '../../models/characters/longguns';
-import { Blueprints, GUNS, ATTACHMENTS, WEAPON_UPGRADES, blueprint } from '../../meta/Blueprints';
-import { buildWeaponDisplay, buildWeaponRig } from '../../player/Weapons';
+import { Blueprints, GUNS, ATTACHMENTS } from '../../meta/Blueprints';
+import { buildWeaponRig } from '../../player/Weapons';
 import { blueprintPhoto } from '../../ui/BlueprintReveal';
 import { loadSave, writeSave, owns, PRICES, GUN_PARTS, GUN_PERKS, GunLoadout } from '../../meta/Save';
 import { BuildKit, HubHost, HubStation, HeroBubble, PriceLock, safe, geoOf, meshOf, reach, ease, clamp01, sstep, stepJob, nailGeo } from './HubKit';
+import { GunRack, GunKey, RACK_ORDER, REV_DEFAULT, Display, Q_FLAT, buildDisplay, poseBox, scaleOf, slotPieces, slotBoxes, revolverLaserMesh, TextCard, fontReady } from './GunRack';
 import type { Mode, Pick, View } from './HouseExtras';
 
 const IN = HX.CABIN_IN;
-type GunKey = 'revolver' | 'shotgun' | 'tommy';
 const FV = 1 / 48;
-const REV_DEFAULT: GunLoadout = { barrel: 'standard', cylinder: 'standard', grip: 'wood', sight: 'none' };
-/** guns lying on the bench: on the left flank, muzzle to the right, the top toward the wall */
-const Q_BENCH = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(1, 0, 0)));
-/** guns on the wall hooks: upright, muzzle to the right, the right flank to the room */
-const Q_WALL = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0)));
 const proxyMat = new THREE.MeshBasicMaterial({ visible: false });
+const GOLD_SLOTS = Object.keys(GUN_PARTS) as (keyof GunLoadout)[];
+/** what each slot is called on its tag, and what sits there when nothing is fitted */
+const SLOT_NAME: Record<string, string> = { barrel: 'BARREL', muzzle: 'MUZZLE', optic: 'OPTIC', under: 'UNDER THE BARREL', mag: 'MAGAZINE', stock: 'STOCK', cylinder: 'CYLINDER', grip: 'GRIP', sight: 'SIGHT' };
+const BARE: Record<string, string> = {
+  'shotgun:barrel': 'Coach Barrels', 'shotgun:muzzle': 'Open Bore', 'shotgun:stock': 'Plain Stock', 'shotgun:under': 'Nothing Fitted',
+  'tommy:mag': 'L-Drum (50 Rounds)', 'tommy:muzzle': 'Bare Muzzle', 'tommy:optic': 'Iron Sights', 'tommy:under': 'Nothing Fitted',
+  'revolver:barrel': 'Standard Barrel', 'revolver:cylinder': 'Standard Cylinder', 'revolver:grip': 'Walnut Grip', 'revolver:sight': 'No Sight',
+  'revolver:under': 'Nothing Fitted', 'revolver:mag': 'Loose Rounds',
+};
+const BARE_DESC: Record<string, string> = { 'revolver:mag': 'Thumbing them in one at a time, like Pa did.', 'tommy:mag': 'Fifty rounds in the L-drum.', 'shotgun:barrel': 'Side by side, the way the stage line had them.' };
 
 interface Part {
   id: string;
@@ -42,115 +51,116 @@ interface Part {
   slot: string;
   name: string;
   desc: string;
-  /** the part's voxels in gun-rig space (so parenting it to the gun root puts it exactly where it fits) */
+  /** the part's voxels in rig space (parented to the gun root it sits exactly where it fits on a bare gun) */
   grp: THREE.Group;
   /** centre of its content in rig space */
   c: THREE.Vector3;
   len: number;
   lock: PriceLock | null;
-  /** revolver gold part: the save key, else a blueprint attachment */
+  /** revolver gold part: the save key; else a blueprint attachment */
   key?: string;
   proxy: THREE.Group | null;
+  /** where it lies in the tray */
+  home: THREE.Matrix4 | null;
 }
-
-/** the rest-pose transform of a part inside its rig */
-function restMatrix(spec: RigSpec, name: string): THREE.Matrix4 {
-  const vs = spec.voxelSize;
-  const by = new Map(spec.parts.map((p) => [p.name, p]));
-  const chain: RigSpec['parts'] = [];
-  for (let p = by.get(name); p; p = p.parent ? by.get(p.parent) : undefined) chain.unshift(p);
-  const M = new THREE.Matrix4();
-  chain.forEach((p, i) => {
-    const pp = i > 0 ? chain[i - 1] : null;
-    const off = pp ? new THREE.Vector3((p.attach[0] - pp.pivot[0]) * vs, (p.attach[1] - pp.pivot[1]) * vs, (p.attach[2] - pp.pivot[2]) * vs) : new THREE.Vector3(p.attach[0] * vs, p.attach[1] * vs, p.attach[2] * vs);
-    M.multiply(new THREE.Matrix4().compose(off, new THREE.Quaternion().setFromEuler(new THREE.Euler(...(p.rest ?? [0, 0, 0]))), new THREE.Vector3(1, 1, 1)));
-  });
-  return M;
+interface Spot {
+  slot: string;
+  /** the zone in rig space */
+  c: THREE.Vector3;
+  lo: THREE.Vector3;
+  hi: THREE.Vector3;
+  pin: THREE.Mesh;
+  /** the pick holder (at the origin; the house lifts it on hover) and the tag inside it */
+  hold: THREE.Group;
+  tag: THREE.Group;
+  card: TextCard;
+  cord: THREE.Mesh;
+  row: 0 | 1;
+  x: number;
+  hole: THREE.Vector3;
 }
-const key3 = (x: number, y: number, z: number) => `${x},${y},${z}`;
-/**
- * The pieces that change between the options of one slot: for each part, the
- * voxels where the option rigs disagree (missing or a different colour). Each
- * option's piece is its own voxels inside that zone, meshed in rig space.
- */
-function slotPieces(specs: RigSpec[]): THREE.Group[] {
-  const names = new Set<string>();
-  for (const s of specs) for (const p of s.parts) names.add(p.name);
-  const zone = new Map<string, Set<string>>();
-  for (const n of names) {
-    const z = new Set<string>();
-    const models = specs.map((s) => s.parts.find((p) => p.name === n)?.model ?? null);
-    const all = new Set<string>();
-    for (const m of models) m?.forEach((x, y, zz) => all.add(key3(x, y, zz)));
-    for (const k of all) {
-      const [x, y, zz] = k.split(',').map(Number);
-      let first: number | undefined | null = null;
-      for (const m of models) {
-        const v = m ? m.get(x, y, zz) : undefined;
-        const c = v === undefined ? -1 : v & 0xffffff;
-        if (first === null) first = c;
-        else if (c !== first) {
-          z.add(k);
-          break;
-        }
-      }
-    }
-    if (z.size) {
-      // a separate part that changes a lot (the shotgun's barrels, the Thompson's drum, a cylinder) is the piece
-      // whole; the root part (the frame) only ever gives up the voxels that differ
-      const counts = models.filter((m): m is VoxelModel => !!m).map((m) => m.count);
-      const isRoot = specs.some((s) => s.parts[0]?.name === n);
-      if (!isRoot && z.size > 0.25 * Math.min(...counts)) for (const m of models) m?.forEach((x, y, zz) => z.add(key3(x, y, zz)));
-      zone.set(n, z);
-    }
-  }
-  return specs.map((s) => {
-    const g = new THREE.Group();
-    for (const p of s.parts) {
-      const z = zone.get(p.name);
-      if (!z) continue;
-      const m = new VoxelModel(p.name + ':piece');
-      p.model.forEach((x, y, zz, c, f) => {
-        if (z.has(key3(x, y, zz))) m.set(x, y, zz, c, f);
-      });
-      if (!m.count) continue;
-      const mesh = meshOf(buildVoxelGeometry(m, { voxelSize: s.voxelSize, pivot: p.pivot }), sharedVoxelMaterial);
-      mesh.applyMatrix4(restMatrix(s, p.name));
-      g.add(mesh);
-    }
-    return g;
-  });
+interface Flight {
+  p: Part;
+  t: number;
+  on: boolean;
+  from: THREE.Matrix4;
+  /** where it lands: the gun root (+ a rig-space shift to the slot as it is now) or a tray spot */
+  to: THREE.Object3D | null;
+  shift: THREE.Vector3;
+  back: THREE.Matrix4 | null;
+  joint: THREE.Vector3;
 }
+type State = 'rack' | 'down' | 'work' | 'up';
 
 export class Bench3D implements Mode {
   id = 'bench';
   done = false;
+  rack: GunRack;
   private st: HubStation | null = null;
   private top = 0.958;
   private bx = -1.32;
   private zBack = -3.26;
   private zFront = -2.55;
+  // ---- browsing and the work
+  private state: State = 'rack';
   private sel: GunKey = 'revolver';
-  private longs: Partial<Record<GunKey, { root: THREE.Object3D; hook: THREE.Vector3 }>> = {};
+  private scroll = 1;
+  private gunFly: { t: number; dur: number; d: Display; down: boolean; a: { p: THREE.Vector3; q: THREE.Quaternion; s: number }; b: { p: THREE.Vector3; q: THREE.Quaternion; s: number } } | null = null;
+  private work: Display | null = null;
+  // ---- the turntable
+  private tt: RigInstance | null = null;
+  private ttAt = new THREE.Vector3();
+  private felt = 0.16;
+  /** the baize over the platter's own origin */
+  private feltTop = 0.06;
+  private spin = 0;
+  private spinTo = 0;
+  private crank = new THREE.Vector3();
+  private benchClip: THREE.Mesh | null = null;
+  // ---- the parts tray and the parts
+  private trayX = -0.77;
+  private trayY = 0;
+  private trayZ = -2.62;
+  private trayLen = 0.75;
   private parts: Part[] = [];
   private pieceJob: Generator<void, void, void> | null = null;
   private built = new Set<GunKey>();
-  private trayY = 0;
-  private papers: { id: string; mesh: THREE.Mesh; at: THREE.Vector3; ready: boolean }[] = [];
+  // ---- the slots on the gun as it is now
+  private zones = new Map<GunKey, { key: string; map: Map<string, { c: THREE.Vector3; lo: THREE.Vector3; hi: THREE.Vector3 }>; opt: Map<string, THREE.Vector3> }>();
+  private zoneJob: { g: GunKey; key: string; job: Generator<void, void, void> } | null = null;
+  private spots: Spot[] = [];
+  private spotKey = '';
+  private pinGeo: THREE.BufferGeometry | null = null;
+  private tagSm: ReturnType<typeof WS.workTag> | null = null;
+  private tagGeo: THREE.BufferGeometry | null = null;
+  private cordGeo: THREE.BufferGeometry | null = null;
+  private carry: { hold: THREE.Group; tag: THREE.Group; card: TextCard; cord: THREE.Mesh; hole: THREE.Vector3 } | null = null;
+  private board: { grp: THREE.Group; card: TextCard } | null = null;
+  // ---- the blueprints you have not found
+  private papers: { id: string; mesh: THREE.Mesh }[] = [];
   private paperJob: Generator<void, void, void> | null = null;
-  /** the blueprint photographs wait until you first open the bench */
   private paperDelay = Infinity;
-  private cartridges = new THREE.Group();
-  private laser: THREE.Mesh | null = null;
-  private clip: THREE.Object3D | null = null;
+  // ---- fitting
+  private fly: Flight | null = null;
+  private offs: Flight[] = [];
+  private queue: (() => void) | null = null;
   private wrench: THREE.Mesh | null = null;
-  private vi = -1;
-  private views: View[] = [];
-  private fly: { p: Part; t: number; on: boolean; from: THREE.Matrix4; to: THREE.Object3D; done: boolean } | null = null;
+  private wt = 0;
+  // ---- input
+  private drag = { down: false, x0: 0, x: 0, moved: false, s0: 0, spin0: 0, vx: 0, lt: 0, lx: 0 };
+  private pending: (() => void) | null = null;
+  private swallow = false;
+  private listening = false;
+  private hovered: Spot | Part | 'carry' | null = null;
+  private ray = new THREE.Raycaster();
   private v = new THREE.Vector3();
+  private t = 0;
 
-  constructor(private h: HubHost, private bubble: HeroBubble) {}
+  constructor(private h: HubHost, private bubble: HeroBubble) {
+    this.rack = new GunRack(h);
+  }
 
+  // ======================================================================= build
   build(k: BuildKit) {
     const wb = this.h.stations.find((s) => s.id === 'bench')?.objs[0];
     if (wb) {
@@ -160,149 +170,82 @@ export class Bench3D implements Mode {
       this.zFront = bb.min.z + 35 * FV;
       this.top = wb.position.y + 46 * FV;
     }
-    // the tray along the front edge, right of the vise
-    const ts = safe(() => WS.partsTray(66, 3.5));
-    const tray = k.put(ts, this.bx + 10 * FV, this.zFront - 4.5 * FV, 0, this.top, 1, false);
-    this.trayY = this.top + (ts?.meta.top ?? 0.04) + 0.003;
-    void tray;
-    // the long guns' hooks over the tool wall
-    for (const [g, y] of [['shotgun', 2.0], ['tommy', 2.28]] as const) {
-      for (const dx of [-0.34, 0.3]) k.against(safe(() => WS.gunHook(46 + (y > 2.1 ? 1 : 0))), 'back', this.bx + dx, y - 0.1, 0.01, 1, false);
-      this.longs[g] = { root: new THREE.Group(), hook: new THREE.Vector3(this.bx - 0.02, y + 0.03, IN.back + 0.15) };
+    // ---- the rack, over the side cabinet between the bench's end and the futon
+    this.rack.build(k, 0.225);
+    const st = this.h.stations.find((s) => s.id === 'bench');
+    if (st && this.rack.grp) st.objs.push(this.rack.grp);
+    // ---- the turntable at the bench's right end, the tray in front of it, the work order on the tool wall
+    this.ttAt.set(this.bx + 0.74, this.top - 0.004, this.zBack + 0.35);
+    const ts = safe(() => WS.gunTurntableRig());
+    this.tt = k.rig(ts, this.ttAt.x, this.ttAt.y, this.ttAt.z, -0.55, 'tt');
+    this.felt = (ts?.meta?.felt as number) ?? 0.16;
+    this.feltTop = this.felt - (this.tt?.nodes['top']?.position.y ?? 0.1);
+    if (ts?.meta?.crank) this.crank.set(...(ts.meta.crank as [number, number, number]));
+    const trs = safe(() => WS.partsTray(44, 3.5));
+    this.trayX = this.ttAt.x - 0.27;
+    this.trayZ = this.zFront - 4.5 * FV;
+    this.trayLen = 44 * FV;
+    k.put(trs, this.trayX, this.trayZ, 0, this.top, 1, false);
+    this.trayY = this.top + (trs?.meta.top ?? 0.04) + 0.003;
+    const cb = safe(() => WS.workClipboard());
+    const cg = geoOf(cb);
+    if (cb && cg) {
+      const grp = new THREE.Group();
+      grp.add(meshOf(cg));
+      const [w, hh] = cb.meta.size;
+      const card = new TextCard(w, hh, 300);
+      card.mesh.position.set(...cb.meta.paper);
+      card.mesh.position.z += 0.003;
+      grp.add(card.mesh);
+      grp.position.set(this.ttAt.x - 0.6, this.top + 0.13, this.zBack + 0.068);
+      grp.rotation.set(-0.06, 0.12, 0.03);
+      const nail = new THREE.Mesh(nailGeo(), sharedVoxelMaterial);
+      nail.position.set(0, cg.boundingBox!.max.y - 0.012, -0.004);
+      grp.add(nail);
+      this.h.scene.add(grp);
+      this.board = { grp, card };
     }
-    this.h.scene.add(this.cartridges);
-    this.views = [
-      { pos: new THREE.Vector3(this.bx - 0.98, this.top + 0.98, this.zFront + 1.02), look: new THREE.Vector3(this.bx + 0.1, this.top + 0.04, this.zBack + 0.34), fov: 50 },
-      { pos: new THREE.Vector3(-3.3, 1.72, -1.2), look: new THREE.Vector3(-3.45, 2.12, IN.back), fov: 50 },
-    ];
+    // ---- the wrench he sets parts with; the pins, tags and twine the slots wear
     const wm = geoOf(safe(() => WS.benchWrench()), 'center');
     if (wm) {
       this.wrench = meshOf(wm);
       this.wrench.visible = false;
       this.h.scene.add(this.wrench);
     }
-    this.refreshLongs();
-    this.refreshUpgrades();
+    const ps = safe(() => WS.slotPin());
+    this.pinGeo = ps ? buildVoxelGeometry(ps.model, { voxelSize: ps.voxelSize, pivot: [0.5, 0, 0.5] }) : null;
+    this.tagSm = safe(() => WS.workTag());
+    this.tagGeo = geoOf(this.tagSm);
+    const tc = safe(() => WS.twineCord());
+    this.cordGeo = tc ? buildVoxelGeometry(tc.model, { voxelSize: tc.voxelSize, pivot: [0.5, 0.5, 0] }) : null;
+    // ---- the six-shooter's bench cradle stays empty now (the gun lives on the rack); his idle fiddling goes to the turntable
+    const host = this.h as unknown as { gunHolder?: THREE.Object3D };
+    if (host.gunHolder) {
+      host.gunHolder.visible = false;
+      host.gunHolder.position.copy(this.ttAt).add(new THREE.Vector3(0, this.felt, 0));
+    }
     this.paperJob = this.makePapers();
   }
 
-  // ======================================================================= what's on the bench
-  /** owned long guns: on their hooks, or (the one being worked on) lying on the oilcloth */
-  private refreshLongs() {
-    for (const g of ['shotgun', 'tommy'] as GunKey[]) {
-      const L = this.longs[g];
-      if (!L) continue;
-      L.root.removeFromParent();
-      if (!Blueprints.ownsGun(g as 'shotgun')) continue;
-      const root = safe(() => buildWeaponDisplay(g as 'shotgun')) ?? null;
-      if (!root) continue;
-      root.traverse((o) => {
-        if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).castShadow = true;
-      });
-      const hold = new THREE.Group();
-      hold.add(root);
-      root.updateMatrixWorld(true);
-      const bb = new THREE.Box3().setFromObject(root);
-      const c = bb.getCenter(new THREE.Vector3());
-      root.position.sub(c);
-      if (this.sel === g) {
-        hold.quaternion.copy(Q_BENCH);
-        hold.position.set(this.bx - 0.3, this.top + 0.04, this.zBack + 0.3);
-        root.position.add(new THREE.Vector3(0, 0, 0));
-        hold.updateMatrixWorld(true);
-        const b2 = new THREE.Box3().setFromObject(hold);
-        hold.position.y += this.top + 0.012 - b2.min.y;
-      } else {
-        hold.quaternion.copy(Q_WALL);
-        hold.position.copy(L.hook);
-      }
-      this.h.scene.add(hold);
-      L.root = hold;
-      (hold.userData as { gun: GunKey }).gun = g;
-    }
-  }
-  private gunRoot(g: GunKey): THREE.Object3D | null {
-    if (g === 'revolver') return (this.h as unknown as { gun: { root: THREE.Object3D } | null }).gun?.root ?? null;
-    const hold = this.longs[g]?.root;
-    return hold?.children[0] ?? null;
-  }
-  /** owned upgrades: live cartridges standing on the bench by the oil can (tips in the upgrade's colour) */
-  private refreshUpgrades() {
-    this.cartridges.clear();
-    let i = 0;
-    for (const u of Blueprints.upgrades()) {
-      if (!u.owned) continue;
-      const sm = safe(() => cartridgeTrio(u.tip));
-      const g = sm ? buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot }) : null;
-      if (!g) continue;
-      const m = meshOf(g);
-      m.rotation.set(0, Math.PI / 2 + Math.sin(i) * 0.3, 0);
-      m.position.set(this.bx + 0.62 + (i % 3) * 0.06, this.top + 0.012, this.zBack + 0.32 + Math.floor(i / 3) * 0.08);
-      m.userData.upgrade = u.id;
-      this.cartridges.add(m);
-      i++;
-    }
-  }
-  /** the six-shooter's fitted blueprint parts, physically on it: the laser under the barrel, the moon clip by the cradle */
-  private dressRevolver() {
-    const gun = (this.h as unknown as { gun: { nodes: Record<string, THREE.Object3D>; geo: { spec: RigSpec } } | null }).gun;
-    this.laser?.removeFromParent();
-    this.clip?.removeFromParent();
-    this.laser = null;
-    this.clip = null;
-    if (!gun) return;
-    const fitted = Blueprints.fitted('revolver').map((a) => a.id);
-    const frame = gun.nodes['frame'];
-    if (fitted.includes('rev_laser') && frame) {
-      const sm = revolverLaserModel();
-      const spec = gun.geo.spec;
-      const vs = spec.voxelSize, piv = spec.parts[0].pivot;
-      this.laser = meshOf(buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot }));
-      this.laser.position.set((0.5 - piv[0]) * vs, (0.6 - piv[1]) * vs, (10.5 - piv[2]) * vs);
-      frame.add(this.laser);
-    }
-    if (fitted.includes('rev_speedloader')) {
-      const g = geoOf(safe(() => WS.moonClip()));
-      if (g) {
-        const m = meshOf(g);
-        const hp = (this.h as unknown as { gunHolder: THREE.Object3D }).gunHolder.position;
-        m.position.set(hp.x + 0.2, this.top + 0.01, hp.z + 0.1);
-        m.scale.setScalar(1.2);
-        this.h.scene.add(m);
-        this.clip = m;
-      }
-    }
-  }
-
-  // ======================================================================= the parts tray
-  /** build (a slice at a time) every part of the selected gun as a 3D piece */
+  // ======================================================================= the parts (for the tray: per gun, against the bare gun)
   private *makePieces(g: GunKey): Generator<void, void, void> {
     if (g === 'revolver') {
-      // the gold parts: one rig per option, the pieces where they differ
-      for (const slot of Object.keys(GUN_PARTS) as (keyof GunLoadout)[]) {
+      for (const slot of GOLD_SLOTS) {
         const opts = GUN_PARTS[slot] as string[];
         const specs = opts.map((o) => (CH as any).revolverRig({ ...REV_DEFAULT, [slot]: o }) as RigSpec);
         yield;
         const pieces = slotPieces(specs);
         opts.forEach((o, i) => {
-          if (o === 'none' || o === 'standard' || o === 'wood') return;
-          const key = `gun:${slot}:${o}`;
-          this.addPart({ id: `${slot}:${o}`, gun: 'revolver', slot, name: `${cap(o)} ${slot}`, desc: GUN_PERKS[`${slot}:${o}`] ?? '', key, grp: pieces[i] });
+          if (o === (REV_DEFAULT as unknown as Record<string, string>)[slot]) return;
+          this.addPart({ id: `${slot}:${o}`, gun: 'revolver', slot, name: `${cap(o)} ${cap(slot)}`, desc: GUN_PERKS[`${slot}:${o}`] ?? '', key: `gun:${slot}:${o}`, grp: pieces[i] });
         });
         yield;
       }
+      const rs = (CH as any).revolverRig(REV_DEFAULT) as RigSpec;
       for (const a of Blueprints.attachments('revolver')) {
         if (!a.owned) continue;
-        const sm = a.id === 'rev_laser' ? revolverLaserModel() : null;
         const grp = new THREE.Group();
-        if (sm) {
-          // clamped under the barrel, just ahead of the cylinder (where Weapons puts it in a run)
-          const rs = (CH as any).revolverRig(REV_DEFAULT) as RigSpec;
-          const vs = rs.voxelSize, piv = rs.parts[0].pivot;
-          const lm = meshOf(buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot }));
-          lm.position.set((0.5 - piv[0]) * vs, (0.6 - piv[1]) * vs, (10.5 - piv[2]) * vs);
-          grp.add(lm);
-        }
+        if (a.id === 'rev_laser') grp.add(revolverLaserMesh(rs));
         else {
           const cg = geoOf(safe(() => WS.moonClip()));
           if (cg) grp.add(meshOf(cg));
@@ -311,111 +254,372 @@ export class Bench3D implements Mode {
       }
       return;
     }
-    // a long gun: per slot, the gun bare and with each option
-    const atts = Blueprints.attachments(g as 'shotgun');
-    const slots = [...new Set(atts.map((a) => a.slot))];
-    for (const slot of slots) {
+    const atts = Blueprints.attachments(g);
+    for (const slot of GUNS[g].slots) {
       const opts = atts.filter((a) => a.slot === slot);
-      const specs = [buildWeaponRig(g as 'shotgun', []), ...opts.map((a) => buildWeaponRig(g as 'shotgun', [ATTACHMENTS[a.id]]))].filter((s): s is RigSpec => !!s);
+      if (!opts.some((a) => a.owned)) continue;
+      const specs = [buildWeaponRig(g, []), ...opts.map((a) => buildWeaponRig(g, [ATTACHMENTS[a.id]]))].filter((s): s is RigSpec => !!s);
       yield;
       const pieces = slotPieces(specs);
       opts.forEach((a, i) => {
-        if (!a.owned) return;
-        this.addPart({ id: a.id, gun: g, slot, name: a.name, desc: a.desc, grp: pieces[i + 1] });
+        if (a.owned) this.addPart({ id: a.id, gun: g, slot, name: a.name, desc: a.desc, grp: pieces[i + 1] });
+        else pieces[i + 1].traverse((o) => (o as THREE.Mesh).geometry?.dispose());
       });
+      pieces[0].traverse((o) => (o as THREE.Mesh).geometry?.dispose());
       yield;
     }
   }
-  private addPart(p: Omit<Part, 'c' | 'len' | 'lock' | 'proxy'>) {
+  private addPart(p: Omit<Part, 'c' | 'len' | 'lock' | 'proxy' | 'home'>) {
     const bb = new THREE.Box3().setFromObject(p.grp);
     if (bb.isEmpty()) return;
     const c = bb.getCenter(new THREE.Vector3());
-    const part: Part = { ...p, c, len: Math.max(bb.max.z - bb.min.z, 0.03), lock: null, proxy: null };
+    const part: Part = { ...p, c, len: Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z, 0.03), lock: null, proxy: null, home: null };
     if (p.key && !owns(p.key)) part.lock = new PriceLock(this.h, p.key, PRICES[p.key] ?? 0, 16, 0.75);
     if (part.lock) this.h.scene.add(part.lock.grp);
+    p.grp.visible = false;
     this.h.scene.add(p.grp);
     this.parts.push(part);
     this.layout();
+  }
+  private ensurePieces(g: GunKey) {
+    if (this.built.has(g)) return;
+    this.built.add(g);
+    const job = this.makePieces(g);
+    const prev = this.pieceJob;
+    this.pieceJob = (function* () {
+      if (prev) yield* prev;
+      yield* job;
+    })();
   }
   private fittedNow(p: Part) {
     if (p.key) {
       const [slot, o] = p.id.split(':');
       return (loadSave().gun as unknown as Record<string, string>)[slot] === o;
     }
-    return Blueprints.fitted(p.gun as 'revolver').some((a) => a.id === p.id);
+    return Blueprints.fitted(p.gun).some((a) => a.id === p.id);
   }
-  /** lay the selected gun's loose parts out along the tray; fitted ones ride on the gun (with a hidden hit proxy) */
+  private usable(p: Part) {
+    return !p.lock || p.lock.open;
+  }
+
+  // ======================================================================= the slots as they are now (pins and tags)
+  private configKey(g: GunKey) {
+    const d = loadSave();
+    return g === 'revolver' ? `${d.gun.barrel}:${d.gun.cylinder}:${d.gun.grip}:${d.gun.sight}:${Blueprints.fitted('revolver').map((a) => a.id).join(',')}` : Blueprints.fitted(g).map((a) => a.id).sort().join(',');
+  }
+  private ensureZones(g: GunKey) {
+    const key = this.configKey(g);
+    if (this.zones.get(g)?.key === key || (this.zoneJob && this.zoneJob.g === g && this.zoneJob.key === key)) return;
+    this.zoneJob = { g, key, job: this.makeZones(g, key) };
+  }
+  private *makeZones(g: GunKey, key: string): Generator<void, void, void> {
+    const map = new Map<string, { c: THREE.Vector3; lo: THREE.Vector3; hi: THREE.Vector3 }>();
+    const opt = new Map<string, THREE.Vector3>();
+    const put = (slot: string, b: THREE.Box3) => {
+      if (!b.isEmpty()) map.set(slot, { c: b.getCenter(new THREE.Vector3()), lo: b.min.clone(), hi: b.max.clone() });
+    };
+    const union = (bs: THREE.Box3[]) => bs.reduce((a, b) => a.union(b), new THREE.Box3());
+    if (g === 'revolver') {
+      const cfg = loadSave().gun;
+      for (const slot of GOLD_SLOTS) {
+        const os = GUN_PARTS[slot] as string[];
+        const specs = os.map((o) => (CH as any).revolverRig({ ...cfg, [slot]: o }) as RigSpec);
+        yield;
+        const bs = slotBoxes(specs);
+        put(slot, union(bs));
+        os.forEach((o, i) => !bs[i].isEmpty() && opt.set(`${slot}:${o}`, bs[i].getCenter(new THREE.Vector3())));
+      }
+      const rs = (CH as any).revolverRig(cfg) as RigSpec;
+      const lm = revolverLaserMesh(rs);
+      const frame = rs.parts[0];
+      lm.position.add(new THREE.Vector3(frame.attach[0] * rs.voxelSize, frame.attach[1] * rs.voxelSize, frame.attach[2] * rs.voxelSize));
+      lm.updateMatrixWorld(true);
+      put('under', new THREE.Box3().setFromObject(lm));
+      const cyl = map.get('cylinder');
+      if (cyl) put('mag', new THREE.Box3(cyl.lo.clone().setZ(cyl.c.z - 0.01), cyl.hi.clone().setY(cyl.c.y).setZ(cyl.hi.z)));
+    } else {
+      const cfg = Blueprints.fitted(g);
+      for (const slot of GUNS[g].slots) {
+        const base = cfg.filter((a) => a.slot !== slot);
+        const opts = Object.values(ATTACHMENTS).filter((a) => a.gun === g && a.slot === slot);
+        const specs = [buildWeaponRig(g, base), ...opts.map((a) => buildWeaponRig(g, [...base, a]))];
+        yield;
+        if (specs.some((s) => !s)) continue;
+        const bs = slotBoxes(specs as RigSpec[]);
+        put(slot, union(bs));
+        opts.forEach((a, i) => !bs[i + 1].isEmpty() && opt.set(a.id, bs[i + 1].getCenter(new THREE.Vector3())));
+      }
+    }
+    this.zones.set(g, { key, map, opt });
+  }
+  /** pins on the gun, tags on twine: one per slot (rebuilt when the gun or its zones change) */
+  private refreshSpots() {
+    const d = this.work;
+    const z = d ? this.zones.get(d.g) : null;
+    const key = d && z && z.key === this.configKey(d.g) ? `${d.g}:${z.key}:${d.root.uuid}` : '';
+    if (key === this.spotKey) return;
+    this.spotKey = key;
+    this.clearSpots();
+    if (!d || !z || !key || !this.pinGeo || !this.tagGeo || !this.tagSm) return;
+    const slots = d.g === 'revolver' ? [...GOLD_SLOTS, 'under', 'mag'] : GUNS[d.g].slots;
+    const box = poseBox(d, new THREE.Quaternion(), 1);
+    const midY = (box.min.y + box.max.y) / 2;
+    for (const slot of slots) {
+      const zn = z.map.get(slot);
+      if (!zn) continue;
+      const pin = new THREE.Mesh(this.pinGeo, sharedVoxelMaterial);
+      pin.castShadow = true;
+      // stuck into the right flank (rig -X, facing up on the turntable), needle along -X
+      pin.position.set(zn.lo.x - 0.002, zn.c.y, zn.c.z);
+      pin.rotation.z = Math.PI / 2;
+      pin.scale.setScalar(1 / d.hold.scale.x);
+      d.root.add(pin);
+      const hold = new THREE.Group();
+      const tag = new THREE.Group();
+      const tm = meshOf(this.tagGeo, sharedVoxelMaterial, false);
+      const hole = new THREE.Vector3(...this.tagSm.meta.hole);
+      tm.position.copy(hole).negate();
+      tag.add(tm);
+      const [w, hh] = this.tagSm.meta.size;
+      const card = new TextCard(w, hh, 256);
+      card.mesh.position.set(...this.tagSm.meta.face).sub(hole);
+      card.mesh.position.z += 0.0025;
+      tag.add(card.mesh);
+      tag.scale.setScalar(1.2);
+      hold.add(tag);
+      this.h.scene.add(hold);
+      const cord = this.cordGeo ? new THREE.Mesh(this.cordGeo, sharedVoxelMaterial) : new THREE.Mesh();
+      this.h.scene.add(cord);
+      this.spots.push({ slot, c: zn.c.clone(), lo: zn.lo.clone(), hi: zn.hi.clone(), pin, hold, tag, card, cord, row: zn.c.y > midY ? 0 : 1, x: NaN, hole });
+    }
+    // the sling tag on the crank (long guns only)
+    if (d.g !== 'revolver' && !this.carry) {
+      const hold = new THREE.Group();
+      const tag = new THREE.Group();
+      const tm = meshOf(this.tagGeo, sharedVoxelMaterial, false);
+      const hole = new THREE.Vector3(...this.tagSm.meta.hole);
+      tm.position.copy(hole).negate();
+      tag.add(tm);
+      const [w, hh] = this.tagSm.meta.size;
+      const card = new TextCard(w, hh, 256);
+      card.mesh.position.set(...this.tagSm.meta.face).sub(hole);
+      card.mesh.position.z += 0.0025;
+      tag.add(card.mesh);
+      tag.scale.setScalar(1.2);
+      hold.add(tag);
+      this.h.scene.add(hold);
+      const cord = this.cordGeo ? new THREE.Mesh(this.cordGeo, sharedVoxelMaterial) : new THREE.Mesh();
+      this.h.scene.add(cord);
+      this.carry = { hold, tag, card, cord, hole };
+    }
+    this.writeTags();
+  }
+  private clearSpots() {
+    for (const s of this.spots) {
+      s.pin.removeFromParent();
+      s.hold.removeFromParent();
+      s.cord.removeFromParent();
+      s.card.dispose();
+    }
+    this.spots = [];
+    if (this.carry && (!this.work || this.work.g === 'revolver' || this.state !== 'work')) {
+      this.carry.hold.removeFromParent();
+      this.carry.cord.removeFromParent();
+      this.carry.card.dispose();
+      this.carry = null;
+    }
+  }
+  /** a slot's choices: what is there with nothing fitted, then every part you can fit there */
+  private options(g: GunKey, slot: string): { part: Part | null; name: string; desc: string }[] {
+    const out: { part: Part | null; name: string; desc: string }[] = [{ part: null, name: BARE[`${g}:${slot}`] ?? 'Nothing Fitted', desc: g === 'revolver' && GOLD_SLOTS.includes(slot as keyof GunLoadout) ? GUN_PERKS[`${slot}:${(REV_DEFAULT as unknown as Record<string, string>)[slot]}`] ?? '' : BARE_DESC[`${g}:${slot}`] ?? '' }];
+    for (const p of this.parts) if (p.gun === g && p.slot === slot && this.usable(p)) out.push({ part: p, name: p.name, desc: p.desc });
+    return out;
+  }
+  private current(g: GunKey, slot: string) {
+    return this.parts.find((p) => p.gun === g && p.slot === slot && this.fittedNow(p)) ?? null;
+  }
+  private lockedCount(g: GunKey, slot: string) {
+    if (g === 'revolver' && GOLD_SLOTS.includes(slot as keyof GunLoadout)) return this.parts.filter((p) => p.gun === g && p.slot === slot && !this.usable(p)).length;
+    return Blueprints.attachments(g).filter((a) => a.slot === slot && !a.owned).length;
+  }
+  private writeTags() {
+    if (!fontReady()) return;
+    for (const s of this.spots) {
+      const g = this.work?.g ?? this.sel;
+      const opts = this.options(g, s.slot);
+      const cur = this.current(g, s.slot);
+      const i = Math.max(0, opts.findIndex((o) => o.part === cur));
+      const lk = this.lockedCount(g, s.slot);
+      const foot = opts.length > 1 ? `${i + 1} of ${opts.length}` : lk ? (g === 'revolver' ? `${lk} for sale in the tray` : `${lk} more out there`) : 'nothing else fits';
+      s.card.set([
+        { t: (g === 'revolver' && s.slot === 'mag' ? 'SPEEDLOADER' : SLOT_NAME[s.slot] ?? s.slot.toUpperCase()), size: 0.24, color: '#8a2a14' },
+        { t: opts[i]?.name ?? '', size: 0.27 },
+        { t: foot, size: 0.19, color: '#5a4228' },
+      ], 0.07);
+    }
+    if (this.carry && this.work) {
+      const carried = Blueprints.guns().find((q) => q.id === this.work!.g)?.carried;
+      this.carry.card.set([
+        { t: 'SLING', size: 0.24, color: '#8a2a14' },
+        { t: carried ? 'Rides with me' : 'Stays home', size: 0.27 },
+        { t: carried ? 'click: leave it home' : 'click: take it along', size: 0.18, color: '#5a4228' },
+      ], 0.07);
+    }
+  }
+  /** lay the tags out over and under the gun, their twine to the pins; they turn to face you and sway */
+  private placeSpots(rdt: number) {
+    const d = this.work;
+    if (!d) return;
+    d.root.updateWorldMatrix(true, true);
+    const cam = this.h.camera.position;
+    const heads: THREE.Vector3[] = this.spots.map((s) => s.pin.localToWorld(new THREE.Vector3(0, 0.06, 0)));
+    // the lamp shade hangs over the bench left of the turntable: tags under it go to the front row
+    const shade = { x0: this.bx + 0.3, x1: this.bx + 0.58 };
+    const rows: Spot[][] = [[], []];
+    this.spots.forEach((s, i) => {
+      let row = s.row;
+      if (row === 0 && heads[i].x > shade.x0 && heads[i].x < shade.x1) row = 1;
+      rows[row].push(s);
+    });
+    const gap = 0.152;
+    const yRow = [this.ttAt.y + this.felt + 0.235, this.ttAt.y + this.felt + 0.035];
+    const zRow = [this.ttAt.z - 0.2, this.ttAt.z + 0.26];
+    rows.forEach((list, r) => {
+      const want = list.map((s) => heads[this.spots.indexOf(s)].x);
+      const order = list.map((_, i) => i).sort((a, b) => want[a] - want[b]);
+      const xs = order.map((i) => want[i]);
+      for (let it = 0; it < 8; it++)
+        for (let k = 1; k < xs.length; k++) {
+          const o = gap - (xs[k] - xs[k - 1]);
+          if (o > 0) {
+            xs[k - 1] -= o / 2;
+            xs[k] += o / 2;
+          }
+        }
+      order.forEach((i, k) => {
+        const s = list[i];
+        s.x = Number.isNaN(s.x) ? xs[k] : damp(s.x, xs[k], 6, rdt);
+        const hov = this.hovered === s ? 1 : 0;
+        s.tag.position.set(s.x, yRow[r] + Math.sin(this.t * 1.4 + k) * 0.003, zRow[r]);
+        s.tag.lookAt(cam);
+        s.tag.rotateZ(Math.sin(this.t * 1.1 + k * 1.7) * 0.04);
+        s.tag.scale.setScalar(1.2 * (1 + hov * 0.08));
+      });
+    });
+    this.spots.forEach((s, i) => this.tieCord(s.cord, heads[i], s.tag));
+    if (this.carry) {
+      const c = this.carry;
+      const crank = this.tt?.nodes['top'] ? this.tt.nodes['top'].localToWorld(this.crank.clone()) : this.ttAt.clone();
+      c.tag.position.set(this.ttAt.x + 0.44, yRow[1] - 0.01, zRow[1] + 0.02);
+      c.tag.lookAt(cam);
+      c.tag.rotateZ(Math.sin(this.t * 1.3) * 0.05);
+      c.tag.scale.setScalar(1.2 * (this.hovered === 'carry' ? 1.08 : 1));
+      this.tieCord(c.cord, crank, c.tag);
+    }
+  }
+  /** stretch the twine from a point to the tag's grommet */
+  private tieCord(cord: THREE.Mesh, from: THREE.Vector3, tag: THREE.Group) {
+    tag.updateMatrixWorld(true);
+    const to = tag.localToWorld(new THREE.Vector3(0, 0, -0.002));
+    const L = from.distanceTo(to);
+    cord.position.copy(from);
+    cord.lookAt(to);
+    cord.scale.set(1, 1, L / (64 / 768));
+    cord.visible = L > 0.01;
+  }
+
+  // ======================================================================= the tray
+  /** lay the gun's loose parts along the tray; fitted ones ride on the gun (with a hidden hit proxy) */
   private layout() {
-    const loose = this.parts.filter((p) => p.gun === this.sel && !this.fittedNow(p) && this.fly?.p !== p);
-    const gunQ = this.gunQuat(this.sel);
-    const sc = this.sel === 'revolver' ? 1.25 : 1;
-    const tot = loose.reduce((a, p) => a + p.len * sc + 0.035, 0);
-    const span = 66 * FV - 0.08;
+    const g = this.sel;
+    const loose = this.parts.filter((p) => p.gun === g && !this.fittedNow(p) && this.fly?.p !== p);
+    const q = this.trayQuat();
+    const sc = g === 'revolver' ? 1.1 : 0.85;
+    const tot = loose.reduce((a, p) => a + p.len * sc + 0.03, 0);
+    const span = this.trayLen - 0.06;
     const k = tot > span ? span / tot : 1;
-    let x = this.bx + 10 * FV - Math.min(tot * k, span) / 2;
+    let x = this.trayX - Math.min(tot * k, span) / 2;
+    const show = this.state !== 'rack';
     for (const p of this.parts) {
-      p.grp.visible = p.gun === this.sel && this.fly?.p !== p && !this.fittedNow(p);
-      p.lock?.show(p.grp.visible);
+      const flying = this.fly?.p === p || this.offs.some((f) => f.p === p);
+      p.grp.visible = show && p.gun === g && (flying || !this.fittedNow(p));
+      p.lock?.show(p.grp.visible && !flying);
     }
     for (const p of loose) {
       const L = p.len * sc * k;
-      const at = new THREE.Vector3(x + L / 2, this.trayY, this.zFront - 4.5 * FV);
-      x += L + 0.035 * k;
-      p.grp.quaternion.copy(gunQ);
-      p.grp.scale.setScalar(sc * k);
-      p.grp.position.copy(at).sub(p.c.clone().multiplyScalar(sc * k).applyQuaternion(gunQ));
+      const at = new THREE.Vector3(x + L / 2, this.trayY, this.trayZ);
+      x += L + 0.03 * k;
+      const m = new THREE.Object3D();
+      m.quaternion.copy(q);
+      m.scale.setScalar(sc * k);
+      m.position.copy(at).sub(p.c.clone().multiplyScalar(sc * k).applyQuaternion(q));
+      m.updateMatrixWorld(true);
+      // measure it lying there to sit it on the felt
+      p.home = m.matrixWorld.clone();
+      const bb = new THREE.Box3();
       p.grp.updateMatrixWorld(true);
-      const bb = new THREE.Box3().setFromObject(p.grp);
-      p.grp.position.y += this.trayY - bb.min.y;
-      if (p.lock) {
-        p.lock.grp.position.set(at.x, this.trayY + Math.max(0.05, bb.max.y - bb.min.y) + 0.02, at.z + 0.02);
-        p.lock.grp.rotation.y = 0;
+      p.grp.children.forEach((c) => {
+        const mesh = c as THREE.Mesh;
+        if (!mesh.geometry) return;
+        if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+        bb.union(mesh.geometry.boundingBox!.clone().applyMatrix4(mesh.matrix).applyMatrix4(p.home!));
+      });
+      if (!bb.isEmpty()) p.home.premultiply(new THREE.Matrix4().makeTranslation(0, this.trayY - bb.min.y, 0));
+      if (!this.offs.some((f) => f.p === p)) {
+        p.home.decompose(p.grp.position, p.grp.quaternion, p.grp.scale);
+        if (p.lock) {
+          p.lock.grp.position.set(at.x, this.trayY + Math.max(0.05, bb.max.y - bb.min.y) + 0.02, at.z + 0.02);
+          p.lock.grp.rotation.y = 0;
+        }
       }
     }
     this.refreshProxies();
   }
-  private gunQuat(g: GunKey) {
-    const r = this.gunRoot(g);
-    return r ? r.getWorldQuaternion(new THREE.Quaternion()) : Q_BENCH.clone();
+  /** parts lie in the tray the way the gun lies on the turntable */
+  private trayQuat() {
+    return Q_FLAT.clone().premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.35));
   }
-  /** invisible copies of the fitted parts on the gun, so you can click a part to take it off */
+  /** invisible copies of the fitted parts on the gun, so a click on a part takes it off */
   private refreshProxies() {
     for (const p of this.parts) {
       p.proxy?.removeFromParent();
       p.proxy = null;
-      if (p.gun !== this.sel || !this.fittedNow(p)) continue;
-      const root = this.gunRoot(p.gun);
-      if (!root) continue;
+      const d = this.work;
+      if (!d || this.state !== 'work' || p.gun !== d.g || !this.fittedNow(p)) continue;
       const px = p.grp.clone();
-      // a hair proud of the gun so a click finds the part before the gun under it
+      px.position.copy(this.shiftOf(p)).add(p.c.clone().multiplyScalar(-0.04));
       px.quaternion.identity();
       px.scale.setScalar(1.04);
-      px.position.copy(p.c).multiplyScalar(-0.04);
       px.traverse((o) => {
         if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).material = proxyMat;
       });
       px.visible = true;
-      root.add(px);
+      d.root.add(px);
       p.proxy = px;
     }
+  }
+  /** a part's pieces are cut against the bare gun: this shift puts one where its slot is on the gun as it is now */
+  private shiftOf(p: Part) {
+    const z = this.zones.get(p.gun);
+    if (!z || z.key !== this.configKey(p.gun)) return new THREE.Vector3();
+    if (p.gun === 'revolver' && p.slot === 'mag') {
+      const zn = z.map.get('mag');
+      return zn ? zn.c.clone().sub(p.c) : new THREE.Vector3();
+    }
+    const c = z.opt.get(p.id);
+    return c ? c.clone().sub(p.c) : new THREE.Vector3();
   }
 
   // ======================================================================= blueprints you haven't found: pinned over the board rack
   private *makePapers(): Generator<void, void, void> {
-    const locked = Blueprints.list().filter((b) => !b.owned && b.kind !== 'gear');
+    const locked = Blueprints.list().filter((b) => !b.owned && b.kind !== 'gear' && b.kind !== 'gun');
     let slot = 0;
     for (const b of locked) {
-      let at: THREE.Vector3;
-      let w = 0.27;
-      if (b.kind === 'gun' && this.longs[b.gun as GunKey]) {
-        at = this.longs[b.gun as GunKey]!.hook.clone().setZ(IN.back + 0.012);
-        w = 0.36;
-      } else {
-        if (slot >= 18) continue;
-        const col = slot % 6, row = Math.floor(slot / 6);
-        at = new THREE.Vector3(-4.42 + col * 0.36 + (row % 2) * 0.1, 2.36 - row * 0.21, IN.back + 0.01 + slot * 0.0006);
-        slot++;
-      }
+      if (slot >= 18) break;
+      const col = slot % 6, row = Math.floor(slot / 6);
+      const at = new THREE.Vector3(-4.42 + col * 0.36 + (row % 2) * 0.1, 2.36 - row * 0.21, IN.back + 0.01 + slot * 0.0006);
+      const w = 0.27;
+      slot++;
       const tex = safe(() => blueprintPhoto(this.h.engine.renderer, b.id));
       if (tex) {
         const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.9, metalness: 0 });
@@ -424,12 +628,11 @@ export class Bench3D implements Mode {
         mesh.position.copy(at);
         mesh.rotation.z = Math.sin(slot * 2.3 + b.id.length) * 0.05;
         mesh.receiveShadow = true;
-        mesh.userData.bp = b.id;
         const nail = new THREE.Mesh(nailGeo(), sharedVoxelMaterial);
         nail.position.set(0, w / 3.2 - 0.012, -0.004);
         mesh.add(nail);
         this.h.scene.add(mesh);
-        this.papers.push({ id: b.id, mesh, at, ready: true });
+        this.papers.push({ id: b.id, mesh });
       }
       yield;
     }
@@ -439,211 +642,581 @@ export class Bench3D implements Mode {
   enter(): Mode | null {
     this.st = this.h.here;
     this.done = false;
-    this.vi = 0;
-    this.paperDelay = 0;
-    this.select(this.sel);
+    this.paperDelay = Math.min(this.paperDelay, 8);
+    this.state = 'rack';
+    const i = RACK_ORDER.indexOf(this.sel);
+    this.scroll = i;
+    this.rack.focus = i;
     this.home = { at: this.st.stand.clone(), face: this.st.face };
-    this.rest = { at: new THREE.Vector2(this.bx + 1.08, this.zFront + 0.3), face: -2.3 };
-    this.goTo(this.rest);
-    this.h.engine.audio.play('rev_open', { volume: 0.5 });
+    this.goTo(this.rackRest());
+    this.h.engine.audio.play('rev_open', { volume: 0.45 });
+    this.listen(true);
+    this.ensurePieces(this.sel);
+    if (this.rack.owned(this.sel)) this.ensureZones(this.sel);
     return this;
   }
-  private select(g: GunKey) {
-    const prev = this.sel;
-    this.sel = g;
-    if (prev !== g) {
-      this.refreshLongs();
-      this.h.engine.audio.play(g === 'revolver' ? 'rev_spin' : 'shotgun_pump', { volume: 0.4 });
+  private rackRest() {
+    const c = this.rack.bays[1]?.centre ?? new THREE.Vector3(0.2, 1.6, -3.1);
+    const at = new THREE.Vector2(this.bx + 0.38, this.zFront + 0.3);
+    return { at, face: Math.atan2(c.x - at.x, c.z - at.y) };
+  }
+  private workRest() {
+    const at = new THREE.Vector2(this.ttAt.x - 0.82, this.zFront + 0.3);
+    return { at, face: Math.atan2(this.ttAt.x - at.x, this.ttAt.z - at.y) };
+  }
+  /** look at another bay */
+  private focusTo(i: number) {
+    const n = RACK_ORDER.length;
+    const j = Math.max(0, Math.min(n - 1, i));
+    if (j !== this.rack.focus) {
+      const g = RACK_ORDER[j];
+      const own = this.rack.owned(g);
+      this.h.engine.audio.play(!own ? 'paper_flutter' : g === 'revolver' ? 'rev_hammer' : g === 'shotgun' ? 'shotgun_pump' : 'lever_cycle', { volume: own ? 0.32 : 0.2, pitch: 1.1 });
+      if (own && GUNS[g].lore && Math.random() < 0.35) this.bubble.say(GUNS[g].lore!);
+    } else if (j !== i) this.h.engine.audio.play('ui_error', { volume: 0.2, pitch: 1.4 });
+    this.rack.focus = j;
+    this.sel = RACK_ORDER[j];
+    if (this.rack.owned(this.sel)) {
+      this.ensurePieces(this.sel);
+      this.ensureZones(this.sel);
     }
-    if (!this.built.has(g)) {
-      this.built.add(g);
-      const job = this.makePieces(g);
-      const prevJob = this.pieceJob;
-      this.pieceJob = (function* () {
-        if (prevJob) yield* prevJob;
-        yield* job;
-      })();
+  }
+  /** the gun comes down off the rack onto the turntable */
+  private takeDown() {
+    const b = this.rack.bayOf(this.sel);
+    if (!b.disp || b.out || this.gunFly) return;
+    const d = b.disp;
+    b.out = true;
+    this.state = 'down';
+    this.spinTo = 0;
+    const top = this.tt?.nodes['top'];
+    this.spin = 0;
+    if (top) top.rotation.y = 0;
+    const a = { p: d.hold.getWorldPosition(new THREE.Vector3()), q: d.hold.getWorldQuaternion(new THREE.Quaternion()), s: d.hold.scale.x };
+    this.gunFly = { t: 0, dur: 1.15, d, down: true, a, b: this.benchPose(d) };
+    this.h.engine.audio.play(d.g === 'revolver' ? 'rev_spin' : 'shotgun_pump', { volume: 0.5 });
+    this.goTo(this.workRest());
+    this.rack.focus = null;
+    if (d.g === 'revolver') this.rack.refreshLedge();
+    this.ensurePieces(d.g);
+    this.ensureZones(d.g);
+  }
+  /** the gun goes back up into its bay */
+  private putBack() {
+    const d = this.work;
+    if (!d || this.gunFly || this.fly) return;
+    const b = this.rack.bayOf(d.g);
+    this.state = 'up';
+    this.clearSpots();
+    this.spotKey = '';
+    for (const p of this.parts) {
+      p.proxy?.removeFromParent();
+      p.proxy = null;
     }
-    this.dressRevolver();
+    this.benchClip?.removeFromParent();
+    this.benchClip = null;
+    const a = { p: d.hold.getWorldPosition(new THREE.Vector3()), q: d.hold.getWorldQuaternion(new THREE.Quaternion()), s: d.hold.scale.x };
+    this.h.scene.attach(d.hold);
+    const rest = this.rack.restPose(b, d);
+    this.gunFly = { t: 0, dur: 1.0, d, down: false, a, b: { p: rest.pos, q: rest.quat, s: rest.scale } };
+    this.work = null;
+    this.h.engine.audio.play('rev_close', { volume: 0.45 });
+    this.goTo(this.rackRest());
     this.layout();
   }
+  /** where a gun lies on the turntable (world) */
+  private benchPose(d: Display) {
+    const s = scaleOf(d.g, 'bench');
+    const box = poseBox(d, Q_FLAT, s);
+    const c = box.getCenter(new THREE.Vector3());
+    const top = this.tt?.nodes['top'];
+    if (!top || !this.tt) return { p: new THREE.Vector3(-c.x, this.felt - box.min.y, -c.z).add(this.ttAt), q: Q_FLAT.clone(), s };
+    // lined up with the bench at rest whatever way the platter was set down, then turned with the platter
+    const yaw0 = this.tt.root.quaternion.clone().invert();
+    const local = new THREE.Vector3(-c.x, this.feltTop - box.min.y + 0.002, -c.z).applyQuaternion(yaw0);
+    top.updateWorldMatrix(true, false);
+    return { p: top.localToWorld(local), q: top.getWorldQuaternion(new THREE.Quaternion()).multiply(yaw0.multiply(Q_FLAT)), s };
+  }
+
   view(): View | null {
-    if (this.vi < 0 && this.st) return (this.h as unknown as { shotOf(st: HubStation): View }).shotOf(this.st);
-    return this.views[this.vi] ?? null;
+    if (this.state === 'rack') {
+      const bays = this.rack.bays;
+      if (!bays.length) return null;
+      const s = Math.max(0, Math.min(bays.length - 1, this.scroll));
+      const i0 = Math.floor(s), i1 = Math.min(bays.length - 1, i0 + 1), f = s - i0;
+      const c = bays[i0].centre.clone().lerp(bays[i1].centre, f);
+      const mid = bays[1].centre;
+      const look = new THREE.Vector3(c.x, 1.76, this.rack.backZ);
+      const pos = new THREE.Vector3(c.x * 0.62 + mid.x * 0.38, 1.8, this.rack.frontZ + 1.7);
+      return { pos, look, fov: 47 };
+    }
+    const T = this.ttAt;
+    const rev = (this.work?.g ?? this.sel) === 'revolver';
+    return rev
+      ? { pos: new THREE.Vector3(T.x + 0.4, T.y + 0.98, T.z + 1.18), look: new THREE.Vector3(T.x - 0.1, T.y + this.felt + 0.1, T.z - 0.06), fov: 40 }
+      : { pos: new THREE.Vector3(T.x + 0.5, T.y + 1.12, T.z + 1.44), look: new THREE.Vector3(T.x - 0.15, T.y + this.felt + 0.1, T.z - 0.07), fov: 40 };
   }
   step(d: number) {
-    const n = this.views.length + 1;
-    this.vi = ((((this.vi + 1 + d) % n) + n) % n) - 1;
-    this.h.engine.audio.play('paper_flutter', { volume: 0.15, pitch: 0.8 });
+    if (this.state === 'rack') this.focusTo((this.rack.focus ?? 1) + d);
+    else if (this.state === 'work') {
+      this.spinTo = Math.max(-1.1, Math.min(1.1, this.spinTo + d * 0.45));
+      this.h.engine.audio.play('lever_cycle', { volume: 0.15, pitch: 1.6 });
+    }
   }
   hint() {
-    if (this.fly) return '';
-    return 'Click a gun to work on it   ·   click a part to fit it, a fitted part to take it off   ·   A / D: look around   ·   Esc: done';
+    const touch = !!(this.h as unknown as { touch?: boolean }).touch;
+    if (this.state === 'rack') return touch ? 'Swipe: browse the rack   ·   tap the gun: take it down' : 'Drag, A / D or the wheel: browse the rack   ·   click the gun: take it down   ·   Esc: done';
+    if (this.state === 'work' && !this.fly) return touch ? 'Tap a tag: swap that part   ·   swipe: turn it   ·   tap away: back on the rack' : 'Click a tag: swap that part   ·   drag: turn it   ·   Esc or click away: back on the rack';
+    return '';
   }
   back() {
-    if (this.fly) return false;
+    if (this.gunFly || this.fly) return false;
+    if (this.state === 'work') {
+      this.putBack();
+      return false;
+    }
     this.goTo(this.home);
+    this.rack.focus = null;
+    this.listen(false);
     this.done = true;
+    this.h.engine.audio.play('rev_close', { volume: 0.35 });
     return true;
   }
   picks(): Pick[] {
-    if (this.fly) return [];
+    if (this.swallow || this.gunFly || this.fly) return [];
     const out: Pick[] = [];
-    const rev = this.gunRoot('revolver');
-    if (rev) out.push({ obj: rev, lift: false, tip: () => (this.sel === 'revolver' ? 'The Six-Shooter (on the cradle)' : 'Work on the Six-Shooter'), click: () => this.select('revolver') });
-    for (const g of ['shotgun', 'tommy'] as GunKey[]) {
-      const hold = this.longs[g]?.root;
-      if (!hold?.parent || !hold.children.length) continue;
-      out.push({
-        obj: hold,
-        lift: false,
-        tip: () => {
-          const carried = Blueprints.guns().find((q) => q.id === g)?.carried;
-          if (this.sel !== g) return `Take down the ${GUNS[g].name}`;
-          return carried ? `${GUNS[g].name}: on your sling (click to leave it home)` : `${GUNS[g].name}: click to sling it for the ride`;
-        },
-        click: () => {
-          if (this.sel !== g) {
-            this.select(g);
-            this.vi = 0;
-            return;
-          }
-          const carried = Blueprints.guns().find((q) => q.id === g)?.carried;
-          Blueprints.setSecondary(carried ? null : (g as 'shotgun'));
-          this.h.engine.audio.play(carried ? 'rev_close' : 'shotgun_pump', { volume: 0.6 });
-          this.bubble.say(carried ? 'Stays home today.' : `${GUNS[g].name} rides with me.`);
-        },
-      });
+    if (this.state === 'rack') {
+      for (const b of this.rack.bays) {
+        const obj = b.disp && !b.out ? b.disp.hold : b.dust ?? b.plateMesh;
+        if (!obj) continue;
+        out.push({
+          obj,
+          lift: false,
+          tip: () => '',
+          click: () => (this.pending = () => {
+            if (b.i !== this.rack.focus) this.focusTo(b.i);
+            else if (b.disp) this.takeDown();
+            else this.bubble.say(['Haven\'t found that one yet.', 'Heard tell of one like it out past the dunes.', 'That cradle\'s waiting on a blueprint.'][Math.floor(Math.random() * 3)]);
+          }),
+        });
+      }
+      return out;
     }
+    if (this.state !== 'work' || !this.work) return out;
+    for (const s of this.spots) {
+      const go = () => (this.pending = () => this.cycle(s.slot));
+      out.push({ obj: s.hold, tip: () => '', click: go });
+      out.push({ obj: s.pin, lift: false, tip: () => '', click: go });
+    }
+    if (this.carry) out.push({ obj: this.carry.hold, tip: () => '', click: () => (this.pending = () => this.toggleSling()) });
     for (const p of this.parts) {
-      if (p.gun !== this.sel) continue;
-      if (p.proxy) out.push({ obj: p.proxy, lift: false, tip: () => `${p.name}: click to take it off`, click: () => this.unfit(p) });
-      else if (p.grp.visible) out.push({ obj: p.grp, tip: () => (p.lock && !p.lock.open ? p.lock.tip(p.name) : `${p.name}: ${p.desc}`), click: () => this.fit(p) });
+      if (p.gun !== this.work.g) continue;
+      if (p.proxy) out.push({ obj: p.proxy, lift: false, tip: () => '', click: () => (this.pending = () => this.unfit(p)) });
+      else if (p.grp.visible) out.push({ obj: p.grp, tip: () => '', click: () => (this.pending = () => this.fit(p)) });
     }
-    for (const pp of this.papers) {
-      const b = blueprint(pp.id);
-      out.push({ obj: pp.mesh, lift: false, tip: () => `Blueprint not found yet: ${b?.name ?? pp.id}`, click: () => this.bubble.say(['Still out there somewhere.', 'Haven\'t found that one yet.', 'One day.'][pp.id.length % 3]) });
-    }
-    for (const c of this.cartridges.children) {
-      const u = WEAPON_UPGRADES[c.userData.upgrade as string];
-      if (u) out.push({ obj: c, tip: () => `${u.name}: ${u.desc}`, click: () => this.h.engine.audio.play('shell_casing', { volume: 0.6 }) });
-    }
+    // the gun itself and the clipboard catch clicks without doing anything (a click on them is not a click away)
+    out.push({ obj: this.work.hold, lift: false, tip: () => '', click: () => undefined });
+    if (this.board) out.push({ obj: this.board.grp, lift: false, tip: () => '', click: () => undefined });
     return out;
   }
 
+  // ======================================================================= swapping parts
+  private cycle(slot: string) {
+    const d = this.work;
+    if (!d) return;
+    const opts = this.options(d.g, slot);
+    const cur = this.current(d.g, slot);
+    if (opts.length <= 1) {
+      this.h.engine.audio.play('rev_dry', { volume: 0.45, pitch: 1.2 });
+      const lk = this.lockedCount(d.g, slot);
+      this.bubble.say(lk ? (d.g === 'revolver' ? 'Buy one off the tray first.' : 'Need a blueprint for that.') : 'Nothing else fits there.');
+      return;
+    }
+    const i = opts.findIndex((o) => o.part === cur);
+    const next = opts[(i + 1) % opts.length];
+    if (!next.part) {
+      if (cur) this.unfit(cur);
+    } else this.fit(next.part);
+  }
+  private toggleSling() {
+    const d = this.work;
+    if (!d || d.g === 'revolver') return;
+    const carried = Blueprints.guns().find((q) => q.id === d.g)?.carried;
+    Blueprints.setSecondary(carried ? null : d.g);
+    this.h.engine.audio.play(carried ? 'rev_close' : 'shotgun_pump', { volume: 0.6 });
+    this.bubble.say(carried ? 'Stays home today.' : `${GUNS[d.g].name} rides with me.`);
+    this.rack.refreshTags();
+    this.writeTags();
+  }
   private fit(p: Part) {
     if (p.lock && !p.lock.open && !p.lock.click()) return;
-    const root = this.gunRoot(p.gun);
-    if (!root) return;
+    const d = this.work;
+    if (!d || this.fly) return;
+    const prev = this.current(p.gun, p.slot);
     p.grp.updateMatrixWorld(true);
-    this.fly = { p, t: 0, on: true, from: p.grp.matrixWorld.clone(), to: root, done: false };
+    const shift = this.shiftOf(p);
+    this.fly = { p, t: 0, on: true, from: p.grp.matrixWorld.clone(), to: d.root, shift, back: null, joint: new THREE.Vector3() };
+    this.queue = prev && prev !== p ? () => this.popOff(prev) : null;
     this.wt = 0;
-    this.vi = 0;
-    // he steps up to the gun to set it
-    const at = (p.gun === 'revolver' ? root : this.longs[p.gun]?.root ?? root).getWorldPosition(new THREE.Vector3());
-    this.goTo({ at: new THREE.Vector2(at.x - 0.08, this.zFront + 0.3), face: Math.PI });
-  }
-  private unfit(p: Part) {
-    const root = this.gunRoot(p.gun);
-    if (!root) return;
-    root.updateMatrixWorld(true);
-    // take it off now; it flies from where it sat on the gun back into the tray
-    this.apply(p, false);
     this.layout();
-    const to = p.grp.matrixWorld.clone();
-    p.grp.matrixAutoUpdate = true;
-    this.fly = { p, t: 0, on: false, from: root.matrixWorld.clone(), to: root, done: false };
-    (this.fly as unknown as { back: THREE.Matrix4 }).back = to;
+    // he steps up beside the turntable to set it
+    const j = this.v.copy(p.c).add(shift).applyMatrix4(d.root.matrixWorld);
+    const at = new THREE.Vector2(Math.min(j.x - 0.36, this.ttAt.x - 0.42), this.zFront + 0.28);
+    this.goTo({ at, face: Math.atan2(j.x - at.x, j.z - at.y) });
   }
-  /** the save: fit or remove (revolver gold parts change the loadout and rebuild the gun) */
+  /** take a part off: saved now, it flies from the gun back into the tray */
+  private unfit(p: Part) {
+    const d = this.work;
+    if (!d || this.fly) return;
+    d.root.updateMatrixWorld(true);
+    const from = d.root.matrixWorld.clone().multiply(new THREE.Matrix4().makeTranslation(this.shiftOf(p)));
+    this.apply(p, false);
+    this.offs.push({ p, t: 0, on: false, from, to: null, shift: new THREE.Vector3(), back: null, joint: new THREE.Vector3() });
+    this.layout();
+    this.h.engine.audio.play('rev_eject', { volume: 0.45 });
+  }
+  /** a part that was replaced pops off the gun back into the tray (its new place) */
+  private popOff(p: Part) {
+    this.offs.push({ p, t: 0, on: false, from: this.lastRoot.clone().multiply(new THREE.Matrix4().makeTranslation(this.lastShift)), to: null, shift: new THREE.Vector3(), back: null, joint: new THREE.Vector3() });
+    this.layout();
+  }
+  private lastRoot = new THREE.Matrix4();
+  private lastShift = new THREE.Vector3();
+  /** the save: fit or remove, then the gun is rebuilt on the turntable */
   private apply(p: Part, on: boolean) {
+    const prevShift = (() => {
+      const q = this.current(p.gun, p.slot);
+      return q ? this.shiftOf(q) : new THREE.Vector3();
+    })();
+    if (this.work) {
+      this.work.root.updateMatrixWorld(true);
+      this.lastRoot.copy(this.work.root.matrixWorld);
+      this.lastShift.copy(prevShift);
+    }
     if (p.key) {
       const [slot, o] = p.id.split(':') as [keyof GunLoadout, string];
       const d = loadSave();
       (d.gun as unknown as Record<string, string>)[slot] = on ? o : (REV_DEFAULT as unknown as Record<string, string>)[slot];
       writeSave(d);
-      (this.h as unknown as { buildGun(): void }).buildGun();
-    } else if (on) Blueprints.fit(p.gun as 'revolver', p.id);
-    else Blueprints.unfit(p.gun as 'revolver', p.slot as 'under');
-    if (p.gun === 'revolver') this.dressRevolver();
-    else this.refreshLongs();
+      (this.h as unknown as { buildGun?(): void }).buildGun?.();
+    } else if (on) Blueprints.fit(p.gun, p.id);
+    else Blueprints.unfit(p.gun, p.slot as 'under');
+    this.rebuildWork();
+    this.ensureZones(p.gun);
+  }
+  /** swap the gun on the turntable for a fresh build with what is fitted now */
+  private rebuildWork() {
+    const old = this.work;
+    if (!old) return;
+    const d = buildDisplay(old.g);
+    if (!d) return;
+    const parent = old.hold.parent;
+    d.hold.position.copy(old.hold.position);
+    d.hold.quaternion.copy(old.hold.quaternion);
+    d.hold.scale.copy(old.hold.scale);
+    // a longer or shorter barrel: keep it centred on the platter
+    const s = d.hold.scale.x;
+    const b0 = poseBox(old, Q_FLAT, s), b1 = poseBox(d, Q_FLAT, s);
+    const shift = b0.getCenter(new THREE.Vector3()).sub(b1.getCenter(new THREE.Vector3()));
+    shift.y = b0.min.y - b1.min.y;
+    d.hold.position.add(shift);
+    for (const p of this.parts) {
+      if (p.proxy?.parent === old.root) {
+        p.proxy.removeFromParent();
+        p.proxy = null;
+      }
+    }
+    old.hold.removeFromParent();
+    parent?.add(d.hold);
+    this.work = d;
+    this.rack.bayOf(d.g).disp = d;
+    if (this.fly?.to === old.root) this.fly.to = d.root;
+    this.spotKey = '';
+    this.clearSpots();
+    this.dressBenchClip();
+  }
+  /** the moon clip, when fitted, lies on the baize beside the six-shooter */
+  private dressBenchClip() {
+    this.benchClip?.removeFromParent();
+    this.benchClip = null;
+    const top = this.tt?.nodes['top'];
+    if (!top || this.work?.g !== 'revolver' || !Blueprints.fitted('revolver').some((a) => a.id === 'rev_speedloader')) return;
+    const cg = geoOf(safe(() => WS.moonClip()));
+    if (!cg) return;
+    this.benchClip = meshOf(cg);
+    this.benchClip.position.set(0.04, this.feltTop + 0.002, 0.12);
+    this.benchClip.scale.setScalar(1.2);
+    top.add(this.benchClip);
+  }
+
+  // ======================================================================= input: drag / swipe, click-on-release
+  private onDown = (e: PointerEvent) => {
+    if ((e.target as HTMLElement)?.closest?.('button,a,input')) return;
+    const d = this.drag;
+    d.down = true;
+    d.moved = false;
+    d.x0 = d.x = d.lx = e.clientX;
+    d.lt = performance.now();
+    d.vx = 0;
+    d.s0 = this.scroll;
+    d.spin0 = this.spinTo;
+  };
+  private onMove = (e: PointerEvent) => {
+    const d = this.drag;
+    if (!d.down) return;
+    d.x = e.clientX;
+    const now = performance.now();
+    const dt = Math.max(1, now - d.lt);
+    d.vx = d.vx * 0.6 + ((e.clientX - d.lx) / dt) * 0.4;
+    d.lx = e.clientX;
+    d.lt = now;
+    if (Math.abs(d.x - d.x0) > 12) {
+      d.moved = true;
+      this.pending = null;
+    }
+  };
+  private onUp = () => {
+    const d = this.drag;
+    if (!d.down) return;
+    d.down = false;
+    if (d.moved && this.state === 'rack') {
+      const flick = -d.vx * 0.9;
+      this.focusTo(Math.round(this.scroll + Math.max(-1, Math.min(1, flick))));
+    }
+  };
+  private listen(on: boolean) {
+    if (on === this.listening) return;
+    this.listening = on;
+    const f = on ? window.addEventListener : window.removeEventListener;
+    f('pointerdown', this.onDown as EventListener);
+    f('pointermove', this.onMove as EventListener);
+    f('pointerup', this.onUp as EventListener);
+    f('pointercancel', this.onUp as EventListener);
+    if (!on) this.drag.down = false;
   }
 
   // ======================================================================= per frame
-  tick(_t: number, rdt: number) {
+  tick(t: number, rdt: number) {
+    this.t = t;
     this.paperDelay -= rdt;
-    this.pieceJob = stepJob(this.pieceJob, 'bench parts');
+    // the tray's parts: right away once a gun is on the turntable, else in the frame's spare slot
+    if (this.state !== 'rack' && this.pieceJob) {
+      try {
+        if (this.pieceJob.next().done) this.pieceJob = null;
+      } catch (e) {
+        console.warn('[hub+] bench parts', e);
+        this.pieceJob = null;
+      }
+    } else this.pieceJob = stepJob(this.pieceJob, 'bench parts');
     if (this.paperDelay <= 0) this.paperJob = stepJob(this.paperJob, 'bench papers');
-    for (const p of this.parts) {
-      p.lock?.update(rdt);
-      p.lock?.show(p.grp.visible);
+    // the slot zones: right away while you are at the turntable, else in the frame's spare slot
+    const zj = this.zoneJob;
+    if (zj) {
+      if (this.state !== 'rack' && zj.g === (this.work?.g ?? this.sel)) {
+        try {
+          if (zj.job.next().done) this.zoneJob = null;
+        } catch (e) {
+          console.warn('[hub+] zones', e);
+          this.zoneJob = null;
+        }
+      } else if (!stepJob(zj.job, 'bench zones')) this.zoneJob = null;
     }
-    // the six-shooter is rebuilt by the hub at times: keep its fitted parts on it
-    const gr = this.gunRoot('revolver');
-    if (gr !== this.lastGun) {
-      this.lastGun = gr;
-      this.dressRevolver();
-      if (this.sel === 'revolver') this.refreshProxies();
-    }
+    for (const p of this.parts) p.lock?.update(rdt);
+    this.rack.tick(rdt);
   }
-  private lastGun: THREE.Object3D | null = null;
+
   update(_t: number, rdt: number) {
+    const eng = this.h.engine, inp = eng.input;
+    this.swallow = false;
+    // ---- a click on nothing at the turntable puts the gun back (decided on release, so a drag is not a click)
+    if (this.state === 'work' && !this.fly && inp.wasPressed('Mouse0') && this.work) {
+      this.ray.setFromCamera(new THREE.Vector2(inp.ndcX, inp.ndcY), this.h.camera);
+      const hits = this.ray.intersectObjects(this.picks().map((p) => p.obj), true);
+      if (!hits.length) this.pending = () => this.putBack();
+    }
+    if (this.pending && !inp.isDown('Mouse0') && !this.drag.down) {
+      const f = this.pending;
+      this.pending = null;
+      if (!this.drag.moved) {
+        f();
+        this.swallow = true;
+      }
+    }
+    // ---- browsing: the drag slides the view along the rack, the wheel steps
+    if (this.state === 'rack') {
+      const n = this.rack.bays.length;
+      if (this.drag.down && this.drag.moved) {
+        const per = Math.max(140, eng.width * 0.2);
+        this.scroll = Math.max(-0.35, Math.min(n - 0.65, this.drag.s0 - (this.drag.x - this.drag.x0) / per));
+        const near = Math.max(0, Math.min(n - 1, Math.round(this.scroll)));
+        if (near !== this.rack.focus) this.focusTo(near);
+      } else this.scroll = damp(this.scroll, this.rack.focus ?? 1, 5, rdt);
+      if (inp.wheel) this.focusTo((this.rack.focus ?? 1) + Math.sign(inp.wheel));
+    } else if (this.state === 'work') {
+      if (this.drag.down && this.drag.moved) this.spinTo = Math.max(-1.2, Math.min(1.2, this.drag.spin0 + (this.drag.x - this.drag.x0) * 0.006));
+    }
+    // ---- the turntable turns (a slow drift while you look)
+    const top = this.tt?.nodes['top'];
+    if (top) {
+      this.spin = damp(this.spin, this.spinTo, 4, rdt);
+      top.rotation.y = this.spin + (this.state === 'work' ? Math.sin(this.t * 0.35) * 0.05 : 0);
+    }
+    // ---- the gun coming down or going back up
+    const gf = this.gunFly;
+    if (gf) {
+      gf.t += rdt;
+      const u = clamp01(gf.t / gf.dur), e = ease(u);
+      const b = gf.down ? this.benchPose(gf.d) : gf.b;
+      const hold = gf.d.hold;
+      hold.position.lerpVectors(gf.a.p, b.p, e);
+      // out from the wall and up, then down onto the baize (or back into the cradle)
+      hold.position.y += Math.sin(Math.PI * u) * 0.16;
+      hold.position.z += Math.sin(Math.PI * Math.min(1, u * 1.3)) * 0.22;
+      hold.quaternion.slerpQuaternions(gf.a.q, b.q, ease(clamp01(u * 1.15 - 0.05)));
+      hold.scale.setScalar(gf.a.s + (b.s - gf.a.s) * e);
+      if (u >= 1) {
+        this.gunFly = null;
+        const bay = this.rack.bayOf(gf.d.g);
+        if (gf.down) {
+          if (top) top.attach(hold);
+          this.work = gf.d;
+          this.state = 'work';
+          eng.audio.play('counter_clang', { volume: 0.22, pitch: 0.7 });
+          this.h.particles.emit({ pos: this.ttAt.clone().add(new THREE.Vector3(0, this.felt + 0.02, 0)), count: 8, spread: 0.5, up: 0.25, life: [0.5, 1.1], size: [0.02, 0.006], color: 0xd8c8a0, gravity: -0.4 });
+          this.dressBenchClip();
+          this.layout();
+        } else {
+          this.rack.seat(bay);
+          this.rack.focus = bay.i;
+          this.state = 'rack';
+          if (gf.d.g === 'revolver') this.rack.refreshLedge();
+          eng.audio.play('rev_hammer', { volume: 0.3 });
+        }
+      }
+    }
+    // ---- pins, tags, twine, the hover, the work order
+    if (this.state === 'work') {
+      this.refreshSpots();
+      this.writeTags();
+      this.placeSpots(rdt);
+      this.hover();
+    }
+    this.writeBoard();
+    // ---- parts flying off the gun back to the tray
+    for (const f of this.offs) {
+      f.t += rdt;
+      const u = clamp01(f.t / 0.7), e = ease(u);
+      const to = f.p.home ?? f.from;
+      lerpMatrix(f.p.grp, f.from, to, e, Math.sin(Math.PI * u) * 0.12);
+      f.p.grp.visible = true;
+    }
+    if (this.offs.some((f) => f.t >= 0.7)) {
+      this.offs = this.offs.filter((f) => f.t < 0.7);
+      eng.audio.play('shell_casing', { volume: 0.45 });
+      this.layout();
+    }
+    this.updateFit(rdt);
+  }
+  /** a part flying onto the gun; once he is at the gun, the wrench goes to work in a spray of sparks */
+  private updateFit(rdt: number) {
     const f = this.fly;
-    if (!f) return;
+    if (!f || !f.to) return;
+    const eng = this.h.engine;
     f.t += rdt;
-    const p = f.p, eng = this.h.engine;
-    const target = f.to.matrixWorld;
-    const back = (f as unknown as { back?: THREE.Matrix4 }).back;
-    const A = f.from, B = f.on ? target : back ?? f.from;
-    const u = clamp01(f.t / 0.75);
-    const e = ease(u);
-    const pa = new THREE.Vector3(), qa = new THREE.Quaternion(), sa = new THREE.Vector3();
-    const pb = new THREE.Vector3(), qb = new THREE.Quaternion(), sb = new THREE.Vector3();
-    A.decompose(pa, qa, sa);
-    B.decompose(pb, qb, sb);
+    const p = f.p;
+    f.to.updateMatrixWorld(true);
+    const target = f.to.matrixWorld.clone().multiply(new THREE.Matrix4().makeTranslation(f.shift));
+    const u = clamp01(f.t / 0.8);
+    lerpMatrix(p.grp, f.from, target, ease(u), Math.sin(Math.PI * u) * 0.16);
     p.grp.visible = true;
-    p.grp.position.lerpVectors(pa, pb, e);
-    p.grp.position.y += Math.sin(Math.PI * u) * 0.16;
-    p.grp.quaternion.slerpQuaternions(qa, qb, e);
-    p.grp.scale.lerpVectors(sa, sb, e);
-    const joint = this.v.copy(p.c).applyMatrix4(target);
-    // it sits on the gun; once he is at the gun, the wrench goes to work in a spray of sparks
-    let done = !f.on && u >= 1;
-    if (f.on && u >= 1) {
+    const joint = f.joint.copy(p.c).applyMatrix4(target);
+    let done = false;
+    if (u >= 1) {
       if (this.h.route.length === 0 && this.h.atK > 0.5) this.wt += rdt;
       const wt = this.wt;
       if (wt > 0 && wt < 1.1) {
         if (this.wrench) {
           this.wrench.visible = true;
-          this.wrench.position.copy(joint).add(new THREE.Vector3(0.06, 0.05, 0.07));
+          this.wrench.position.copy(joint).add(new THREE.Vector3(-0.05, 0.07, 0.06));
           this.wrench.rotation.set(-Math.PI / 2, 0, Math.sin(wt * 14) * 0.5 + 0.4);
         }
-        if (Math.random() < rdt * 24) this.h.particles.emit({ pos: joint, count: 2, spread: 0.9, up: 0.6, life: [0.2, 0.45], size: [0.03, 0.006], sprite: 'spark', color: 0xffc860, additive: true, gravity: -6, stretch: 0.03 });
+        if (Math.random() < rdt * 26) this.h.particles.emit({ pos: joint, count: 2, spread: 0.9, up: 0.6, life: [0.2, 0.45], size: [0.03, 0.006], sprite: 'spark', color: 0xffc860, additive: true, gravity: -6, stretch: 0.03 });
         if (Math.floor(wt * 7) !== Math.floor((wt - rdt) * 7)) eng.audio.play(Math.random() < 0.5 ? 'rev_close' : 'counter_clang', { volume: 0.35, pitch: 1.2 + Math.random() * 0.3 });
       }
-      done = wt >= 1.15 || f.t > 8;
+      done = wt >= 1.15 || f.t > 7;
     }
-    if (done) {
-      if (this.wrench) this.wrench.visible = false;
-      this.fly = null;
-      this.wt = 0;
-      if (f.on) {
-        this.apply(p, true);
-        eng.audio.play('rev_spin', { volume: 0.5 });
-        this.h.particles.emit({ pos: joint, count: 10, spread: 1.4, up: 0.8, life: [0.3, 0.6], size: [0.04, 0.008], sprite: 'spark', color: 0xffe0a0, additive: true, gravity: -6 });
-        if (Math.random() < 0.6) this.bubble.say(['That\'ll do.', 'Snug as a tick.', 'Now we\'re talking.', 'Purrs like a cat.'][Math.floor(Math.random() * 4)]);
-      } else eng.audio.play('shell_casing', { volume: 0.5 });
-      this.layout();
-      this.goTo(this.rest);
+    if (!done) return;
+    if (this.wrench) this.wrench.visible = false;
+    this.fly = null;
+    this.wt = 0;
+    this.apply(p, true);
+    eng.audio.play('rev_spin', { volume: 0.5 });
+    this.h.particles.emit({ pos: joint, count: 12, spread: 1.4, up: 0.8, life: [0.3, 0.6], size: [0.04, 0.008], sprite: 'spark', color: 0xffe0a0, additive: true, gravity: -6 });
+    if (Math.random() < 0.6) this.bubble.say(['That\'ll do.', 'Snug as a tick.', 'Now we\'re talking.', 'Purrs like a cat.'][Math.floor(Math.random() * 4)]);
+    const q = this.queue;
+    this.queue = null;
+    q?.();
+    this.layout();
+    this.goTo(this.workRest());
+  }
+  /** what the mouse is over at the turntable (the tag grows a touch; the work order reads it out) */
+  private hover() {
+    const inp = this.h.engine.input;
+    this.hovered = null;
+    if (this.fly) return;
+    this.ray.setFromCamera(new THREE.Vector2(inp.ndcX, inp.ndcY), this.h.camera);
+    const objs: THREE.Object3D[] = [];
+    for (const s of this.spots) objs.push(s.hold, s.pin);
+    if (this.carry) objs.push(this.carry.hold);
+    for (const p of this.parts) if (p.gun === this.work?.g && (p.proxy || p.grp.visible)) objs.push(p.proxy ?? p.grp);
+    const hit = this.ray.intersectObjects(objs, true)[0];
+    if (!hit) return;
+    for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) {
+      const s = this.spots.find((q) => q.hold === o || q.pin === o);
+      if (s) return void (this.hovered = s);
+      if (this.carry?.hold === o) return void (this.hovered = 'carry');
+      const p = this.parts.find((q) => q.proxy === o || q.grp === o);
+      if (p) return void (this.hovered = p);
     }
   }
-  private wt = 0;
-  /** where he waits while you look things over: the right end of the bench, out of the way of the work */
+  /** the work order on the clipboard: the gun, or whatever you point at */
+  private writeBoard() {
+    const b = this.board;
+    if (!b) return;
+    const g = this.work?.g ?? this.sel;
+    const own = this.rack.owned(g);
+    const L: Parameters<TextCard['set']>[0] = [{ t: 'WORK ORDER', size: 0.055, color: '#8a2a14' }];
+    const hv = this.hovered;
+    if (!own) L.push({ t: 'Nothing on the bench', size: 0.06 });
+    else if (hv && hv !== 'carry' && 'pin' in hv) {
+      const opts = this.options(g, hv.slot);
+      const cur = this.current(g, hv.slot);
+      const i = Math.max(0, opts.findIndex((o) => o.part === cur));
+      const nx = opts[(i + 1) % opts.length];
+      L.push({ t: GUNS[g].name, size: 0.05, color: '#5a4228' }, { t: opts[i].name, size: 0.075 }, { t: opts[i].desc, size: 0.046, wrap: true });
+      L.push({ t: opts.length > 1 ? `Click: ${nx.name}` : 'Nothing else to fit here yet', size: 0.046, color: '#8a2a14', wrap: true });
+    } else if (hv && hv !== 'carry') {
+      const p = hv as Part;
+      L.push({ t: p.proxy ? 'On the gun' : 'In the tray', size: 0.05, color: '#5a4228' }, { t: p.name, size: 0.072, wrap: true }, { t: p.desc, size: 0.046, wrap: true });
+      L.push({ t: p.lock && !p.lock.open ? p.lock.tip(p.name).replace(p.name + ': ', '').replace(`${p.name} `, '') : p.proxy ? 'Click: take it off' : 'Click: fit it', size: 0.046, color: '#8a2a14', wrap: true });
+    } else if (hv === 'carry') {
+      const carried = Blueprints.guns().find((q) => q.id === g)?.carried;
+      L.push({ t: 'The sling', size: 0.075 }, { t: 'One long gun rides on my back into the dunes, beside the six-shooter.', size: 0.046, wrap: true }, { t: carried ? `The ${GUNS[g].name} is on it.` : 'Click: sling this one.', size: 0.046, color: '#8a2a14', wrap: true });
+    } else {
+      L.push({ t: GUNS[g].name, size: 0.08 }, { t: GUNS[g].title, size: 0.05, color: '#5a4228' }, { t: GUNS[g].desc, size: 0.044, wrap: true });
+      const ups = Blueprints.upgrades().filter((u) => u.owned && (!u.gun || u.gun === g));
+      if (ups.length) L.push({ t: 'Loaded with: ' + ups.map((u) => u.name).join(', '), size: 0.044, color: '#8a2a14', wrap: true });
+    }
+    b.card.set(L, 0.07);
+  }
+
+  // ======================================================================= Sundown
   private rest = { at: new THREE.Vector2(), face: 0 };
   private home = { at: new THREE.Vector2(), face: 0 };
   private goTo(s: { at: THREE.Vector2; face: number }) {
     const st = this.st;
     if (!st) return;
+    this.rest = s;
     st.stand.copy(s.at);
     st.face = s.face;
     this.h.route = [s.at.clone()];
@@ -653,15 +1226,29 @@ export class Bench3D implements Mode {
     const f = this.fly;
     if (!f || !f.on || this.wt <= 0) return;
     const w = sstep(0, 0.25, this.wt) * (1 - sstep(0.95, 1.15, this.wt));
-    if (this.wrench?.visible) reach(this.h, 'r', this.wrench.position.clone().add(new THREE.Vector3(0.05, 0, 0.05)), new THREE.Vector3(-1, -0.4, -0.2), w);
+    if (this.wrench?.visible) reach(this.h, 'r', this.wrench.position.clone().add(new THREE.Vector3(-0.05, 0, 0.05)), new THREE.Vector3(-1, -0.4, -0.2), w);
   }
 
   dispose() {
+    this.listen(false);
     for (const p of this.parts) p.lock?.dispose();
     for (const pp of this.papers) (pp.mesh.material as THREE.Material).dispose();
+    this.clearSpots();
+    this.board?.card.dispose();
+    this.rack.dispose();
   }
 }
 
+/** move an object along a matrix blend (position eased with a hop, rotation slerped, scale lerped) */
+const _pa = new THREE.Vector3(), _qa = new THREE.Quaternion(), _sa = new THREE.Vector3(), _pb = new THREE.Vector3(), _qb = new THREE.Quaternion(), _sb = new THREE.Vector3();
+function lerpMatrix(o: THREE.Object3D, A: THREE.Matrix4, B: THREE.Matrix4, e: number, hop: number) {
+  A.decompose(_pa, _qa, _sa);
+  B.decompose(_pb, _qb, _sb);
+  o.position.lerpVectors(_pa, _pb, e);
+  o.position.y += hop;
+  o.quaternion.slerpQuaternions(_qa, _qb, e);
+  o.scale.lerpVectors(_sa, _sb, e);
+}
 function cap(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }

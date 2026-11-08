@@ -9,7 +9,12 @@
 // never once looks back. A close-up: the fire on his skull, the hat brim dips.
 // The wagon goes up too - a wide shot of a small figure walking out of an
 // inferno - and the title "dustUP" bursts up out of the sand in front of the
-// blaze in voxel-cast gold, then a cut to black and the bounty poster.
+// blaze in voxel-cast gold. Then he stops, lifts his head into the lens, turns
+// side-on and outdraws the camera: the round punches a hole through the lens
+// (cracked glass, a scorched ember lip, light bleeding through), time freezes,
+// and the view flies into the hole until it burns white - the white-hot desert
+// sun the intro picks up from (LensShot). Without a lens rig it cuts to black.
+// He walks drunk (anim/drunkWalk.ts): lurching, swaying, weaving, stumbling.
 // Uses the intro's own skip (SPACE / ESC / the SKIP label).
 import * as THREE from 'three';
 import type { Engine } from '../../engine/Engine';
@@ -23,6 +28,8 @@ import { modelEntry } from '../models/lookup';
 import * as CH from '../models/characters';
 import { CineKit, GRAIN, SAND, type KitWorld } from './CineKit';
 import { VoxelWord, warmLetters } from './VoxelLetters';
+import { DrunkGait } from '../anim/drunkWalk';
+import { LensShot } from './LensShot';
 
 export interface ColdOpenDeps {
   engine: Engine;
@@ -34,6 +41,8 @@ export interface ColdOpenDeps {
   skipped(): boolean;
   /** cap on a frame's dt (slow headless machines) */
   dtCap?: number;
+  /** the lens he shoots through (the intro owns it); without it the cold open cuts to black */
+  lens?: LensShot | null;
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -94,22 +103,6 @@ function findSet(world: World, p: THREE.Vector3) {
     }
   }
   return best ? new THREE.Vector3(best.x, world.groundAt(best.x, best.z), best.z) : p.clone().add(new THREE.Vector3(40, 0, 0));
-}
-
-function walkPose(r: RigInstance, ph: number, amt: number) {
-  const n = r.nodes;
-  const s = Math.sin(ph);
-  n['thigh_l']?.rotation.set(-s * 0.5 * amt, 0, 0);
-  n['thigh_r']?.rotation.set(s * 0.5 * amt, 0, 0);
-  n['shin_l']?.rotation.set(Math.max(0, Math.sin(ph + 1.4)) * 0.8 * amt, 0, 0);
-  n['shin_r']?.rotation.set(Math.max(0, Math.sin(ph + 1.4 + Math.PI)) * 0.8 * amt, 0, 0);
-  n['arm_l']?.rotation.set(s * 0.38 * amt, 0, 0.1);
-  n['fore_l']?.rotation.set(-0.3 - Math.max(0, s) * 0.25 * amt, 0, 0);
-  n['arm_r']?.rotation.set(-s * 0.3 * amt, 0, -0.12);
-  n['fore_r']?.rotation.set(-0.35 - Math.max(0, -s) * 0.2 * amt, 0, 0);
-  n['torso']?.rotation.set(0.04 * amt, Math.sin(ph) * 0.08 * amt, Math.cos(ph) * 0.03 * amt);
-  if (n['pelvis']) n['pelvis'].rotation.y = -Math.sin(ph) * 0.06 * amt;
-  if (n['coat']) n['coat'].rotation.x = -Math.abs(s) * 0.12 * amt - 0.04;
 }
 
 export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
@@ -224,9 +217,18 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
   const dtCap = d.dtCap ?? 0.05;
   let T = 0;
   let rate = 1;
-  let walkPh = 0;
-  let lastStep = 0;
+  const gait = new DrunkGait(3.7);
+  let headX = -0.03;
   let boom1 = false, boom2 = false, fadeOut = false;
+  // ---- the draw: he stops, looks into the lens, turns side-on and shoots it (needs the intro's lens rig)
+  const lens = d.lens ?? null;
+  const DRAW = 9.2;
+  const END = lens ? DRAW + 3.35 : 10.6;
+  let drawn = false, fired = false, heart = false, pushing = false;
+  const mz = new THREE.Vector3(), camW = new THREE.Vector3(), tv = new THREE.Vector3();
+  const HOL = { x: 0.2, z: -0.26, f: -0.7 };
+  const aim = { x: 0, z: 0 };
+  let recoil = 0;
   const fuseFrom = A.clone();
   const fuseTo = porch.clone();
   const shot = (pos: THREE.Vector3, look: THREE.Vector3, fov: number, roll = 0) => {
@@ -252,7 +254,13 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
     void eng.fadeIn(0.9);
     eng.audio.play('dynamite_fuse', { volume: 0.7 });
     eng.audio.play('door_creak', { volume: 0.6, pitch: 0.8 });
-    while (!d.skipped() && T < 10.6) {
+    // dev: ?coldfrom=9 starts late with the set left standing (checks the draw without the blasts)
+    const from = +(new URLSearchParams(location.search).get('coldfrom') ?? 0);
+    if (from > 0) {
+      T = from;
+      boom1 = boom2 = true;
+    }
+    while (!d.skipped() && T < END) {
       await eng.tweens.wait(0.016, true);
       const now = performance.now();
       const dt = Math.min(dtCap, (now - last) / 1000);
@@ -262,27 +270,127 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
       (window as any).__coldT = T;
       // time: real speed until the blast, then deep slow motion, easing up a little for the title
       rate = T < 2.0 ? 1 : T < 7.6 ? 0.3 : 0.42;
+      // the shot freezes the world (once the flash has burnt out); only the lens lives on
+      if (fired && T > DRAW + 1.05 + 0.09) rate = 0.05;
+      else if (fired) rate = 1;
       const cdt = dt * rate;
+      const dd = T - DRAW;
       // the world (its living sand) slows with us
       eng.slowMo(rate, 30);
-      // ---- Sundown walks toward the lens and never looks back
-      const walkAmt = 1;
-      walkPh += cdt * 6.0;
-      walkPose(actor, walkPh, walkAmt);
-      actor.root.position.addScaledVector(dir, cdt * 1.15);
+      // ---- Sundown staggers toward the lens, three whiskeys deep, and never looks back
+      const walkAmt = lens ? 1 - ease((dd - 0.05) / 0.5) : 1;
+      gait.update(cdt, 6.0, walkAmt);
+      gait.pose(actor.nodes, { armL: true, armR: !drawn, head: false });
+      actor.root.position.addScaledVector(dir, cdt * 1.15 * walkAmt);
       const ap = actor.root.position;
-      ap.y = gAt(ap.x, ap.z) + Math.abs(Math.cos(walkPh)) * 0.035;
-      if (Math.floor(walkPh / Math.PI) !== lastStep) {
-        lastStep = Math.floor(walkPh / Math.PI);
+      ap.y = gAt(ap.x, ap.z);
+      if (gait.stepped) {
         if (rate > 0.9) eng.audio.play('footstep_sand', { volume: 0.4, pitch: 0.9 + Math.random() * 0.2 });
-        kit.particles.emit({ pos: { x: ap.x, y: ap.y + 0.04, z: ap.z }, count: 5, spread: 1.2, up: 1.1, life: [0.4, 0.8], size: [0.05, 0.03], sprite: GRAIN, color: SAND, gravity: 9, ground: true });
+        const fp = actor.nodes[gait.foot === 1 ? 'shin_l' : 'shin_r']?.getWorldPosition(tv) ?? ap;
+        kit.particles.emit({ pos: { x: fp.x, y: ap.y + 0.04, z: fp.z }, count: 5, spread: 1.2, up: 1.1, life: [0.4, 0.8], size: [0.05, 0.03], sprite: GRAIN, color: SAND, gravity: 9, ground: true });
       }
       const n = actor.nodes;
       if (n['jaw']) n['jaw'].rotation.x = actor.exprJaw;
       n['brow_l']?.rotation.set(0, 0, actor.exprBrow[0]);
       n['brow_r']?.rotation.set(0, 0, actor.exprBrow[1]);
-      // the hat brim dips in the close-up
-      if (n['head']) n['head'].rotation.x += ((T > 4.6 && T < 5.8 ? 0.2 : -0.03) - n['head'].rotation.x) * Math.min(1, dt * 4);
+      // the hat brim dips in the close-up; the head lolls on top of it
+      headX += ((T > 4.6 && T < 5.8 ? 0.2 : -0.03) - headX) * Math.min(1, dt * 4);
+      n['head']?.rotation.set(headX + gait.head.x, gait.head.y, gait.head.z);
+      if (lens && dd > 0) {
+        // ---- the draw (in real time: the fastest thing in a frozen world)
+        if (dd > 0.08 && !drawn && dd < 0.2) {
+          actor.setExpression('focus');
+          eng.audio.play('skeleton_rattle', { volume: 0.35, pitch: 0.8 });
+        }
+        const turn = ease((dd - 0.52) / 0.26);
+        if (n['pelvis']) n['pelvis'].rotation.y += 0.34 * turn;
+        if (n['torso']) {
+          n['torso'].rotation.y += 0.2 * turn;
+          n['torso'].rotation.x -= 0.05 * turn;
+        }
+        n['arm_l']?.rotation.set(0.22 * turn + gait.armL.x * (1 - turn), 0, 0.2 * turn + gait.armL.z * (1 - turn));
+        actor.root.updateMatrixWorld(true);
+        camW.copy(cam.camera.position);
+        // the head comes up and finds the lens
+        const look = ease((dd - 0.05) / 0.4);
+        if (n['head'] && n['torso']) {
+          const hl = n['torso'].worldToLocal(camW.clone()).sub(n['head'].position);
+          const yaw = Math.atan2(hl.x, hl.z), pitch = -Math.atan2(hl.y, Math.hypot(hl.x, hl.z));
+          const r = n['head'].rotation;
+          r.set(r.x + (pitch - 0.04 - r.x) * look, r.y + (yaw - r.y) * look, r.z + (0.07 - r.z) * look);
+        }
+        // the gun hand: down to the holster, the iron comes up into the lens
+        if (n['arm_r'] && n['fore_r'] && n['torso']) {
+          const sh = n['torso'].worldToLocal(camW.clone()).sub(n['arm_r'].position).normalize();
+          aim.z = Math.asin(THREE.MathUtils.clamp(sh.x, -1, 1));
+          aim.x = Math.atan2(-sh.z, -sh.y);
+          const k1 = ease((dd - 0.56) / 0.1), k2 = 1 - Math.pow(1 - sat((dd - 0.68) / 0.13), 3);
+          if (dd > 0.66 && !drawn) {
+            drawn = true;
+            actor.attach('hand_r', holder);
+            eng.audio.play('rev_spin', { volume: 0.5, pitch: 1.3 });
+          }
+          const ax0 = gait.armR.x + (HOL.x - gait.armR.x) * k1, az0 = gait.armR.z + (HOL.z - gait.armR.z) * k1, f0 = gait.armR.fore + (HOL.f - gait.armR.fore) * k1;
+          recoil *= Math.exp(-dt * 7);
+          n['arm_r'].rotation.set(ax0 + (aim.x - ax0) * k2 - recoil, 0, az0 + (aim.z - az0) * k2);
+          n['fore_r'].rotation.set(f0 * (1 - k2) - recoil * 0.4, 0, 0);
+        }
+        if (dd > 0.9 && dd < 0.95 && !fired) eng.audio.play('rev_hammer', { volume: 0.8 });
+        actor.root.updateMatrixWorld(true);
+        // BANG
+        if (!fired && dd >= 1.05) {
+          fired = true;
+          if (!(gun.sockets['muzzle']?.getWorldPosition(mz))) gun.root.getWorldPosition(mz);
+          const dc = camW.clone().sub(mz).normalize();
+          const P = kit.particles;
+          P.emit({ pos: mz, count: 1, life: [0.06, 0.07], size: [0.62, 0.8], sprite: ['flash0', 'flash1', 'flash2'], animate: true, additive: true, color: 0xfff2a0, rot: 6.28 });
+          P.emit({ pos: mz.clone().addScaledVector(dc, 0.18), count: 1, life: [0.05, 0.06], size: [0.36, 0.2], sprite: 'glow16', additive: true, color: 0xffd27a, sizeJitter: 0 });
+          P.emit({ pos: mz, count: 16, vel: { x: dc.x * 16, y: dc.y * 16, z: dc.z * 16 }, spread: 5, life: [0.06, 0.22], size: [0.04, 0.012], sprite: 'spark', additive: true, color: [0xffd070, 0xfff2a0, 0xff9a40], stretch: 0.025, drag: 5 });
+          P.emit({ pos: mz, count: 6, vel: { x: dc.x * 6, y: dc.y * 6, z: dc.z * 6 }, spread: 2, life: [0.25, 0.5], size: [0.03, 0.012], sprite: 'dot3', additive: true, color: [0xffa040, 0xff7020, 0xffd070], drag: 3, gravity: 3 });
+          P.emit({ pos: mz, count: 6, vel: { x: dc.x * 3 + side.x * 0.4, y: dc.y * 3 + 0.4, z: dc.z * 3 + side.z * 0.4 }, spread: 0.9, life: [0.8, 1.6], size: [0.14, 0.7], sprite: ['puff0', 'puff1', 'puff2'], color: [0xddd6ca, 0xc4bcae, 0xb0a898], alpha: 0.55, drag: 4, rot: 6, rotSpeed: 1.2, gravity: -0.4 });
+          kit.light(mz, 0xffb050, 12, 0.14, 10);
+          eng.audio.play('rev_shot', { volume: 1, pitch: 0.92 });
+          eng.flash(0xfff0c8, 0.45, 0.1);
+          cam.addTrauma(0.55);
+          recoil = 0.5;
+          // the round goes through the lens where the muzzle points
+          LensShot.toUv(cam.camera, mz, lens.hole);
+          lens.hole.set(THREE.MathUtils.clamp(lens.hole.x, 0.3, 0.7), THREE.MathUtils.clamp(lens.hole.y, 0.32, 0.72));
+          lens.on = 1;
+          lens.burn = 1;
+          lens.light = 0.35;
+          lens.crack = 0;
+          kit.after(0.0, () => eng.audio.play('glass_break', { volume: 1, pitch: 0.8 }));
+          eng.audio.play('time_slow', { volume: 0.6, pitch: 1.2 });
+          // glass splinters hang in the frozen air just in front of the lens
+          const cv = cam.camera;
+          const ray = new THREE.Vector3(lens.hole.x * 2 - 1, lens.hole.y * 2 - 1, 0.5).unproject(cv).sub(cv.position).normalize();
+          const gp = cv.position.clone().addScaledVector(ray, 0.55);
+          P.emit({ pos: gp, count: 18, vel: { x: -ray.x * 1.2, y: -ray.y * 1.2 + 0.2, z: -ray.z * 1.2 }, spread: 1.6, life: [2.5, 4], size: [0.012, 0.006], sprite: ['star4', 'spark', 'dot3'], additive: true, color: [0xffffff, 0xfff4d8, 0xd8ecff], drag: 1, gravity: 1 });
+        }
+        if (fired) {
+          const f = dd - 1.05;
+          // cracks race out from the hole, the lip cools, the light behind it swells
+          lens.crack = 1 - Math.pow(1 - sat(f / 0.16), 3);
+          lens.burn = 0.35 + 0.65 * Math.exp(-f * 1.4);
+          lens.light = 0.35 + 0.85 * ease((f - 0.25) / 1.1);
+          if (!heart && f > 0.35) {
+            heart = true;
+            eng.audio.play('heartbeat', { volume: 0.7, pitch: 0.9 });
+          }
+          // ...then the view flies into the hole and burns white: the desert sun
+          const pk = sat((f - 1.25) / 1.05);
+          if (pk > 0 && !pushing) {
+            pushing = true;
+            eng.audio.play('whoosh_big', { volume: 0.9, pitch: 0.55 });
+            eng.audio.play('wind_loop', { volume: 0.5, pitch: 1.4 });
+          }
+          lens.push = pk * pk * (3 - 2 * pk);
+          lens.white = Math.pow(sat((pk - 0.5) / 0.5), 1.5);
+          lens.blaze = Math.max(lens.white, pk * 0.3);
+        }
+        lens.sync();
+      }
       if (pinch) {
         const pn = pinch.nodes;
         for (let k = 1; k <= 5; k++) pn['tail' + k]?.rotation.set(-0.3 - Math.sin(T * 2 + k) * 0.08, 0, 0);
@@ -354,21 +462,25 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
         const k = (T - 5.6) / 2.0;
         // from the side away from the wagon: a small figure walking out of the inferno
         shot(ap.clone().addScaledVector(side, 12 - k * 1.5).addScaledVector(dir, 6.5).add(new THREE.Vector3(0, 2.0 + k * 0.4, 0)), ap.clone().add(new THREE.Vector3(0, 2.2, 0)).addScaledVector(dir, -5).addScaledVector(side, -2), 54);
-      } else {
+      } else if (!lens || T < DRAW) {
         // low, looking up: the name against the smoke column, him walking out under it
         const k = ease((T - 7.6) / 3.0);
         const L = word.group.position;
         shot(ap.clone().addScaledVector(dir, 7.2 + k * 2).addScaledVector(side, 0.5).add(new THREE.Vector3(0, 0.55 + k * 0.45, 0)), L.clone().add(new THREE.Vector3(0, 1.45 + k * 0.35, 0)), 52 - k * 4);
+      } else {
+        // face to face: the blaze and the name behind him, the lens in front of him (it creeps in, then holds)
+        const k = ease(Math.min(dd, 1.05) / 1.05);
+        shot(ap.clone().addScaledVector(dir, 2.75 - k * 0.3).addScaledVector(side, 0.32).add(new THREE.Vector3(0, 1.22, 0)), ap.clone().add(new THREE.Vector3(0, 1.32, 0)).addScaledVector(side, 0.06), 38);
       }
       kit.update(cdt, cdt);
-      if (!fadeOut && T >= 9.9) {
+      if (!lens && !fadeOut && T >= 9.9) {
         fadeOut = true;
         void eng.fadeOut(0.65, '#000');
       }
     }
   } finally {
-    // hand back on black: the bounty poster fades in from here
-    if (!d.skipped()) eng.fadeEl.style.opacity = '1';
+    // hand back on black (or on the lens burnt white): the intro picks up from here
+    if (!d.skipped() && !lens) eng.fadeEl.style.opacity = '1';
     eng.slowMo(1, 1000);
     word.dispose();
     actor.dispose();

@@ -1,15 +1,15 @@
-// Shared kit for the 3D HUD pieces (SoulBar, MissionPaper, OutlawHud):
+// Shared kit for the HUD pieces (SoulBar, MissionPaper, OutlawHud, ArsenalHud):
 //  • sculpt()      a dense SDF voxeliser: every cell whose centre is inside the
 //                  shape is filled, and its colour is painted from the surface
 //                  normal, how exposed the voxel is (edges rub bright, crevices
 //                  grime over) and layered noise — the same realistic material
-//                  language as the HUD hero models (props/hud.ts).
-//  • TextPlane     Alagard typography rendered at screen resolution into a
-//                  canvas texture on a quad that rides a 3D piece.
+//                  language as the HUD hero models (props/hud.ts). The HUD shows
+//                  these models as photographs (HudSprites), not live 3D.
+//  • inkText / wrapInk / TextPlane   Alagard typography helpers.
 //  • PixelFx       square 2D pixel-art particles snapped to the HUD pixel grid
-//                  (dust, embers, soul wisps, chalk), one normal + one additive layer.
+//                  (dust, embers, soul wisps, chalk), drawn over the HUD canvas.
 // Coordinates: the HUD overlay scene is orthographic in CSS pixels, y up (screen
-// y is negated); pieces are modelled in HUD pixels and scaled by Hud.scale.
+// y is negated); pieces are laid out in HUD pixels and scaled by Hud.scale.
 import * as THREE from 'three';
 import { VoxelModel, VF } from '../../engine/voxel/VoxelModel';
 import { Noise, hash3 } from '../../engine/math/rand';

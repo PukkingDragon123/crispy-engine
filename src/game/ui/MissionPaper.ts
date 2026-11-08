@@ -1,20 +1,23 @@
 // The MISSION PAPER: the quest you accepted is a torn, scorched, coffee-ringed
-// note speared on a forged nail near the top-right corner of the HUD.
-// Each note is a Verlet cloth (stretch, shear and bend springs, a soft pull back
-// to its pinned pose) that flutters in the desert wind and ruffles harder the
-// faster Sundown rides. The parchment is shaded procedurally (fibres, foxing,
-// coffee rings, creases, a charred corner, a deckled torn edge) and lit with a
-// cel ramp; the writing is Alagard set on it in ink.
+// note speared on a forged nail near the top-right corner of the HUD — flat
+// pixel art like the rest of the HUD. The parchment is generated pixel by pixel
+// (fibres, foxing, a dried coffee ring, a charred corner, a browned, deckled
+// torn edge with an ink outline) on the pixel UI kit's parchment ramp; the
+// writing is Alagard set on it in ink; the nail is a photograph of the sculpted
+// rosehead below (HudSprites). Each note hangs from the nail and flutters as a
+// 2D sprite: drawn row by row, every row swayed a little more the further it
+// hangs from the nail (harder the faster Sundown rides), the fan of the stack
+// a shear about the nail.
 //   • a new quest: the note blows in, slaps flat and the nail is driven home
-//   • objective progress: an ink stroke underlines the progress and a check is ticked
+//   • objective progress: an ink stroke underlines the progress line
 //   • completed: a red DONE stamp slams down, then the wind rips the note off the
 //     nail (a torn scrap stays impaled for a moment)
 //   • failed: the note catches fire and burns away to embers
 // Several quests stack on the same nail, fanned a little, the newest on top.
 import * as THREE from 'three';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
-import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
-import { sculpt, Surf, PixelFx, inkText, wrapInk, measureInk, fbm3, h3, mixc, mulc, clamp, clamp01, TAU, uiSfx, METAL, len2, lerp, KNZ } from './HudKit';
+import { sculpt, Surf, PixelFx, wrapInk, fbm3, h3, mixc, mulc, clamp, clamp01, TAU, uiSfx, METAL, KNZ, len2 } from './HudKit';
+import { SpriteBank, Shot, blitC, blitShear, palNearest, pixelText, pixelTextWidth, wrap } from './HudSprites';
 
 /** what one note says */
 export interface PaperQuest {
@@ -51,106 +54,6 @@ export function questFromObjective(o: { text: string; sub: string }, reward?: st
 const SUCCESS = /COMPLETE|SAFE AND SOUND|FIXED|REUNITED|CLAIMED|\bDONE\b|SUCCESS|THANKS/i;
 const FAILURE = /FAIL|DIDN'T|LOST|TOOK THE|ESCAPED|\bDEAD\b|TOO LATE|GONE/i;
 
-// ------------------------------------------------------------------ shader
-const VS = /* glsl */ `
-varying vec2 vUv; varying vec3 vN;
-void main(){ vUv = uv; vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
-const FS = /* glsl */ `
-uniform sampler2D baseMap, map, stampMap;
-uniform vec4 uRect;
-uniform float uAspect, uSeed, uShade, uLocalAsp;
-uniform vec4 uStampXf;   // centre uv, rotation, height (uv)
-uniform vec2 uStamp;     // slam 0..1, opacity
-uniform float uStampAsp;
-uniform vec4 uStroke;    // x0, x1, y (uv, y up), reveal
-uniform vec3 uCheck;     // x, y (uv), reveal
-uniform vec2 uHole;      // nail hole (uv)
-uniform vec3 uBurn;      // origin uv, progress
-uniform float uRip;      // 1 = this note was ripped off the nail (a ragged notch at the hole)
-varying vec2 vUv; varying vec3 vN;
-float h(vec2 p){ p = fract(p * vec2(123.34, 456.21) + uSeed); p += dot(p, p + 45.32); return fract(p.x * p.y); }
-float n2(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
-float fbm(vec2 p){ return n2(p) * 0.57 + n2(p * 2.07 + 1.3) * 0.29 + n2(p * 4.3 + 3.1) * 0.14; }
-float segD(vec2 p, vec2 a, vec2 b){ vec2 pa = p - a, ba = b - a; float t = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return length(pa - ba * t); }
-float sdRB(vec2 p, vec2 b, float r){ vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
-void main(){
-  vec2 uv = uRect.xy + vUv * uRect.zw;
-  vec2 A = vec2(uAspect, 1.0);
-  // the parchment (fibres, foxing, coffee rings, charred corner, torn deckle) is baked per note
-  vec4 base = texture2D(baseMap, uv);
-  if (base.a < 0.5) discard;
-  if (uRect.z < 0.999) {
-    // a scrap: torn all the way round
-    vec2 e = min(vUv, 1.0 - vUv);
-    if (min(e.x * uLocalAsp, e.y) * uRect.w < 0.008 + n2(uv * 40.0) * 0.02) discard;
-  }
-  if (uRip > 0.5 && length((uv - uHole) * A) < 0.05 + n2(uv * 30.0) * 0.05) discard;
-  float bd = 0.0, bth = 0.0;
-  if (uBurn.z > 0.0) {
-    bd = length((uv - uBurn.xy) * A) * 0.85 + fbm(uv * 6.0 + 3.0) * 0.32;
-    bth = uBurn.z * 1.6;
-    if (bd < bth) discard;
-  }
-  vec3 col = base.rgb;
-  // ink
-  vec4 ink = texture2D(map, uv);
-  col = mix(col, ink.rgb * mix(vec3(1.0), col * 1.08, 0.3), ink.a * 0.92);
-  vec3 inkRed = vec3(0.42, 0.07, 0.04);
-  // the progress stroke: a quick brush underline
-  if (uStroke.w > 0.0) {
-    float x0 = uStroke.x, x1 = mix(uStroke.x, uStroke.y, uStroke.w);
-    float yy = uStroke.z + 0.012 * sin(uv.x * 40.0) + (uv.x - uStroke.x) * 0.03;
-    float th = 0.010 * (0.6 + 0.6 * sin(clamp((uv.x - x0) / max(0.001, uStroke.y - x0), 0.0, 1.0) * 3.14159)) * (0.75 + 0.5 * n2(uv * 80.0));
-    float on = step(x0, uv.x) * step(uv.x, x1) * smoothstep(th, th * 0.4, abs(uv.y - yy));
-    col = mix(col, inkRed, on * 0.85);
-  }
-  // the check mark: two strokes, drawn in order
-  if (uCheck.z > 0.0) {
-    vec2 p = (uv - uCheck.xy) * A / 0.05;
-    vec2 a = vec2(-0.55, 0.05), b = vec2(-0.12, -0.45), c = vec2(0.75, 0.75);
-    float l1 = length(b - a), l2 = length(c - b), L = (l1 + l2) * uCheck.z;
-    float d1 = segD(p, a, a + (b - a) * clamp(L / l1, 0.0, 1.0));
-    float d2 = L > l1 ? segD(p, b, b + (c - b) * clamp((L - l1) / l2, 0.0, 1.0)) : 9.0;
-    float w = 0.16 + 0.06 * n2(p * 6.0);
-    col = mix(col, inkRed, smoothstep(w, w * 0.5, min(d1, d2 + 0.02 * p.x)) * 0.9);
-  }
-  // the DONE stamp: slams down from above, red ink with a broken double frame
-  if (uStamp.y > 0.0) {
-    float sl = uStamp.x;
-    float sz = uStampXf.w * mix(1.9, 1.0, sl);
-    vec2 q = (uv - uStampXf.xy) * A;
-    float cr = cos(-uStampXf.z), sr = sin(-uStampXf.z);
-    q = mat2(cr, -sr, sr, cr) * q / sz;
-    vec2 hb = vec2(uStampAsp * 0.5, 0.5);
-    float frame = abs(sdRB(q, hb - 0.06, 0.12)) - 0.035;
-    float frame2 = abs(sdRB(q, hb - 0.15, 0.08)) - 0.016;
-    float word = 0.0;
-    vec2 tq = q / (hb * 2.0) + 0.5;
-    if (tq.x > 0.0 && tq.x < 1.0 && tq.y > 0.0 && tq.y < 1.0) word = texture2D(stampMap, tq).a;
-    float m = max(max(smoothstep(0.012, 0.0, frame), smoothstep(0.012, 0.0, frame2)), word);
-    float grain = smoothstep(0.14, 0.36, fbm(uv * 55.0 + 4.0)) * (0.72 + 0.28 * smoothstep(0.3, 0.7, fbm(uv * 9.0)));
-    col = mix(col, vec3(0.74, 0.07, 0.04), m * grain * uStamp.y * smoothstep(0.75, 1.0, sl));
-  }
-  // nail puncture: crushed fibres round the hole
-  col = mix(col, vec3(0.30, 0.18, 0.08), smoothstep(0.05, 0.02, length((uv - uHole) * A)) * 0.6);
-  // burning edge: char, then a glowing ember line
-  if (uBurn.z > 0.0) {
-    col = mix(col, vec3(0.06, 0.03, 0.02), smoothstep(bth + 0.11, bth + 0.02, bd));
-    col = mix(col, vec3(1.0, 0.55, 0.15), smoothstep(bth + 0.028, bth, bd));
-  }
-  // light: the cloth's folds and the paper's creases catch a cel-stepped key light
-  float c1 = uv.y - 0.5 - 0.015 * sin(uv.x * 7.0 + uSeed * 6.0);
-  float c2 = (uv.x - uv.y * 0.6) - 0.62;
-  float fold = smoothstep(0.012, 0.0, abs(c1)) * (c1 > 0.0 ? 0.08 : -0.06) + smoothstep(0.01, 0.0, abs(c2)) * (c2 > 0.0 ? 0.05 : -0.04);
-  vec3 n = normalize(vN) * (gl_FrontFacing ? 1.0 : -1.0);
-  float l = dot(n, normalize(vec3(-0.35, 0.55, 1.0))) + fold;
-  float ramp = 0.66 + 0.24 * smoothstep(0.45, 0.52, l) + 0.10 * smoothstep(0.86, 0.9, l);
-  if (!gl_FrontFacing) ramp *= 0.82;
-  gl_FragColor = vec4(col * ramp * uShade, 1.0);
-  #include <colorspace_fragment>
-}`;
-
 /** fbm of simplex noise mapped to ~0..1 */
 function fbm01(x: number, y: number, oct = 3) {
   let s = 0, a = 0.5, f = 1, n = 0;
@@ -166,57 +69,6 @@ const sm = (a: number, b: number, v: number) => {
   const t = clamp01((v - a) / (b - a));
   return t * t * (3 - 2 * t);
 };
-/**
- * bake a note's parchment: aged colour, fibres, foxing, a dried coffee ring,
- * a charred corner, the browned rim and the deckled torn edge (alpha)
- */
-function paperBase(w: number, h: number, seed: number, coffee: [number, number, number], scorch: [number, number]) {
-  const R = 1.5;
-  const W = Math.max(8, Math.round(w * R)), H = Math.max(8, Math.round(h * R));
-  const data = new Uint8Array(W * H * 4);
-  const asp = w / h;
-  const o = seed * 97.3;
-  const mixv = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-  for (let j = 0; j < H; j++)
-    for (let i = 0; i < W; i++) {
-      const u = (i + 0.5) / W, v = (j + 0.5) / H;
-      const edge = Math.min(Math.min(u, 1 - u) * asp, Math.min(v, 1 - v));
-      const tear = 0.012 + fbm01(u * 19 + o, v * 19) * 0.026;
-      const k = (j * W + i) * 4;
-      if (edge < tear - 0.004) {
-        data[k + 3] = 0;
-        continue;
-      }
-      let c = mixv([0.94, 0.86, 0.69], [0.8, 0.66, 0.46], sm(0.25, 0.85, fbm01(u * 4 + o, v * 3)));
-      const fib = 0.94 + 0.06 * (0.5 + 0.5 * KNZ.n2(u * 150 + o, v * 34));
-      c = [c[0] * fib, c[1] * fib, c[2] * fib];
-      c = mixv(c, [0.64, 0.43, 0.24], sm(0.66, 0.84, fbm01(u * 12 + 7 + o, v * 12 + 7)) * 0.4);
-      // coffee: a dried ring with a darker lip, a faint pool and a second partial ring
-      const cd = Math.hypot((u - coffee[0]) * asp, v - coffee[1]);
-      const wob = (fbm01(u * 9 + o, v * 9) - 0.5) * 0.02;
-      const ring = Math.exp(-(((cd - coffee[2] - wob) / 0.01) ** 2));
-      const pool = sm(coffee[2] + wob, coffee[2] - 0.03, cd) * 0.16;
-      const cd2 = Math.hypot((u - coffee[0] - 0.05) * asp, v - coffee[1] + 0.07);
-      const ring2 = Math.exp(-(((cd2 - coffee[2] * 0.9 - wob) / 0.008) ** 2)) * (u > coffee[0] + 0.02 ? 1 : 0);
-      c = mixv(c, [0.42, 0.24, 0.1], clamp01(Math.min(0.65, ring * 0.5 + ring2 * 0.32 + pool)));
-      // browned rim and a charred corner
-      const rim = sm(tear + 0.05, tear, edge);
-      c = mixv(c, [0.4, 0.23, 0.1], rim * 0.65);
-      const sc = sm(0.55, 0, Math.hypot((u - scorch[0]) * asp, v - scorch[1]) + (fbm01(u * 7 + o, v * 7) - 0.5) * 0.35);
-      c = mixv(c, [0.3, 0.15, 0.06], sc * 0.55);
-      c = mixv(c, [0.08, 0.04, 0.02], sc * sm(tear + 0.09, tear + 0.01, edge));
-      data[k] = Math.round(clamp01(c[0]) * 255);
-      data[k + 1] = Math.round(clamp01(c[1]) * 255);
-      data[k + 2] = Math.round(clamp01(c[2]) * 255);
-      data[k + 3] = Math.round(sm(tear - 0.004, tear + 0.004, edge) * 255);
-    }
-  const t = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
-  t.minFilter = THREE.LinearFilter;
-  t.magFilter = THREE.LinearFilter;
-  t.needsUpdate = true;
-  return t;
-}
-
 // ------------------------------------------------------------------ the nail
 /** a hand-forged rosehead nail head, hammered facets, rust (4 voxels per HUD px, head faces +z) */
 function nailModel() {
@@ -249,161 +101,175 @@ function nailModel() {
   return { model: sculpt('mission_nail', [-14, -14, 0, 14, 14, 10], sd, paint), vs: 1 / V };
 }
 
-// ------------------------------------------------------------------ one note
-const LH = 14; // line height (HUD px)
-const PAD = 9;
 
-interface Pt {
-  x: number;
-  y: number;
-  z: number;
-  px: number;
-  py: number;
-  pz: number;
-  rx: number;
-  ry: number;
-  pin: boolean;
-}
-
-type State = 'in' | 'pinned' | 'stamp' | 'tear' | 'burn' | 'gone';
-
-let stampTex: THREE.CanvasTexture | null = null;
-let stampAsp = 2.4;
-function stampTexture() {
-  if (stampTex) return stampTex;
+/** the note's parchment at HUD-pixel resolution, on the pixel kit's parchment palette, ink-outlined */
+function notePaper(w: number, h: number, seed: number, coffee: [number, number, number], scorch: [number, number]) {
   const cv = document.createElement('canvas');
-  const fs = 64;
-  const c = cv.getContext('2d')!;
-  c.font = `${fs}px Alagard`;
-  const w = Math.ceil(c.measureText('DONE').width) + 40;
   cv.width = w;
-  cv.height = fs + 30;
-  const c2 = cv.getContext('2d')!;
-  c2.font = `${fs}px Alagard`;
-  c2.textAlign = 'center';
-  c2.textBaseline = 'middle';
-  c2.fillStyle = '#b01810';
-  c2.strokeStyle = '#b01810';
-  c2.lineWidth = 5;
-  c2.lineJoin = 'round';
-  c2.strokeText('DONE', w / 2, cv.height / 2 + 4);
-  c2.fillText('DONE', w / 2, cv.height / 2 + 4);
-  stampAsp = w / cv.height;
-  stampTex = new THREE.CanvasTexture(cv);
-  stampTex.colorSpace = THREE.SRGBColorSpace;
-  return stampTex;
+  cv.height = h;
+  const c = cv.getContext('2d')!;
+  const img = c.createImageData(w, h);
+  const d = img.data;
+  const asp = w / h;
+  const o = seed * 97.3;
+  const solid = new Uint8Array(w * h);
+  const mixv = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  for (let j = 0; j < h; j++)
+    for (let i = 0; i < w; i++) {
+      const u = (i + 0.5) / w, v = (j + 0.5) / h;
+      const edge = Math.min(Math.min(u, 1 - u) * asp, Math.min(v, 1 - v));
+      const tear = 0.012 + fbm01(u * 19 + o, v * 19) * 0.03;
+      if (edge < tear) continue;
+      const k = (j * w + i) * 4;
+      solid[j * w + i] = 1;
+      let col = mixv([0.94, 0.86, 0.69], [0.8, 0.66, 0.46], sm(0.25, 0.85, fbm01(u * 4 + o, v * 3)));
+      const fib = 0.94 + 0.06 * (0.5 + 0.5 * KNZ.n2(u * 150 + o, v * 34));
+      col = [col[0] * fib, col[1] * fib, col[2] * fib];
+      col = mixv(col, [0.64, 0.43, 0.24], sm(0.66, 0.84, fbm01(u * 12 + 7 + o, v * 12 + 7)) * 0.4);
+      // coffee: a dried ring with a darker lip and a faint pool
+      const cd = Math.hypot((u - coffee[0]) * asp, v - coffee[1]);
+      const wob = (fbm01(u * 9 + o, v * 9) - 0.5) * 0.02;
+      const ring = Math.exp(-(((cd - coffee[2] - wob) / 0.014) ** 2));
+      const pool = sm(coffee[2] + wob, coffee[2] - 0.03, cd) * 0.16;
+      col = mixv(col, [0.42, 0.24, 0.1], clamp01(Math.min(0.65, ring * 0.55 + pool)));
+      // browned rim and a charred corner
+      col = mixv(col, [0.4, 0.23, 0.1], sm(tear + 0.06, tear, edge) * 0.7);
+      const sc = sm(0.55, 0, Math.hypot((u - scorch[0]) * asp, v - scorch[1]) + (fbm01(u * 7 + o, v * 7) - 0.5) * 0.35);
+      col = mixv(col, [0.3, 0.15, 0.06], sc * 0.55);
+      col = mixv(col, [0.08, 0.04, 0.02], sc * sm(tear + 0.09, tear + 0.01, edge));
+      const p = palNearest(clamp01(col[0]) * 255, clamp01(col[1]) * 255, clamp01(col[2]) * 255);
+      d[k] = p[0];
+      d[k + 1] = p[1];
+      d[k + 2] = p[2];
+      d[k + 3] = 255;
+    }
+  // the ink outline round the torn silhouette
+  for (let j = 0; j < h; j++)
+    for (let i = 0; i < w; i++) {
+      if (!solid[j * w + i]) continue;
+      const out = i === 0 || j === 0 || i === w - 1 || j === h - 1 || !solid[j * w + i - 1] || !solid[j * w + i + 1] || !solid[(j - 1) * w + i] || !solid[(j + 1) * w + i];
+      if (!out) continue;
+      const k = (j * w + i) * 4;
+      d[k] = 42;
+      d[k + 1] = 22;
+      d[k + 2] = 10;
+    }
+  c.putImageData(img, 0, 0);
+  return cv;
 }
+
+/** the red DONE stamp: Alagard in a broken double frame, inked unevenly (HUD px) */
+function stampCanvas(fs: number) {
+  const tw = Math.ceil(pixelTextWidth('DONE', fs));
+  const w = tw + Math.round(fs * 0.9), h = Math.round(fs * 1.55);
+  const cv = document.createElement('canvas');
+  cv.width = w;
+  cv.height = h;
+  const c = cv.getContext('2d')!;
+  const red = '#b01810';
+  pixelText(c, 'DONE', w / 2, Math.round(h / 2 - fs * 0.55), { size: fs, color: red, align: 'center' });
+  c.fillStyle = red;
+  const t = Math.max(1, Math.round(fs / 16));
+  for (const [i, th] of [[0, t + 1], [t + 2, t]] as [number, number][]) {
+    c.fillRect(i, i, w - i * 2, th);
+    c.fillRect(i, h - i - th, w - i * 2, th);
+    c.fillRect(i, i, th, h - i * 2);
+    c.fillRect(w - i - th, i, th, h - i * 2);
+  }
+  // uneven rubber: knock some of the ink out
+  const img = c.getImageData(0, 0, w, h);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const k = (y * w + x) * 4;
+      if (!img.data[k + 3]) continue;
+      const n = fbm01(x * 0.21 + 3, y * 0.21) * 0.7 + h3(x, y, 5) * 0.3;
+      if (n < 0.2) img.data[k + 3] = 0;
+      else if (n < 0.3) img.data[k + 3] = 170;
+    }
+  c.putImageData(img, 0, 0);
+  return cv;
+}
+
+// ------------------------------------------------------------------ one note
+type State = 'in' | 'pinned' | 'stamp' | 'tear' | 'burn' | 'gone';
 
 class Note {
   q: PaperQuest;
   w = 140;
   h = 80;
-  mesh: THREE.Mesh;
-  mat: THREE.ShaderMaterial;
-  geo: THREE.PlaneGeometry;
-  pts: Pt[] = [];
-  springs: [number, number, number, number][] = [];
+  fs = 16;
   state: State = 'in';
   st = 0;
-  /** simulated seconds in this state (the cloth runs at most 1/30 s per frame) */
-  simT = 0;
   /** seconds this quest has been missing from the HUD state */
   missing = 0;
-  /** fan angle (rest pose rotation) and its target */
+  /** fan angle (a shear about the nail) and its target */
   ang = 0;
   angT = 0;
-  /** ink */
-  private cv = document.createElement('canvas');
-  tex: THREE.CanvasTexture;
+  /** offset from the pinned pose (HUD px) and its velocity */
+  ox = 0;
+  oy = 0;
+  vx = 0;
+  vy = 0;
+  /** extra lean while flying (blown in / torn off) */
+  lean = 0;
+  /** a slap / kick ruffle, decays */
+  ruffle = 0;
+  /** the parchment with the writing, and the composed picture (stroke, stamp, burn) */
+  base: HTMLCanvasElement | null = null;
+  pic: HTMLCanvasElement | null = null;
+  private dirty = true;
   private inkKey = '';
   private inkAge = 9;
   private lastCounts: number[] = [];
   private lastObjective = '';
-  private progLine = -1;
-  private progW = 0;
+  progLine = -1;
+  progW = 0;
   strokeT = -1;
-  checkT = -1;
-  checked = false;
   ending: 'done' | 'fail' | 'quiet' | null = null;
   stamped = false;
-  private compact = false;
-  private seed = Math.random();
-  private ownsTex: boolean;
-
-  /** the baked parchment */
-  base: THREE.DataTexture | null = null;
+  stampSl = 0;
+  stampRot = -0.22;
+  burnO: [number, number] = [0, 0];
+  burnP = 0;
+  ripped = false;
+  /** a torn scrap: the strip round the nail hole */
+  scrap: { x: number; y: number; w: number; h: number } | null = null;
+  seed = Math.random();
   private coffee: [number, number, number] = [0.18 + Math.random() * 0.6, 0.15 + Math.random() * 0.3, 0.1 + Math.random() * 0.05];
   private scorch: [number, number] = [Math.random() < 0.5 ? 0 : 1, Math.random() < 0.6 ? 0 : 1];
 
-  constructor(q: PaperQuest, private nx: number, private ny: number, private rect = new THREE.Vector4(0, 0, 1, 1), ink?: { tex: THREE.CanvasTexture; base: THREE.DataTexture | null; w: number; h: number }) {
+  constructor(q: PaperQuest) {
     this.q = q;
-    this.ownsTex = !ink;
-    this.tex = ink?.tex ?? new THREE.CanvasTexture(this.cv);
-    this.tex.colorSpace = THREE.SRGBColorSpace;
-    this.tex.generateMipmaps = false;
-    this.tex.minFilter = THREE.LinearFilter;
-    if (ink) {
-      this.w = ink.w * rect.z;
-      this.h = ink.h * rect.w;
-    }
-    this.geo = new THREE.PlaneGeometry(1, 1, nx - 1, ny - 1);
-    this.mat = new THREE.ShaderMaterial({
-      uniforms: {
-        baseMap: { value: ink?.base ?? null },
-        map: { value: this.tex },
-        stampMap: { value: stampTexture() },
-        uRect: { value: rect },
-        uAspect: { value: 1.6 },
-        uLocalAsp: { value: 1.6 },
-        uSeed: { value: this.seed },
-        uShade: { value: 1 },
-        uStampXf: { value: new THREE.Vector4(0.6, 0.42, -0.22, 0.34) },
-        uStamp: { value: new THREE.Vector2(0, 0) },
-        uStampAsp: { value: stampAsp },
-        uStroke: { value: new THREE.Vector4(0, 0, 0, 0) },
-        uCheck: { value: new THREE.Vector3(0, 0, 0) },
-        uHole: { value: new THREE.Vector2(0.5, 0.92) },
-        uBurn: { value: new THREE.Vector3(0, 0, 0) },
-        uRip: { value: 0 },
-      },
-      vertexShader: VS,
-      fragmentShader: FS,
-      side: THREE.DoubleSide,
-      depthTest: false,
-      depthWrite: false,
-    });
-    this.mesh = new THREE.Mesh(this.geo, this.mat);
-    this.mesh.frustumCulled = false;
   }
 
-  // ---------------------------------------------------- ink
-  /** lay the note out (HUD px) and rebuild its cloth if the size changed */
-  setQuest(q: PaperQuest, compact: boolean, q2: number, force = false) {
+  /** lay the note out (HUD px, set in Alagard at fs) and redraw its writing if it changed */
+  setQuest(q: PaperQuest, compact: boolean, fs: number, force = false) {
     this.q = q;
-    const title = q.title;
-    const maxW = compact ? 180 : 214;
-    const obj = wrapInk(q.objective, maxW - PAD * 2, 16, compact ? 1 : 2);
-    const prog = q.progress ? wrapInk(q.progress, maxW - PAD * 2 - 11, 16, 1)[0] : '';
-    const reward = compact || !q.reward ? '' : wrapInk(q.reward, maxW - PAD * 2, 16, 1)[0];
+    const u = fs / 16;
+    const PAD = Math.round(9 * u), LH = Math.round(14 * u), IND = Math.round(11 * u);
+    const maxW = Math.round((compact ? 180 : 214) * u);
+    const obj = wrapInk(q.objective, maxW - PAD * 2, fs, compact ? 1 : 2);
+    const prog = q.progress ? wrapInk(q.progress, maxW - PAD * 2 - IND, fs, 1)[0] : '';
+    const reward = compact || !q.reward ? '' : wrapInk(q.reward, maxW - PAD * 2, fs, 1)[0];
     const lines: { t: string; kind: 'title' | 'obj' | 'prog' | 'rew' }[] = [
-      // long titles ("Find a way out of the Glass Hollow") wrap instead of running off the cloth
-      ...wrapInk(title, maxW - PAD * 2, 16, compact ? 1 : 2).map((t) => ({ t, kind: 'title' as const })),
+      // long titles ("Find a way out of the Glass Hollow") wrap instead of running off the paper
+      ...wrapInk(q.title, maxW - PAD * 2, fs, compact ? 1 : 2).map((t) => ({ t, kind: 'title' as const })),
       ...obj.map((t) => ({ t, kind: 'obj' as const })),
     ];
     if (prog) lines.push({ t: prog, kind: 'prog' });
     if (reward) lines.push({ t: reward, kind: 'rew' });
     let tw = 0;
-    for (const l of lines) tw = Math.max(tw, measureInk(l.t, 16) + (l.kind === 'prog' ? 11 : 0));
-    const w = Math.round(clamp(tw + PAD * 2, compact ? 104 : 128, maxW));
-    const h = Math.round(PAD + 4 + lines.length * LH + 9 + (reward ? 2 : 0));
-    const key = `${q2}|${w}|${h}|${lines.map((l) => l.t).join('|')}`;
-    // progress counts going up / a new objective → stroke + check
+    for (const l of lines) tw = Math.max(tw, pixelTextWidth(l.t, fs) + (l.kind === 'prog' ? IND : 0));
+    const w = Math.round(clamp(tw + PAD * 2, Math.round((compact ? 104 : 128) * u), maxW));
+    const h = Math.round(PAD + 4 * u + lines.length * LH + 9 * u + (reward ? 2 : 0));
+    const key = `${fs}|${w}|${h}|${lines.map((l) => l.t).join('|')}`;
+    // progress counts going up / a new objective: an ink stroke underlines it
     const counts = (prog.match(/(\d+)\s*\/\s*\d+/g) ?? []).map((m) => parseInt(m, 10));
     const up = counts.some((c, i) => this.lastCounts[i] !== undefined && c > this.lastCounts[i]);
     const newObj = this.lastObjective !== '' && this.lastObjective !== q.objective;
     if ((up || newObj) && this.state !== 'in') {
       this.strokeT = 0;
-      this.checkT = -0.3;
+      this.ruffle = Math.max(this.ruffle, 0.5);
       uiSfx('page_turn', 0.35, 1.3);
     }
     this.lastCounts = counts;
@@ -413,203 +279,172 @@ class Note {
     if (!force && this.inkAge < 0.25 && w === this.w && h === this.h && !(up || newObj)) return;
     this.inkKey = key;
     this.inkAge = 0;
-    this.compact = compact;
-    const resized = w !== this.w || h !== this.h || !this.pts.length;
+    const resized = w !== this.w || h !== this.h || fs !== this.fs || !this.base;
     this.w = w;
     this.h = h;
-    const W = w * q2, H = h * q2;
-    if (this.cv.width !== W || this.cv.height !== H) {
-      this.cv.width = W;
-      this.cv.height = H;
-      this.tex.dispose();
-    }
-    const c = this.cv.getContext('2d')!;
-    c.clearRect(0, 0, W, H);
-    let y = PAD + 4;
+    this.fs = fs;
+    const paper = resized || !this.paperCv ? (this.paperCv = notePaper(w, h, this.seed, this.coffee, this.scorch)) : this.paperCv;
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const c = cv.getContext('2d')!;
+    c.drawImage(paper, 0, 0);
+    let y = PAD + Math.round(3 * u);
     this.progLine = -1;
     for (const l of lines) {
-      if (l.kind === 'title') inkText(c, q2, { text: l.t, x: w / 2, y, color: '#5c160a', align: 'center', style: 'ink' });
-      else if (l.kind === 'obj') inkText(c, q2, { text: l.t, x: PAD, y, color: '#33200e' });
+      if (l.kind === 'title') pixelText(c, l.t, w / 2, y, { size: fs, color: '#5c160a', align: 'center' });
+      else if (l.kind === 'obj') pixelText(c, l.t, PAD, y, { size: fs, color: '#33200e' });
       else if (l.kind === 'prog') {
-        inkText(c, q2, { text: l.t, x: PAD + 11, y, color: '#6e1a0a' });
+        pixelText(c, l.t, PAD + IND, y, { size: fs, color: '#6e1a0a' });
         this.progLine = y;
-        this.progW = measureInk(l.t, 16);
-      } else inkText(c, q2, { text: l.t, x: PAD, y: y + 2, color: '#6a5232' });
+        this.progW = pixelTextWidth(l.t, fs);
+      } else pixelText(c, l.t, PAD, y + 2, { size: fs, color: '#6a5232' });
       y += LH;
       if (l.kind === 'title') y += 1;
     }
-    this.tex.needsUpdate = true;
-    const u = this.mat.uniforms;
-    u.uAspect.value = w / h;
-    u.uLocalAsp.value = (w * this.rect.z) / (h * this.rect.w);
-    u.uHole.value.set(0.5, 1 - 7 / h);
-    if (this.progLine >= 0) {
-      const yv = 1 - (this.progLine + 13) / h;
-      u.uStroke.value.set((PAD + 10) / w, (PAD + 12 + this.progW) / w, yv, u.uStroke.value.w);
-      u.uCheck.value.set((PAD + 4) / w, 1 - (this.progLine + 6) / h, u.uCheck.value.z);
-    }
-    if (resized) {
-      this.buildCloth();
-      this.base?.dispose();
-      this.base = paperBase(w, h, this.seed, this.coffee, this.scorch);
-      u.baseMap.value = this.base;
-    }
+    this.base = cv;
+    this.dirty = true;
   }
+  private paperCv: HTMLCanvasElement | null = null;
 
-  // ---------------------------------------------------- cloth
-  buildCloth(start?: { x: number; y: number; rot: number }) {
-    const NX = this.nx, NY = this.ny;
-    const old = this.pts;
-    this.pts = [];
-    this.springs = [];
-    const r = this.rect;
-    // the full note's top sits 7 px above the nail; a scrap keeps its place in the note
-    const fullW = this.w / r.z, fullH = this.h / r.w;
-    for (let j = 0; j < NY; j++)
-      for (let i = 0; i < NX; i++) {
-        const u = r.x + (i / (NX - 1)) * r.z, v = r.y + r.w - (j / (NY - 1)) * r.w;
-        const rx = (u - 0.5) * fullW, ry = 7 - (1 - v) * fullH;
-        let x = rx, y = ry;
-        if (start) {
-          const c = Math.cos(start.rot), s = Math.sin(start.rot);
-          x = start.x + rx * c - ry * s;
-          y = start.y + rx * s + ry * c;
-        } else if (old.length === NX * NY) {
-          const o = old[j * NX + i];
-          x = o.x;
-          y = o.y;
-        }
-        this.pts.push({ x, y, z: 0, px: x, py: y, pz: 0, rx, ry, pin: false });
+  /** the picture as it stands: writing + progress stroke + DONE stamp + burn */
+  picture() {
+    const animating = (this.strokeT >= 0 && this.strokeT < 0.4) || (this.ending === 'done' && this.stampSl < 1 && this.state === 'stamp') || this.state === 'burn';
+    if (!this.dirty && !animating && this.pic) return this.pic;
+    this.dirty = false;
+    const b = this.base!;
+    const cv = this.pic && this.pic.width === b.width && this.pic.height === b.height ? this.pic : document.createElement('canvas');
+    cv.width = b.width;
+    cv.height = b.height;
+    const c = cv.getContext('2d', { willReadFrequently: true })!;
+    c.clearRect(0, 0, cv.width, cv.height);
+    c.drawImage(b, 0, 0);
+    const u = this.fs / 16;
+    // the progress stroke: a quick brush underline (a little wobbly, thicker mid-stroke)
+    if (this.strokeT >= 0 && this.progLine >= 0) {
+      const rev = clamp01(this.strokeT / 0.32);
+      const x0 = Math.round(9 * u + 10 * u), x1 = Math.round(x0 + (this.progW + 2 * u) * rev);
+      const yb = this.progLine + Math.round(13 * u);
+      c.fillStyle = '#6a120c';
+      for (let x = x0; x < x1; x++) {
+        const f = (x - x0) / Math.max(1, this.progW);
+        const yy = yb + Math.round(Math.sin(x * 0.35 + this.seed * 9) * 0.6 + f * 1.2);
+        c.fillRect(x, yy, 1, f > 0.15 && f < 0.85 && u > 0.8 ? 2 : 1);
       }
-    const idx = (i: number, j: number) => j * NX + i;
-    const link = (a: number, b: number, k: number) => {
-      const A = this.pts[a], B = this.pts[b];
-      this.springs.push([a, b, Math.hypot(A.rx - B.rx, A.ry - B.ry), k]);
-    };
-    for (let j = 0; j < NY; j++)
-      for (let i = 0; i < NX; i++) {
-        if (i < NX - 1) link(idx(i, j), idx(i + 1, j), 1);
-        if (j < NY - 1) link(idx(i, j), idx(i, j + 1), 1);
-        if (i < NX - 1 && j < NY - 1) {
-          link(idx(i, j), idx(i + 1, j + 1), 0.6);
-          link(idx(i + 1, j), idx(i, j + 1), 0.6);
-        }
-        if (i < NX - 2) link(idx(i, j), idx(i + 2, j), 0.3);
-        if (j < NY - 2) link(idx(i, j), idx(i, j + 2), 0.3);
-      }
-  }
-
-  /** pin the two points nearest the nail */
-  pinToNail(on: boolean) {
-    const byD = this.pts.map((p, i) => [Math.hypot(p.rx, p.ry), i]).sort((a, b) => a[0] - b[0]);
-    for (const p of this.pts) p.pin = false;
-    if (on) for (let k = 0; k < 2; k++) this.pts[byD[k][1]].pin = true;
-  }
-
-  centroid() {
-    let x = 0, y = 0;
-    for (const p of this.pts) {
-      x += p.x;
-      y += p.y;
     }
-    return { x: x / this.pts.length, y: y / this.pts.length };
-  }
-
-  /** z offset this note keeps from the board (stacking) */
-  step(dt: number, t: number, wind: number, zBase: number) {
-    const sub = 3, h = Math.min(dt, 1 / 30) / sub;
-    this.simT += h * sub;
-    const c = Math.cos(this.ang), s = Math.sin(this.ang);
-    const st = this.state;
-    const free = st === 'tear' || st === 'gone';
-    const homing = st === 'in' ? 140 : st === 'burn' ? 22 : 26;
-    for (let it = 0; it < sub; it++) {
-      for (let k = 0; k < this.pts.length; k++) {
-        const p = this.pts[k];
-        const tx = p.rx * c - p.ry * s, ty = p.rx * s + p.ry * c;
-        if (p.pin) {
-          p.x = p.px = tx;
-          p.y = p.py = ty;
-          p.z = p.pz = zBase;
-          continue;
-        }
-        const i = k % this.nx, j = Math.floor(k / this.nx);
-        const far = Math.min(1, Math.hypot(p.rx, p.ry) / 60);
-        const turb = Math.sin(t * 5.3 + i * 0.8 + j * 0.55) * 0.6 + Math.sin(t * 8.7 - i * 0.9 + j * 0.4) * 0.4;
-        let ax = 0, ay = 0, az = 0;
-        if (free) {
-          // ripped loose: the wind takes it up and away to the left
-          ax = -900 + turb * 500;
-          ay = 380 + Math.sin(t * 3 + j) * 300;
-          az = turb * 160;
-        } else {
-          ax = (tx - p.x) * homing + turb * 40 * wind * far;
-          ay = (ty - p.y) * homing - 40 + Math.cos(t * 4.4 + i * 0.6) * 25 * wind * far;
-          az = (zBase - p.z) * 30 + turb * 260 * wind * far;
-        }
-        const vmax = free ? 14 : 6;
-        const vx = clamp((p.x - p.px) * 0.97, -vmax, vmax), vy = clamp((p.y - p.py) * 0.97, -vmax, vmax), vz = clamp((p.z - p.pz) * 0.9, -vmax, vmax);
-        p.px = p.x;
-        p.py = p.y;
-        p.pz = p.z;
-        p.x += vx + ax * h * h;
-        p.y += vy + ay * h * h;
-        p.z += vz + az * h * h;
-        if (!free && p.z < zBase - 2) p.z = zBase - 2; // the board is behind it
-      }
-      for (let r = 0; r < 3; r++)
-        for (const [a, b, rest, k] of this.springs) {
-          const A = this.pts[a], B = this.pts[b];
-          const dx = B.x - A.x, dy = B.y - A.y, dz = B.z - A.z;
-          const d = Math.hypot(dx, dy, dz) || 1e-6;
-          const diff = ((d - rest) / d) * 0.5 * k;
-          const wa = A.pin ? 0 : 1, wb = B.pin ? 0 : 1;
-          const sw = wa + wb || 1;
-          A.x += dx * diff * (wa / sw) * 2;
-          A.y += dy * diff * (wa / sw) * 2;
-          A.z += dz * diff * (wa / sw) * 2;
-          B.x -= dx * diff * (wb / sw) * 2;
-          B.y -= dy * diff * (wb / sw) * 2;
-          B.z -= dz * diff * (wb / sw) * 2;
-        }
+    // the DONE stamp slams down: big and pale, then hard and red; slanted by a shear
+    if (this.ending === 'done' && (this.state === 'stamp' || this.stamped || this.state === 'tear')) {
+      const st = stampFor(Math.max(10, Math.round(32 * u)));
+      const sl = this.state === 'stamp' ? clamp01(this.stampSl) : 1;
+      const sc = 1.9 - 0.9 * sl;
+      const sw = Math.round(st.width * sc), sh = Math.round(st.height * sc);
+      const cx = cv.width * 0.6, cy = cv.height * 0.58;
+      const tmp = scratch(sw, sh);
+      const tc = tmp.getContext('2d')!;
+      tc.clearRect(0, 0, sw, sh);
+      tc.imageSmoothingEnabled = false;
+      tc.drawImage(st, 0, 0, sw, sh);
+      c.globalAlpha = sl < 1 ? 0.35 + 0.4 * sl : 0.95;
+      blitShear(c, tmp, cx - sw / 2, cy - sh / 2, (r) => (r - sh / 2) * -Math.tan(this.stampRot));
+      c.globalAlpha = 1;
     }
-    const pos = this.geo.attributes.position as THREE.BufferAttribute;
-    for (let k = 0; k < this.pts.length; k++) pos.setXYZ(k, this.pts[k].x, this.pts[k].y, this.pts[k].z);
-    pos.needsUpdate = true;
-    this.geo.computeVertexNormals();
+    // the ripped nail hole: a ragged notch where it tore free
+    if (this.ripped) {
+      const hx = cv.width / 2, hy = Math.round(7 * u);
+      c.save();
+      c.globalCompositeOperation = 'destination-out';
+      for (let y = 0; y < hy + 6 * u; y++)
+        for (let x = Math.floor(hx - 7 * u); x < hx + 7 * u; x++) {
+          const r = Math.hypot(x - hx, (y - hy) * 1.2);
+          if (r < 3.2 * u + h3(x, y, 2) * 2.4 * u || (y < hy && Math.abs(x - hx) < 2 * u + h3(x, y, 3) * 2 * u)) c.fillRect(x, y, 1, 1);
+        }
+      c.restore();
+    }
+    // burning: the paper is eaten from a corner, an ember line ahead of the char
+    if (this.state === 'burn') {
+      const img = c.getImageData(0, 0, cv.width, cv.height);
+      const d = img.data;
+      const W = cv.width, H = cv.height;
+      const front = this.burnP * 1.6 * Math.max(W, H);
+      for (let y = 0; y < H; y++)
+        for (let x = 0; x < W; x++) {
+          const k = (y * W + x) * 4;
+          if (!d[k + 3]) continue;
+          const dd = Math.hypot(x - this.burnO[0] * W, y - this.burnO[1] * H) * 0.85 + fbm01(x * 0.09 + 3, y * 0.09) * 0.32 * Math.max(W, H);
+          if (dd < front) d[k + 3] = 0;
+          else if (dd < front + 2) {
+            const p = h3(x, y, Math.floor(this.st * 12)) > 0.5 ? [255, 208, 112] : [240, 106, 32];
+            d[k] = p[0];
+            d[k + 1] = p[1];
+            d[k + 2] = p[2];
+          } else if (dd < front + 6) {
+            d[k] = (d[k] * 0.25) | 0;
+            d[k + 1] = (d[k + 1] * 0.18) | 0;
+            d[k + 2] = (d[k + 2] * 0.14) | 0;
+          }
+        }
+      c.putImageData(img, 0, 0);
+    }
+    this.pic = cv;
+    this.ver++;
+    return cv;
+  }
+  /** composed-picture version (the stack's shaded copies follow it) */
+  ver = 0;
+  private shadeCv: HTMLCanvasElement | null = null;
+  private shadeKey = '';
+  /** the picture sunk a little into shadow (a note further down the stack) */
+  shaded(depth: number) {
+    const pic = this.picture();
+    const key = this.ver + ':' + depth;
+    if (this.shadeCv && this.shadeKey === key) return this.shadeCv;
+    const cv = this.shadeCv && this.shadeCv.width === pic.width && this.shadeCv.height === pic.height ? this.shadeCv : document.createElement('canvas');
+    cv.width = pic.width;
+    cv.height = pic.height;
+    const c = cv.getContext('2d')!;
+    c.clearRect(0, 0, cv.width, cv.height);
+    c.drawImage(pic, 0, 0);
+    c.globalCompositeOperation = 'source-atop';
+    c.fillStyle = `rgba(42,22,8,${0.16 + depth * 0.1})`;
+    c.fillRect(0, 0, cv.width, cv.height);
+    c.globalCompositeOperation = 'source-over';
+    this.shadeCv = cv;
+    this.shadeKey = key;
+    return cv;
   }
 
-  /** a shove out of the board (the slap of a stamp, a nail blow) */
-  kick(z: number) {
-    for (const p of this.pts) if (!p.pin) p.pz -= z * 0.12 * (0.5 + Math.random() * 0.5) * Math.min(1, Math.hypot(p.rx, p.ry) / 40);
-  }
-
-  tickAnims(dt: number) {
+  tick(dt: number) {
     this.inkAge += dt;
-    const u = this.mat.uniforms;
     if (this.strokeT >= 0) {
       this.strokeT += dt;
-      u.uStroke.value.w = clamp01(this.strokeT / 0.32);
+      if (this.strokeT >= 0.4) this.dirty = true;
     }
-    if (this.checkT > -1) {
-      this.checkT += dt;
-      if (this.checkT > 0) {
-        u.uCheck.value.z = clamp01(this.checkT / 0.25);
-        this.checked = true;
-      }
-      if (this.checkT > 0.25) this.checkT = -1;
-    }
+    this.ruffle = Math.max(0, this.ruffle - dt * 2.5);
   }
+  markDirty() {
+    this.dirty = true;
+  }
+}
 
-  dispose() {
-    this.mesh.removeFromParent();
-    this.geo.dispose();
-    this.mat.dispose();
-    if (this.ownsTex) {
-      this.tex.dispose();
-      this.base?.dispose();
-    }
+const stamps = new Map<number, HTMLCanvasElement>();
+const stampFor = (fs: number) => {
+  let s = stamps.get(fs);
+  if (!s) stamps.set(fs, (s = stampCanvas(fs)));
+  return s;
+};
+const scratchs = new Map<string, HTMLCanvasElement>();
+/** a reusable canvas of exactly w×h (the slamming stamp at its momentary size) */
+function scratch(w: number, h: number) {
+  const key = w + 'x' + h;
+  let o = scratchs.get(key);
+  if (!o) {
+    o = document.createElement('canvas');
+    o.width = w;
+    o.height = h;
+    scratchs.set(key, o);
+    if (scratchs.size > 24) scratchs.delete(scratchs.keys().next().value!);
   }
+  return o;
 }
 
 // ------------------------------------------------------------------ the stack
@@ -625,15 +460,15 @@ export interface PaperAnchor {
   speed: number;
 }
 
+let nailRig: THREE.Group | null = null;
+
 export class MissionPaper {
-  private group = new THREE.Group();
   private notes: Note[] = [];
-  private scraps: { n: Note; t: number }[] = [];
-  private nail: THREE.Mesh | null = null;
-  private nailMat: VoxelMaterial;
+  private scraps: { n: Note; t: number; ox: number; oy: number; vx: number; vy: number }[] = [];
+  private bank = SpriteBank.get();
   private nailT = 1;
   private nailShow = 0;
-  private fx: PixelFx;
+  private dust: PixelFx;
   private glow: PixelFx;
   private t = 0;
   private ended = new Map<string, 'done' | 'fail'>();
@@ -643,11 +478,9 @@ export class MissionPaper {
   private nailX = -1;
 
   constructor(private scene: THREE.Scene) {
-    this.nailMat = makeVoxelMaterial({ fog: false });
-    scene.add(this.group);
-    this.fx = new PixelFx(300, false, 9);
+    this.dust = new PixelFx(300, false, 9);
     this.glow = new PixelFx(300, true, 9);
-    scene.add(this.fx.points, this.glow.points);
+    scene.add(this.dust.points, this.glow.points);
   }
 
   /** a quest ended for sure: stamp it DONE (ok) or burn it (failed) */
@@ -655,50 +488,60 @@ export class MissionPaper {
     this.ended.set(id, ok ? 'done' : 'fail');
   }
 
-  private ensureNail() {
-    if (this.nail) return;
-    try {
-      const n = nailModel();
-      this.nail = new THREE.Mesh(buildVoxelGeometry(n.model, { voxelSize: n.vs, pivot: [0, 0, 0] }), this.nailMat);
-      this.nail.renderOrder = 6;
-      this.group.add(this.nail);
-    } catch (e) {
-      console.warn('[paper] nail failed', e);
-    }
+  fx(dt: number, s: number, visible: boolean) {
+    this.dust.points.visible = this.glow.points.visible = visible;
+    this.dust.update(dt, s);
+    this.glow.update(dt, s);
   }
 
-  update(dt: number, quests: PaperQuest[], pa: PaperAnchor, visible: boolean, s: number, recent: { text: string; age: number }[]) {
+  private nail(k: number) {
+    const S = Math.round(9 * k) + 2;
+    return this.bank.get('paper:nail', S, 56, (): Shot => {
+      if (!nailRig) {
+        const n = nailModel();
+        const m = new THREE.Mesh(buildVoxelGeometry(n.model, { voxelSize: n.vs, pivot: [0, 0, 0] }), SpriteBank.get().material());
+        m.rotation.set(0.25, 0, 0.4);
+        nailRig = wrap(m);
+      }
+      return { obj: nailRig, w: S, h: S, yaw: -0.3, pitch: 0.25, fit: true };
+    });
+  }
+
+  paint(c: CanvasRenderingContext2D, dt: number, quests: PaperQuest[], pa: PaperAnchor, s: number, recent: { text: string; age: number }[]) {
     dt = Math.min(dt, 0.1);
     this.t += dt;
     const k = pa.k;
-    const topW = this.notes.find((n) => !n.ending)?.w ?? 150;
-    const want = pa.right - (topW / 2 + 2) * k;
+    // Alagard stays on whole pixels: full size from k 0.85 up, a hard-edged smaller cut on a phone
+    const fs = k >= 0.85 ? 16 : Math.max(10, Math.round(16 * k * 1.1));
+    const topW = this.notes.find((n) => !n.ending)?.w ?? 150 * (fs / 16);
+    const want = pa.right - (topW / 2 + 2 * k);
     this.nailX = this.nailX < 0 ? want : this.nailX + (want - this.nailX) * Math.min(1, dt * 5);
-    const a = { ...pa, x: this.nailX };
-    const q2 = Math.max(1, Math.round(s * k));
+    const ax = Math.round(this.nailX), ay = Math.round(pa.y);
     // ---------------------------------------------------- sync with the quest list
     for (const q of quests) {
       let n = this.notes.find((x) => x.q.id === q.id && !x.ending);
       if (!n) {
-        n = new Note(q, 11, 9);
-        n.setQuest(q, a.compact, q2, true);
+        n = new Note(q);
+        n.setQuest(q, pa.compact, fs, true);
         // blown in from off the right edge, tumbling
-        n.buildCloth({ x: 90 + Math.random() * 40, y: -20 - Math.random() * 30, rot: 0.7 + Math.random() * 0.4 });
+        n.ox = 90 + Math.random() * 40;
+        n.oy = 20 + Math.random() * 30;
+        n.vx = -60;
+        n.vy = -40;
+        n.lean = 0.7 + Math.random() * 0.4;
         n.state = 'in';
         n.st = 0;
         this.notes.unshift(n);
-        this.group.add(n.mesh);
         this.ended.delete(q.id);
         uiSfx('paper_flutter', 0.6, 1.1);
       } else {
         n.missing = 0;
-        n.setQuest(q, a.compact, q2);
+        n.setQuest(q, pa.compact, fs);
       }
     }
     for (const n of this.notes) {
       if (n.ending) continue;
-      const present = quests.some((q) => q.id === n.q.id);
-      if (present) continue;
+      if (quests.some((q) => q.id === n.q.id)) continue;
       n.missing += dt;
       const ex = this.ended.get(n.q.id);
       const hit = recent.find((r) => r.age < 2.5 && (SUCCESS.test(r.text) || FAILURE.test(r.text)));
@@ -706,190 +549,221 @@ export class MissionPaper {
       if (verdict && n.missing > 0.05) this.finish(n, verdict);
       else if (n.missing > 2.5) this.finish(n, 'quiet');
     }
-    // ---------------------------------------------------- the nail
-    const live = this.notes.filter((n) => n.state !== 'gone');
-    const anyPinned = live.some((n) => n.state !== 'tear');
-    this.nailShow += ((anyPinned || this.scraps.length ? 1 : 0) - this.nailShow) * Math.min(1, dt * 8);
-    this.nailT = Math.min(1, this.nailT + dt / 0.11);
-    this.group.visible = visible;
-    this.group.position.set(a.x * s, -a.y * s, 0);
-    this.group.scale.set(s * k, s * k, s * k);
-    if (anyPinned || this.scraps.length) this.ensureNail();
-    if (this.nail) {
-      const drive = this.nailT < 1 ? 1 - this.nailT : 0;
-      const bounce = this.nailT >= 1 ? 0 : Math.sin(this.nailT * Math.PI) * 0.15;
-      this.nail.visible = this.nailShow > 0.05;
-      this.nail.position.set(0, 0, 14 + drive * 18);
-      this.nail.scale.setScalar(Math.max(0.01, this.nailShow) * (1 + drive * 0.7 + bounce));
-      this.nail.rotation.set(0.25, -0.3, 0.4 + drive * 1.2);
-    }
-    // ---------------------------------------------------- notes
-    const wind = 0.22 + clamp((a.speed - 5) / 22, 0, 1) * 1.25;
+    // ---------------------------------------------------- notes, back to front
+    const wind = 0.22 + clamp((pa.speed - 5) / 22, 0, 1) * 1.25;
     let order = 0;
-    let bottom = a.y;
-    for (let i = 0; i < this.notes.length; i++) {
-      const n = this.notes[i];
+    let bottom = ay;
+    const draw: { n: Note; idx: number }[] = [];
+    for (const n of this.notes) {
       n.st += dt;
-      n.tickAnims(dt);
-      const idx = n.ending ? 0 : order++;
-      n.angT = idx === 0 ? -0.03 : idx === 1 ? 0.1 : idx === 2 ? -0.13 : 0.16;
+      n.tick(dt);
+      const idx = n.ending ? -1 : order++;
+      n.angT = idx <= 0 ? -0.03 : idx === 1 ? 0.1 : idx === 2 ? -0.13 : 0.16;
       n.ang += (n.angT - n.ang) * Math.min(1, dt * 5);
-      const hidden = idx > 2 && !n.ending;
-      n.mesh.visible = !hidden;
-      n.mesh.renderOrder = n.ending ? 5 : 4 - Math.min(3, idx) * 0.5;
-      n.mat.uniforms.uShade.value = n.ending ? 1 : 1 - Math.min(2, idx) * 0.1;
-      const zBase = n.ending ? 6 : 4 - idx * 2;
-      this.advance(n, dt, a);
-      if (!hidden) n.step(dt, this.t + i * 1.7, n.state === 'in' ? 1.5 : wind, zBase);
-      if (!n.ending && idx < 3) bottom = Math.max(bottom, a.y + (n.h - 7) * k + 6);
+      this.advance(n, dt, ax, ay, k);
+      if (idx > 2) continue;
+      draw.push({ n, idx });
+      if (!n.ending) bottom = Math.max(bottom, ay + n.h - 7 * (fs / 16) + 6);
     }
-    for (let i = this.notes.length - 1; i >= 0; i--)
-      if (this.notes[i].state === 'gone') {
-        this.notes[i].dispose();
-        this.notes.splice(i, 1);
-      }
+    // back to front: the deepest of the stack first, the newest, then a note being stamped / torn off on top
+    draw.sort((a, b) => b.idx - a.idx);
+    for (const { n, idx } of draw) if (n.state !== 'gone') this.drawNote(c, n, ax, ay, wind, idx);
+    for (let i = this.notes.length - 1; i >= 0; i--) if (this.notes[i].state === 'gone') this.notes.splice(i, 1);
     // ---------------------------------------------------- scraps left on the nail
     for (let i = this.scraps.length - 1; i >= 0; i--) {
       const sc = this.scraps[i];
       sc.t += dt;
-      if (sc.t > 2.6 && sc.n.state !== 'tear') {
-        sc.n.state = 'tear';
-        sc.n.pinToNail(false);
+      if (sc.t > 2.6) {
+        // the wind takes the scrap too
+        sc.vx -= 500 * dt;
+        sc.vy -= 200 * dt;
+        sc.ox += sc.vx * dt;
+        sc.oy += sc.vy * dt;
       }
-      sc.n.step(dt, this.t, wind * 1.5, 7);
-      if (sc.t > 4.5) {
-        sc.n.dispose();
-        this.scraps.splice(i, 1);
-      }
+      this.drawScrap(c, sc, ax, ay, wind);
+      if (sc.t > 4.5) this.scraps.splice(i, 1);
+    }
+    // ---------------------------------------------------- the nail, driven through the top note
+    const anyPinned = this.notes.some((n) => n.state === 'pinned' || n.state === 'stamp' || n.state === 'burn');
+    this.nailShow += ((anyPinned || this.scraps.length ? 1 : 0) - this.nailShow) * Math.min(1, dt * 8);
+    this.nailT = Math.min(1, this.nailT + dt / 0.11);
+    const nl = this.nail(k);
+    if (nl && this.nailShow > 0.05) {
+      const drive = this.nailT < 1 ? 1 - this.nailT : 0;
+      const sz = nl.w * Math.max(0.2, this.nailShow) * (1 + drive * 0.7);
+      blitC(c, nl.cv, ax, ay - Math.round(drive * 3), 1, sz, sz);
     }
     this.bottom = bottom;
-    this.fx.update(dt, s);
-    this.glow.update(dt, s);
+    void s;
   }
 
-  private advance(n: Note, dt: number, a: PaperAnchor & { x: number }) {
-    const k = a.k;
+  /** a note hanging from (ax, ay): each row swayed more the further it hangs, the fan a shear about the nail */
+  private drawNote(c: CanvasRenderingContext2D, n: Note, ax: number, ay: number, wind: number, idx: number) {
+    if (!n.base) return;
+    const pic = idx > 0 ? n.shaded(idx) : n.picture();
+    const u = n.fs / 16;
+    const top = ay - Math.round(7 * u) + Math.round(n.oy);
+    const left = ax - n.w / 2 + Math.round(n.ox);
+    const flying = n.state === 'in' || n.state === 'tear';
+    const amp = (n.state === 'in' ? 1.5 : wind) * 1.6 + n.ruffle * 3 + (n.state === 'tear' ? 5 : 0);
+    const tilt = Math.tan(n.ang + n.lean);
+    const t = this.t + n.seed * 10;
+    const alpha = n.state === 'tear' ? clamp01(1.6 - n.st * 0.8) : 1;
+    blitShear(
+      c,
+      pic,
+      left,
+      top,
+      (r) => {
+        const hang = clamp01((r - 7 * u) / Math.max(1, n.h));
+        return -(r - 7 * u) * tilt + Math.sin(t * 5.3 + r * 0.16) * amp * Math.pow(hang, 1.3) * (flying ? 1.4 : 1) + Math.sin(t * 8.7 - r * 0.3) * amp * 0.35 * hang * hang;
+      },
+      alpha
+    );
+  }
+
+  private drawScrap(c: CanvasRenderingContext2D, sc: { n: Note; t: number; ox: number; oy: number }, ax: number, ay: number, wind: number) {
+    const n = sc.n;
+    const r = n.scrap;
+    if (!r || !n.base) return;
+    const cv = scrapCanvas(n);
+    const u = n.fs / 16;
+    blitShear(c, cv, ax - r.w / 2 + Math.round(sc.ox), ay - Math.round(7 * u) + Math.round(sc.oy), (row) => Math.sin(this.t * 6 + row * 0.5) * wind * 0.8 * (row / r.h), clamp01(4.5 - sc.t));
+  }
+
+  private advance(n: Note, dt: number, ax: number, ay: number, k: number) {
+    const u = n.fs / 16;
     if (n.state === 'in') {
-      const c = n.centroid();
-      const restY = 7 - n.h / 2;
-      if (n.simT > 0.5 || (n.simT > 0.25 && Math.hypot(c.x, c.y - restY) < 6)) {
+      // springs home to the nail, the lean settling
+      n.vx += (-n.ox * 90 - n.vx * 9) * dt;
+      n.vy += (-n.oy * 90 - n.vy * 9) * dt;
+      n.ox += n.vx * dt;
+      n.oy += n.vy * dt;
+      n.lean += (0 - n.lean) * Math.min(1, dt * 6);
+      if (n.st > 0.5 || (n.st > 0.25 && Math.hypot(n.ox, n.oy) < 6)) {
         // slap! the nail is driven through it
         n.state = 'pinned';
         n.st = 0;
-        n.simT = 0;
-        n.pinToNail(true);
-        n.kick(10);
+        n.ox = n.oy = n.vx = n.vy = 0;
+        n.lean = 0;
+        n.ruffle = 1;
         this.nailT = 0;
         uiSfx('poster_slam', 0.55, 1.15);
         uiSfx('rev_hammer', 0.5, 0.6);
         for (let i = 0; i < 14; i++) {
           const ang = Math.random() * TAU, v = 20 + Math.random() * 50;
-          this.fx.emit({ x: a.x + Math.cos(ang) * 3 * k, y: a.y + Math.sin(ang) * 3 * k, vx: Math.cos(ang) * v, vy: Math.sin(ang) * v * 0.6 - 10, ay: 90, drag: 2.5, life: 0.4 + Math.random() * 0.4, size: Math.random() < 0.3 ? 2 : 1, c0: 0xd8c09a, c1: 0x8a7050, alpha: 0.85 });
+          this.dust.emit({ x: ax + Math.cos(ang) * 3 * k, y: ay + Math.sin(ang) * 3 * k, vx: Math.cos(ang) * v, vy: Math.sin(ang) * v * 0.6 - 10, ay: 90, drag: 2.5, life: 0.4 + Math.random() * 0.4, size: Math.random() < 0.3 ? 2 : 1, c0: 0xd8c09a, c1: 0x8a7050, alpha: 0.85 });
         }
-        for (let i = 0; i < 4; i++) this.glow.emit({ x: a.x, y: a.y, vx: (Math.random() - 0.5) * 80, vy: -Math.random() * 60, ay: 200, drag: 1, life: 0.25 + Math.random() * 0.15, size: 1, c0: 0xffe8b0, c1: 0xff8a3a, alpha: 1 });
+        for (let i = 0; i < 4; i++) this.glow.emit({ x: ax, y: ay, vx: (Math.random() - 0.5) * 80, vy: -Math.random() * 60, ay: 200, drag: 1, life: 0.25 + Math.random() * 0.15, size: 1, c0: 0xffe8b0, c1: 0xff8a3a, alpha: 1 });
       }
     } else if (n.state === 'stamp') {
-      const u = n.mat.uniforms;
-      const sl = clamp01(n.simT / 0.13);
-      u.uStamp.value.set(sl, 1);
-      if (sl >= 1 && !n.stamped) {
+      n.stampSl = clamp01(n.st / 0.13);
+      if (n.stampSl >= 1 && !n.stamped) {
         n.stamped = true;
-        n.kick(7);
+        n.ruffle = 1;
+        n.markDirty();
         uiSfx('poster_slam', 0.7, 1.35);
         uiSfx('counter_clang', 0.25, 1.6);
-        const c = this.noteScreen(n, a, u.uStampXf.value.x, u.uStampXf.value.y);
+        const cx = ax - n.w / 2 + n.w * 0.6, cy = ay - 7 * u + n.h * 0.58;
         for (let i = 0; i < 18; i++) {
           const ang = Math.random() * TAU, v = 30 + Math.random() * 60;
-          this.fx.emit({ x: c.x + Math.cos(ang) * 14 * k, y: c.y + Math.sin(ang) * 6 * k, vx: Math.cos(ang) * v, vy: Math.sin(ang) * v * 0.5, ay: 140, drag: 2, life: 0.35 + Math.random() * 0.3, size: 1, c0: 0xc42a1a, c1: 0x6a0e08, alpha: 0.9 });
+          this.dust.emit({ x: cx + Math.cos(ang) * 14 * k, y: cy + Math.sin(ang) * 6 * k, vx: Math.cos(ang) * v, vy: Math.sin(ang) * v * 0.5, ay: 140, drag: 2, life: 0.35 + Math.random() * 0.3, size: 1, c0: 0xc42a1a, c1: 0x6a0e08, alpha: 0.9 });
         }
       }
-      if (n.simT > 1.35) this.rip(n, a);
+      if (n.st > 1.35) this.rip(n);
     } else if (n.state === 'burn') {
-      const u = n.mat.uniforms;
-      const b = clamp01(n.simT / 1.7);
-      u.uBurn.value.z = b;
+      n.burnP = clamp01(n.st / 1.7);
       // embers and smoke off the burning front
-      const ox = u.uBurn.value.x, oy = u.uBurn.value.y;
-      const front = (b * 1.6 - 0.16) / 0.85;
+      const front = n.burnP * 1.6 * Math.max(n.w, n.h);
       for (let i = 0; i < 3; i++) {
         const ang = Math.random() * TAU;
-        const uu = ox + Math.cos(ang) * front / (n.w / n.h), vv = oy + Math.sin(ang) * front;
-        if (uu < 0.03 || uu > 0.97 || vv < 0.03 || vv > 0.97) continue;
-        const c = this.noteScreen(n, a, uu, vv);
-        this.glow.emit({ x: c.x, y: c.y, vx: (Math.random() - 0.5) * 20 - 10, vy: -25 - Math.random() * 30, ay: -20, drag: 0.8, life: 0.4 + Math.random() * 0.6, size: 1, c0: 0xffd070, c1: 0xff4a10, alpha: 1, flick: 0.6 });
-        if (Math.random() < 0.4) this.fx.emit({ x: c.x, y: c.y, vx: -6 + (Math.random() - 0.5) * 10, vy: -16 - Math.random() * 10, drag: 0.6, life: 0.8 + Math.random() * 0.6, size: 1, size1: 3, c0: 0x4a3a30, c1: 0x2a2420, alpha: 0.45, curl: 5 });
+        const x = n.burnO[0] * n.w + Math.cos(ang) * front, y = n.burnO[1] * n.h + Math.sin(ang) * front;
+        if (x < 2 || x > n.w - 2 || y < 2 || y > n.h - 2) continue;
+        const sx = ax - n.w / 2 + x, sy = ay - 7 * u + y;
+        this.glow.emit({ x: sx, y: sy, vx: (Math.random() - 0.5) * 20 - 10, vy: -25 - Math.random() * 30, ay: -20, drag: 0.8, life: 0.4 + Math.random() * 0.6, size: 1, c0: 0xffd070, c1: 0xff4a10, alpha: 1, flick: 0.6 });
+        if (Math.random() < 0.4) this.dust.emit({ x: sx, y: sy, vx: -6 + (Math.random() - 0.5) * 10, vy: -16 - Math.random() * 10, drag: 0.6, life: 0.8 + Math.random() * 0.6, size: 1, size1: 3, c0: 0x4a3a30, c1: 0x2a2420, alpha: 0.45, curl: 5 });
       }
-      if (n.simT > 1.75) n.state = 'gone';
+      if (n.st > 1.75) n.state = 'gone';
     } else if (n.state === 'tear') {
-      const c = n.centroid();
-      if (n.simT > 2.2 || c.x < -a.x / a.k - n.w || c.y > 40 + a.y / a.k) n.state = 'gone';
+      // ripped loose: the wind takes it up and away to the left
+      n.vx -= 620 * dt;
+      n.vy -= 260 * dt;
+      n.ox += n.vx * dt;
+      n.oy += n.vy * dt;
+      n.lean += dt * 1.6;
+      if (n.st > 2.2 || ax + n.ox + n.w < 0 || ay + n.oy + n.h < 0) n.state = 'gone';
     }
-  }
-
-  /** a point of a pinned note in HUD px (approximate: uses its current cloth) */
-  private noteScreen(n: Note, a: PaperAnchor & { x: number }, u: number, v: number) {
-    const NX = 11, NY = 9;
-    const i = Math.round(clamp01(u) * (NX - 1)), j = Math.round((1 - clamp01(v)) * (NY - 1));
-    const p = n.pts[j * NX + i] ?? { x: 0, y: 0 };
-    return { x: a.x + p.x * a.k, y: a.y - p.y * a.k };
   }
 
   private finish(n: Note, kind: 'done' | 'fail' | 'quiet') {
     n.ending = kind;
     n.st = 0;
     this.ended.delete(n.q.id);
+    n.markDirty();
     if (kind === 'done') {
-      // the stamp hits the paper's lower-right; finish the pending check
+      // the stamp hits the paper's lower right; the pending stroke completes
       n.state = 'stamp';
-      n.simT = 0;
-      const u = n.mat.uniforms;
-      u.uStampXf.value.set(0.6, 0.38, -0.2 - Math.random() * 0.12, Math.min(0.56, 44 / n.h));
-      if (n.mat.uniforms.uCheck.value.z <= 0 && n.mat.uniforms.uStroke.value.x > 0) {
-        n.strokeT = 0;
-        n.checkT = 0;
-      }
+      n.stampRot = -0.2 - Math.random() * 0.12;
+      if (n.strokeT < 0 && n.progLine >= 0) n.strokeT = 0;
     } else if (kind === 'fail') {
       n.state = 'burn';
-      n.simT = 0;
-      n.mat.uniforms.uBurn.value.set(Math.random() < 0.5 ? 0.05 : 0.95, 0.04, 0.001);
+      n.burnO = [Math.random() < 0.5 ? 0.05 : 0.95, 0.96];
       uiSfx('dynamite_fuse', 0.35, 0.8);
-    } else this.rip(n, null);
+    } else this.rip(n);
   }
 
   /** the wind rips the note off the nail; a torn scrap stays behind */
-  private rip(n: Note, a: (PaperAnchor & { x: number }) | null) {
+  private rip(n: Note) {
     n.state = 'tear';
     n.st = 0;
-    n.simT = 0;
-    n.pinToNail(false);
-    n.kick(-12);
-    n.mat.uniforms.uRip.value = 1;
+    n.vx = -40;
+    n.vy = -60;
+    n.ripped = true;
+    n.ruffle = 1;
+    n.markDirty();
     uiSfx('paper_flutter', 0.8, 0.95);
-    // the scrap: the strip of paper round the nail hole
-    const hv = n.mat.uniforms.uHole.value.y;
-    const rect = new THREE.Vector4(0.42, hv - 0.09, 0.16, Math.min(1 - (hv - 0.09), 0.2));
-    const sc = new Note(n.q, 4, 3, rect, { tex: n.tex, base: n.base, w: n.w, h: n.h });
-    sc.mat.uniforms.uAspect.value = n.w / n.h;
-    sc.mat.uniforms.uLocalAsp.value = (n.w * rect.z) / (n.h * rect.w);
-    sc.mat.uniforms.uSeed.value = Math.random();
-    sc.mat.uniforms.uHole.value.copy(n.mat.uniforms.uHole.value);
-    sc.buildCloth();
-    sc.ang = n.ang;
-    sc.pinToNail(true);
-    sc.state = 'pinned';
-    sc.mesh.renderOrder = 5.5;
-    this.group.add(sc.mesh);
-    this.scraps.push({ n: sc, t: 0 });
-    void a;
+    const u = n.fs / 16;
+    const sw = Math.max(6, Math.round(n.w * 0.16)), shh = Math.max(6, Math.round(16 * u));
+    const sn = new Note(n.q);
+    Object.assign(sn, { base: n.base, w: n.w, h: n.h, fs: n.fs, seed: n.seed });
+    sn.scrap = { x: Math.round(n.w / 2 - sw / 2), y: 0, w: sw, h: shh };
+    this.scraps.push({ n: sn, t: 0, ox: 0, oy: 0, vx: 0, vy: 0 });
   }
 
   dispose() {
-    for (const n of this.notes) n.dispose();
-    for (const s of this.scraps) s.n.dispose();
-    this.group.removeFromParent();
-    this.fx.dispose();
+    this.notes = [];
+    this.scraps = [];
+    this.dust.dispose();
     this.glow.dispose();
     void this.scene;
-    void lerp;
   }
+}
+
+/** the strip of paper left round the nail hole, torn ragged all round */
+const scraps = new WeakMap<Note, HTMLCanvasElement>();
+function scrapCanvas(n: Note) {
+  let cv = scraps.get(n);
+  if (cv) return cv;
+  const r = n.scrap!;
+  cv = document.createElement('canvas');
+  cv.width = r.w;
+  cv.height = r.h;
+  const c = cv.getContext('2d', { willReadFrequently: true })!;
+  c.drawImage(n.base!, -r.x, -r.y);
+  const img = c.getImageData(0, 0, r.w, r.h);
+  const d = img.data;
+  for (let y = 0; y < r.h; y++)
+    for (let x = 0; x < r.w; x++) {
+      const e = Math.min(x, r.w - 1 - x, r.h - 1 - y);
+      const k = (y * r.w + x) * 4;
+      if (e < 1 + h3(x, y, 7) * 2.2) d[k + 3] = 0;
+      else if (e < 2.2 + h3(x, y, 7) * 2.2) {
+        d[k] = 42;
+        d[k + 1] = 22;
+        d[k + 2] = 10;
+      }
+    }
+  c.putImageData(img, 0, 0);
+  scraps.set(n, cv);
+  return cv;
 }

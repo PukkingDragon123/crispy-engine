@@ -1,6 +1,9 @@
 // THE SOUL BAR — the ultimate's charge as Serket's soul, kept in a glass
 // canopic jar that stands above the beating heart (Serket guards the canopic
-// jars). A real 3D piece in the HUD overlay:
+// jars). On the HUD it is flat pixel art: the real 3D jar below is photographed
+// (HudSprites) into flip-books — the smoke at twelve fill levels, each in three
+// boiling frames, three glowing frames for a full jar, and the stopper with
+// Pinch in his poses — and composited in 2D. The model:
 //  • a hand-blown glass body (sculpted lathe profile with a lean, wobble and
 //    seed bubbles; anime-hard specular streaks, a fresnel rim)
 //  • inside it, jade soul smoke — a ray-marched volume bounded by the jar's own
@@ -11,8 +14,8 @@
 // Kill streaks pour soul in (motes spiral into the mouth on every surge); when
 // it is full the smoke glows and pulses, wisps leak from under the lid, the lid
 // rattles and Pinch snaps his claws while the 2D HUD shows "[Z] UNLEASH". Using
-// the ultimate uncorks the jar: the smoke whirls down in a vortex and streams
-// out into Sundown.
+// the ultimate uncorks the jar: the stopper pops, the soul drains and streams
+// out into Sundown as 2D pixel motes.
 import * as THREE from 'three';
 import type { Hud } from './Hud';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
@@ -20,7 +23,8 @@ import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMater
 import { buildRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { VF } from '../../engine/voxel/VoxelModel';
 import { modelEntry } from '../models/lookup';
-import { sculpt, JobQueue, Surf, PixelFx, fbm3, h3, mixc, mulc, clamp01, sstep, len2, len3, TAU, uiSfx, METAL, lerp } from './HudKit';
+import { sculpt, Surf, PixelFx, fbm3, h3, mixc, mulc, clamp01, sstep, len2, len3, TAU, uiSfx, METAL, lerp } from './HudKit';
+import { SpriteBank, Shot, Sprite, blitC, blitSquash, variant, framingBox } from './HudSprites';
 
 // ------------------------------------------------------------------ profile (HUD px)
 /** interior bottom of the glass above the foot */
@@ -304,7 +308,7 @@ const GLASS_VS = /* glsl */ `
 varying vec3 vN, vObj;
 void main(){ vObj = position; vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 const GLASS_FS = /* glsl */ `
-uniform float uT, uReady, uFlash;
+uniform float uT, uReady, uFlash, uSolid;
 uniform vec3 uTintG, uGlow;
 varying vec3 vN, vObj;
 float hash2(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -329,7 +333,9 @@ void main(){
   col = mix(col, vec3(0.55, 0.42, 0.28), dust * 0.6);
   col += uGlow * f * (uReady * (0.55 + 0.45 * sin(uT * 5.0)) + uFlash);
   float a = 0.05 + f * 0.5 + s1 * 0.75 + s2 * 0.55 + s3 * 0.35 + bub * 0.35 + dust * 0.25 + uFlash * 0.25;
-  gl_FragColor = vec4(col, clamp(a, 0.0, 0.95));
+  // photographed for the pixel HUD the glass is a solid pale body the smoke shows over
+  col = mix(col, col * (0.82 + 0.18 * (1.0 - f)), uSolid);
+  gl_FragColor = vec4(col, mix(clamp(a, 0.0, 0.95), 1.0, uSolid));
   #include <colorspace_fragment>
 }`;
 
@@ -348,40 +354,32 @@ export interface SoulAnchor {
   heroY: number;
 }
 
-export class SoulBar {
-  private root = new THREE.Group();
-  private jar = new THREE.Group();
-  private lid = new THREE.Group();
-  private brassMat: VoxelMaterial;
-  private smoke: THREE.Mesh;
-  private smokeMat: THREE.ShaderMaterial;
-  private glass: THREE.Mesh;
-  private glassMat: THREE.ShaderMaterial;
-  private pinch: RigInstance | null = null;
-  private pinchMat: VoxelMaterial;
-  private fx: PixelFx;
-  private glow: PixelFx;
-  private t = 0;
-  private shown = 0;
-  private lastUlt = -1;
-  private ready = false;
-  private readyT = 0;
-  private surge = 0;
-  private flash = 0;
-  private jolt = 0;
-  private drainT = -1;
-  private drainFrom = 1;
-  private tilt = 0;
-  private tiltV = 0;
-  private pinchHop = 0;
-  private built = false;
-  private jobs = new JobQueue();
+/** fill levels photographed (0 … LEVELS-1) and boiling frames per level */
+const LEVELS = 12;
+const BOIL = 3;
+const YAW = -0.35, PITCH = 0.1;
+const _vd = new THREE.Vector3();
+const _m4 = new THREE.Matrix4();
 
-  constructor(private scene: THREE.Scene, private hud: Hud) {
-    this.brassMat = makeVoxelMaterial({ fog: false });
+/** the 3D jar, built once and only ever photographed */
+class JarRig {
+  root = new THREE.Group();
+  body = new THREE.Group();
+  lid = new THREE.Group();
+  mat: VoxelMaterial;
+  pinchMat: VoxelMaterial;
+  smoke: THREE.Mesh;
+  smokeMat: THREE.ShaderMaterial;
+  glassMat: THREE.ShaderMaterial;
+  pinch: RigInstance | null = null;
+  constructor() {
+    this.mat = makeVoxelMaterial({ fog: false });
     this.pinchMat = makeVoxelMaterial({ fog: false });
+    const env = SpriteBank.get().envTexture();
+    for (const m of [this.mat, this.pinchMat]) m.envMap = env;
+    const vs = 1 / VPH;
     const smokePts: [number, number][] = [[0, 0.15]];
-    for (const [y, r] of SAMPLES) if (y <= 29.4) smokePts.push([innerR(y) - 0.25, Math.max(0.15, y)]);
+    for (const [y] of SAMPLES) if (y <= 29.4) smokePts.push([innerR(y) - 0.25, Math.max(0.15, y)]);
     smokePts.push([0, 29.4]);
     const uR = new Float32Array(31);
     for (let i = 0; i <= 30; i++) uR[i] = innerR(i);
@@ -407,63 +405,152 @@ export class SoulBar {
     });
     this.smoke = new THREE.Mesh(blownLathe(smokePts, 40, 0), this.smokeMat);
     this.smoke.position.y = BODY_Y0;
-    this.smoke.renderOrder = 1;
+    this.smoke.renderOrder = 2;
     const glassPts: [number, number][] = [[0, -GLASS_T]];
     for (const [y] of SAMPLES) glassPts.push([innerR(y) + GLASS_T, y]);
     glassPts.push([innerR(BODY_H) + GLASS_T * 0.6, BODY_H + 0.35], [innerR(BODY_H) - 0.1, BODY_H + 0.45]);
     this.glassMat = new THREE.ShaderMaterial({
-      uniforms: { uT: { value: 0 }, uReady: { value: 0 }, uFlash: { value: 0 }, uTintG: { value: new THREE.Color(0xcfe8dc) }, uGlow: { value: new THREE.Color(0x6dffb4) } },
+      uniforms: { uT: { value: 0 }, uReady: { value: 0 }, uFlash: { value: 0 }, uSolid: { value: 1 }, uTintG: { value: new THREE.Color(0xd8efe4) }, uGlow: { value: new THREE.Color(0x6dffb4) } },
       vertexShader: GLASS_VS,
       fragmentShader: GLASS_FS,
       transparent: true,
       depthWrite: false,
     });
-    this.glass = new THREE.Mesh(blownLathe(glassPts, 48, 0.012), this.glassMat);
-    this.glass.position.y = BODY_Y0;
-    this.glass.renderOrder = 2;
-    this.jar.add(this.smoke, this.glass);
-    this.jar.add(this.lid);
-    this.root.add(this.jar);
-    this.root.visible = false;
-    scene.add(this.root);
-    this.fx = new PixelFx(500, false, 30);
-    this.glow = new PixelFx(500, true, 31);
-    scene.add(this.fx.points, this.glow.points);
-  }
-
-  /** the voxel parts are sculpted on first use, one per frame (keeps the run start smooth) */
-  private build() {
-    this.built = true;
-    const vs = 1 / VPH;
-    const J = this.jobs;
-    J.add(() => this.jar.add(new THREE.Mesh(buildVoxelGeometry(footModel(), { voxelSize: vs, pivot: [0, 0, 0] }), this.brassMat)));
-    J.add(() => this.jar.add(new THREE.Mesh(buildVoxelGeometry(cageModel(), { voxelSize: vs, pivot: [0, 0, 0] }), this.brassMat)));
-    J.add(() => {
-      this.lid.add(new THREE.Mesh(buildVoxelGeometry(lidModel(), { voxelSize: vs, pivot: [0, 0, 0] }), this.brassMat));
-      this.lid.position.y = 34.9;
-    });
-    J.add(() => {
+    const glass = new THREE.Mesh(blownLathe(glassPts, 48, 0.012), this.glassMat);
+    glass.position.y = BODY_Y0;
+    glass.renderOrder = 1;
+    this.body.add(this.smoke, glass);
+    this.body.add(new THREE.Mesh(buildVoxelGeometry(footModel(), { voxelSize: vs, pivot: [0, 0, 0] }), this.mat));
+    this.body.add(new THREE.Mesh(buildVoxelGeometry(cageModel(), { voxelSize: vs, pivot: [0, 0, 0] }), this.mat));
+    this.lid.add(new THREE.Mesh(buildVoxelGeometry(lidModel(), { voxelSize: vs, pivot: [0, 0, 0] }), this.mat));
+    this.lid.position.y = 34.9;
+    try {
       const ps = modelEntry('pinch')?.() as RigSpec | undefined;
-      if (!ps?.parts) return;
-      this.pinch = new RigInstance(buildRigGeo(ps, ps.name + ':soul'), { material: this.pinchMat, castShadow: false });
-      const len = (ps.meta?.length as number) ?? 0.65;
-      this.pinch.root.scale.setScalar(17 / len);
-      this.pinch.root.position.set(0, 6.6, 0);
-      this.lid.add(this.pinch.root);
+      if (ps?.parts) {
+        this.pinch = new RigInstance(buildRigGeo(ps, ps.name + ':soul'), { material: this.pinchMat, castShadow: false });
+        const len = (ps.meta?.length as number) ?? 0.65;
+        this.pinch.root.scale.setScalar(17 / len);
+        this.pinch.root.position.set(0, 6.6, 0);
+        this.pinch.root.rotation.set(0, 0.9, 0);
+        this.lid.add(this.pinch.root);
+      }
+    } catch (e) {
+      console.warn('[soul] pinch failed', e);
+    }
+    // body and stopper photographs share one framing, so they stack back up in 2D
+    this.root.add(this.body, this.lid, framingBox([-17, -0.5, -17], [17, 57, 17]));
+  }
+  /** aim the smoke's ray-march along the IconFactory camera */
+  aim() {
+    this.root.position.set(0, 0, 0);
+    this.root.rotation.set(0, YAW, 0);
+    this.root.updateMatrixWorld(true);
+    _m4.copy(this.smoke.matrixWorld).invert();
+    _vd.set(0, -Math.sin(PITCH), -Math.cos(PITCH));
+    (this.smokeMat.uniforms.uDir.value as THREE.Vector3).copy(_vd).transformDirection(_m4);
+    (this.smokeMat.uniforms.uLdir.value as THREE.Vector3).set(-0.45, 0.8, 0.6).transformDirection(_m4);
+  }
+  /** pose for a body photograph: fill level, boil time, ready glow (0..1 + its pulse) */
+  poseBody(level: number, t: number, ready: number, pulse: number) {
+    this.body.visible = true;
+    this.lid.visible = false;
+    const u = this.smokeMat.uniforms;
+    u.uLevel.value = level <= 0.002 ? -0.05 : 0.04 + level * 0.96;
+    u.uT.value = t;
+    u.uReady.value = ready;
+    u.uSurge.value = 0;
+    u.uDrain.value = 0;
+    u.uTilt.value = 0;
+    const g = this.glassMat.uniforms;
+    g.uT.value = t;
+    g.uReady.value = ready;
+    g.uFlash.value = 0;
+    this.mat.userData.fx.value.z = ready > 0 ? 1.6 + pulse * 0.9 : 0.25 + level * 0.6;
+    this.aim();
+  }
+  /** pose for a stopper photograph: Pinch idle / snapping / dozing */
+  poseLid(pose: number) {
+    this.body.visible = false;
+    this.lid.visible = true;
+    this.mat.userData.fx.value.z = pose === 1 ? 1.2 : 0.3;
+    const p = this.pinch;
+    if (!p) return;
+    const n = p.nodes;
+    for (let i = 1; i <= 5; i++) if (n['tail' + i]) n['tail' + i].rotation.x = pose === 1 ? -0.42 : -0.28 + Math.sin(i * 0.6) * 0.07;
+    const snap = pose === 1 ? 0.6 : 0;
+    if (n['pincer_l']) n['pincer_l'].rotation.x = -snap;
+    if (n['pincer_r']) n['pincer_r'].rotation.x = -snap * 0.8;
+    p.root.rotation.set(0, pose === 1 ? 1.25 : 0.9, 0);
+    p.setExpression(pose === 1 ? 'happy' : pose === 2 ? 'sleepy' : 'neutral');
+    const f = pose === 2 ? 0.86 : 1;
+    this.pinchMat.userData.tint.value.setRGB(f, f, f);
+  }
+}
+let jarRig: JarRig | null = null;
+const jar = () => (jarRig ??= new JarRig());
+
+export class SoulBar {
+  private dust: PixelFx;
+  private glow: PixelFx;
+  private bank = SpriteBank.get();
+  private t = 0;
+  private shown = 0;
+  private lastUlt = -1;
+  private ready = false;
+  private readyT = 0;
+  private surge = 0;
+  private flash = 0;
+  private jolt = 0;
+  private drainT = -1;
+  private drainFrom = 1;
+  private tilt = 0;
+  private tiltV = 0;
+  private pinchHop = 0;
+
+  constructor(private scene: THREE.Scene, private hud: Hud) {
+    this.dust = new PixelFx(500, false, 30);
+    this.glow = new PixelFx(500, true, 31);
+    scene.add(this.dust.points, this.glow.points);
+  }
+
+  private size(k: number) {
+    return { w: Math.round(36 * k) + 2, h: Math.round(58 * k) + 2 };
+  }
+  private body(lv: number, boil: number, k: number, prio: number) {
+    const { w, h } = this.size(k);
+    return this.bank.get(`soul:L${lv}:${boil}`, w, prio, (): Shot => {
+      jar().poseBody(lv / (LEVELS - 1), boil * 1.7 + lv * 0.37, 0, 0);
+      return { obj: jar().root, w, h, yaw: YAW, pitch: PITCH, fit: true };
+    });
+  }
+  private full(j: number, k: number, prio: number) {
+    const { w, h } = this.size(k);
+    const pulse = [1, 0, -1][j];
+    return this.bank.get(`soul:R${j}`, w, prio, (): Shot => {
+      jar().poseBody(1, [0.314, 0, 0.942][j], 1, pulse);
+      return { obj: jar().root, w, h, yaw: YAW, pitch: PITCH, fit: true };
+    });
+  }
+  private stopper(pose: number, k: number, prio: number) {
+    const { w, h } = this.size(k);
+    return this.bank.get(`soul:lid${pose}`, w, prio, (): Shot => {
+      jar().poseLid(pose);
+      return { obj: jar().root, w, h, yaw: YAW, pitch: PITCH, fit: true };
     });
   }
 
-  update(dt: number, anchor: SoulAnchor | null, visible: boolean, s: number) {
+  /** the particles ride above the HUD canvas: keep them running (hidden with the HUD) */
+  fx(dt: number, s: number, visible: boolean) {
+    this.dust.points.visible = this.glow.points.visible = visible;
+    this.dust.update(dt, s);
+    this.glow.update(dt, s);
+  }
+
+  paint(c: CanvasRenderingContext2D, dt: number, anchor: SoulAnchor | null, s: number) {
     dt = Math.min(dt, 0.1);
     this.t += dt;
-    const a = anchor ? { ...anchor, k: anchor.k * SOUL_JAR_SCALE } : null;
-    const show = !!a && visible;
-    this.root.visible = show;
-    this.fx.update(dt, s);
-    this.glow.update(dt, s);
-    if (!a) return;
-    if (show && !this.built) this.build();
-    this.jobs.step();
+    if (!anchor) return;
+    const a = { ...anchor, k: anchor.k * SOUL_JAR_SCALE };
     const ult = Math.max(0, Math.min(1, a.frac));
     const k = a.k;
     if (this.lastUlt < 0) {
@@ -486,11 +573,9 @@ export class SoulBar {
     this.lastUlt = ult;
 
     // ---------------------------------------------------- level
-    let drain = 0;
     if (this.drainT >= 0) {
       this.drainT += dt;
       const kd = Math.min(1, this.drainT / 1.05);
-      drain = Math.sin(Math.min(1, this.drainT / 1.2) * Math.PI);
       this.shown = lerp(this.drainFrom, ult, kd * kd * (3 - 2 * kd));
       if (this.drainT < 0.95) this.stream(a, dt);
       if (this.drainT > 1.6) this.drainT = -1;
@@ -498,50 +583,65 @@ export class SoulBar {
     this.surge = Math.max(0, this.surge - dt * 1.4);
     this.flash = Math.max(0, this.flash - dt * 2.2);
     this.jolt = Math.max(0, this.jolt - dt * 3);
-
-    // ---------------------------------------------------- pose
-    // a damped slosh: the jar tilts with jolts, the smoke surface follows
+    // a damped slosh: the jar rocks on its foot with every surge
     for (let i = 0, n = Math.ceil(dt * 120); i < n; i++) {
       const h = dt / n;
       this.tiltV += (-this.tilt * 60 - this.tiltV * 7) * h;
       this.tilt += this.tiltV * h;
     }
-    const rattle = this.ready ? Math.sin(this.t * 47) * 0.012 * (0.5 + 0.5 * Math.sin(this.t * 3.1)) : 0;
-    this.root.position.set(a.x * s, -a.y * s, 40);
-    const pop = 1 + this.jolt * 0.06 * Math.sin(this.jolt * 12);
-    this.root.scale.setScalar(s * k * pop);
-    this.jar.rotation.set(0.1 + Math.sin(this.t * 0.8) * 0.02, -0.35 + Math.sin(this.t * 0.45) * 0.12, this.tilt + rattle + Math.sin(this.t * 0.9) * 0.015);
-    // the stopper: rattles when full, pops and spins when uncorked
-    let lidUp = 0, lidSpin = 0;
-    if (this.drainT >= 0) {
-      const u = this.drainT;
-      lidUp = u < 0.12 ? (u / 0.12) * 7 : u < 1.1 ? 7 + Math.sin((u - 0.12) * 9) * 0.6 : Math.max(0, 7 * (1 - (u - 1.1) / 0.3));
-      lidSpin = u * 7;
-      if (u > 1.4 && u - dt <= 1.4) uiSfx('rev_close', 0.45, 0.8);
-    } else if (this.ready) lidUp = Math.max(0, Math.sin(this.t * 23)) * 0.45 * (Math.sin(this.t * 2.7) > 0.3 ? 1 : 0.15);
-    this.lid.position.y = 34.9 + lidUp;
-    this.lid.rotation.set(rattle * 2, lidSpin + Math.sin(this.t * 0.5) * 0.1, -rattle * 3);
-    this.animPinch(dt, a);
 
-    // ---------------------------------------------------- shaders
-    this.root.updateMatrixWorld(true);
-    const inv = new THREE.Matrix4().copy(this.smoke.matrixWorld).invert();
-    (this.smokeMat.uniforms.uDir.value as THREE.Vector3).set(0, 0, -1).transformDirection(inv);
-    (this.smokeMat.uniforms.uLdir.value as THREE.Vector3).set(-0.45, 0.8, 0.6).transformDirection(inv);
-    const u = this.smokeMat.uniforms;
-    u.uT.value = this.t;
-    u.uLevel.value = this.shown <= 0.002 ? -0.05 : 0.04 + this.shown * 0.96;
-    u.uReady.value = this.ready ? Math.min(1, this.readyT * 2) : 0;
-    u.uSurge.value = Math.min(1.2, this.surge);
-    u.uDrain.value = drain;
-    u.uTilt.value = this.tilt * 2.5;
-    const g = this.glassMat.uniforms;
-    g.uT.value = this.t;
-    g.uReady.value = u.uReady.value;
-    g.uFlash.value = this.flash;
-    this.brassMat.userData.fx.value.z = (this.ready ? 1.6 + Math.sin(this.t * 5) * 0.9 : 0.25 + this.shown * 0.6) + this.flash * 2;
-    // ---------------------------------------------------- ambient particles
-    if (show) this.ambient(dt, a);
+    // ---------------------------------------------------- pictures
+    // the frames in use now come first; the rest of the flip-book follows
+    const lv = Math.max(0, Math.min(LEVELS - 1, Math.round(this.shown * (LEVELS - 1))));
+    const boil = Math.floor(this.t * (3 + this.surge * 6)) % BOIL;
+    const glowing = this.ready && this.drainT < 0;
+    const pulse = Math.sin(this.t * 5);
+    const pj = pulse > 0.45 ? 0 : pulse < -0.45 ? 2 : 1;
+    let body: Sprite | null = null;
+    if (glowing) {
+      for (let j = 0; j < 3; j++) this.full(j, k, 52);
+      body = this.bank.exact(`soul:R${pj}`, this.size(k).w) ?? this.body(LEVELS - 1, 0, k, 58);
+    } else {
+      body = this.bank.exact(`soul:L${lv}:${boil}`, this.size(k).w) ?? this.body(lv, 0, k, 58);
+      this.body(lv, boil, k, 50);
+    }
+    for (let l = 0; l < LEVELS; l++) this.body(l, 0, k, l === lv ? 58 : 34);
+    for (let l = 0; l < LEVELS; l++) for (let b = 1; b < BOIL; b++) this.body(l, b, k, 12);
+    const pose = this.ready || this.pinchHop > 0 ? (Math.sin(this.t * 9) > 0 ? 1 : 0) : this.shown < 0.2 ? 2 : 0;
+    for (let p = 0; p < 3; p++) this.stopper(p, k, p === 0 ? 57 : 30);
+    const lid = this.bank.exact(`soul:lid${pose}`, this.size(k).w) ?? this.stopper(0, k, 57);
+    if (!body) return;
+
+    // ---------------------------------------------------- composite
+    const rock = Math.round(this.tilt * 5);
+    const rattle = this.ready ? (Math.sin(this.t * 47) > 0.6 ? 1 : 0) * (Math.sin(this.t * 3.1) > 0 ? 1 : 0) : 0;
+    const hop = Math.round(Math.sin(this.jolt * Math.PI) * 2 * k);
+    const X = a.x + rock, Y = a.y - hop;
+    // the jar stands on its foot at the anchor
+    const cx = X, cy = Y - (body.by + body.bh) + body.h / 2;
+    blitC(c, body, cx, cy);
+    if (this.flash > 0.02) blitC(c, variant(body, 'flash'), cx, cy, this.flash * 0.55);
+    if (lid) {
+      // the stopper: rattles when full, pops and spins when uncorked
+      let up = 0, spin = 1;
+      if (this.drainT >= 0) {
+        const u = this.drainT;
+        up = u < 0.12 ? (u / 0.12) * 7 : u < 1.1 ? 7 + Math.sin((u - 0.12) * 9) * 0.6 : Math.max(0, 7 * (1 - (u - 1.1) / 0.3));
+        spin = Math.cos(u * 7);
+        if (u > 1.4 && u - dt <= 1.4) uiSfx('rev_close', 0.45, 0.8);
+      } else if (this.ready) up = Math.max(0, Math.sin(this.t * 23)) * 0.6 * (Math.sin(this.t * 2.7) > 0.3 ? 1 : 0.15);
+      const pinchHop = this.pinchHop > 0 ? Math.abs(Math.sin(this.pinchHop * Math.PI * 2)) * 4 * this.pinchHop : 0;
+      this.pinchHop = Math.max(0, this.pinchHop - dt * 1.6);
+      const ly = cy - Math.round((up + pinchHop) * k);
+      if (Math.abs(spin) > 0.999) blitC(c, lid, cx + rattle, ly);
+      else blitSquash(c, lid.cv, cx + rattle, ly, spin < 0 ? Math.min(-0.15, spin) : Math.max(0.15, spin));
+    }
+    if (this.surge > 0.25 && Math.random() < dt * 20) {
+      // the soul sloshes up the glass on a big surge
+      this.glow.emit({ x: a.x + (Math.random() - 0.5) * 12 * k, y: a.y - (8 + this.shown * 20) * k, vx: (Math.random() - 0.5) * 8, vy: -10 - Math.random() * 10, life: 0.4, size: 1, c0: 0xeafff2, c1: 0x2fbf7e, alpha: 0.9 });
+    }
+    this.ambient(dt, a);
+    void s;
   }
 
   /** soul motes fly in from the field and spiral down the mouth */
@@ -600,7 +700,12 @@ export class SoulBar {
         life, size: Math.random() < 0.35 ? 2 : 1, size1: Math.random() < 0.5 ? 3 : 1, c0: c, c1: 0x9dff3a, alpha: 1, curl: 10,
       });
       if (Math.random() < 0.35)
-        this.fx.emit({ x: mx + (Math.random() - 0.5) * 8 * k, y: my, vx: (Math.random() - 0.5) * 30, vy: -30 - Math.random() * 30, ay: -20, drag: 1.5, life: 0.6 + Math.random() * 0.5, size: 2, size1: 4, c0: 0x2a8a62, c1: 0x0e3a28, alpha: 0.5, curl: 8 });
+        this.dust.emit({ x: mx + (Math.random() - 0.5) * 8 * k, y: my, vx: (Math.random() - 0.5) * 30, vy: -30 - Math.random() * 30, ay: -20, drag: 1.5, life: 0.6 + Math.random() * 0.5, size: 2, size1: 4, c0: 0x2a8a62, c1: 0x0e3a28, alpha: 0.5, curl: 8 });
+    }
+    // the soul whirls down in the glass as it goes
+    if (Math.random() < dt * 40) {
+      const ang = this.t * 14;
+      this.glow.emit({ x: a.x + Math.cos(ang) * 7 * k, y: a.y - (8 + this.shown * 22) * k, vx: -Math.sin(ang) * 30, vy: -40, life: 0.35, size: 1, c0: 0xb8ffd8, c1: 0x2fbf7e, alpha: 0.9 });
     }
     // arrival flare at Sundown
     if (Math.random() < dt * 30)
@@ -617,42 +722,19 @@ export class SoulBar {
       // wisps leak from under the stopper and curl up
       if (Math.random() < dt * 16) {
         const side = Math.random() < 0.5 ? -1 : 1;
-        this.fx.emit({ x: mx + side * (6 + Math.random() * 2) * k, y: my, vx: side * (4 + Math.random() * 6), vy: -14 - Math.random() * 10, ay: -6, drag: 0.6, life: 1.1 + Math.random() * 0.9, size: 1, size1: 3, c0: 0x6ff0b0, c1: 0x1d6a4a, alpha: 0.65, curl: 7 });
+        this.dust.emit({ x: mx + side * (6 + Math.random() * 2) * k, y: my, vx: side * (4 + Math.random() * 6), vy: -14 - Math.random() * 10, ay: -6, drag: 0.6, life: 1.1 + Math.random() * 0.9, size: 1, size1: 3, c0: 0x6ff0b0, c1: 0x1d6a4a, alpha: 0.65, curl: 7 });
       }
       if (Math.random() < dt * 10) this.glow.emit({ x: mx + (Math.random() - 0.5) * 16 * k, y: my + Math.random() * 10 * k, vx: (Math.random() - 0.5) * 6, vy: -16 - Math.random() * 14, drag: 0.4, life: 0.8 + Math.random() * 0.8, size: 1, c0: 0xeafff2, c1: 0x2fbf7e, alpha: 0.9, flick: 0.6, curl: 5 });
     } else if (this.shown > 0.05 && Math.random() < dt * (0.6 + this.shown * 2.5)) {
-      // a faint motes drifting inside the glass
+      // faint motes drifting inside the glass
       const r = Math.random() * 8 * k;
       this.glow.emit({ x: mx + (Math.random() - 0.5) * r * 2, y: a.y - (6 + Math.random() * this.shown * 22) * k, vx: (Math.random() - 0.5) * 3, vy: -3 - Math.random() * 4, life: 0.7 + Math.random() * 0.6, size: 1, c0: 0xb8ffd8, c1: 0x2fbf7e, alpha: 0.55, flick: 0.5 });
     }
   }
 
-  private animPinch(dt: number, a: SoulAnchor) {
-    const p = this.pinch;
-    if (!p) return;
-    this.pinchHop = Math.max(0, this.pinchHop - dt * 1.6);
-    const ready = this.ready;
-    const hop = this.pinchHop > 0 ? Math.abs(Math.sin(this.pinchHop * Math.PI * 2)) * 5 * this.pinchHop : 0;
-    p.root.position.set(0, 6.6 + hop + (ready ? Math.abs(Math.sin(this.t * 6)) * 0.6 : 0), 0);
-    p.root.rotation.set(0, 0.9 + Math.sin(this.t * (ready ? 2.2 : 0.5)) * (ready ? 0.5 : 0.35), 0);
-    const n = p.nodes;
-    for (let i = 1; i <= 5; i++) if (n['tail' + i]) n['tail' + i].rotation.x = -0.28 + Math.sin(this.t * (ready ? 7 : 1.8) + i * 0.6) * (ready ? 0.2 : 0.07);
-    const snap = ready ? Math.max(0, Math.sin(this.t * 9)) * 0.6 : this.surge > 0.3 ? Math.max(0, Math.sin(this.t * 14)) * 0.4 : 0;
-    if (n['pincer_l']) n['pincer_l'].rotation.x = -snap;
-    if (n['pincer_r']) n['pincer_r'].rotation.x = -snap * 0.8;
-    const tint = this.pinchMat.userData.tint.value;
-    const f = 0.82 + this.shown * 0.18;
-    tint.setRGB(f, f, f);
-    p.setExpression(ready || this.pinchHop > 0 ? 'happy' : this.shown < 0.2 ? 'sleepy' : 'neutral');
-    void a;
-  }
-
   dispose() {
-    this.root.removeFromParent();
-    this.fx.dispose();
+    this.dust.dispose();
     this.glow.dispose();
-    this.smokeMat.dispose();
-    this.glassMat.dispose();
     void this.scene;
     void this.hud;
   }

@@ -13,8 +13,10 @@
 //   4. ANUBIS   a low hero angle on his soul avatar: obsidian under a luminous
 //               spirit shell, eyes igniting, the head lifting. He speaks in
 //               floating 3D words, gestures at the Scales of Ma'at.
-//   5. JUDGEMENT  keep Ma'at level (the beam follows the needle), then speak the
-//               words of passage (each sign flies from the soul to the feather).
+//   5. JUDGEMENT  timing only: the beam swings and its needle sweeps the gauge;
+//               stop it on the feather's mark. Then the feather falls: strike as
+//               the closing ring meets the sight, the moment the beam comes level
+//               (each good beat sends a sign flying from the soul to the feather).
 //   6. VERDICT  worthy: he raises the was-sceptre and the soul rises in a blaze
 //               of light. Unworthy: the fires gutter, his eyes burn red, hands
 //               rise from the floor and his open hand takes the soul.
@@ -22,7 +24,7 @@
 // API (RunScene): new AnubisTrial(engine, qte, playerGeo); await trial.run({ kills, wave }) → worthy?
 import * as THREE from 'three';
 import type { Engine } from '../../engine/Engine';
-import type { Qte } from '../ui/Qte';
+import { Qte } from '../ui/Qte';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { buildRigGeo, clearRigCache, RigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { globalUniforms, makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
@@ -95,8 +97,9 @@ const SPIRIT_FS = /* glsl */ `
     float fog = smoothstep(uFogNear, uFogFar, vDepth);
     gl_FragColor = vec4(col * (1.0 - fog) * uFade * uGain, 1.0);
   }`;
-type SpiritMat = THREE.ShaderMaterial & { uniforms: Record<string, THREE.IUniform> };
-function spiritMaterial(a: number, b: number, o: { inflate?: number; power?: number; core?: number; lumRim?: number; gain?: number; vein?: number } = {}): SpiritMat {
+export type SpiritMat = THREE.ShaderMaterial & { uniforms: Record<string, THREE.IUniform> };
+/** the additive fresnel 'spirit shell' look (souls, gods, the dead); shared with the death sequence */
+export function spiritMaterial(a: number, b: number, o: { inflate?: number; power?: number; core?: number; lumRim?: number; gain?: number; vein?: number } = {}): SpiritMat {
   return new THREE.ShaderMaterial({
     uniforms: {
       uTime: globalUniforms.uTime,
@@ -281,6 +284,8 @@ export class AnubisTrial {
   private tilt = 0;
   private tiltTarget = 0;
   private glyphsDone = 0;
+  /** the feather's fall (the second weighing beat) is running when >= 0 */
+  private featherDrop = -1;
   private wallPulse = 0;
   private shake = 0;
   // camera
@@ -682,16 +687,42 @@ export class AnubisTrial {
     eng.audio.play('scales', { volume: 0.8 });
     eng.audio.play('heartbeat', { volume: 0.6 });
     await this.hold(1.0, false);
-    const a = await this.qte.run({ kind: 'balance', label: "KEEP MA'AT LEVEL", duration: 3.2, drift: 0.9 + Math.min(1.2, stats.wave * 0.02) });
+    // 1) the beam swings; its needle sweeps the gauge: stop it on the feather's mark
+    const wave = stats.wave;
+    const a = await this.qte.run({ kind: 'bar', label: 'WEIGH THE HEART', speed: 0.8 + Math.min(0.55, wave * 0.011), width: 0.15 - Math.min(0.04, wave * 0.0008), duration: 5, phase: -Math.PI / 2, at: () => this.needlePoint(-3.1) });
     if (a === 'fail') return this.verdict(false);
-    this.tiltTarget = 0;
+    this.weighed(a);
     this.gwT = { present: 1, point: 0, reach: 0, grant: 0, raise: 0 };
-    await this.say('"Balanced… for now. Speak the words of passage."', 'anubis', 1.0, false);
-    const glyphs = ['KeyW', 'KeyA', 'KeyS', 'KeyD'];
-    const seq = Array.from({ length: 4 + Math.min(3, Math.floor(stats.wave / 20)) }, () => rnd.pick(glyphs));
-    this.glyphsDone = 0;
-    const b = await this.qte.run({ kind: 'sequence', keys: seq, label: 'WORDS OF PASSAGE', duration: 3.4 });
+    await this.say('"Level… for now. Once more, as the feather falls."', 'anubis', 0.8, false);
+    // 2) the feather drops its pan: strike as the beam comes level (the ring meets the sight)
+    this.gwT = { present: 0, point: 1, reach: 0, grant: 0, raise: 0 };
+    await this.hold(0.5, false);
+    this.featherDrop = 0;
+    const b = await this.qte.run({ kind: 'ring', key: 'Space', alt: ['Mouse0'], label: 'AS THE FEATHER FALLS', duration: 1.3 - Math.min(0.3, wave * 0.006), at: () => this.needlePoint() });
+    this.featherDrop = -1;
+    if (b !== 'fail') this.weighed(b);
     return this.verdict(b !== 'fail');
+  }
+
+  /** where the timing prompts float: on the needle of the scales (the gauge sits lower, under the beam it drives) */
+  private needlePoint(dy = 0.4) {
+    const n = this.scales?.nodes['plumb'];
+    if (!n) return null;
+    n.getWorldPosition(this.v2);
+    return { x: this.v2.x, y: this.v2.y + dy, z: this.v2.z };
+  }
+
+  /** a good beat: the beam settles level, a sign flies from the soul's heart to the feather */
+  private weighed(r: 'perfect' | 'good' | 'fail') {
+    this.tiltTarget = 0;
+    this.glyphsDone++;
+    this.engine.audio.play('divine_chime', { volume: 0.6, pitch: r === 'perfect' ? 1.15 : 0.95 });
+    this.wallPulse = r === 'perfect' ? 1.4 : 0.8;
+    const from = { x: this.soulPos.x, y: this.soulPos.y + 1.1, z: this.soulPos.z };
+    const to = V(-1.5, 2.8, SCALES_Z);
+    for (let i = 0; i < (r === 'perfect' ? 3 : 1); i++)
+      this.fx.emit({ pos: from, vel: { x: (to.x - from.x) * 1.1 + (i - 1) * 0.8, y: (to.y - from.y) * 1.1 + 1.5 + i * 0.4, z: (to.z - from.z) * 1.1 }, count: 1, life: [0.9, 0.9], size: [0.5, 0.35], sprite: 'glyph' + ((this.glyphsDone + i) % 4), color: 0xffe6a0, additive: true, gravity: 3 });
+    this.fx.emit({ pos: from, count: r === 'perfect' ? 30 : 16, spread: 1.6, life: [0.4, 0.8], size: [0.12, 0.02], sprite: 'glow8', color: [0xffe6a0, 0x9ff8ff], additive: true, drag: 2 });
   }
 
   private async arrival(stats: { kills: number; wave: number }) {
@@ -1195,19 +1226,15 @@ export class AnubisTrial {
   // ---------------------------------------------------------------- the scales
   private updateScales(dt: number, t: number) {
     const a = this.qte.active as any;
-    if (this.phase === 'judge' && a && !a.done && a.spec.kind === 'balance') this.tiltTarget = -a.state.x * 0.36;
-    else if (this.phase !== 'take' && this.phase !== 'judge') this.tiltTarget = Math.sin(t * 0.7) * 0.05;
-    if (this.phase === 'judge' && a && !a.done && a.spec.kind === 'sequence' && a.state.i > this.glyphsDone) {
-      // each word of passage flies as a sign from the soul's heart to the feather
-      this.glyphsDone = a.state.i;
-      this.engine.audio.play('divine_chime', { volume: 0.5, pitch: 0.9 + this.glyphsDone * 0.08 });
-      this.wallPulse = 1;
-      const from = { x: this.soulPos.x, y: this.soulPos.y + 1.1, z: this.soulPos.z };
-      const to = V(-1.5, 2.8, SCALES_Z);
-      this.fx.emit({ pos: from, vel: { x: (to.x - from.x) * 1.1, y: (to.y - from.y) * 1.1 + 1.5, z: (to.z - from.z) * 1.1 }, count: 1, life: [0.9, 0.9], size: [0.5, 0.35], sprite: 'glyph' + (this.glyphsDone % 4), color: 0xffe6a0, additive: true, gravity: 3 });
-      this.fx.emit({ pos: from, count: 16, spread: 1.6, life: [0.4, 0.8], size: [0.12, 0.02], sprite: 'glow8', color: [0xffe6a0, 0x9ff8ff], additive: true, drag: 2 });
-    }
-    this.tilt = damp(this.tilt, this.tiltTarget, this.phase === 'take' ? 1.2 : 5, dt);
+    const live = this.phase === 'judge' && a && !a.done;
+    // the weighing: the beam IS the gauge (its needle sweeps with the prompt's), then the feather's fall
+    if (live && a.spec.kind === 'bar') this.tiltTarget = (a.state.x - 0.5) * 0.74;
+    else if (live && a.spec.kind === 'ring' && this.featherDrop >= 0) {
+      const k = a.t / (a.spec.duration ?? 1.15);
+      this.tiltTarget = 0.34 * (1 - k / Qte.RING_PERFECT);
+    } else if (this.phase !== 'take' && this.phase !== 'judge') this.tiltTarget = Math.sin(t * 0.7) * 0.05;
+    const swing = live && (a.spec.kind === 'bar' || a.spec.kind === 'ring');
+    this.tilt = swing ? damp(this.tilt, this.tiltTarget, 14, dt) : damp(this.tilt, this.tiltTarget, this.phase === 'take' ? 1.2 : 5, dt);
     const n = this.scales.nodes;
     n['beam'].rotation.z = this.tilt;
     n['pan_l'].rotation.z = -this.tilt;
@@ -1438,7 +1465,7 @@ function copyPose(src: RigInstance, dst: RigInstance) {
  * the living player) so repeat trials reuse them.
  */
 const SHELLS = new WeakMap<RigGeo, THREE.BufferGeometry[]>();
-function soulShellGeos(geo: RigGeo) {
+export function soulShellGeos(geo: RigGeo) {
   let out = SHELLS.get(geo);
   if (out) return out;
   out = geo.parts.map((p) => {

@@ -1,26 +1,28 @@
-// The arsenal readouts in the 3D HUD layer (the revolver keeps its rusty cylinder):
+// The arsenal readouts on the HUD (the revolver keeps its rusty cylinder, Hud3D).
+// Every piece is a sculpted 3D model below, photographed once (HudSprites) and
+// shown as flat pixel art on the HUD grid; motion is 2D (drops, kicks, tumbles):
 //  • COACH GUN — two real paper-hulled shotgun shells stand where the cylinder
 //    floats (ribbed red hulls, star crimps, high-brass heads). A shot kicks the
 //    spent shell out tumbling; a reload drops a fresh one into its place.
 //  • THOMPSON — a blued-steel drum magazine (domed faces, rolled rim, rivet ring,
 //    hub and winding key) that indexes round per shot and drops out on reload;
 //    the "ammo / mag" count is set beside it in Alagard (Hud.ts draws the type).
-//  • CARRIED GUNS — a tooled gun-belt strip with each carried gun as a lit
-//    miniature of its own rig over its slot (keys 3/4/5 above, from Hud.ts);
-//    the gun in hand is lifted and lit, the others sit back dimmed.
-//  • TREASURE — revealed dig spots, blueprints and maps get a hovering, turning
-//    miniature of the real prop over the spot; off screen they ride the screen
-//    edge beside a weathered wooden sign-arrow pointing the way.
+//  • CARRIED GUNS — a tooled gun-belt strip with each carried gun as a
+//    photograph of its own rig over its slot (keys 3/4/5 above, from Hud.ts);
+//    the gun in hand is lifted and bigger, the others sit back dimmed.
+//  • TREASURE — revealed dig spots, blueprints and maps get a hovering picture
+//    of the real prop over the spot; off screen they ride the screen edge beside
+//    a weathered wooden sign-arrow pointing the way (photographed in 16 headings).
 import * as THREE from 'three';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
-import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { buildRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { VF } from '../../engine/voxel/VoxelModel';
 import type { WeaponHud } from '../player/Weapons';
 import { buildWeaponRig } from '../player/Weapons';
 import type { GunId } from '../meta/Blueprints';
 import { xMarker, blueprintScroll, mapFragment } from '../models/props/treasure';
-import { sculpt, JobQueue, Surf, PixelFx, fbm3, h3, mixc, mulc, clamp, clamp01, sstep, len2, len3, sdRoundBox2, TAU, uiSfx, METAL, KNZ } from './HudKit';
+import { sculpt, Surf, PixelFx, fbm3, h3, mixc, mulc, clamp01, sstep, len2, len3, sdRoundBox2, TAU, uiSfx, METAL, KNZ } from './HudKit';
+import { SpriteBank, Shot, blitC, variant, framingBox, wrap } from './HudSprites';
 
 // ------------------------------------------------------------------ shotgun shell (HUD px, 3 vox/px, axis +y)
 const SV = 3;
@@ -199,7 +201,6 @@ export interface ArsenalAnchors {
 }
 
 interface Flyer {
-  mesh: THREE.Object3D;
   x: number;
   y: number;
   vx: number;
@@ -209,93 +210,121 @@ interface Flyer {
   life: number;
 }
 
+// the models, built on first use and only ever photographed
+const geos = new Map<string, THREE.BufferGeometry>();
+function geo(name: string, make: () => THREE.BufferGeometry) {
+  let g = geos.get(name);
+  if (!g) geos.set(name, (g = make()));
+  return g;
+}
+const mesh = (g: THREE.BufferGeometry) => new THREE.Mesh(g, SpriteBank.get().material());
+const shellGeo = () => geo('shell', () => buildVoxelGeometry(shellModel(), { voxelSize: 1 / SV, pivot: [0, 0, 0] }));
+const gunRigs = new Map<string, THREE.Group | null>();
+
 export class ArsenalHud {
-  private mat: VoxelMaterial;
-  private dimMat: VoxelMaterial;
-  private jobs = new JobQueue();
-  private built = false;
-  // shells
-  private shellGeo: THREE.BufferGeometry | null = null;
-  private shells: THREE.Mesh[] = [];
+  private bank = SpriteBank.get();
   private shellDrop: number[] = [];
   private lastAmmo = -1;
   private lastId = '';
-  // drum
-  private drumGeo: THREE.BufferGeometry | null = null;
-  private drum: THREE.Mesh | null = null;
-  private drumSpin = 0;
+  private drumKick = 0;
   private drumOut = 0;
-  // strip
-  private belt: THREE.Mesh | null = null;
-  private beltN = 0;
-  private guns = new Map<string, RigInstance | null>();
-  private gunScale = new Map<string, number>();
-  private strip = new THREE.Group();
-  // treasure
-  private markerGeo = new Map<string, { geo: THREE.BufferGeometry; size: number }>();
-  private markers: { root: THREE.Group; model: THREE.Mesh; arrow: THREE.Mesh | null; kind: string }[] = [];
-  private arrowGeo: THREE.BufferGeometry | null = null;
   private flyers: Flyer[] = [];
-  private fx = new PixelFx(200, false, 8);
-  private group = new THREE.Group();
+  private dust = new PixelFx(200, false, 8);
   private t = 0;
 
   constructor(private scene: THREE.Scene, private revolverSpec: () => RigSpec | null) {
-    this.mat = makeVoxelMaterial({ fog: false });
-    this.dimMat = makeVoxelMaterial({ fog: false });
-    this.dimMat.userData.tint.value.setRGB(0.55, 0.52, 0.5);
-    scene.add(this.group, this.strip, this.fx.points);
+    scene.add(this.dust.points);
   }
 
-  private build() {
-    this.built = true;
-    this.jobs.add(() => (this.shellGeo = buildVoxelGeometry(shellModel(), { voxelSize: 1 / SV, pivot: [0, 0, 0] })));
-    this.jobs.add(() => (this.drumGeo = buildVoxelGeometry(drumModel(), { voxelSize: 1 / DV, pivot: [0, 0, 0] })));
-    this.jobs.add(() => (this.arrowGeo = buildVoxelGeometry(arrowModel(), { voxelSize: 1 / DV, pivot: [0, 0, 0] })));
+  fx(dt: number, s: number, visible: boolean) {
+    this.dust.points.visible = visible;
+    this.dust.update(dt, s);
   }
 
-  private gun(id: GunId): RigInstance | null {
-    if (this.guns.has(id)) return this.guns.get(id)!;
-    let r: RigInstance | null = null;
-    try {
-      const spec = id === 'revolver' ? this.revolverSpec() : buildWeaponRig(id);
-      if (spec) {
-        r = new RigInstance(buildRigGeo(spec, spec.name + ':hudstrip'), { material: this.mat, castShadow: false });
-        const b = new THREE.Box3().setFromObject(r.root);
-        const sz = b.getSize(new THREE.Vector3());
-        this.gunScale.set(id, 29 / Math.max(1e-3, sz.x, sz.y, sz.z));
-        this.strip.add(r.root);
+  // ---------------------------------------------------- photographs
+  private shell(i: number, k: number) {
+    const w = Math.round(14 * k) + 2, h = Math.round(32 * k) + 2;
+    return this.bank.get('ars:shell' + i, w, 52, (): Shot => {
+      const m = mesh(shellGeo());
+      m.position.y = -SHELL_H / 2;
+      const inner = new THREE.Group();
+      inner.add(m, framingBox([-6, -SHELL_H / 2 - 0.6, -6], [6, SHELL_H / 2 + 0.6, 6]));
+      inner.rotation.z = (i - 0.5) * -0.16;
+      return { obj: wrap(inner), w, h, yaw: 0.5 + i * 1.3, pitch: 0.28, fit: true };
+    });
+  }
+  private hull(f: number, k: number) {
+    const S = Math.round(34 * k) + 2;
+    return this.bank.get('ars:hull' + f, S, 30, (): Shot => {
+      const m = mesh(shellGeo());
+      m.position.y = -SHELL_H / 2;
+      const inner = new THREE.Group();
+      inner.add(m, framingBox([-17, -17, -17], [17, 17, 17]));
+      inner.rotation.z = (f * Math.PI) / 4;
+      return { obj: wrap(inner), w: S, h: S, yaw: 0.6, pitch: 0.2, fit: true };
+    });
+  }
+  private drum(k: number) {
+    const S = Math.round(44 * k) + 2;
+    return this.bank.get('ars:drum', S, 52, (): Shot => {
+      const inner = new THREE.Group();
+      inner.add(mesh(geo('drum', () => buildVoxelGeometry(drumModel(), { voxelSize: 1 / DV, pivot: [0, 0, 0] }))), framingBox([-23, -23, -8], [23, 23, 8]));
+      inner.rotation.x = -0.2;
+      return { obj: wrap(inner), w: S, h: S, yaw: 0.42, pitch: 0.1, fit: true };
+    });
+  }
+  private belt(n: number, k: number) {
+    const hw = (n * SLOT) / 2 + 4;
+    const w = Math.round(hw * 2 * k) + 2, h = Math.round(18 * k) + 2;
+    return this.bank.get('ars:belt' + n, w, 50, (): Shot => {
+      const inner = new THREE.Group();
+      inner.add(mesh(geo('belt' + n, () => buildVoxelGeometry(beltModel(n), { voxelSize: 1 / DV, pivot: [0, 0, 0] }))), framingBox([-hw, -9, -1], [hw, 9, 4]));
+      return { obj: wrap(inner), w, h, yaw: -0.08, pitch: 0.12, fit: true };
+    });
+  }
+  private gun(id: GunId, on: boolean, k: number) {
+    const S = Math.round((on ? 36 : 30) * k) + 2;
+    if (id === 'revolver' && !this.revolverSpec()) return null;
+    return this.bank.get(`ars:gun:${id}:${on ? 1 : 0}`, S, on ? 51 : 49, (): Shot | null => {
+      let root = gunRigs.get(id);
+      if (root === undefined) {
+        root = null;
+        const spec = id === 'revolver' ? this.revolverSpec() : buildWeaponRig(id);
+        if (spec) {
+          const r = new RigInstance(buildRigGeo(spec, spec.name + ':hudsprite'), { material: SpriteBank.get().material(), castShadow: false });
+          r.root.rotation.set(0, 0, on ? 0.08 : -0.05);
+          root = wrap(r.root);
+        }
+        gunRigs.set(id, root);
       }
-    } catch (e) {
-      console.warn('[arsenal hud] gun model failed', id, e);
-    }
-    this.guns.set(id, r);
-    return r;
+      if (!root) return null;
+      return { obj: root, w: S, h: S, yaw: Math.PI / 2 + (on ? 0.22 : 0.12), pitch: 0.12, fit: true };
+    });
   }
-
-  private markerModel(kind: string) {
-    let e = this.markerGeo.get(kind);
-    if (!e) {
+  private prize(kind: 'x' | 'blueprint' | 'map', k: number) {
+    const S = Math.round((kind === 'x' ? 34 : 29) * k) + 2;
+    return this.bank.get('ars:prize:' + kind, S, 44, (): Shot => {
       const pm = kind === 'x' ? xMarker(2) : kind === 'map' ? mapFragment(3) : blueprintScroll('gun');
-      const geo = buildVoxelGeometry(pm.model, { voxelSize: 1, pivot: 'center' });
-      geo.computeBoundingBox();
-      const s = geo.boundingBox!.getSize(new THREE.Vector3());
-      e = { geo, size: Math.max(s.x, s.y, s.z) };
-      this.markerGeo.set(kind, e);
-    }
-    return e;
+      const m = mesh(geo('prize' + kind, () => buildVoxelGeometry(pm.model, { voxelSize: pm.voxelSize ?? 0.05, pivot: 'center' })));
+      m.rotation.set(kind === 'x' ? 0.8 : 0.55, 0, kind === 'blueprint' ? 0.35 : 0);
+      return { obj: wrap(m), w: S, h: S, yaw: kind === 'blueprint' ? 0.15 : 0.4, pitch: 0.2, fit: true };
+    });
+  }
+  private arrow(d: number, k: number) {
+    const S = Math.round(30 * k) + 2;
+    return this.bank.get('ars:arrow' + d, S, 40, (): Shot => {
+      const inner = new THREE.Group();
+      inner.add(mesh(geo('arrow', () => buildVoxelGeometry(arrowModel(), { voxelSize: 1 / DV, pivot: [0, 0, 0] }))), framingBox([-12, -12, -1], [12, 12, 4]));
+      inner.rotation.z = -(d / 16) * TAU;
+      return { obj: wrap(inner), w: S, h: S, yaw: 0, pitch: 0.06, fit: true };
+    });
   }
 
-  update(dt: number, A: ArsenalAnchors | null, visible: boolean, s: number, cylHidden: boolean) {
+  paint(c: CanvasRenderingContext2D, dt: number, A: ArsenalAnchors | null, s: number) {
     dt = Math.min(dt, 0.1);
     this.t += dt;
-    this.fx.update(dt, s);
-    const show = !!A && visible;
-    this.group.visible = this.strip.visible = show;
-    for (const m of this.markers) m.root.visible = false;
-    if (!A || !show) return;
-    if (!this.built) this.build();
-    this.jobs.step();
+    this.paintFlyers(c, dt, A?.k ?? 1);
+    if (!A) return;
     const k = A.k;
     const w = A.weapon;
     const kind = w?.kind ?? 'cylinder';
@@ -305,131 +334,77 @@ export class ArsenalHud {
       this.lastId = w.id;
       this.lastAmmo = -1;
     }
+    // ---------------------------------------------------- carried strip (behind the magazine)
+    const st = A.strip;
+    if (st && st.slots.length > 1) {
+      const belt = this.belt(st.slots.length, k);
+      if (belt) blitC(c, belt, st.x, st.y);
+      for (const sl of st.slots) {
+        const g = this.gun(sl.id, sl.active, k);
+        this.gun(sl.id, !sl.active, k);
+        if (!g) continue;
+        const lift = sl.active ? Math.round(3 + Math.sin(this.t * 2.2) * 0.8) : 0;
+        blitC(c, sl.active ? g : variant(g, 'dim'), sl.x, st.y - lift);
+      }
+    }
     // ---------------------------------------------------- shells
     const nShell = kind === 'shells' && w ? Math.min(4, Math.max(1, w.mag)) : 0;
-    while (this.shells.length < nShell && this.shellGeo) {
-      const m = new THREE.Mesh(this.shellGeo, this.mat);
-      this.group.add(m);
-      this.shells.push(m);
-      this.shellDrop.push(1);
-    }
+    while (this.shellDrop.length < nShell) this.shellDrop.push(1);
     if (kind === 'shells' && w) {
       if (this.lastAmmo >= 0 && w.ammo < this.lastAmmo) {
         // spent hulls kicked out of the breech
-        for (let i = w.ammo; i < this.lastAmmo && i < this.shells.length; i++) this.eject(this.shells[i], A, s);
+        for (let i = w.ammo; i < this.lastAmmo && i < nShell; i++) this.eject(A, i, nShell);
         uiSfx('shell_casing', 0.4, 0.8);
       }
       if (this.lastAmmo >= 0 && w.ammo > this.lastAmmo) for (let i = this.lastAmmo; i < w.ammo && i < this.shellDrop.length; i++) this.shellDrop[i] = 0;
       this.lastAmmo = w.ammo;
-    }
-    for (let i = 0; i < this.shells.length; i++) {
-      const m = this.shells[i];
-      const on = i < nShell && !!w && i < w.ammo;
-      m.visible = on;
-      if (!on) continue;
-      this.shellDrop[i] = Math.min(1, this.shellDrop[i] + dt * 4.5);
-      const d = this.shellDrop[i];
-      const fall = (1 - d * d) * 40;
-      const sp = (i - (nShell - 1) / 2) * 12;
-      const bob = Math.sin(this.t * 1.6 + i * 0.9) * 1.2;
-      m.position.set((A.x + sp * k) * s, -(A.y + (SHELL_H / 2) * k - fall * k - bob + swapDrop) * s, 30);
-      m.scale.setScalar(s * k);
-      m.rotation.set(0.28 + Math.sin(this.t * 0.8 + i) * 0.04, 0.5 + this.t * 0.35 + i * 1.3, (i - 0.5) * -0.16 + (1 - d) * 0.6);
+      for (let i = 0; i < nShell; i++) {
+        const sp = this.shell(i, k);
+        if (!sp || i >= w.ammo) continue;
+        this.shellDrop[i] = Math.min(1, this.shellDrop[i] + dt * 4.5);
+        const d = this.shellDrop[i];
+        const fall = (1 - d * d) * 40;
+        const bob = Math.sin(this.t * 1.6 + i * 0.9) * 1.2;
+        const x = A.x + (i - (nShell - 1) / 2) * 12 * k;
+        const y = A.y - fall * k + bob + swapDrop;
+        blitC(c, sp, x, y);
+        // a fresh shell drops in glinting
+        if (d < 0.6) blitC(c, variant(sp, 'flash'), x, y, (0.6 - d) * 1.2);
+      }
     }
     // ---------------------------------------------------- drum
-    if (kind === 'drum' && w && this.drumGeo && !this.drum) {
-      this.drum = new THREE.Mesh(this.drumGeo, this.mat);
-      this.group.add(this.drum);
-    }
-    if (this.drum) {
-      const on = kind === 'drum' && !!w;
-      this.drum.visible = on;
-      if (on && w) {
-        // the housing never turns (the rotor inside does): each round kicks it instead
-        if (this.lastAmmo >= 0 && w.ammo < this.lastAmmo) this.drumSpin = 1;
-        this.lastAmmo = w.ammo;
-        this.drumSpin = Math.max(0, this.drumSpin - dt * 6);
-        this.drumOut += ((w.reloading ? 1 : 0) - this.drumOut) * Math.min(1, dt * 7);
+    if (kind === 'drum' && w) {
+      // the housing never turns (the rotor inside does): each round kicks it instead
+      if (this.lastAmmo >= 0 && w.ammo < this.lastAmmo) this.drumKick = 1;
+      this.lastAmmo = w.ammo;
+      this.drumKick = Math.max(0, this.drumKick - dt * 6);
+      this.drumOut += ((w.reloading ? 1 : 0) - this.drumOut) * Math.min(1, dt * 7);
+      const sp = this.drum(k);
+      if (sp) {
         const out = this.drumOut;
-        this.drum.position.set((A.x + out * 10 * k) * s, -(A.y + out * 26 * k + swapDrop + Math.sin(this.t * 1.6) * 1.2) * s, 30);
-        this.drum.scale.setScalar(s * k * 0.95);
-        const kick = Math.sin(this.drumSpin * 14) * this.drumSpin;
-        this.drum.rotation.set(-0.2 + Math.sin(this.t * 0.9) * 0.04 - kick * 0.05, 0.42 + Math.sin(this.t * 0.7) * 0.06, out * 2.4 + kick * 0.06);
+        const kick = Math.round(Math.sin(this.drumKick * 14) * this.drumKick * 1.5);
+        const x = A.x + out * 10 * k + kick, y = A.y + out * 26 * k + swapDrop + Math.sin(this.t * 1.6) * 1.2 + Math.abs(kick);
+        blitC(c, sp, x, y, 1 - out * 0.55);
       }
     }
-    // ---------------------------------------------------- carried strip
-    const st = A.strip;
-    for (const r of this.guns.values()) if (r) r.root.visible = false;
-    if (st && st.slots.length > 1) {
-      if (this.beltN !== st.slots.length) {
-        this.belt?.removeFromParent();
-        this.belt?.geometry.dispose();
-        this.belt = null;
-        const n = st.slots.length;
-        this.beltN = n;
-        this.jobs.add(() => {
-          this.belt = new THREE.Mesh(buildVoxelGeometry(beltModel(n), { voxelSize: 1 / DV, pivot: [0, 0, 0] }), this.mat);
-          this.strip.add(this.belt);
-        });
-      }
-      if (this.belt) {
-        this.belt.visible = true;
-        this.belt.position.set(st.x * s, -st.y * s, 0);
-        this.belt.scale.setScalar(s * k);
-        this.belt.rotation.set(0.12, -0.08, 0);
-      }
-      for (const sl of st.slots) {
-        const g = this.gun(sl.id);
-        if (!g) continue;
-        g.root.visible = true;
-        const sc = (this.gunScale.get(sl.id) ?? 30) * s * k * (sl.active ? 1.12 : 0.92);
-        g.root.scale.setScalar(sc);
-        const lift = sl.active ? 3 + Math.sin(this.t * 2.2) * 0.8 : 0;
-        g.root.position.set(sl.x * s, -(st.y - lift) * s, 40);
-        g.root.rotation.set(0.1 + (sl.active ? Math.sin(this.t * 1.3) * 0.05 : 0), Math.PI / 2 + (sl.active ? Math.sin(this.t * 0.9) * 0.25 : 0.12), sl.active ? 0.08 : -0.05);
-        for (const m of Object.values(g.meshes)) (m as THREE.Mesh).material = sl.active ? this.mat : this.dimMat;
-      }
-    } else if (this.belt) this.belt.visible = false;
     // ---------------------------------------------------- treasure markers
     for (let i = 0; i < A.markers.length; i++) {
       const mk = A.markers[i];
-      let o = this.markers[i];
-      if (!o || o.kind !== mk.kind) {
-        o?.root.removeFromParent();
-        const e = this.markerModel(mk.kind);
-        const root = new THREE.Group();
-        const model = new THREE.Mesh(e.geo, this.mat);
-        model.userData.size = e.size;
-        root.add(model);
-        o = { root, model, arrow: null, kind: mk.kind };
-        this.markers[i] = o;
-        this.group.add(root);
-      }
-      if (!o.arrow && this.arrowGeo) {
-        o.arrow = new THREE.Mesh(this.arrowGeo, this.mat);
-        o.root.add(o.arrow);
-      }
-      o.root.visible = true;
-      o.root.position.set(mk.x * s, -mk.y * s, 20);
-      const bob = Math.sin(this.t * 2.4 + i) * 1.5;
-      const size = (mk.kind === 'x' ? 32 : 27) * k;
-      o.model.scale.setScalar((size * s) / (o.model.userData.size || 1));
-      o.model.position.set(0, (bob + (mk.edge ? 0 : 12 * k)) * s, 0);
-      // turn gently (never edge-on) so the prop always reads
-      o.model.rotation.set(mk.kind === 'x' ? 0.8 : 0.55, Math.sin(this.t * 0.9 + i) * 0.6 + (mk.kind === 'blueprint' ? 0.15 : 0.4), mk.kind === 'blueprint' ? 0.35 : 0);
-      if (o.arrow) {
-        o.arrow.visible = mk.edge;
-        if (mk.edge) {
-          // the sign rides between the miniature and the edge, pointing the way
-          const ax = Math.cos(mk.ang), ay = Math.sin(mk.ang);
-          o.arrow.position.set(ax * 22 * k * s, -ay * 22 * k * s, 4);
-          o.arrow.scale.setScalar(s * k * 1.35 * (1 + Math.sin(this.t * 6) * 0.05));
-          o.arrow.rotation.set(0, 0, -mk.ang);
-        }
+      const sp = this.prize(mk.kind, k);
+      const bob = Math.round(Math.sin(this.t * 2.4 + i) * 1.5);
+      if (sp) blitC(c, sp, mk.x, mk.y - bob - (mk.edge ? 0 : 12 * k));
+      if (mk.edge) {
+        // the sign rides between the picture and the edge, pointing the way
+        const d = ((Math.round((mk.ang / TAU) * 16) % 16) + 16) % 16;
+        const ar = this.arrow(d, k);
+        const pulse = Math.round(Math.sin(this.t * 6) * 1);
+        if (ar) blitC(c, ar, mk.x + Math.cos(mk.ang) * (22 * k + pulse), mk.y + Math.sin(mk.ang) * (22 * k + pulse));
       }
     }
-    for (let i = A.markers.length; i < this.markers.length; i++) this.markers[i].root.visible = false;
-    // ---------------------------------------------------- ejected hulls
+    void s;
+  }
+
+  private paintFlyers(c: CanvasRenderingContext2D, dt: number, k: number) {
     for (let i = this.flyers.length - 1; i >= 0; i--) {
       const f = this.flyers[i];
       f.life -= dt;
@@ -437,35 +412,25 @@ export class ArsenalHud {
       f.x += f.vx * dt;
       f.y += f.vy * dt;
       f.r += f.w * dt;
-      f.mesh.position.set(f.x * s, -f.y * s, 60);
-      f.mesh.rotation.set(f.r * 0.7, f.r * 0.3, f.r);
       if (f.life <= 0) {
-        f.mesh.removeFromParent();
         this.flyers.splice(i, 1);
+        continue;
       }
+      const fr = ((Math.floor((f.r / Math.PI) * 4) % 4) + 4) % 4;
+      const sp = this.hull(fr, k);
+      if (sp) blitC(c, variant(sp, 'dim'), f.x, f.y, Math.min(1, f.life * 3));
     }
   }
 
-  private eject(src: THREE.Mesh, A: ArsenalAnchors, s: number) {
-    const m = new THREE.Mesh(src.geometry, this.dimMat);
-    m.scale.copy(src.scale);
-    this.group.add(m);
-    const x = src.position.x / s, y = -src.position.y / s;
-    this.flyers.push({ mesh: m, x, y, vx: 60 + Math.random() * 80, vy: -260 - Math.random() * 120, r: 0, w: 9 + Math.random() * 8, life: 1.3 });
-    for (let i = 0; i < 8; i++)
-      this.fx.emit({ x, y: y - SHELL_H * A.k * 0.5, vx: (Math.random() - 0.3) * 40, vy: -20 - Math.random() * 30, ay: -10, drag: 1.2, life: 0.5 + Math.random() * 0.5, size: 1, size1: 3, c0: 0xd8d0c0, c1: 0x6a6460, alpha: 0.6 });
+  private eject(A: ArsenalAnchors, i: number, n: number) {
+    const x = A.x + (i - (n - 1) / 2) * 12 * A.k, y = A.y;
+    this.flyers.push({ x, y, vx: 60 + Math.random() * 80, vy: -260 - Math.random() * 120, r: 0, w: 9 + Math.random() * 8, life: 1.3 });
+    for (let j = 0; j < 8; j++)
+      this.dust.emit({ x, y: y - SHELL_H * A.k * 0.5, vx: (Math.random() - 0.3) * 40, vy: -20 - Math.random() * 30, ay: -10, drag: 1.2, life: 0.5 + Math.random() * 0.5, size: 1, size1: 3, c0: 0xd8d0c0, c1: 0x6a6460, alpha: 0.6 });
   }
 
   dispose() {
-    this.group.removeFromParent();
-    this.strip.removeFromParent();
-    this.fx.dispose();
-    this.shellGeo?.dispose();
-    this.drumGeo?.dispose();
-    this.arrowGeo?.dispose();
-    this.belt?.geometry.dispose();
-    for (const e of this.markerGeo.values()) e.geo.dispose();
+    this.dust.dispose();
     void this.scene;
-    void clamp;
   }
 }

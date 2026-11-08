@@ -130,11 +130,11 @@ export class DrunkGait {
         // where the swinging foot lands: wide for balance, or crossing over the line
         this.placeTarget[leg] = this.rand() < 0.3 ? -0.05 - this.rand() * 0.04 : 0.02 + this.rand() * 0.07;
         // the weight drops onto the landing foot (harder some steps than others)
-        this.lurch.kick(this.foot * (0.9 + this.rand() * 1.4));
+        this.lurch.kick(this.foot * (5 + this.rand() * 6));
         if (this.nextStumble <= 0 && this.st < 0) {
           this.st = 0;
           this.nextStumble = this.every[0] + this.rand() * (this.every[1] - this.every[0]);
-          this.lurch.kick(-this.foot * 2.4);
+          this.lurch.kick(-this.foot * 12);
           this.headX.kick(-1.6);
           this.headZ.kick(this.foot * 1.2);
         }
@@ -153,10 +153,10 @@ export class DrunkGait {
     const A = amt;
     const tr = this.trip, rc = this.recover;
     // ---- pelvis: onto the stance foot, rolling (swagger), bobbing, surging on the lurch
-    const roll = -c * 0.075 + sway * 0.04 - lurch * 0.035;
+    const roll = -c * 0.075 + sway * 0.04 + lurch * 0.03;
     this.pelvisPos.x = (weave + sway * 0.03 + lurch * 0.032) * A;
     this.pelvisPos.y = (Math.abs(c) * 0.034 * (0.75 + 0.35 * this.stride[c < 0 ? 1 : 0]) - 0.012 - tr * 0.05) * A;
-    this.pelvisPos.z = (0.035 * Math.cos(2 * ph) * (this.tempo - 0.85) + tr * 0.07) * A;
+    this.pelvisPos.z = (0.022 * Math.cos(2 * ph) + tr * 0.07) * A;
     this.pelvisRot.x = (tr * 0.12 - rc * 0.03) * A;
     this.pelvisRot.y = (-s * 0.1 + this.weaveYaw) * A;
     this.pelvisRot.z = roll * A;

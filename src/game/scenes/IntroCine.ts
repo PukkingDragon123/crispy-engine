@@ -1,14 +1,21 @@
-// Opening cinematic (NEW RUN, about 80 s; SPACE / ESC / the SKIP label skips):
-//   0. COLD OPEN (cine/ColdOpen.ts, ~10 s) - Sundown walks out of a saloon toward
-//      the lens in slow motion while it blows up behind him (voxel fireball,
-//      shattered building, burning debris raining, a shock ring through the
-//      sand), the wagon goes up too, and "dustUP" bursts out of the sand in
-//      voxel-cast gold. Cut to black, then the approved opening below.
-//   1. SHOW YOUR BOUNTY - a weathered WANTED poster nailed to a signpost snaps in
-//      the golden-hour wind: SETHOS, THE HAND OF SET, $1,000,000. The portrait is
-//      the real Sethos rig photographed (IconFactory) and printed in sepia on a
-//      shader-paper cloth sheet (Verlet: it flaps, curls and tears). A long
-//      shadow falls across it; Sundown's bone hand rips it off its nails.
+// Opening cinematic (NEW RUN, about 85 s; SPACE / ESC / the SKIP label skips):
+//   0. COLD OPEN (cine/ColdOpen.ts, ~12.5 s) - Sundown staggers out of a saloon
+//      toward the lens in slow motion while it blows up behind him (voxel
+//      fireball, shattered building, burning debris raining, a shock ring through
+//      the sand), the wagon goes up too, and "dustUP" bursts out of the sand in
+//      voxel-cast gold. He looks up into the lens, turns side-on and shoots it:
+//      a bullet hole punches through the glass (cine/LensShot.ts), time freezes,
+//      and the view flies into the hole until it burns white.
+//      0b. Out of the white: the blinding hot desert sun, the air boiling, the
+//      signpost and its flapping sheet against the glare, and a drunk skeleton
+//      silhouette staggering out of the sun toward it.
+//   1. SHOW YOUR BOUNTY - his own WANTED bill nailed to the signpost snaps in the
+//      golden-hour wind: DEAD OR ALIVE, SUNDOWN, NAME UNKNOWN, $1,000,000. The
+//      portrait is his real rig photographed (CardStudio) in deep shadow under
+//      the brim, only the glowing eyes and the bandana catching light, pressed
+//      into a chunky pixel-art print (ui/WantedPrint.ts) on shader paper
+//      pixelated on the same grid (Verlet cloth: it flaps, curls and tears). His
+//      shadow falls across it; his bone hand rips it off its nails.
 //   2. He walks the dunes at golden hour, board slung on his back, Pinch on his
 //      shoulder, revolver twirling; footsteps kick up sand, pixel grit streams by.
 //   3. The ground trembles. A sigil of light traces itself into the sand, sand
@@ -17,6 +24,7 @@
 //      outward, then ignites into jade light (bloom, flash, motes).
 //   4. She talks in floating 3D words; you answer (1 / 2 / 3, click or tap);
 //      she has him throw his board down, and shrinks to a guide at his side.
+// He walks drunk everywhere (anim/drunkWalk.ts).
 // Returns { skipped }. Unless skipped, the run's interactive tutorial
 // (run/Tutorial.ts) takes over from here; skipping the intro skips it too.
 import * as THREE from 'three';
@@ -28,17 +36,19 @@ import type { Particles } from '../fx/Particles';
 import type { World } from '../world/World';
 import { buildRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
-import { makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
+import { ATMO } from '../../engine/render/VoxelMaterial';
 import type { VoxelModel } from '../../engine/voxel/VoxelModel';
 import { modelEntry } from '../models/lookup';
 import { FloatText3D } from '../fx/FloatText3D';
 import { Voice } from '../audio/Voice';
-import { IconFactory } from '../ui/IconFactory';
+import { mysteryPhoto, paintWantedPrint, pressPrint, PRINT_W, PRINT_H } from '../ui/WantedPrint';
 import { PARCHMENT_GLSL } from '../ui/Choice';
 import { GlyphRings, LightSigil, SandVortex, SerketSpirit, spiritMotes, guideSpot } from '../fx/SerketSpirit';
 import { Skills } from '../player/Skills';
 import * as CH from '../models/characters';
 import { playColdOpen } from '../cine/ColdOpen';
+import { LensShot } from '../cine/LensShot';
+import { DrunkGait } from '../anim/drunkWalk';
 
 export interface IntroDeps {
   engine: Engine;
@@ -64,91 +74,12 @@ const UP = new THREE.Vector3(0, 1, 0);
 
 const PW = 0.6, PH = PW * (1040 / 720);
 const NX = 10, NY = 14;
-const INK = '#2a1a10', RED = '#8e1c12', SEPIA = '#4a2a14';
 
-/** Sethos (form 1) photographed from his own rig, waist up, printed in sepia */
-function sethosPortrait(renderer: THREE.WebGLRenderer): HTMLCanvasElement | null {
-  const spec = modelEntry('sethos_1')?.() as RigSpec | undefined;
-  if (!spec?.parts) return null;
-  const mat = makeVoxelMaterial({ fog: false });
-  const f = new IconFactory(renderer);
-  try {
-    const r = new RigInstance(buildRigGeo(spec, spec.name + ':wanted'), { material: mat, castShadow: false });
-    for (const p of ['thigh_l', 'thigh_r', 'shin_l', 'shin_r']) r.setPartVisible(p, false);
-    r.setExpression('smug');
-    const n = r.nodes;
-    if (n.jaw) n.jaw.rotation.x = r.exprJaw;
-    n.brow_l?.rotation.set(0, 0, r.exprBrow[0]);
-    n.brow_r?.rotation.set(0, 0, r.exprBrow[1]);
-    n.arm_r?.rotation.set(-0.5, 0, -0.35);
-    n.fore_r?.rotation.set(-1.3, 0, 0);
-    n.arm_l?.rotation.set(0.05, 0, 0.18);
-    n.head?.rotation.set(0.1, -0.18, 0.05);
-    r.root.updateMatrixWorld(true);
-    const shot = f.capture(r.root, { w: 140, h: 120, ss: 4, yaw: -0.38, pitch: 0.06, fill: 0.97, dy: 0.03, light: 'sunset', levels: 12, ink: '#2a160a', rim: '#ffe2a8' });
-    const c = shot.getContext('2d')!;
-    const id = c.getImageData(0, 0, shot.width, shot.height);
-    const d = id.data;
-    for (let i = 0; i < d.length; i += 4) {
-      const l = (d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11) / 255;
-      const k = Math.min(1, Math.max(0, (l - 0.04) * 1.12));
-      d[i] = Math.min(255, 66 + k * 180);
-      d[i + 1] = Math.min(255, 38 + k * 152);
-      d[i + 2] = Math.min(255, 20 + k * 104);
-    }
-    c.putImageData(id, 0, 0);
-    return shot;
-  } catch (e) {
-    console.warn('[intro] wanted portrait failed', e);
-    return null;
-  } finally {
-    f.dispose();
-    mat.dispose();
-  }
-}
-
-/** the poster's ink: Alagard typography + the photographed portrait (the paper itself is the shader) */
-function paintWanted(portrait: HTMLCanvasElement | null) {
-  const W = 720, H = 1040;
-  const cv = document.createElement('canvas');
-  cv.width = W;
-  cv.height = H;
-  const c = cv.getContext('2d')!;
-  c.imageSmoothingEnabled = false;
-  c.textAlign = 'center';
-  c.textBaseline = 'top';
-  const t = (s: string, size: number, y: number, col = INK) => {
-    c.font = `${size}px Alagard`;
-    c.fillStyle = col;
-    const w = c.measureText(s).width;
-    const sx = Math.min(1, (W - 70) / Math.max(1, w));
-    c.save();
-    c.translate(W / 2, y);
-    c.scale(sx, 1);
-    c.fillText(s, 0, 0);
-    c.restore();
-  };
-  t('WANTED', 124, 30);
-  t('DEAD  OR  ALIVE', 40, 162, RED);
-  if (portrait) {
-    const pw = portrait.width * 3, ph = portrait.height * 3;
-    c.globalAlpha = 0.95;
-    c.drawImage(portrait, Math.round(W / 2 - pw / 2), 214, pw, ph);
-    c.globalAlpha = 1;
-  }
-  t('SETHOS', 96, 590);
-  t('- THE HAND OF SET -', 34, 694);
-  t('for the theft of the desert,', 27, 748, SEPIA);
-  t('a hundred stolen souls & one stolen name', 27, 782, SEPIA);
-  t('REWARD', 46, 836);
-  t('$ 1,000,000', 88, 886, RED);
-  t("claim at the eye of the storm  -  Serket's Reach", 22, 994, SEPIA);
-  return cv;
-}
-
+// the paper is printed on the same pixel grid as the ink: snapped UVs, a few dithered tones
 const POSTER_PAPER = /* glsl */ `
 {
-  vec2 pUv = vMapUv;
+  vec2 pPix = floor(vMapUv * uGrid);
+  vec2 pUv = (pPix + 0.5) / uGrid;
   float pEdge = paperEdge(pUv, uAspect);
   float pTear = paperTear(pUv, 0.02);
   if (pEdge < pTear) discard;
@@ -165,11 +96,21 @@ const POSTER_PAPER = /* glsl */ `
     if (uTorn < 0.5 && uScrap < 0.5) pCol = mix(pCol, vec3(0.12, 0.1, 0.09), smoothstep(0.009, 0.004, d));
   }
   if (uTorn > 0.5 || uScrap > 0.5) pCol = mix(pCol, vec3(0.98, 0.93, 0.8), smoothstep(0.012, 0.0, abs(pHh)) * 0.8);
+  pCol = floor(pCol * 10.0 + bayer4(pPix)) / 10.0;
   vec3 pLin = pow(pCol, vec3(2.2));
   vec4 pInk = texture2D(map, pUv);
-  float pPress = 0.8 + 0.2 * smoothstep(0.2, 0.6, pNoise(pUv * vec2(uAspect, 1.0) * 260.0));
-  if (gl_FrontFacing) pLin = mix(pLin, pInk.rgb * mix(vec3(1.0), pLin * 1.1, 0.2), pInk.a * pPress);
-  else pLin = mix(pLin, pLin * 0.78, pInk.a * 0.3);
+  // a cheap press: here and there a pixel takes the ink thin
+  float pPress = 0.78 + 0.22 * step(0.3, pHash(pPix * 0.0731 + 3.1));
+  if (gl_FrontFacing) {
+    pLin = mix(pLin, pInk.rgb * mix(vec3(1.0), pLin * 1.1, 0.2), pInk.a * pPress);
+    // the eyes are printed in a luminous ink
+    float pEye = pInk.a * step(0.7, pInk.g) * step(pInk.r, 0.75) * step(pInk.b, 0.5);
+    totalEmissiveRadiance += vec3(0.32, 1.0, 0.18) * pEye * 0.7;
+  } else {
+    pLin = mix(pLin, pLin * 0.78, pInk.a * 0.3);
+    // the low sun shines through the sheet from behind
+    totalEmissiveRadiance += pLin * uBack * (1.0 - pInk.a * 0.75);
+  }
   diffuseColor.rgb *= pLin;
 }
 `;
@@ -183,9 +124,12 @@ function paperMaterial(ink: THREE.Texture, u: Record<string, { value: unknown }>
       .replace(
         '#include <common>',
         `#include <common>
-uniform float uAspect, uTorn, uScrap;
+uniform float uAspect, uTorn, uScrap, uBack;
+uniform vec2 uGrid;
 uniform vec4 uNails;
 ${PARCHMENT_GLSL}
+float bayerB2(vec2 p){ return mod(2.0 * p.x + 3.0 * p.y, 4.0); }
+float bayer4(vec2 p){ vec2 q = mod(p, 4.0); return (4.0 * bayerB2(mod(q, 2.0)) + bayerB2(floor(q / 2.0)) + 0.5) / 16.0; }
 float tornHole(vec2 uv, vec2 at){
   vec2 d = (uv - at) * vec2(uAspect, 1.0);
   float a = atan(d.y, d.x);
@@ -194,7 +138,7 @@ float tornHole(vec2 uv, vec2 at){
       )
       .replace('#include <map_fragment>', POSTER_PAPER);
   };
-  m.customProgramCacheKey = () => 'dustup-intro-wanted';
+  m.customProgramCacheKey = () => 'dustup-intro-wanted-px';
   return m;
 }
 
@@ -214,7 +158,7 @@ class WantedPoster {
   private scrapMat: THREE.MeshStandardMaterial;
   private scraps: THREE.Mesh[] = [];
   private ink: THREE.CanvasTexture;
-  private u = { uAspect: { value: PW / PH }, uSeed: { value: Math.random() }, uTorn: { value: 0 }, uNails: { value: new THREE.Vector4(4 / 9, 0.975, 5 / 9, 0.975) } };
+  private u = { uAspect: { value: PW / PH }, uSeed: { value: Math.random() }, uTorn: { value: 0 }, uNails: { value: new THREE.Vector4(4 / 9, 0.975, 5 / 9, 0.975) }, uGrid: { value: new THREE.Vector2(PRINT_W, PRINT_H) }, uBack: { value: 0.3 } };
   pts: ClothPt[] = [];
   private springs: [number, number, number, number][] = [];
   private nails: THREE.Vector3[] = [];
@@ -223,11 +167,19 @@ class WantedPoster {
   torn = false;
   /** 0..1: folded away into a coat */
   fold = 0;
+  /** the post's front face (m from its axis, along the sheet's normal) and half width */
+  face = 0.08;
+  halfW = 0.085;
+  /** how much the low sun shines through the back of the sheet */
+  set backlight(v: number) {
+    this.u.uBack.value = v;
+  }
 
-  constructor(scene: THREE.Scene, portrait: HTMLCanvasElement | null, private top: THREE.Vector3, private n: THREE.Vector3, private postAxis: THREE.Vector3, private ground: (x: number, z: number) => number) {
+  constructor(scene: THREE.Scene, ink: HTMLCanvasElement, private top: THREE.Vector3, private n: THREE.Vector3, private postAxis: THREE.Vector3, private ground: (x: number, z: number) => number) {
     this.lat = new THREE.Vector3().crossVectors(UP, n).normalize();
-    this.ink = new THREE.CanvasTexture(paintWanted(portrait));
+    this.ink = new THREE.CanvasTexture(ink);
     this.ink.colorSpace = THREE.SRGBColorSpace;
+    this.ink.magFilter = THREE.NearestFilter;
     this.ink.anisotropy = 4;
     this.mat = paperMaterial(this.ink, this.u, false);
     this.scrapMat = paperMaterial(this.ink, this.u, true);
@@ -349,8 +301,8 @@ class WantedPoster {
         for (const q of this.pts) {
           if (q.pin >= 0) continue;
           tmp.copy(q.p).sub(this.postAxis);
-          const dl = tmp.dot(lat), dn = tmp.dot(n) - 0.08;
-          const lim = Math.abs(dl) < 0.085 ? 0.003 : -0.16;
+          const dl = tmp.dot(lat), dn = tmp.dot(n) - this.face;
+          const lim = Math.abs(dl) < this.halfW ? 0.003 : -0.16;
           if (dn < lim) q.p.addScaledVector(n, lim - dn);
         }
       for (const q of this.pts) {
@@ -367,6 +319,15 @@ class WantedPoster {
     pos.needsUpdate = true;
     this.geo.computeVertexNormals();
     this.geo.computeBoundingSphere();
+  }
+
+  /** hang it flat again (on a cut) */
+  reset() {
+    for (const q of this.pts) {
+      q.p.copy(q.rest);
+      q.o.copy(q.rest);
+    }
+    this.writeMesh();
   }
 
   centre(out = new THREE.Vector3()) {
@@ -404,20 +365,6 @@ const ARM = {
   tuck: { arm_r: [-0.3, 0.2, 0.05], fore_r: [-1.75, 0, 0] },
   throw: { arm_r: [-2.4, 0, -0.3], fore_r: [-0.3, 0, 0] },
 } as Record<string, Record<'arm_r' | 'fore_r', Pose3>>;
-
-function walkPose(r: RigInstance, ph: number, amt: number) {
-  const n = r.nodes;
-  const s = Math.sin(ph);
-  const set = (k: string, x: number, y = 0, z = 0) => n[k]?.rotation.set(x, y, z);
-  set('thigh_l', -s * 0.55 * amt);
-  set('thigh_r', s * 0.55 * amt);
-  set('shin_l', Math.max(0, Math.sin(ph + 1.4)) * 0.85 * amt);
-  set('shin_r', Math.max(0, Math.sin(ph + 1.4 + Math.PI)) * 0.85 * amt);
-  set('arm_l', s * 0.45 * amt, 0, 0.08);
-  set('fore_l', -0.25 - Math.max(0, s) * 0.3 * amt);
-  set('torso', 0.05 * amt, Math.sin(ph) * 0.09 * amt, Math.cos(ph) * 0.03 * amt);
-  if (n['pelvis']) n['pelvis'].rotation.y = -Math.sin(ph) * 0.06 * amt;
-}
 
 // ================================================================== the cinematic
 
@@ -487,6 +434,8 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
   const Q = p.clone().addScaledVector(fwd, -11).addScaledVector(side, 1.0);
   Q.y = gy(Q);
   let postMesh: THREE.Mesh | null = null;
+  // how far the post's face stands proud of its axis where the sheet hangs (the hewn post is not a slim pole)
+  let postFace = 0.08, postHalf = 0.085;
   {
     let best: { model: VoxelModel; voxelSize: number } | null = null, bestY = -1;
     for (let s = 0; s < 4; s++) {
@@ -505,6 +454,16 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     if (e?.model) {
       const b = e.model.bounds();
       postMesh = new THREE.Mesh(buildVoxelGeometry(e.model, { voxelSize: e.voxelSize, pivot: [0.5, b.minY, 0.5] }), player.material);
+      // the post's -Z side faces the sun (and the sheet): measure it over the sheet's height band
+      const y0 = b.minY + Math.floor(0.85 / e.voxelSize), y1 = b.minY + Math.floor(1.85 / e.voxelSize);
+      let zMin = 0, xMax = 0;
+      e.model.forEach((x, y, z) => {
+        if (y < y0 || y > y1 || Math.abs(x) > 8 || Math.abs(z) > 8) return;
+        zMin = Math.min(zMin, z);
+        xMax = Math.max(xMax, Math.abs(x));
+      });
+      postFace = Math.max(0.08, (0.5 - zMin) * e.voxelSize);
+      postHalf = Math.max(0.085, (xMax + 0.5) * e.voxelSize + 0.01);
       postMesh.castShadow = true;
       postMesh.receiveShadow = true;
       postMesh.position.copy(Q).add(new THREE.Vector3(0, -0.06, 0));
@@ -559,7 +518,8 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
   d.scene.add(actor.root);
   own.push(actor.root);
   actor.setExpression('determined');
-  let walkPh = 0, walkAmt = 0, spin = 0, spinRate = 0, lastStep = 0;
+  let walkAmt = 0, spin = 0, spinRate = 0, headPitch = 0;
+  const gait = new DrunkGait(11.3);
   let armPose = 'relax';
   const armCur: Record<string, THREE.Vector3> = { arm_r: new THREE.Vector3(...ARM.relax.arm_r), fore_r: new THREE.Vector3(...ARM.relax.fore_r) };
   let armSpeed = 6;
@@ -567,8 +527,18 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
   // the poster (top centre on the post's face, a little above shoulder height)
   const topY = Q.y + THREE.MathUtils.clamp(shoulderY + 0.4, 1.55, 1.95);
   const lat = new THREE.Vector3().crossVectors(UP, nP).normalize();
-  const posterTop = new THREE.Vector3(Q.x, topY, Q.z).addScaledVector(nP, 0.08);
-  let poster: WantedPoster | null = new WantedPoster(d.scene, sethosPortrait(eng.renderer), posterTop, nP, new THREE.Vector3(Q.x, 0, Q.z), ground);
+  const posterTop = new THREE.Vector3(Q.x, topY, Q.z).addScaledVector(nP, postFace);
+  // his own bill: his rig photographed in shadow under the brim, pressed into a pixel-art print
+  const photo = mysteryPhoto(eng.renderer, player.rig.geo);
+  const wantedInk = paintWantedPrint(photo ? pressPrint(photo) : null);
+  Object.assign(window as any, { __wantedInk: wantedInk, __wantedPhoto: photo }); // dev: inspect the print
+  let poster: WantedPoster | null = new WantedPoster(d.scene, wantedInk, posterTop, nP, new THREE.Vector3(Q.x, 0, Q.z), ground);
+  poster.face = postFace;
+  poster.halfW = postHalf;
+  // the lens he shoots at the end of the cold open (then the heat shimmer and the sun's glare)
+  const lens = new LensShot(eng);
+  let lensLive = false;
+  disposers.push(() => lens.dispose());
   const handW = new THREE.Vector3();
   // Serket
   const soulAt = p.clone().addScaledVector(fwd, 8.5).addScaledVector(side, -0.4);
@@ -598,14 +568,14 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
 
   const tick = (dt: number) => {
     T += dt;
-    // ---- Sundown
-    walkPh += dt * 6.2 * walkAmt;
-    walkPose(actor, walkPh, walkAmt);
-    actor.root.position.y = gy(actor.root.position) + Math.abs(Math.cos(walkPh)) * 0.035 * walkAmt;
-    if (walkAmt > 0.3 && Math.floor(walkPh / Math.PI) !== lastStep) {
-      lastStep = Math.floor(walkPh / Math.PI);
+    (window as any).__phaseT = T - phaseAt;
+    // ---- Sundown (three whiskeys deep)
+    gait.update(dt, 6.2, walkAmt);
+    gait.pose(actor.nodes, { armL: true, armR: false, head: false });
+    actor.root.position.y = gy(actor.root.position);
+    if (walkAmt > 0.3 && gait.stepped) {
       eng.audio.play('footstep_sand', { volume: 0.35, pitch: 0.9 + Math.random() * 0.2 });
-      const fp = actor.root.position;
+      const fp = actor.nodes[gait.foot === 1 ? 'shin_l' : 'shin_r']?.getWorldPosition(new THREE.Vector3()).setY(actor.root.position.y) ?? actor.root.position;
       d.fx.dust({ x: fp.x, y: fp.y + 0.05, z: fp.z }, 0.25, 0xe6cf9f, 2);
       d.particles.emit({ pos: { x: fp.x, y: fp.y + 0.04, z: fp.z }, count: 5, spread: 1.2, up: 1.2, life: [0.4, 0.8], size: [0.05, 0.03], sprite: ['grain0', 'grain1', 'grain2'], color: [0xf6dfb0, 0xe0b373], gravity: 9, ground: true });
     }
@@ -613,12 +583,13 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     holder.rotation.x = Math.PI / 2 + spin;
     const target = ARM[armPose] ?? ARM.relax;
     const kk = 1 - Math.exp(-dt * armSpeed);
-    for (const j of ['arm_r', 'fore_r'] as const) {
-      armCur[j].lerp(new THREE.Vector3(...target[j]), kk);
-      actor.nodes[j]?.rotation.set(armCur[j].x, armCur[j].y, armCur[j].z);
-    }
+    for (const j of ['arm_r', 'fore_r'] as const) armCur[j].lerp(new THREE.Vector3(...target[j]), kk);
+    // the gun arm keeps its pose but hangs loose on the stagger
+    actor.nodes['arm_r']?.rotation.set(armCur.arm_r.x + gait.armR.x * 0.3, armCur.arm_r.y, armCur.arm_r.z + gait.armR.z * 0.3);
+    actor.nodes['fore_r']?.rotation.set(armCur.fore_r.x + (gait.armR.fore + 0.28 * gait.amt) * 0.25, armCur.fore_r.y, armCur.fore_r.z);
     const n = actor.nodes;
-    if (n['head']) n['head'].rotation.x += ((headLook > 0 ? 0.32 * headLook : headLook < 0 ? -0.3 : -0.04 * (1 - walkAmt)) - n['head'].rotation.x) * Math.min(1, dt * 5);
+    headPitch += ((headLook > 0 ? 0.32 * headLook : headLook < 0 ? -0.3 : -0.04 * (1 - walkAmt)) - headPitch) * Math.min(1, dt * 5);
+    n['head']?.rotation.set(headPitch + gait.head.x, gait.head.y, gait.head.z);
     if (n['jaw']) n['jaw'].rotation.x = actor.exprJaw;
     n['brow_l']?.rotation.set(0, 0, actor.exprBrow[0]);
     n['brow_r']?.rotation.set(0, 0, actor.exprBrow[1]);
@@ -634,6 +605,10 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
       pinch.root.rotation.y = Math.sin(T * 1.3) * 0.3;
     }
     actor.root.updateMatrixWorld(true);
+    if (lensLive) {
+      lens.track(camera, ATMO.sunDir);
+      lens.sync();
+    }
     // ---- the poster
     if (poster) {
       if (poster.hand) {
@@ -684,6 +659,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
   const dtCap = +(new URLSearchParams(location.search).get('cinedt') ?? 0.05);
   const frame = async () => {
     await eng.tweens.wait(0.016, true);
+    while ((window as any).__cineHold && !skipped) await eng.tweens.wait(0.016, true); // dev: freeze for a screenshot
     const now = performance.now();
     const dt = Math.min(dtCap, (now - last) / 1000);
     last = now;
@@ -753,7 +729,11 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
   };
 
   // dev handle for headless checks: window.__introPhase
-  const phase = (n: string) => ((window as any).__introPhase = n);
+  let phaseAt = 0;
+  const phase = (n: string) => {
+    (window as any).__introPhase = n;
+    phaseAt = T;
+  };
   player.rig.root.visible = false;
   player.boardMesh.visible = false;
   eng.input.enabled = false;
@@ -762,8 +742,46 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
   try {
     // ================================================================ 0. COLD OPEN
     phase('coldopen');
-    await playColdOpen({ engine: eng, cam, world, scene: d.scene, player, skipped: () => skipped, dtCap });
+    await playColdOpen({ engine: eng, cam, world, scene: d.scene, player, skipped: () => skipped, dtCap, lens });
     last = performance.now();
+    // ================================================================ 0b. THROUGH THE HOLE: THE HOT DESERT SUN
+    // out of the white, into the glare: the sign and its sheet against the sun, the air boiling,
+    // and a lone skeleton staggering out of the light toward it
+    phase('sun');
+    lensLive = true;
+    const hot = golden ? { ...golden, sunColor: 0xfff0d0, sunIntensity: golden.sunIntensity * 1.2, horizon: 0xffd29a, clouds: 0.3 } : null;
+    if (!skipped) {
+      if (hot) env.apply?.(hot);
+      Object.assign(lens, { on: 0, push: 0, crack: 0, burn: 0, light: 0, white: 1, blaze: 1, glare: 0.9, shimmer: 1 });
+      if (poster) poster.backlight = 1.1;
+      const far = S0.clone().addScaledVector(nP, 10.5);
+      far.y = gy(far);
+      actor.root.position.copy(far);
+      walkAmt = 0.85;
+      // low behind the post: the sun hangs just above the walker's hat, the post and its sheet to one side
+      const sunCam = Q.clone().addScaledVector(nP, -2.7).addScaledVector(lat, 0.75);
+      sunCam.y = gy(sunCam) + 0.5;
+      const sunLook = Q.clone().addScaledVector(nP, 6.5);
+      sunLook.y = gy(sunLook) + 1.5;
+      eng.audio.play('whoosh_big', { volume: 0.5, pitch: 0.4 });
+      eng.audio.play('sand_spray', { volume: 0.4, pitch: 0.7 });
+      let cut = true;
+      await runFor(2.9, (k, t) => {
+        actor.root.position.lerpVectors(far, actorPos, k);
+        lens.white = 1 - (1 - Math.pow(1 - Math.min(1, t / 1.0), 3));
+        lens.glare = 0.9 - 0.25 * k;
+        lens.blaze = Math.max(1 - t * 1.5, 0.14 - 0.06 * k);
+        const cp = sunCam.clone().addScaledVector(nP, k * 0.45).add(new THREE.Vector3(0, k * 0.08, 0));
+        shot(cp, sunLook.clone().add(new THREE.Vector3(0, -0.35 * ease(k), 0)), 40 - k * 3, !cut);
+        cut = false;
+      });
+      // cut to the sheet through a hot flash (the eye adjusts)
+      eng.flash(0xfff2d8, 0.65, 0.55);
+      if (poster) {
+        poster.backlight = 0.3;
+        poster.reset();
+      }
+    }
     // ================================================================ 1. SHOW YOUR BOUNTY
     phase('poster');
     const pc = posterTop.clone().addScaledVector(UP, -PH * 0.5);
@@ -779,10 +797,18 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     stop.y = gy(stop);
     await runFor(4.6, (k, t) => {
       const e = ease(k);
+      // the heat haze and the glare settle as the eye adjusts
+      lens.white = 0;
+      lens.shimmer = 1 - ease(Math.min(1, t / 1.9));
+      lens.glare = Math.max(0, 0.6 - t * 0.5);
+      lens.blaze = Math.max(0, 0.15 - t * 0.12);
+      if (hot && golden && t < 2.2) env.lerpPreset?.(hot, golden, ease(t / 2.2));
       shot(pc.clone().addScaledVector(nP, 1.05 - e * 0.32).addScaledVector(lat, -0.22 + e * 0.08).add(new THREE.Vector3(0, 0.05 - e * 0.12, 0)), pc.clone().add(new THREE.Vector3(0, -0.06 * e, 0)), 38 - e * 4, true);
       actor.root.position.lerpVectors(from, stop, Math.min(1, t / 4.4));
       if (t > 2.0 && t < 2.05) eng.audio.play('paper_flutter', { volume: 0.5, pitch: 1.2 });
     });
+    if (hot && golden) env.apply?.(golden);
+    Object.assign(lens, { shimmer: 0, glare: 0, blaze: 0, white: 0 });
     walkAmt = 0;
     // the reward line, then up to the face
     await runFor(1.8, (k) => {
@@ -827,7 +853,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     actor.setExpression('smug');
     eng.audio.play('scorpion_chitter', { volume: 0.8 });
     await say('pinch', '*click click*  (a million!)', 0.4);
-    await say('sundown', "A million, and my name back. Reckon that's a fair price.", 0.5);
+    await say('sundown', "A million on my skull, and Sethos signed it himself. Reckon I'll deliver it personal.", 0.5);
     armPose = 'tuck';
     eng.audio.play('page_turn', { volume: 0.6 });
     await runFor(0.8, (k) => poster && (poster.fold = ease(k)));

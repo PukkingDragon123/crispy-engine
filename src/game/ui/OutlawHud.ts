@@ -1,5 +1,8 @@
-// Outlaw HUD furniture — the sheriff's-office readouts as real 3D pieces in the
-// HUD overlay, sculpted on dense voxel grids with realistic materials:
+// Outlaw HUD furniture — the sheriff's-office readouts, sculpted below as real
+// 3D models on dense voxel grids with realistic materials, and shown on the HUD
+// as flat pixel art: each is photographed once (HudSprites) and composited in
+// 2D with Alagard type on top (the stopwatch is a 31-frame flip-book, one per
+// second of the break; its chains are photographed links laid out link by link):
 //  • TIN STAR: a pressed-tin six-point star with ball tips, a stamped border,
 //    a raised boss with the rank struck into it; spins and rings on rank-up
 //  • TALLY BOARD: two weathered, nailed pine planks (grain, knots, cracks,
@@ -17,9 +20,9 @@ import * as THREE from 'three';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { VF } from '../../engine/voxel/VoxelModel';
-import {
-  sculpt, JobQueue, Surf, TextPlane, PixelFx, inkText, measureInk, fbm3, h3, mixc, mulc, clamp, clamp01, sstep, len2, len3, segD, sdRoundBox2, TAU, uiSfx, METAL, KNZ,
-} from './HudKit';
+import { sculpt, Surf, PixelFx, fbm3, h3, mixc, mulc, clamp, clamp01, sstep, len2, len3, segD, sdRoundBox2, TAU, uiSfx, METAL, KNZ } from './HudKit';
+import { SpriteBank, Shot, Sprite, blitC, blitSquash, framingBox, wrap, pixelText, pixelTextWidth } from './HudSprites';
+import { UI, px } from './PixelUI';
 
 const V2 = 2; // voxels per HUD px for the big pieces
 const geoOf = (m: ReturnType<typeof sculpt>, vph: number) => buildVoxelGeometry(m, { voxelSize: 1 / vph, pivot: [0, 0, 0] });
@@ -419,159 +422,151 @@ const swing = (s: Swing, dt: number, k = 40, c = 2.2) => {
   s.a = Math.max(-3, Math.min(3, s.a));
 };
 
+// the models, built on first use and only ever photographed
+const geoOfMesh = (fn: () => ReturnType<typeof sculpt>, vph: number) => new THREE.Mesh(geoOf(fn(), vph), SpriteBank.get().material());
+const piece = new Map<string, THREE.Group>();
+function model(name: string, make: () => THREE.Object3D) {
+  let g = piece.get(name);
+  if (!g) {
+    g = wrap(make());
+    piece.set(name, g);
+  }
+  return g;
+}
+interface WatchRig {
+  root: THREE.Group;
+  hand: THREE.Group;
+  dial: THREE.ShaderMaterial;
+}
+let watchRig: WatchRig | null = null;
+function watch(): WatchRig {
+  if (watchRig) return watchRig;
+  const body = new THREE.Group();
+  body.add(geoOfMesh(watchModel, V2));
+  const blank = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1);
+  blank.needsUpdate = true;
+  const dial = new THREE.ShaderMaterial({
+    uniforms: { map: { value: blank }, uLeft: { value: 1 }, uBell: { value: 0 }, uRed: { value: 0 }, uT: { value: 0 } },
+    vertexShader: DIAL_VS,
+    fragmentShader: DIAL_FS,
+  });
+  const face = new THREE.Mesh(new THREE.CircleGeometry(WR - 3.1, 64), dial);
+  face.position.z = 1.45;
+  body.add(face);
+  const hand = new THREE.Group();
+  const hm = geoOfMesh(handModel, 4);
+  hm.position.z = 2.0;
+  hand.add(hm);
+  body.add(hand);
+  const lid = new THREE.Group();
+  lid.add(geoOfMesh(lidModel, V2));
+  // sprung open on its hinge: the engraved inner face turns to us beside the dial
+  lid.position.set(WR - 0.4, 0, 3.6);
+  lid.rotation.y = -0.42;
+  body.add(lid);
+  // symmetric round the case centre, so the case sits at the picture's centre
+  body.add(framingBox([-58, -31, -18], [58, 31, 18]));
+  watchRig = { root: wrap(body), hand, dial };
+  return watchRig;
+}
+
+/** plaque (HUD px): the label and its chain rings */
+const RING_X = 46, RING_Y = 16.8;
+
 export class OutlawHud {
-  private mat: VoxelMaterial;
-  private built = false;
-  private jobs = new JobQueue();
-  private linkGeo: THREE.BufferGeometry | null = null;
+  private bank = SpriteBank.get();
   // star
-  private star = new THREE.Group();
-  private starNum = new TextPlane(14, 14, 1);
   private starSpin = 0;
   private lastRank = -1;
   // tally
-  private board = new THREE.Group();
-  private boardText = new TextPlane(BOARD_W, BOARD_H, 1);
   private shown = -1;
   private boardKick: Swing = { a: 0, v: 0 };
   private chalkAcc = 0;
   // plaque
-  private plaque = new THREE.Group();
-  private plaqueText = new TextPlane(PLQ_W - 16, PLQ_H - 6, 1);
-  private chains: THREE.Mesh[] = [];
-  private tag = new THREE.Group();
-  private tagText = new TextPlane(TAG_W - 10, TAG_H - 1, 1);
   private sw: Swing = { a: 0, v: 0 };
   private lastLabel = '';
   private dropY = 0;
   private tagShow = 0;
   // watch
-  private watch = new THREE.Group();
-  private watchBody = new THREE.Group();
-  private watchLid = new THREE.Group();
-  private hand = new THREE.Group();
-  private dial: THREE.Mesh;
-  private dialMat: THREE.ShaderMaterial;
-  private dialTex: THREE.CanvasTexture | null = null;
-  private watchNum = new TextPlane(26, 18, 3);
-  private watchChain: THREE.Mesh[] = [];
   private watchShow = 0;
   private watchSw: Swing = { a: 0, v: 0 };
   private lastSec = -1;
-  private lidOpen = 0;
-  private fx = new PixelFx(240, false, 8);
+  private dust = new PixelFx(240, false, 8);
   private glow = new PixelFx(160, true, 8);
   private t = 0;
 
   constructor(private scene: THREE.Scene) {
-    this.mat = makeVoxelMaterial({ fog: false });
-    this.dialMat = new THREE.ShaderMaterial({
-      uniforms: { map: { value: null }, uLeft: { value: 1 }, uBell: { value: 0 }, uRed: { value: 0 }, uT: { value: 0 } },
-      vertexShader: DIAL_VS,
-      fragmentShader: DIAL_FS,
+    scene.add(this.dust.points, this.glow.points);
+  }
+
+  fx(dt: number, s: number, visible: boolean) {
+    this.dust.points.visible = this.glow.points.visible = visible;
+    this.dust.update(dt, s);
+    this.glow.update(dt, s);
+  }
+
+  // ---------------------------------------------------- photographs
+  private star(k: number) {
+    const S = Math.round(36 * k) + 2;
+    return this.bank.get('ol:star', S, 62, (): Shot => ({ obj: model('star', () => geoOfMesh(starModel, V2)), w: S, h: S, yaw: 0.16, pitch: 0.12, fit: true }));
+  }
+  private board(k: number) {
+    const w = Math.round(96 * k) + 2, h = Math.round(34 * k) + 2;
+    return this.bank.get('ol:board', w, 62, (): Shot => ({ obj: model('board', () => geoOfMesh(boardModel, V2)), w, h, yaw: -0.12, pitch: 0.06, fit: true }));
+  }
+  private plaque(k: number) {
+    const w = Math.round(142 * k) + 2, h = Math.round(44 * k) + 2;
+    return this.bank.get('ol:plaque', w, 61, (): Shot => ({
+      obj: model('plaque', () => wrap(geoOfMesh(plaqueModel, V2), framingBox([-70, -21.5, -1], [70, 21.5, 6]))),
+      w, h, yaw: 0, pitch: 0.06, fit: true,
+    }));
+  }
+  private tag(k: number) {
+    const w = Math.round(40 * k) + 2, h = Math.round(28 * k) + 2;
+    return this.bank.get('ol:tag', w, 55, (): Shot => ({
+      obj: model('tag', () => wrap(geoOfMesh(tagModel, V2), framingBox([-19.5, -13.5, -1], [19.5, 13.5, 4]))),
+      w, h, yaw: 0, pitch: 0.05, fit: true,
+    }));
+  }
+  private link(edge: boolean, k: number) {
+    const S = Math.max(5, Math.round(7 * k) + 2);
+    return this.bank.get('ol:link' + (edge ? 'e' : 'f'), S, 60, (): Shot => ({
+      obj: model('link' + (edge ? 'e' : 'f'), () => wrap(geoOfMesh(linkModel, 4), framingBox([-3, -3.2, -3], [3, 3.2, 3]))),
+      w: S, h: S, yaw: edge ? Math.PI / 2 - 0.15 : 0.15, pitch: 0.1, fit: true,
+    }));
+  }
+  private watchFrame(sec: number, k: number, prio: number) {
+    const w = Math.round(116 * WATCH_S * k) + 2, h = Math.round(62 * WATCH_S * k) + 2;
+    return this.bank.get('ol:watch' + sec, w, prio, (): Shot => {
+      const r = watch();
+      const frac = clamp01(sec / 30);
+      r.hand.rotation.z = -(1 - frac) * TAU;
+      const u = r.dial.uniforms;
+      u.uLeft.value = frac;
+      u.uBell.value = 0;
+      u.uRed.value = sec <= 5 && sec > 0 ? 1 : 0;
+      return { obj: r.root, w, h, yaw: 0.32, pitch: 0.1, fit: true };
     });
-    this.dial = new THREE.Mesh(new THREE.CircleGeometry(WR - 3.1, 64), this.dialMat);
-    this.dial.position.z = 1.45;
-    for (const g of [this.star, this.board, this.plaque, this.watch]) {
-      g.visible = false;
-      scene.add(g);
+  }
+
+  /** a chain of photographed links from (x0, y0) down to (x1, y1), HUD px */
+  private chain(c: CanvasRenderingContext2D, k: number, x0: number, y0: number, x1: number, y1: number) {
+    const fa = this.link(false, k), ed = this.link(true, k);
+    if (!fa || !ed) return;
+    const L = Math.hypot(x1 - x0, y1 - y0);
+    const step = 4.3 * k;
+    const n = Math.max(1, Math.round(L / step));
+    for (let i = 0; i <= n; i++) {
+      const f = i / n;
+      blitC(c, i % 2 ? ed : fa, x1 + (x0 - x1) * f, y1 + (y0 - y1) * f);
     }
-    scene.add(this.fx.points, this.glow.points);
   }
 
-  /** queue the sculpting: one piece per frame so the run never hitches */
-  private build() {
-    this.built = true;
-    const mk = (fn: () => ReturnType<typeof sculpt>, vph: number) => new THREE.Mesh(geoOf(fn(), vph), this.mat);
-    const J = this.jobs;
-    J.add(() => {
-      this.star.add(mk(starModel, V2));
-      this.starNum.mesh.position.z = 4.05;
-      this.star.add(this.starNum.mesh);
-    });
-    J.add(() => {
-      this.board.add(mk(boardModel, V2));
-      this.boardText.mesh.position.z = 2.75;
-      this.board.add(this.boardText.mesh);
-    });
-    J.add(() => {
-      this.plaque.add(mk(plaqueModel, V2));
-      this.plaqueText.mesh.position.set(0, -0.5, 3.05);
-      this.plaque.add(this.plaqueText.mesh);
-      this.linkGeo = geoOf(linkModel(), 4);
-      for (const [rx, ry] of RINGS)
-        for (let i = 0; i < 7; i++) {
-          const l = new THREE.Mesh(this.linkGeo, this.mat);
-          l.position.set(rx, ry + 3.4 + i * 4.3, 2.4);
-          l.rotation.y = i % 2 ? Math.PI / 2 : 0.15;
-          this.plaque.add(l);
-        }
-    });
-    J.add(() => {
-      this.tag.add(mk(tagModel, V2));
-      this.tagText.mesh.position.z = 1.75;
-      this.tag.add(this.tagText.mesh);
-      this.tag.position.set(0, -PLQ_H / 2 - TAG_H / 2 + 2.5, 0.8);
-      this.plaque.add(this.tag);
-    });
-    J.add(() => {
-      this.watchBody.add(mk(watchModel, V2));
-      this.watchBody.add(this.dial);
-      this.watchNum.mesh.position.set(0, -6.5, 2.6);
-      this.watchBody.add(this.watchNum.mesh);
-      this.watch.add(this.watchBody);
-      for (let i = 0; i < 4; i++) {
-        const l = new THREE.Mesh(this.linkGeo ?? geoOf(linkModel(), 4), this.mat);
-        l.rotation.y = i % 2 ? Math.PI / 2 : 0.1;
-        this.watch.add(l);
-        this.watchChain.push(l);
-      }
-    });
-    J.add(() => {
-      const hand = mk(handModel, 4);
-      hand.position.z = 2.0;
-      this.hand.add(hand);
-      this.watchBody.add(this.hand);
-      this.watchLid.add(mk(lidModel, V2));
-      // hinged on the right; open, its engraved inner face turns to us beside the dial
-      this.watchLid.position.set(WR - 0.4, 0, 3.6);
-      this.watchBody.add(this.watchLid);
-    });
-  }
-
-  private dialNumerals(q: number) {
-    const cv = document.createElement('canvas');
-    const S = Math.round((WR - 3.1) * 2 * q);
-    cv.width = cv.height = S;
-    const c = cv.getContext('2d')!;
-    const R = (WR - 3.1) * q;
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * TAU;
-      const label = String(30 - i * 5);
-      const x = S / 2 + Math.sin(a) * R * 0.6, y = S / 2 - Math.cos(a) * R * 0.6;
-      inkText(c, q, { text: label, x: x / q, y: y / q - 6, color: '#2a1608', align: 'center' });
-    }
-    this.dialTex?.dispose();
-    this.dialTex = new THREE.CanvasTexture(cv);
-    this.dialTex.colorSpace = THREE.SRGBColorSpace;
-    this.dialMat.uniforms.map.value = this.dialTex;
-  }
-
-  update(dt: number, A: OutlawAnchors, visible: boolean, s: number) {
+  paint(c: CanvasRenderingContext2D, dt: number, A: OutlawAnchors, s: number) {
     dt = Math.min(dt, 0.1);
     this.t += dt;
     const k = A.k;
-    const q = Math.max(1, Math.round(s * k));
-    this.fx.update(dt, s);
-    this.glow.update(dt, s);
-    for (const g of [this.star, this.board]) g.visible = visible;
-    if (!visible) {
-      this.plaque.visible = this.watch.visible = false;
-      return;
-    }
-    if (!this.built) this.build();
-    this.jobs.step();
-
+    const small = k < 0.85;
     // ---------------------------------------------------- tin star
     {
       const st = A.star;
@@ -585,13 +580,17 @@ export class OutlawHud {
       }
       this.lastRank = st.rank;
       this.starSpin = Math.max(0, this.starSpin - dt * 1.4);
-      const sp = 1 - this.starSpin;
-      const spin = this.starSpin > 0 ? (1 - Math.pow(sp, 3)) * TAU * 2 : 0;
-      const bounce = Math.sin(this.starSpin * Math.PI) * 4;
-      this.star.position.set(st.x * s, -(st.y - bounce) * s, 30);
-      this.star.scale.setScalar(s * k * 1.12 * (1 + Math.sin(this.starSpin * Math.PI) * 0.25));
-      this.star.rotation.set(0.12 + Math.sin(this.t * 0.7) * 0.05, spin + Math.sin(this.t * 0.9) * 0.28, Math.sin(this.t * 0.5) * 0.04);
-      this.starNum.draw(`${st.rank}`, q, (c, qq) => inkText(c, qq, { text: String(st.rank), x: 7, y: -0.5, color: '#120c08', align: 'center', style: 'emboss', alt: 'rgba(255,252,240,0.95)' }));
+      const sp = this.star(k);
+      if (sp) {
+        // a rank-up spins it twice and bounces it; otherwise it breathes on its pin
+        const u = 1 - this.starSpin;
+        const spin = this.starSpin > 0 ? (1 - Math.pow(u, 3)) * TAU * 2 : 0;
+        const bounce = Math.round(Math.sin(this.starSpin * Math.PI) * 4);
+        const sx = this.starSpin > 0 ? Math.cos(spin) : 1;
+        const y = st.y - bounce + Math.round(Math.sin(this.t * 0.9) * 0.6);
+        blitSquash(c, sp.cv, st.x, y, Math.abs(sx) < 0.12 ? 0.12 * Math.sign(sx || 1) : sx);
+        if (Math.abs(sx) > 0.7) pixelText(c, String(st.rank), st.x, y - (small ? 5 : 8), { size: small ? Math.round(16 * k * 1.1) : 16, color: '#1a0e06', align: 'center', lip: '#fff6dc' });
+      }
     }
 
     // ---------------------------------------------------- tally board
@@ -607,23 +606,25 @@ export class OutlawHud {
         this.chalkAcc += dt * 30;
       }
       swing(this.boardKick, dt, 260, 9);
-      this.board.position.set(tb.x * s, -tb.y * s, 20);
-      this.board.scale.setScalar(s * k);
-      this.board.rotation.set(0.08 + this.boardKick.a * 0.1, -0.18 + Math.sin(this.t * 0.6) * 0.05, -0.02 + this.boardKick.a * 0.05);
       while (this.chalkAcc > 1) {
         this.chalkAcc -= 1;
-        this.fx.emit({ x: tb.x + (Math.random() - 0.3) * 50 * k, y: tb.y + 4 * k, vx: (Math.random() - 0.5) * 20, vy: -10 - Math.random() * 20, ay: 60, drag: 1.5, life: 0.4 + Math.random() * 0.4, size: 1, c0: 0xfff3d6, c1: 0xc9a97c, alpha: 0.8 });
+        this.dust.emit({ x: tb.x + (Math.random() - 0.3) * 50 * k, y: tb.y + 4 * k, vx: (Math.random() - 0.5) * 20, vy: -10 - Math.random() * 20, ay: 60, drag: 1.5, life: 0.4 + Math.random() * 0.4, size: 1, c0: 0xfff3d6, c1: 0xc9a97c, alpha: 0.8 });
       }
-      const amt = '$' + now.toLocaleString('en-US');
-      this.boardText.draw(amt, q, (c, qq) => {
-        inkText(c, qq, { text: 'BOUNTY', x: BOARD_W / 2 - 1, y: 1, color: '#e2c48c', align: 'center', style: 'paint', chip: 0.62 });
-        inkText(c, qq, { text: amt, x: BOARD_W / 2 + 1, y: 14.5, color: '#fff2cc', align: 'center', style: 'paint', chip: 0.56 });
-      });
+      const sp = this.board(k);
+      if (sp) {
+        const jx = Math.round(this.boardKick.a * 2), jy = Math.round(-Math.abs(this.boardKick.a) * 2);
+        const x = tb.x + jx, y = tb.y + jy;
+        blitC(c, sp, x, y);
+        const amt = '$' + now.toLocaleString('en-US');
+        const fs = small ? Math.max(10, Math.round(16 * k * 1.15)) : 16;
+        // painted on the planks, in the HUD's own outlined type
+        pixelText(c, 'BOUNTY', x - 1, y - 14 * k + (small ? 0 : 1), { size: fs, color: '#e2c48c', align: 'center', outline: '#1a0e06' });
+        pixelText(c, amt, x + 1, y + (small ? 0 : 0.5) * k, { size: fs, color: '#fff2cc', align: 'center', outline: '#1a0e06' });
+      }
     }
 
-    // ---------------------------------------------------- plaque
+    // ---------------------------------------------------- plaque on its chains
     const pq = A.plaque;
-    this.plaque.visible = !!pq;
     let watchTop = 0;
     if (pq) {
       if (pq.label !== this.lastLabel) {
@@ -638,22 +639,29 @@ export class OutlawHud {
       swing(this.sw, dt, 18, 1.4);
       const lean = this.sw.a * 0.08 + Math.sin(this.t * 0.8) * 0.012;
       const py = pq.y - pq.drop + this.dropY;
-      // pivot at the top of the chains: rotate round it
-      const ox = Math.sin(lean) * 30, oy = (1 - Math.cos(lean)) * 30;
-      this.plaque.position.set((pq.x + ox) * s, -(py - oy) * s, 10);
-      this.plaque.scale.setScalar(s * k);
-      this.plaque.rotation.set(0.06, Math.sin(this.t * 0.55) * 0.04, -lean);
-      const big = measureInk(pq.label, 32) <= PLQ_W - 26;
-      this.plaqueText.draw(`${pq.label}|${big}`, q, (c, qq) =>
-        inkText(c, qq, { text: pq.label, x: (PLQ_W - 16) / 2, y: big ? -3 : 4, size: big ? 32 : 16, color: 'rgba(30,10,2,0.92)', align: 'center', style: 'brand' })
-      );
-      // the clock tag
+      // it hangs from the top of the screen: swaying, the chains lean with it
+      const sway = Math.round(Math.sin(lean) * 30 * k);
+      const X = pq.x + sway;
+      for (const sd of [-1, 1]) this.chain(c, k, pq.x + sd * RING_X * k, -5, X + sd * RING_X * k, py - RING_Y * k - 2 * k);
+      const sp = this.plaque(k);
+      if (sp) {
+        blitC(c, sp, X, py);
+        const roomy = pixelTextWidth(pq.label, 32) <= (PLQ_W - 26) * k;
+        const fs = roomy ? 32 : small ? Math.max(10, Math.round(16 * k * 1.15)) : 16;
+        // burnt into the leather: dark seared type with a singed pale lip
+        pixelText(c, pq.label, X, py - (roomy ? 15 : fs * 0.55), { size: fs, color: '#2a0e04', align: 'center', lip: '#c88a5a' });
+      }
+      // the clock tag (the wave timer) hangs under it while no break runs
       const wantTag = !!pq.time && !A.watch;
       this.tagShow += ((wantTag ? 1 : 0) - this.tagShow) * Math.min(1, dt * 8);
-      this.tag.visible = this.tagShow > 0.02;
-      this.tag.scale.setScalar(Math.max(0.01, this.tagShow));
-      this.tag.rotation.set(0, 0, Math.sin(this.t * 1.3) * 0.04 + this.sw.a * 0.05);
-      if (pq.time) this.tagText.draw(pq.time, q, (c, qq) => inkText(c, qq, { text: pq.time!, x: (TAG_W - 10) / 2, y: -2, color: '#3a2208', align: 'center', style: 'emboss', alt: 'rgba(255,240,190,0.6)' }));
+      if (this.tagShow > 0.05 && pq.time) {
+        const tg = this.tag(k);
+        if (tg) {
+          const ty = py + 19 * k - Math.round((1 - this.tagShow) * 10 * k);
+          blitC(c, tg, X + Math.round(Math.sin(this.t * 1.3) * 0.6), ty, Math.min(1, this.tagShow * 1.5));
+          if (this.tagShow > 0.6) pixelText(c, pq.time, X, ty - (small ? 3 : 7), { size: small ? Math.max(10, Math.round(16 * k * 1.15)) : 16, color: '#3a2208', align: 'center', lip: '#fff0be' });
+        }
+      }
       watchTop = py + (PLQ_H / 2 - 1) * k;
     }
 
@@ -661,11 +669,10 @@ export class OutlawHud {
     const w = A.watch;
     const want = w && pq ? 1 : 0;
     this.watchShow += (want - this.watchShow) * Math.min(1, dt * (want ? 4 : 7));
-    this.watch.visible = this.watchShow > 0.01;
-    if (this.watch.visible && pq) {
-      if (!this.dialTex) this.dialNumerals(q);
+    // the whole flip-book is photographed ahead of the first break
+    if (pq) for (let sec = 30; sec >= 0; sec--) this.watchFrame(sec, k, w ? 48 : 8);
+    if (this.watchShow > 0.01 && pq) {
       const left = w ? Math.max(0, w.left) : 0;
-      const total = w?.total || 30;
       const sec = Math.ceil(left);
       const last = left <= 5.0 && left > 0;
       if (sec !== this.lastSec && w) {
@@ -677,46 +684,37 @@ export class OutlawHud {
       }
       swing(this.watchSw, dt, 30, 2);
       const bell = w?.bell ?? 0;
-      const shake = bell > 0 ? (Math.random() - 0.5) * bell * 0.08 : 0;
-      this.lidOpen += ((w ? 1 : 0) - this.lidOpen) * Math.min(1, dt * 5);
-      // hangs on its chain under the plaque, swinging gently: the group pivots at the plaque
-      const ang = Math.sin(this.t * 1.1) * 0.05 + this.watchSw.a * 0.12 + shake;
+      const ang = Math.sin(this.t * 1.1) * 0.05 + this.watchSw.a * 0.12;
       const top = watchTop + (1 - this.watchShow) * -80 * k;
-      const drop = this.watchChain.length * 4.3 + WR + 9.6;
-      this.watch.position.set(pq.x * s, -top * s, 60);
-      this.watch.scale.setScalar(s * k * WATCH_S);
-      this.watch.rotation.set(0, 0, ang);
-      this.watchBody.position.set(0, -drop, 0);
-      this.watchBody.rotation.set(0.1, 0.32 + Math.sin(this.t * 0.6) * 0.06, 0);
-      for (let i = 0; i < this.watchChain.length; i++) this.watchChain[i].position.set(0, -2.15 - i * 4.3, 0.5);
-      const rx = pq.x - Math.sin(ang) * drop * k * WATCH_S, ry = top + Math.cos(ang) * drop * k * WATCH_S;
-      this.watchLid.rotation.y = -Math.PI + 0.02 + this.lidOpen * (Math.PI - 0.8);
-      // the hand points at the seconds left (one turn = the whole break)
-      const frac = clamp01(left / total);
-      this.hand.rotation.z = -(1 - frac) * TAU;
-      const u = this.dialMat.uniforms;
-      u.uLeft.value = frac;
-      u.uBell.value = bell;
-      u.uRed.value += ((last ? 1 : 0) - u.uRed.value) * Math.min(1, dt * 6);
-      u.uT.value = this.t;
-      const num = String(Math.max(0, sec));
-      const red = last && Math.sin(this.t * 12) > -0.3;
-      this.watchNum.draw(`${num}|${red}`, q, (c, qq) => inkText(c, qq, { text: num, x: 13, y: 0, size: 16, color: red ? '#b01a10' : '#2a1608', align: 'center', style: 'ink' }));
+      const drop = (4 * 4.3 + WR + 9.6) * WATCH_S * k;
+      const cx = pq.x - Math.sin(ang) * drop + (bell > 0 ? Math.round((Math.random() - 0.5) * bell * 2) : 0), cy = top + Math.cos(ang) * drop;
+      // its chain runs from the plaque down to the bow
+      const bowY = cy - (WR + 10) * WATCH_S * k;
+      this.chain(c, k, pq.x, top, pq.x - Math.sin(ang) * (drop - (WR + 10) * WATCH_S * k), bowY);
+      const sp = this.bank.exact('ol:watch' + Math.min(30, sec), Math.round(116 * WATCH_S * k) + 2) ?? this.watchFrame(Math.min(30, sec), k, 56);
+      if (sp) {
+        blitC(c, sp, cx, cy);
+        // the bell being rung: brass fills round the rim
+        if (bell > 0.01) {
+          const R = (WR - 1.2) * WATCH_S * k;
+          for (let i = 0; i <= 72 * bell; i++) {
+            const a = -Math.PI / 2 + (i / 72) * TAU;
+            px(c, Math.round(cx + Math.cos(a) * R), Math.round(cy + Math.sin(a) * R), 1, 1, Math.sin(this.t * 14 + i) > 0 ? UI.brass.h : UI.brass.l);
+          }
+        }
+        const red = last && Math.sin(this.t * 12) > -0.3;
+        const num = String(Math.max(0, sec));
+        pixelText(c, num, cx, cy + (small ? 1 : 2) * k, { size: small ? Math.max(10, Math.round(16 * k * 1.15)) : 16, color: red ? '#b01a10' : '#2a1608', align: 'center', lip: '#fff4e0' });
+      }
       if (bell > 0.05 && Math.random() < dt * 20 * bell)
-        this.glow.emit({ x: rx + (Math.random() - 0.5) * 30 * k, y: ry + (Math.random() - 0.5) * 30 * k, vx: (Math.random() - 0.5) * 30, vy: -20 - Math.random() * 30, drag: 2, life: 0.4 + Math.random() * 0.3, size: 1, c0: 0xfff0b0, c1: 0xffb030, alpha: 1 });
-    } else {
-      this.lastSec = -1;
-      this.lidOpen = 0;
-    }
+        this.glow.emit({ x: cx + (Math.random() - 0.5) * 30 * k, y: cy + (Math.random() - 0.5) * 30 * k, vx: (Math.random() - 0.5) * 30, vy: -20 - Math.random() * 30, drag: 2, life: 0.4 + Math.random() * 0.3, size: 1, c0: 0xfff0b0, c1: 0xffb030, alpha: 1 });
+    } else this.lastSec = -1;
+    void s;
   }
 
   dispose() {
-    for (const g of [this.star, this.board, this.plaque, this.watch]) g.removeFromParent();
-    for (const t of [this.starNum, this.boardText, this.plaqueText, this.tagText, this.watchNum]) t.dispose();
-    this.fx.dispose();
+    this.dust.dispose();
     this.glow.dispose();
-    this.dialTex?.dispose();
-    this.dialMat.dispose();
     void this.scene;
   }
 }

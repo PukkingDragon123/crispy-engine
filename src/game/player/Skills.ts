@@ -32,7 +32,8 @@ import { modelEntry } from '../models/lookup';
 import { P } from '../../engine/voxel/palette';
 import { VF } from '../../engine/voxel/VoxelModel';
 import { clamp, damp, dampAngle, rnd } from '../../engine/math/rand';
-import { Input } from '../../engine/Input';
+import { Input, type Action } from '../../engine/Input';
+import { Qte } from '../ui/Qte';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -120,6 +121,9 @@ interface Bomb {
   sq: number;
   sqV: number;
   sputter: number;
+  /** an empowered throw (the cast's timing ring hit): blast radius and damage scale */
+  power?: number;
+  born?: number;
 }
 
 interface Cloud {
@@ -265,9 +269,12 @@ export class Skills {
     }
     this.sealedNag -= dt;
     if (this.player.alive) {
-      if (inp.hit('skill1')) this.tryCast('E');
-      if (inp.hit('skill2')) this.tryCast('C');
-      if (inp.hit('grenade')) this.tryCast('G');
+      // a press that answered the empower ring is not a new cast
+      const q = Qte.current;
+      const eaten = (a: Action) => !!q && (q.quickWants(a) || q.ate(a));
+      if (inp.hit('skill1') && !eaten('skill1')) this.tryCast('E');
+      if (inp.hit('skill2') && !eaten('skill2')) this.tryCast('C');
+      if (inp.hit('grenade') && !eaten('grenade')) this.tryCast('G');
     }
     this.updateBrood(dt);
     this.updateBombs(dt);
@@ -306,7 +313,51 @@ export class Skills {
     else if (k === 'C' && this.swarmCd <= 0) this.summonSwarm();
     else if (k === 'G' && this.bombCharges > 0) this.throwBomb();
     else return;
+    this.offerEmpower(k);
     if (this.echo) this.ctx.engine.tweens.after(0.3, () => this.echoCast(k));
+  }
+
+  // ----------------------------------------------------------- empowered casts (optional timing ring)
+  private nextBombPower = 1;
+  /**
+   * Every cast offers a quick timing ring over Sundown's head: press the same key
+   * again as it meets the sight for an empowered cast. Ignoring it costs nothing,
+   * it never blocks a dodge or any other prompt, and it is offered once per cast.
+   */
+  private offerEmpower(k: SkillKey) {
+    const q = Qte.current;
+    if (!q || q.active || !this.player.alive) return;
+    const action: Action = k === 'E' ? 'skill1' : k === 'C' ? 'skill2' : 'grenade';
+    const aim = this.player.aimPoint.clone();
+    const head = new THREE.Vector3();
+    void q.quick({ action, label: 'EMPOWER', duration: 0.8, tone: 'jade', at: () => this.player.center(head).add(_v3.set(0, 0.95, 0)) }).then((r) => {
+      if ((r === 'perfect' || r === 'good') && this.player.alive) this.empower(k, r === 'perfect', aim);
+    });
+  }
+
+  /** the payoff: a second wave from the same cast (scorpions, scarabs) or a heavier blast (dung bomb) */
+  private empower(k: SkillKey, perfect: boolean, aim: THREE.Vector3) {
+    const pl = this.player;
+    const ctx = this.ctx;
+    const c = pl.center(new THREE.Vector3()).add(_v3.set(0, 0.3, 0));
+    ctx.fx.sparkle(c, perfect ? 0xffd36b : 0x9dff3a, perfect ? 16 : 9, 0.8);
+    ctx.particles.emit({ pos: c, count: perfect ? 26 : 12, spread: 3, life: [0.3, 0.7], size: [0.08, 0.015], sprite: ['glow8', 'dot3'], color: perfect ? [0xfff0a6, 0x9dff3a] : [0x9dff3a, 0xc8ff5a], additive: true, drag: 2.2 });
+    ctx.sfx('divine_chime', c, perfect ? 0.6 : 0.4, perfect ? 1.3 : 1.1);
+    if (k === 'E') {
+      const n = Math.max(1, Math.round((2 + Math.round(this.stats.get('scorpions'))) * (perfect ? 1 : 0.5)));
+      ctx.engine.tweens.after(0.05, () => this.releaseBrood(n, true, aim.clone(), null));
+    } else if (k === 'C') {
+      const S = SKILL_TUNE.swarm;
+      const count = Math.min(S.maxScarabs, Math.round(S.scarabs * this.stats.get('swarmSize')));
+      ctx.engine.tweens.after(0.15, () => this.erupt(aim.clone(), Math.round(count * (perfect ? 0.6 : 0.3)), true));
+    } else {
+      const power = perfect ? 1.45 : 1.2;
+      const b = this.bombs[this.bombs.length - 1];
+      if (b && b.born !== undefined && this.time - b.born < 1.6 && !b.power) {
+        b.power = power;
+        ctx.particles.emit({ pos: b.pos, count: 20, spread: 2.4, life: [0.3, 0.6], size: [0.07, 0.015], sprite: 'spark', color: [0xfff0a6, 0xffd36b], additive: true, drag: 2, stretch: 0.05 });
+      } else this.nextBombPower = power;
+    }
   }
 
   /** the echo: the same skill again, free, with a jade shimmer */
@@ -1319,7 +1370,8 @@ export class Skills {
     const T = 0.55 + d / 34;
     const v = this.lob(o, to, T, Bt.gravity, new THREE.Vector3());
     v.addScaledVector(pl.board.vel, 0.5).setY(v.y + pl.board.vel.y * 0.3);
-    this.bombs.push({ pos: o.clone(), vel: v, fuse: Bt.fuse, q: new THREE.Quaternion().setFromAxisAngle(UP, rnd.next() * TAU), bounces: 0, sq: 0, sqV: 0, sputter: 0 });
+    this.bombs.push({ pos: o.clone(), vel: v, fuse: Bt.fuse, q: new THREE.Quaternion().setFromAxisAngle(UP, rnd.next() * TAU), bounces: 0, sq: 0, sqV: 0, sputter: 0, born: this.time, power: echo || this.nextBombPower === 1 ? undefined : this.nextBombPower });
+    if (!echo) this.nextBombPower = 1;
     ctx.sfx('whoosh', o, 0.7, 0.85);
     ctx.sfx('dynamite_fuse', o, 0.55);
     pl.smear(o.clone(), 1.2);
@@ -1423,9 +1475,11 @@ export class Skills {
   private detonate(b: Bomb) {
     const ctx = this.ctx;
     const Bt = SKILL_TUNE.bomb;
-    const r = Bt.radius * this.stats.get('explosionRadius');
+    const pw = b.power ?? 1;
+    const r = Bt.radius * this.stats.get('explosionRadius') * pw;
     const p = b.pos;
     ctx.fx.explosion(p, r * 0.7, 'fire');
+    if (pw > 1) ctx.fx.explosion({ x: p.x, y: p.y + 0.5, z: p.z }, r * 0.5, 'divine');
     ctx.fx.explosion({ x: p.x, y: p.y + 0.35, z: p.z }, r * 0.45, 'poison');
     this.shockwave(p, r);
     ctx.fx.word(p, r > 5 ? 'w_kaboom' : 'w_boom');
@@ -1439,7 +1493,7 @@ export class Skills {
       ctx.engine.hitStop(0.035, 0.08);
     }
     // the blast tosses bodies off their feet (Enemies.explosion: heavy hit → knockdown)
-    ctx.events.emit('explosion', { x: p.x, y: p.y, z: p.z }, r, Bt.dmg, 'player');
+    ctx.events.emit('explosion', { x: p.x, y: p.y, z: p.z }, r, Bt.dmg * pw, 'player');
     ctx.enemies.inRadius(p, r, (e) => ctx.enemies.damage(e, { base: 0.01, kind: 'magic', source: 'poison', status: [{ id: 'poison', stacks: 5, dur: 5, power: 2.4 }, { id: 'burn', stacks: 1, dur: 3, power: 1.5 }], canCrit: false }));
     this.clouds.push({ pos: p.clone(), r: r * 0.85, life: Bt.cloudLife, t: 0, tick: 0.25 });
     ctx.fx.poisonCloud(p, r * 0.7);

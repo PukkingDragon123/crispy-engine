@@ -40,7 +40,7 @@ vec2 rays(vec2 q, float r, float a, float N, float seed, float minL, float maxL)
     float th = -PI + (s + 0.5 + (h11(s + seed) - 0.5) * 0.7) * sw;
     float L = mix(minL, maxL, pow(h11(s + seed + 40.0), 1.6)) * uCrack;
     // a ray that kinks and wanders a little as it runs out
-    float wob = 0.035 * sin(r * 41.0 + s * 3.1) + 0.05 * (vn(vec2(r * 17.0, s * 7.0 + seed)) - 0.5) + 0.02 * sin(r * 130.0 + s);
+    float wob = 0.012 * sin(r * 41.0 + s * 3.1) + 0.024 * (vn(vec2(r * 17.0, s * 7.0 + seed)) - 0.5) + 0.006 * sin(r * 130.0 + s);
     float d = abs(wrapA(a - th - wob)) * r;
     d += max(0.0, r - L) * 3.0;
     if (d < best) { best = d; id = s; }
@@ -78,7 +78,8 @@ void main(){
     // radial cracks: long primaries, short secondaries
     vec2 p1 = rays(q, r, a, 15.0, 0.0, 0.16, 0.95);
     vec2 p2 = rays(q, r, a + 0.21, 23.0, 91.0, 0.05, 0.3);
-    float w = 0.0011 + 0.0034 * exp(-(r - R) * 10.0); // pattern units: thick near the hole, hairlines further out
+    // pattern units: thick near the hole, hairlines further out; they widen slower than the zoom as we fly in
+    float w = (0.0011 + 0.0034 * exp(-(r - R) * 10.0)) / sqrt(Z);
     float l1 = 1.0 - smoothstep(w * 0.45, w, p1.x);
     float l2 = (1.0 - smoothstep(w * 0.35, w * 0.8, p2.x)) * 0.85;
     // spider-web chords between neighbouring primaries
@@ -116,7 +117,7 @@ void main(){
     ember = smoothstep(Rj * 1.22, Rj * 1.0, r) * (1.0 - inHole) * (0.55 + 0.45 * vn(vec2(a * 9.0 + uTime * 1.5, uTime * 0.7)));
     crackInk = max(max(l1, l2), web) * (1.0 - inHole);
     // the light that comes through the hole runs out along the cracks
-    crackLit = crackInk * (0.25 + uLight * 2.2 * exp(-(r - R) * 5.0));
+    crackLit = crackInk * (0.16 + uLight * 2.0 * exp(-(r - R) * 9.0)) * (1.0 - 0.75 * uPush);
     halo = exp(-max(0.0, r - Rj) / (R * 1.6)) * (1.0 - inHole);
   }
   // ---------------------------------------------------------------- composite
@@ -135,9 +136,11 @@ void main(){
     g = mix(g, vec3(0.025, 0.018, 0.012), soot * 0.82);
     g += vec3(5.0, 1.55, 0.32) * ember * uBurn;
     // light bleeding through: scattering in the glass round the hole
-    g += vec3(1.0, 0.88, 0.66) * halo * uLight * 0.9;
+    g += vec3(1.0, 0.88, 0.66) * halo * uLight * 0.45;
     // the hole itself: clean, and blazing with the light behind it
-    vec3 hole = clear * (1.0 + uLight * 1.6) + vec3(1.0, 0.9, 0.7) * uLight * 1.4;
+    // (flying in, the light gives way to the frozen scene beyond, until the white takes it)
+    float lk = uLight * (1.0 - 0.75 * uPush);
+    vec3 hole = clear * (1.0 + lk * 1.2) + vec3(1.0, 0.9, 0.7) * lk * 0.8;
     col = mix(g, hole, inHole);
     col = mix(clear, col, uOn);
   }
@@ -145,10 +148,11 @@ void main(){
   if (uGlare > 0.001) {
     vec2 d = (uv - uSun) * vec2(uAspect, 1.0);
     float ds = length(d);
-    col += vec3(1.0, 0.82, 0.55) * (exp(-ds * 3.2) * 0.9 + exp(-ds * 14.0) * 2.6) * uGlare;
-    col += vec3(1.0, 0.86, 0.62) * exp(-abs(d.y) * 70.0) * exp(-abs(d.x) * 2.2) * 1.4 * uGlare;
+    col += vec3(1.0, 0.82, 0.55) * (exp(-ds * 6.0) * 0.18 + exp(-ds * 22.0) * 1.5) * uGlare;
+    col += vec3(1.0, 0.86, 0.62) * exp(-abs(d.y) * 90.0) * exp(-abs(d.x) * 2.6) * 0.8 * uGlare;
   }
-  col = mix(col, vec3(7.0, 6.4, 5.4), uWhite);
+  // white heat (the white-out itself is the grade's overlay, after tone mapping)
+  col += vec3(1.0, 0.9, 0.75) * uWhite * uWhite * 2.0;
   gl_FragColor = vec4(col, 1.0);
 }`;
 
@@ -195,6 +199,8 @@ class LensPass extends Pass {
   }
 }
 
+const _fw = new THREE.Vector3();
+
 /** the lens rig a cinematic drives (all values 0..1 unless noted) */
 export class LensShot {
   private pass = new LensPass();
@@ -223,7 +229,7 @@ export class LensShot {
   /** the sun on screen (uv) */
   sun = new THREE.Vector2(0.5, 0.7);
   /** hole radius in screen heights */
-  radius = 0.024;
+  radius = 0.03;
 
   constructor(private eng: Engine) {
     const c = eng.post.composer;
@@ -241,6 +247,16 @@ export class LensShot {
     return out.set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5);
   }
 
+  private sunVis = 0;
+  private ownFlash = false;
+  /** follow the sun on screen (glare and the boiling air around it fade when it is off-frame or behind) */
+  track(cam: THREE.PerspectiveCamera, sunDir: THREE.Vector3) {
+    const f = cam.getWorldDirection(_fw).dot(sunDir);
+    this.sunVis = THREE.MathUtils.smoothstep(f, 0.15, 0.6);
+    if (this.sunVis > 0) LensShot.toUv(cam, sunDir, this.sun, true);
+    else this.sun.set(-9, -9);
+  }
+
   /** push the state to the GPU (call once a frame) */
   sync() {
     const u = this.pass.material.uniforms;
@@ -252,11 +268,20 @@ export class LensShot {
     u.uLight.value = this.light;
     u.uWhite.value = this.white;
     u.uShimmer.value = this.shimmer;
-    u.uGlare.value = this.glare;
+    u.uGlare.value = this.glare * this.sunVis;
     u.uR.value = this.radius;
     (u.uHole.value as THREE.Vector2).copy(this.hole);
     (u.uSun.value as THREE.Vector2).copy(this.sun);
     this.pass.enabled = this.on > 0.001 || this.white > 0.001 || this.shimmer > 0.001 || this.glare > 0.001;
+    // the white-out: the grade's flash overlay (display space, so 1 is truly white); let go of it at 0
+    const fl = this.eng.post.u.uFlash.value;
+    if (this.white > 0.001) {
+      fl.set(1, 0.975, 0.92, Math.min(1, this.white));
+      this.ownFlash = true;
+    } else if (this.ownFlash) {
+      fl.w = 0;
+      this.ownFlash = false;
+    }
     const b = this.eng.post.bloom, b0 = this.bloom0;
     if (b0) {
       const k = this.blaze;
@@ -274,6 +299,7 @@ export class LensShot {
       b.threshold = b0.threshold;
     }
     this.bloom0 = null;
+    if (this.ownFlash) this.eng.post.u.uFlash.value.w = 0;
     this.eng.post.composer.removePass(this.pass);
     this.pass.dispose();
   }

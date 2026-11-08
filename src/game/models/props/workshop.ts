@@ -2021,3 +2021,349 @@ export function curioShelf(seed = 48): StaticModel & { meta: { shelves: number[]
   for (const sx of [-1, 1]) rod(m, [sx * 1.5, H + 1.5, 3], [sx * 4, H + 3.8, 3], 0.4, 0.3, BRASS, VF.METAL);
   return { model: m, voxelSize: FV, meta: { shelves: shelves.map((y) => pivotOf(m, FV, [0, y + 1.6, 0])[1]), plates, depth: D * FV } };
 }
+
+// =====================================================================
+// THE GUN RACK — the heart of the gunsmith's corner. 1/64, hung on the back
+// wall over the side cabinet: weathered oak posts and a plank back, a deep butt
+// shelf with felt-lined pockets on carved corbels, forged iron cradle arms
+// lined with red felt, a green-baize pistol board with brass tacks and pegs, a
+// moulded cornice with a carved setting sun, a brass trough light with a bulb
+// over every bay, iron straps and rivets, a cleaning rod in the corner, a rag
+// over the shelf end and a tally scratched into the post. Front +Z, the back
+// face at z = 0. Bays left → right: the Coach Gun, the pistol board, the
+// Chicago Typewriter. Every meta point in m (bottom-centre pivot).
+// =====================================================================
+export interface GunRackBay {
+  /** the barrel axis x (long guns; the pistol board's centre for the six-shooter) */
+  axis: number;
+  /** where the barrel rides in the felt cradle (long guns) or the pistol board's centre */
+  cradle: V3;
+  /** the visual centre of the bay (camera framing, the bulb, the plate) */
+  centre: V3;
+  /** the nameplate's centre on the shelf lip (its face) */
+  plate: V3;
+  /** the bulb in the trough light over the bay */
+  bulb: V3;
+  /** a peg for the bay's tag */
+  peg: V3;
+}
+export function gunRack(seed = 49): StaticModel & { meta: { bays: GunRackBay[]; shelf: number; gunZ: number; back: number; ledge: V3; front: number } } {
+  const m = new VoxelModel('gun_rack');
+  const HW = 36, SH0 = 4, SH1 = 8, CY = 82, D = 16, GZ = 7.5;
+  const AX = [-29, -5, 15], CEN = [-25, -5, 21], POCK = [-23.5, 0, 19.5], CRY = [40, 36, 51];
+  const OAKW = [0x6e4628, 0x744a2a, 0x684224, 0x7a5030, 0x6a4426];
+  // weathered oak: grain along the length, sun-bleached toward the top and on the front edges, grime low down
+  const oak = (x: number, y: number, z: number, d: number, along: 'x' | 'y', s: number) => {
+    const g = h01(along === 'y' ? x : y, Math.floor((along === 'y' ? y : x) / 9), s);
+    let c = OAKW[Math.floor(h01(s, 3, 1) * OAKW.length)];
+    if (g > 0.8) c = mul(c, 0.86);
+    else if (g < 0.12) c = mul(c, 1.1);
+    if (d > -1 && z >= 12) c = mixRGB(c, 0x9a8466, 0.22 + h01(x, y, 5) * 0.12); // worn front edges
+    c = mixRGB(c, 0x8a7a66, Math.max(0, (y - 30) / 60) * 0.16);
+    if (y < 10 && h01(x >> 1, y, z) > 0.7) c = mul(c, 0.85);
+    return c;
+  };
+  // ---- the back: vertical planks with V-grooves, square nails at the rails
+  for (let x = -HW + 3; x <= HW - 3; x++) {
+    const b = Math.floor((x + HW) / 7), lu = mod(x + HW, 7);
+    const tone = mul([0x5a3a22, 0x60402a, 0x553620, 0x664428, 0x5c3c24][mod(b * 3 + seed, 5)], 0.95 + h01(b, 2, seed) * 0.1);
+    for (let y = SH1 - 1; y <= CY; y++)
+      for (let z = 0; z <= 1; z++) {
+        let c = lu === 0 ? mul(tone, 0.62) : tone;
+        const g = h01(x, Math.floor(y / 11), b);
+        if (g > 0.86) c = mul(c, 0.84);
+        else if (g < 0.08) c = mul(c, 1.12);
+        if (h01(Math.floor(y / 14), b, 9) > 0.9 && lu === 3) c = mul(c, 0.55); // a knot
+        c = mixRGB(c, 0x7a6a58, Math.max(0, (y - 20) / 70) * 0.14);
+        m.set(x, y, z, c);
+      }
+    if (lu === 3) for (const ny of [SH1 + 3, CY - 4]) egg(m, [x, ny, 2.2], [0.6, 0.6, 0.4], h01(x, ny, 1) > 0.6 ? IRON_RUST : IRON, VF.METAL);
+  }
+  // ---- the posts: chamfered oak, a little crooked, iron straps with rivets
+  for (const sx of [-1, 1]) {
+    const px = sx * (HW - 1.5);
+    fill(m, (x, y, z) => dRBox(x + 0.5, y + 0.5, z + 0.5, px + Math.sin(y * 0.05 + sx) * 0.2, 44, 6.5, 1.9, 44, 6.6, 0.9) + lump(x, y, z, 0.3, seed + sx) * 0.12, [[px - 3, 0, 0], [px + 3, 88, 14]], 0.5, (x, y, z, d) => oak(x, y, z, d, 'y', seed + sx));
+    for (const [y0, y1] of [[1, 15], [68, 84]] as const) {
+      for (let y = y0; y <= y1; y++) for (let x = Math.round(px - 1); x <= Math.round(px + 1); x++) m.set(x, y, 14, h01(x, y, 3) > 0.82 ? IRON_RUST : h01(x, y, 4) > 0.5 ? 0x3a3632 : IRON, VF.METAL);
+      for (let y = y0 + 1; y <= y1; y += 4) egg(m, [px, y, 14.8], [0.7, 0.7, 0.5], 0x5a5650, VF.METAL);
+    }
+  }
+  // tally marks scratched into the right post (four and a slash)
+  for (let k = 0; k < 4; k++) for (let y = 30; y <= 35; y++) m.paintAt(Math.round(HW - 2.6 + k * 0.7), y, 13, 0x3a2414);
+  for (let k = 0; k <= 6; k++) m.paintAt(Math.round(HW - 3 + k * 0.5), 29 + k, 13, 0x2e1c10);
+  // ---- the butt shelf: a thick board with a beaded lip, felt-lined pockets for the long guns' butts
+  fill(m, (x, y, z) => dRBox(x + 0.5, y + 0.5, z + 0.5, 0, 6, 8.5, HW + 0.5, 2, 8, 0.7) + lump(x, y, z, 0.35, seed) * 0.15, [[-HW - 2, SH0 - 1, 0], [HW + 2, SH1 + 1, 18]], 1, (x, y, z, d) => {
+    if (z >= D - 1 && y === 7) return 0xa07a52; // the bead
+    if (z >= D - 1 && y === 5) return 0x4e3018;
+    let c = oak(x, y, z, d, 'x', seed + 7);
+    if (y === SH1 - 1 && h01(x, z, 71) > 0.97) c = mul(c, 0.7); // dings
+    return c;
+  });
+  for (const pi of [0, 2]) {
+    const cx = POCK[pi];
+    for (let x = Math.floor(cx - 4); x <= cx + 4; x++)
+      for (let z = 2; z <= 14; z++) {
+        const e = ((x + 0.5 - cx) / 3.6) ** 2 + ((z + 0.5 - GZ) / 3.2) ** 2;
+        if (e > 1) continue;
+        m.del(x, SH1 - 1, z);
+        m.set(x, SH1 - 2, z, h01(x, z, 8) > 0.7 ? 0x7a2424 : 0x6a1e1e, VF.SOFTAO);
+        if (e > 0.7) m.set(x, SH1 - 1, z, 0x4e2e18); // the routed rim
+      }
+  }
+  // carved ogee corbels under the shelf (over the cabinet)
+  for (const cx of [-31, -3])
+    fill(m, (x, y, z) => {
+      const t = (y + 0.5) / SH0;
+      const depth = 3 + 9 * t * t + Math.sin(t * Math.PI) * 1.2;
+      return Math.max(Math.abs(x + 0.5 - cx) - 1.1, -(y + 0.5) + 0.01, y + 0.5 - SH0 - 0.5, -(z + 0.5), z + 0.5 - depth);
+    }, [[cx - 2, 0, 0], [cx + 2, SH0 + 1, 14]], 0.5, (x, y, z, d) => oak(x, y, z, d, 'y', seed + cx));
+  // ---- forged cradle arms for the long guns: an iron arm off the back, a U lined with red felt
+  for (const bi of [0, 2]) {
+    const ax = AX[bi], cy = CRY[bi];
+    const iron = (x: number, y: number, z: number) => (h01(x, y, z) > 0.8 ? IRON_RUST : h01(x >> 1, y, z) > 0.5 ? 0x3e3a36 : IRON);
+    fill(m, (x, y, z) => dRBox(x + 0.5, y + 0.5, z + 0.5, ax, cy - 1, 2.6, 3.4, 4.2, 0.8, 0.5), [[ax - 4, cy - 6, 1], [ax + 4, cy + 4, 4]], 0.5, iron, VF.METAL); // backing plate
+    for (const sy of [cy - 4, cy + 2]) egg(m, [ax, sy, 3.8], [0.7, 0.7, 0.5], 0x6a645c, VF.METAL);
+    rod(m, [ax, cy, 3], [ax, cy, GZ - 3.6], 1.1, 0.95, iron, VF.METAL);
+    const U: V3[] = [[ax - 2.9, cy, GZ + 4.2], [ax - 3.1, cy, GZ + 1], [ax - 2.8, cy, GZ - 2.6], [ax, cy, GZ - 3.6], [ax + 2.8, cy, GZ - 2.6], [ax + 3.1, cy, GZ + 1], [ax + 2.9, cy, GZ + 4.2]];
+    tubeP(m, spline(U, 5), [0.85], iron, VF.METAL);
+    for (const sx of [-1, 1]) egg(m, [ax + sx * 3.4, cy + 0.3, GZ + 4.6], [0.9, 0.9, 0.9], 0x4a4642, VF.METAL); // upturned tips
+    for (let a = -1.3; a <= 1.3; a += 0.12) {
+      const x = ax + Math.sin(a) * 2.2, z = GZ - Math.cos(a) * 2.6;
+      for (const dy of [-1, 0, 1]) m.set(Math.round(x), cy + dy, Math.round(z), h01(Math.round(x), cy + dy, 2) > 0.6 ? 0x7a2424 : 0x6a1e1e, VF.SOFTAO);
+    }
+  }
+  // ---- the pistol board: green baize in a walnut frame, brass tacks round it, two brass pegs
+  const PB = { x0: -16, x1: 6, y0: 16, y1: 58 };
+  for (let x = PB.x0; x <= PB.x1; x++)
+    for (let y = PB.y0; y <= PB.y1; y++) {
+      const fr = x - PB.x0 < 2 || PB.x1 - x < 2 || y - PB.y0 < 2 || PB.y1 - y < 2;
+      if (fr) {
+        const c = mul(WALNUT, 0.95 + h01(x >> 1, y >> 2, seed) * 0.14);
+        m.set(x, y, 2, c);
+        m.set(x, y, 3, (x - PB.x0 === 0 || PB.x1 - x === 0 || y - PB.y0 === 0 || PB.y1 - y === 0) ? mul(c, 0.8) : mul(c, 1.08));
+      } else m.set(x, y, 2, h01(x >> 1, y >> 1, 5) > 0.8 ? 0x24402c : h01(x, y, 6) > 0.9 ? 0x335a3e : 0x2a4a32, VF.SOFTAO);
+    }
+  for (let x = PB.x0 + 3; x <= PB.x1 - 3; x += 3) for (const y of [PB.y0 + 2, PB.y1 - 2]) egg(m, [x, y, 3.2], [0.55, 0.55, 0.4], BRASS_HI, VF.METAL);
+  for (let y = PB.y0 + 5; y <= PB.y1 - 5; y += 3) for (const x of [PB.x0 + 2, PB.x1 - 2]) egg(m, [x, y, 3.2], [0.55, 0.55, 0.4], BRASS_HI, VF.METAL);
+  for (const [px, py] of [[-4, 31], [-8, 45]] as const) {
+    rod(m, [px, py, 2.5], [px, py + 0.4, 6.5], 0.75, 0.6, BRASS, VF.METAL);
+    egg(m, [px, py + 0.5, 6.9], [1.1, 1.1, 0.8], BRASS_HI, VF.METAL);
+  }
+  rod(m, [4, 56, 2.5], [4, 56.4, 4.4], 0.45, 0.4, BRASS, VF.METAL); // a little hook for the board's tag
+  egg(m, [4, 56.9, 4.6], [0.6, 0.7, 0.5], BRASS_HI, VF.METAL);
+  // ---- the cornice: a fillet, a frieze with a carved setting sun (worn sunset paint), a coved cap
+  fill(m, (x, y, z) => dRBox(x + 0.5, y + 0.5, z + 0.5, 0, CY + 1, 7, HW + 0.8, 1, 7, 0.4), [[-HW - 2, CY - 1, 0], [HW + 2, CY + 3, 15]], 0.5, (x, y, z, d) => oak(x, y, z, d, 'x', seed + 20));
+  fill(m, (x, y, z) => dRBox(x + 0.5, y + 0.5, z + 0.5, 0, CY + 4.5, 7.5, HW + 1.2, 2.5, 7.5, 0.5) + lump(x, y, z, 0.3, seed) * 0.12, [[-HW - 2, CY + 1, 0], [HW + 2, CY + 8, 16]], 0.5, (x, y, z, d) => {
+    if (z >= 14 && d > -1) return h01(x >> 1, y, 4) > 0.72 ? oak(x, y, z, d, 'x', seed + 21) : mixRGB(0x8a3a24, 0x6a2a1a, h01(x >> 2, y, 3)); // flaking red-oxide paint
+    return oak(x, y, z, d, 'x', seed + 21);
+  });
+  for (let y = CY + 8; y <= CY + 10; y++) {
+    const reach = y === CY + 8 ? 15 : y === CY + 9 ? 16 : 17;
+    for (let x = -HW - 2; x <= HW + 2; x++) for (let z = 0; z <= reach; z++) m.set(x, y, z, y === CY + 10 && z === reach ? 0xa08460 : oak(x, y, z, z === reach ? 0 : -2, 'x', seed + 22));
+  }
+  // the carved sun: a half disc on the horizon, eight rays, a darker groove round it
+  for (let x = -10; x <= 10; x++)
+    for (let y = CY + 3; y <= CY + 7; y++) {
+      const r = Math.hypot(x, y - (CY + 3)), a = Math.atan2(y - (CY + 3), x);
+      if (y === CY + 3 && Math.abs(x) <= 9) m.set(x, y, 15, 0x5a2a18);
+      else if (r < 3.3) m.set(x, y, 15, y > CY + 5 ? 0xf0b048 : 0xd8902e);
+      else if (r > 3.9 && r < 7.2 && Math.abs(mod(a * (8 / Math.PI) + 0.5, 1) - 0.5) < 0.2) m.set(x, y, 15, h01(x, y, 9) > 0.8 ? 0x8a5a30 : 0xc8782a);
+    }
+  // ---- the brass trough light under the cornice, a bulb over every bay, two arms up to the cornice
+  const LX = 26, LY = 80, LZ = 14;
+  for (let x = -LX; x <= LX; x++)
+    for (let y = LY - 3; y <= LY + 1; y++)
+      for (let z = LZ - 3; z <= LZ + 3; z++) {
+        const r = Math.hypot(y - LY, z - LZ);
+        const cap = Math.abs(x) >= LX - 0.5;
+        if (y < LY - 1.6 && !cap) continue;
+        if (r > 3.2 || (!cap && r < 2.1)) continue;
+        m.set(x, y, z, y >= LY && z <= LZ ? BRASS_HI : h01(x >> 2, y, z) > 0.8 ? mul(BRASS, 0.7) : BRASS, VF.METAL);
+      }
+  for (const sx of [-1, 1]) tubeP(m, spline([[sx * (LX - 4), LY + 2, LZ], [sx * (LX - 4), CY + 1, LZ - 3], [sx * (LX - 4), CY + 1.5, 9]], 3), [0.55], BRASS, VF.METAL);
+  // a pear-shaped bulb tucked up in the hood over each bay, a brass socket ring above it
+  const bulbs: V3[] = CEN.map((cx) => [Math.max(-LX + 3, Math.min(LX - 3, cx)), LY - 0.6, LZ]);
+  for (const b of bulbs) {
+    lathe(m, Math.round(b[0]), LZ, LY, LY, () => 1.4, () => mul(BRASS, 0.7), {}, VF.METAL);
+    egg(m, [b[0], b[1], b[2]], [0.9, 1.0, 0.9], (_x, y) => (y < LY - 1 ? 0xffd890 : 0xffe8b8), VF.GLOW);
+  }
+  // ---- a cleaning rod leaning in the right corner, a rag over the shelf's right end
+  rod(m, [HW - 5, SH1, 12], [HW - 7.5, SH1 + 56, 13], 0.5, 0.45, (_x, y) => (y > SH1 + 50 ? BRASS : STEEL_HI), VF.METAL);
+  egg(m, [HW - 7.6, SH1 + 57.5, 13], [0.9, 1.6, 0.9], 0x3a3632);
+  rod(m, [HW - 5, SH1, 12], [HW - 5.2, SH1 + 3.5, 12.2], 0.9, 0.85, mul(WALNUT, 1.1));
+  for (let x = HW - 12; x <= HW - 4; x++) {
+    const hang = 3 + Math.round(Math.sin(x * 1.3) * 1.2 + h01(x, 1, 2) * 1.4);
+    const col = (y: number) => (mod(x, 4) < 2 !== mod(y, 4) < 2 ? 0xb85848 : 0xd8c8b0);
+    for (let z = D - 5; z <= D; z++) m.set(x, SH1, z, col(z), VF.SOFTAO);
+    for (let y = SH1; y >= SH1 - hang; y--) m.set(x, y, D, col(y), VF.SOFTAO);
+  }
+  const P = (p: V3) => pivotOf(m, DV, p);
+  const bays: GunRackBay[] = [0, 1, 2].map((i) => ({
+    axis: P([AX[i], 0, 0])[0],
+    cradle: P([AX[i], CRY[i], GZ]),
+    centre: P([CEN[i], i === 1 ? 37 : 46, GZ]),
+    plate: P([CEN[i], 6, D + 0.1]),
+    bulb: P(bulbs[i]),
+    peg: i === 1 ? P([4, 56, 4]) : P([AX[i] + 3.4, CRY[i] + 0.3, GZ + 4.6]),
+  }));
+  return { model: m, voxelSize: DV, meta: { bays, shelf: P([0, SH1, 0])[1], gunZ: P([0, 0, GZ])[2], back: P([0, 0, 2])[2], ledge: P([CEN[1], SH1, 12]), front: P([0, 0, D])[2] } };
+}
+
+/** a gunsmith's turntable — 1/64 rig: `base` (a trefoil cast-iron foot with three bolts, a turned column, a brass
+ *  collar) and `top` (a walnut platter with radial grain, green baize, a brass rim with index ticks and a crank
+ *  handle off the side) that turns on Y. meta.felt: the baize's top over the foot's sole (m); meta.radius (m). */
+export function gunTurntableRig(seed = 50): RigSpec {
+  const base = new VoxelModel('turntable_base');
+  for (let x = -9; x <= 9; x++)
+    for (let z = -9; z <= 9; z++) {
+      const a = Math.atan2(z, x), r = Math.hypot(x, z);
+      const R = 6 + Math.cos(a * 3) * 1.7;
+      if (r > R) continue;
+      base.set(x, 0, z, r > R - 1 ? 0x2a2622 : 0x34302c, VF.METAL);
+      if (r < R - 1.3) base.set(x, 1, z, h01(x, 1, z) > 0.85 ? 0x4a4642 : 0x3a3632, VF.METAL);
+    }
+  for (let i = 0; i < 3; i++) {
+    const a = i * 2.094;
+    egg(base, [Math.cos(a) * 6.3, 2, Math.sin(a) * 6.3], [0.9, 0.7, 0.9], 0x6a645c, VF.METAL);
+  }
+  lathe(base, 0, 0, 2, 5, (t) => 2.7 - t * 0.8 + (t > 0.85 ? 0.5 : 0), (x, y, z, outer) => (outer && h01(x, y, z) > 0.8 ? 0x4a4642 : 0x34302c), {}, VF.METAL);
+  lathe(base, 0, 0, 6, 6, () => 3, (_x, _y, _z, _o, ang) => (mod(Math.round(ang * 4), 2) ? BRASS : BRASS_HI), {}, VF.METAL);
+  const top = new VoxelModel('turntable_top');
+  const R = 13;
+  lathe(top, 0, 0, 0, 2, (t) => R - 1.4 + t * 1.4, (x, _y, z, outer, ang) => {
+    const g = h01(Math.round(ang * 7), Math.round(Math.hypot(x, z) / 3), seed);
+    return outer ? mul(WALNUT, 0.82) : mul(WALNUT, 0.9 + g * 0.2);
+  });
+  for (let a = 0; a < Math.PI * 2; a += 0.035) {
+    const x = Math.round(Math.cos(a) * (R + 0.3)), z = Math.round(Math.sin(a) * (R + 0.3));
+    const tick = Math.abs(mod(a / (Math.PI / 12), 1) - 0.5) > 0.4;
+    top.set(x, 2, z, tick ? 0x6a5020 : BRASS, VF.METAL);
+    top.set(x, 1, z, mul(BRASS, 0.78), VF.METAL);
+  }
+  for (let x = -R; x <= R; x++)
+    for (let z = -R; z <= R; z++) {
+      const r = Math.hypot(x, z);
+      if (r < R - 0.6) top.set(x, 3, z, r > R - 1.8 ? 0x24402c : h01(x >> 1, 3, z >> 1) > 0.8 ? 0x2e5236 : 0x2a4a32, VF.SOFTAO);
+    }
+  // the crank handle off the rim
+  rod(top, [R + 0.5, 1.5, 0], [R + 3.5, 1.5, 0], 0.7, 0.6, 0x3a3632, VF.METAL);
+  lathe(top, Math.round(R + 3.5), 0, 2, 5, (t) => 0.9 + Math.sin(t * Math.PI) * 0.6, (_x, y) => (y > 4 ? mul(WALNUT, 1.2) : WALNUT));
+  return {
+    name: 'gun_turntable',
+    voxelSize: DV,
+    parts: [
+      { name: 'base', model: base, pivot: [0.5, 0, 0.5], attach: [0.5, 0, 0.5] },
+      { name: 'top', model: top, pivot: [0.5, 0, 0.5], attach: [0.5, 6.5, 0.5], parent: 'base' },
+    ],
+    meta: { felt: 10.5 * DV, radius: R * DV, crank: [(R + 3.5) * DV, 5 * DV, 0] },
+  };
+}
+
+/** a gunsmith's marking pin — 1/256: a steel needle, a brass collar and a hand-cast brass head with a dimple.
+ *  Needle tip at the origin, the head up +Y. meta.head (m, over the tip). */
+export function slotPin(): StaticModel & { meta: { head: V3 } } {
+  const m = new VoxelModel('slot_pin');
+  rod(m, [0, 0, 0], [0, 11, 0], 0.3, 0.75, (x, y, z) => (h01(x, y, z) > 0.7 ? STEEL : STEEL_HI), VF.METAL);
+  lathe(m, 0, 0, 11, 12, () => 1.7, (_x, y) => (y > 11 ? BRASS_HI : mul(BRASS, 0.8)), {}, VF.METAL);
+  // the head carries a little self-light so the pin reads as something to click, even in the bench's shadow
+  egg(m, [0, 15.5, 0], [3.1, 3.4, 3], (x, y, z) => (y > 17 && x <= 0 ? 0xffe08a : y < 14 ? mul(BRASS, 0.85) : h01(x, y, z) > 0.88 ? BRASS : BRASS_HI), VF.METAL | VF.EMISSIVE, 0.12, 3);
+  m.del(0, 18, 0);
+  return { model: m, voxelSize: 1 / 256, meta: { head: [0, 15.5 / 256, 0] } };
+}
+
+/** a gunsmith's work tag — 1/160: a manila card with clipped top corners, a torn bottom edge, fibres and a brass
+ *  grommet at the top centre. Face +Z; the scene prints on it (Alagard). meta: face centre, size (m), hole (m). */
+export function workTag(seed = 51): StaticModel & { meta: { face: V3; size: [number, number]; hole: V3 } } {
+  const m = new VoxelModel('work_tag');
+  const W = 9, H = 6;
+  for (let x = -W; x <= W; x++)
+    for (let y = -H; y <= H; y++) {
+      if (y > H - 3 && Math.abs(x) > W - 3 + (H - y)) continue; // clipped top corners
+      if (y === -H && h01(x, y, seed) > 0.62) continue; // torn bottom
+      const edge = Math.abs(x) === W || y === -H || y === H || (y === -H + 1 && !m.has(x, -H, 0));
+      const z = y < -H + 3 && x > W - 4 ? 1 : 0; // a lifted corner
+      m.set(x, y, z, edge ? 0xc0a070 : h01(x, y, seed + 1) > 0.9 ? 0xccae7c : h01(x >> 2, y >> 1, seed) > 0.6 ? 0xdcc090 : 0xd6b986, VF.SOFTAO);
+    }
+  for (let a = 0; a < Math.PI * 2; a += 0.3) m.set(Math.round(Math.cos(a) * 1.5), Math.round(H - 2 + Math.sin(a) * 1.5), 1, BRASS, VF.METAL);
+  m.del(0, H - 2, 0);
+  const P = (p: V3) => pivotOf(m, 1 / 160, p);
+  return { model: m, voxelSize: 1 / 160, meta: { face: P([0.5, -1.2, 1.05]), size: [(2 * W - 2) / 160, (2 * H - 5) / 160], hole: P([0.5, H - 2, 0.5]) } };
+}
+
+/** a brass nameplate — 1/320, w × h voxels: brushed brass with a bevelled edge, rounded corners and two slotted dome
+ *  screws (tarnished green-brown when the gun is still out there). The scene prints the name over z = meta.face. Centre pivot. */
+export function brassPlate(w = 52, h = 12, tarnish = false, seed = 52): StaticModel & { meta: { face: number; text: [number, number] } } {
+  const m = new VoxelModel('brass_plate');
+  const hw = w / 2, hh = h / 2;
+  for (let x = -Math.floor(hw); x <= Math.floor(hw); x++)
+    for (let y = -Math.floor(hh); y <= Math.floor(hh); y++) {
+      const cx = Math.max(0, Math.abs(x) - (hw - 2.5)), cy = Math.max(0, Math.abs(y) - (hh - 2.5));
+      if (Math.hypot(cx, cy) > 2.5) continue;
+      const bevel = Math.abs(x) > hw - 2 || Math.abs(y) > hh - 2;
+      let c = h01(x >> 3, y, seed) > 0.7 ? BRASS_HI : h01(x >> 2, y, seed + 1) > 0.85 ? mul(BRASS, 0.88) : 0xd8a850;
+      if (bevel) c = y > 0 ? mul(c, 1.08) : mul(c, 0.75);
+      if (tarnish) c = mixRGB(c, h01(x >> 2, y >> 1, seed + 2) > 0.5 ? 0x4a5a3a : 0x5a4a2a, 0.55 + h01(x, y, 3) * 0.2);
+      m.set(x, y, 0, mul(c, 0.8), VF.METAL);
+      if (!bevel) m.set(x, y, 1, c, VF.METAL);
+    }
+  for (const sx of [-1, 1]) {
+    const x0 = sx * (Math.floor(hw) - 3);
+    egg(m, [x0, 0, 1.6], [1.6, 1.6, 0.9], tarnish ? 0x5a5240 : 0x9a8a60, VF.METAL);
+    m.paintAt(x0 - 1, 1, 2, 0x3a2a14);
+    m.paintAt(x0, 0, 2, 0x3a2a14);
+    m.paintAt(x0 + 1, -1, 2, 0x3a2a14);
+  }
+  return { model: m, voxelSize: 1 / 320, meta: { face: 1, text: [w - 14, h - 5] } };
+}
+
+/** the gunsmith's work order — 1/128: a masonite clipboard with rounded corners, a brass spring clip with its roll, a
+ *  sheet of paper with a lifted corner and a pencil tucked under the clip. Face +Z; the scene writes on the paper.
+ *  meta: paper face centre and size (m). Bottom-centre pivot. */
+export function workClipboard(seed = 53): StaticModel & { meta: { paper: V3; size: [number, number] } } {
+  const m = new VoxelModel('work_clipboard');
+  const W = 11, H = 15;
+  fill(m, (x, y, z) => dRBox(x + 0.5, y + 0.5, z + 0.5, 0, 0, 0, W, H, 0.6, 0.5), [[-W - 1, -H - 1, -1], [W + 1, H + 1, 1]], 1, (x, y) => mul(0x7a5638, 0.9 + h01(x >> 2, y, seed) * 0.16));
+  for (let x = -W + 2; x <= W - 2; x++)
+    for (let y = -H + 2; y <= H - 4; y++) {
+      const lift = x > W - 5 && y < -H + 5 && x - (W - 5) + (-H + 5 - y) > 2;
+      m.set(x, y, lift ? 2 : 1, h01(x, y, seed + 3) > 0.94 ? 0xe2d6b8 : y === H - 4 ? 0xd8ccae : 0xf0e6cc, VF.SOFTAO);
+    }
+  fill(m, (x, y, z) => dRBox(x + 0.5, y + 0.5, z + 0.5, 0, H - 2.5, 2, 4.5, 1.6, 0.6, 0.4), [[-6, H - 5, 1], [6, H, 3]], 0.5, (_x, y) => (y > H - 2 ? 0xd8b060 : BRASS), VF.METAL);
+  rod(m, [-4.5, H - 1, 3], [4.5, H - 1, 3], 0.9, 0.9, (x) => (mod(x, 2) ? BRASS_HI : mul(BRASS, 0.85)), VF.METAL);
+  rod(m, [-8, H - 3.5, 2.6], [7, H - 2.6, 2.6], 0.75, 0.75, (x) => (x > 6 ? 0x2a2a2a : x > 5 ? 0xe8c8a0 : x < -7 ? 0xd88a8a : x < -6 ? 0xb8b8b0 : 0xd8a838));
+  return { model: m, voxelSize: 1 / 128, meta: { paper: pivotOf(m, 1 / 128, [0.5, -1, 2.05]), size: [(2 * W - 4) / 128, (2 * H - 7) / 128] } };
+}
+
+/** a hand-twisted twine — 1/768, two plies round each other along +Z (64 voxels long; the scene stretches it). */
+export function twineCord(): StaticModel {
+  const m = new VoxelModel('twine');
+  for (let z = 0; z < 64; z++)
+    for (const ph of [0, Math.PI]) {
+      const a = z * 0.6 + ph;
+      m.set(Math.round(Math.cos(a) * 0.7), Math.round(Math.sin(a) * 0.7), z, ph ? 0xc8b07a : 0xa88c5a, VF.SOFTAO);
+    }
+  return S(m, 1 / 768);
+}
+
+/** where a gun has not hung yet: its silhouette in clean, unfaded wood with a rim of settled dust — built from
+ *  a mask (1 = the gun's shadow, row-major w × h cells of the given size), one voxel thick, (0,0) at the mask's
+ *  corner. Pivot with [0, 0, 0]. */
+export function dustOutline(mask: Uint8Array, w: number, h: number, vs: number, seed = 54): StaticModel {
+  const m = new VoxelModel('dust_outline');
+  const at = (x: number, y: number) => (x >= 0 && y >= 0 && x < w && y < h ? mask[y * w + x] : 0);
+  for (let y = -3; y < h + 3; y++)
+    for (let x = -3; x < w + 3; x++) {
+      if (at(x, y)) {
+        const g = h01(x >> 1, Math.floor(y / 6), seed);
+        m.set(x, y, 0, g > 0.8 ? 0x4e2e18 : g < 0.1 ? 0x56341c : 0x4a2a16);
+        continue;
+      }
+      let d = 9;
+      for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) if (at(x + dx, y + dy)) d = Math.min(d, Math.hypot(dx, dy));
+      if (d > 3.2) continue;
+      const k = h01(x, y, seed + 1);
+      if (d > 1.5 && k > 0.55 + (3.2 - d) * 0.1) continue;
+      m.set(x, y, 0, d < 1.6 ? (k > 0.5 ? 0xb4a68a : 0xa89a7e) : 0x8e7e66, VF.SOFTAO);
+    }
+  return S(m, vs);
+}

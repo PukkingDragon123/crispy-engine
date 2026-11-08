@@ -19,6 +19,11 @@ import { SLOT, type ArsenalAnchors } from './ArsenalHud';
 /** one quest note on the mission paper stack */
 export type HudQuest = PaperQuest;
 
+/** draws pictures into the HUD canvas between the HUD's own base layer and its type (Hud3D, GearHud) */
+export interface HudPainter {
+  paint(c: CanvasRenderingContext2D, dt: number): void;
+}
+
 export interface HudState {
   /** active gun and the carried strip (Weapons.hud) */
   weapon?: WeaponHud;
@@ -185,6 +190,10 @@ export class Hud {
   paperBottom = 0;
   /** size factor for the 3D pieces on small screens */
   uiK = 1;
+  /** the picture layer (Hud3D's sprites, the gear rack): painted over the frames and bars, under the type */
+  painters: HudPainter[] = [];
+  /** type and markers that sit on top of the pictures, flushed after the painters */
+  private late: (() => void)[] = [];
   /** world -> screen (css px) projector, set by RunScene */
   project: ((p: { x: number; y: number; z: number }) => { x: number; y: number; visible: boolean; behind?: boolean }) | null = null;
 
@@ -285,6 +294,14 @@ export class Hud {
   private blit(cv: HTMLCanvasElement, x: number, y: number) {
     this.ctx.drawImage(cv, Math.round(x), Math.round(y));
   }
+  /** type drawn after the picture layer (so a card, jar or cylinder never covers it) */
+  private tl(...a: Parameters<typeof text>) {
+    this.late.push(() => text(...a));
+  }
+  /** a deferred blit / sprite / any draw, after the picture layer */
+  private lt(fn: () => void) {
+    this.late.push(fn);
+  }
 
   // ------------------------------------------------------------------ cylinder
   private cylCache = new Map<string, HTMLCanvasElement>();
@@ -350,12 +367,12 @@ export class Hud {
       const lift = Math.round(Math.sin(Math.min(1, w.swap) * Math.PI) * 23);
       if (wk === 'drum') {
         const low = w.ammo <= Math.max(5, w.mag * 0.15);
-        text(c, String(w.ammo), cx - 25, cy - 17 + lift, w.reloading ? UI.textDim : low && Math.sin(this.t * 10) > 0 ? UI.blood.h : UI.text, 32, 'right');
-        text(c, `/${w.mag}`, cx - 25, cy + 7 + lift, UI.textDim, 16, 'right');
-      } else if (!this.use3D) text(c, `${w.ammo}/${w.mag}`, cx, cy - 8, UI.text, 16, 'center');
-      if (w.reloading) text(c, 'RELOADING', cx, cy - 46, UI.brass.h, 16, 'center');
-      text(c, `${Math.round(s.speed)}`, cx + 38, cy - 6, s.speed > 20 ? UI.brass.h : UI.textDim, 16, 'left');
-      text(c, 'm/s', cx + 38, cy + 6, UI.textDim, 16, 'left');
+        this.tl(c, String(w.ammo), cx - 25, cy - 17 + lift, w.reloading ? UI.textDim : low && Math.sin(this.t * 10) > 0 ? UI.blood.h : UI.text, 32, 'right');
+        this.tl(c, `/${w.mag}`, cx - 25, cy + 7 + lift, UI.textDim, 16, 'right');
+      } else if (!this.use3D) this.tl(c, `${w.ammo}/${w.mag}`, cx, cy - 8, UI.text, 16, 'center');
+      if (w.reloading) this.tl(c, 'RELOADING', cx, cy - 46, UI.brass.h, 16, 'center');
+      this.tl(c, `${Math.round(s.speed)}`, cx + 38, cy - 6, s.speed > 20 ? UI.brass.h : UI.textDim, 16, 'left');
+      this.tl(c, 'm/s', cx + 38, cy + 6, UI.textDim, 16, 'left');
       return;
     }
     this.anchors.cyl.hidden = false;
@@ -411,38 +428,41 @@ export class Hud {
       c.drawImage(img, -img.width / 2, -img.height / 2);
       c.restore();
     }
-    // reload: brass sweet-spot arc + Pinch crawling the rim
+    // reload: brass sweet-spot arc + Pinch crawling the rim (over the cylinder picture)
     if (rel.active) {
       const rr = R + 4;
       const w0 = rel.window[0], w1 = rel.window[1];
-      for (let i = 0; i <= 60; i++) {
-        const t = i / 60;
-        const a = -Math.PI / 2 + t * Math.PI * 2;
-        const inWin = t >= w0 && t <= w1;
-        if (!inWin && i % 3) continue;
-        px(this.ctx, Math.round(ox + Math.cos(a) * rr), Math.round(oy + Math.sin(a) * rr), inWin ? 2 : 1, inWin ? 2 : 1, inWin ? (Math.sin(this.t * 14) > 0 ? UI.brass.h : UI.brass.l) : 'rgba(255,240,200,0.35)');
-      }
-      const pa = -Math.PI / 2 + rel.t * Math.PI * 2;
-      const pxp = ox + Math.cos(pa) * (rr + 3), pyp = oy + Math.sin(pa) * (rr + 3);
-      const frame = Math.floor(this.t * 14) % 2 ? 'pinchA' : 'pinchB';
-      this.spr(frame, pxp, pyp, 1, rel.jam > 0 ? 0.5 + 0.5 * Math.sin(this.t * 40) : 1, pa + Math.PI / 2);
-      const inside = rel.t >= w0 && rel.t <= w1;
-      // on touch the cylinder itself is the switch: say so instead of showing a key
-      if (inside || rel.jam > 0) {
-        const bob = inside ? Math.sin(this.t * 20) : 0;
-        if (this.touch) text(c, 'TAP', ox, oy + R + 7 + bob, UI.brass.h, 16, 'center');
-        else {
-          const kc = keycap('R');
-          this.blit(kc, ox - kc.width / 2, oy + R + 8 + bob);
+      const t = this.t, touch = this.touch, jam = rel.jam, rt = rel.t;
+      this.lt(() => {
+        for (let i = 0; i <= 60; i++) {
+          const f = i / 60;
+          const a = -Math.PI / 2 + f * Math.PI * 2;
+          const inWin = f >= w0 && f <= w1;
+          if (!inWin && i % 3) continue;
+          px(this.ctx, Math.round(ox + Math.cos(a) * rr), Math.round(oy + Math.sin(a) * rr), inWin ? 2 : 1, inWin ? 2 : 1, inWin ? (Math.sin(t * 14) > 0 ? UI.brass.h : UI.brass.l) : 'rgba(255,240,200,0.35)');
         }
-      }
-      if (rel.jam > 0) text(c, 'JAMMED', ox, oy - R - 22, UI.blood.h, 16, 'center');
+        const pa = -Math.PI / 2 + rt * Math.PI * 2;
+        const pxp = ox + Math.cos(pa) * (rr + 3), pyp = oy + Math.sin(pa) * (rr + 3);
+        const frame = Math.floor(t * 14) % 2 ? 'pinchA' : 'pinchB';
+        this.spr(frame, pxp, pyp, 1, jam > 0 ? 0.5 + 0.5 * Math.sin(t * 40) : 1, pa + Math.PI / 2);
+        const inside = rt >= w0 && rt <= w1;
+        // on touch the cylinder itself is the switch: say so instead of showing a key
+        if (inside || jam > 0) {
+          const bob = inside ? Math.sin(t * 20) : 0;
+          if (touch) text(c, 'TAP', ox, oy + R + 7 + bob, UI.brass.h, 16, 'center');
+          else {
+            const kc = keycap('R');
+            this.blit(kc, ox - kc.width / 2, oy + R + 8 + bob);
+          }
+        }
+        if (jam > 0) text(c, 'JAMMED', ox, oy - R - 22, UI.blood.h, 16, 'center');
+      });
       // casings eject at start of eject phase
       if (!this.use3D && rel.phase === 'eject' && Math.random() < dt * 30) this.parts.push({ kind: 'casing', x: ox + (Math.random() - 0.5) * 10, y: oy, vx: (Math.random() - 0.5) * 50, vy: -30 - Math.random() * 30, t: 0, life: 1.2, rot: Math.random() * 6 });
     }
     // speed plaque
-    text(c, `${Math.round(s.speed)}`, cx + 38, cy - 6, s.speed > 20 ? UI.brass.h : UI.textDim, 16, 'left');
-    text(c, 'm/s', cx + 38, cy + 6, UI.textDim, 16, 'left');
+    this.tl(c, `${Math.round(s.speed)}`, cx + 38, cy - 6, s.speed > 20 ? UI.brass.h : UI.textDim, 16, 'left');
+    this.tl(c, 'm/s', cx + 38, cy + 6, UI.textDim, 16, 'left');
   }
 
   // ------------------------------------------------------------------ frame
@@ -452,6 +472,7 @@ export class Hud {
     const c = this.ctx;
     const W = this.w, H = this.h;
     c.clearRect(0, 0, W, H);
+    this.late.length = 0;
     this.hint.style.display = s.locked || !this.visible || this.suppressHint ? 'none' : 'block';
     this.enter += ((this.visible ? 1 : 0) - this.enter) * Math.min(1, dt * 6);
     if (this.enter < 0.01) return;
@@ -523,27 +544,27 @@ export class Hud {
         if (ready) {
           const pulse = Math.round(Math.sin(this.t * 6) * 1.5);
           const col = Math.sin(this.t * 6) > 0 ? '#c8ffe0' : UI.venom.l;
-          if (this.touch) text(c, 'TAP THE JAR', tx, ty0 + pulse, col, 16);
+          if (this.touch) this.tl(c, 'TAP THE JAR', tx, ty0 + pulse, col, 16);
           else {
             const kc = keycap('Z');
-            this.blit(kc, tx, ty0 - 2 + pulse);
-            text(c, 'UNLEASH', tx + kc.width + 4, ty0 + pulse, col, 16);
+            this.lt(() => this.blit(kc, tx, ty0 - 2 + pulse));
+            this.tl(c, 'UNLEASH', tx + kc.width + 4, ty0 + pulse, col, 16);
           }
         }
         if (s.combo > 1) {
           const hot = Math.min(1, s.combo / 40);
           const col = s.combo >= 25 ? '#eafff2' : s.combo >= 10 ? UI.venom.h : UI.venom.l;
           const bump = Math.round(this.streakPop * 3);
-          text(c, `x${s.combo}`, tx, ty0 + 16 - bump, col, 16);
-          text(c, 'STREAK', tx + measure(c, `x${s.combo}`) + 4, ty0 + 16, `rgba(201,169,124,${0.6 + hot * 0.4})`, 16);
+          this.tl(c, `x${s.combo}`, tx, ty0 + 16 - bump, col, 16);
+          this.tl(c, 'STREAK', tx + measure(c, `x${s.combo}`) + 4, ty0 + 16, `rgba(201,169,124,${0.6 + hot * 0.4})`, 16);
         }
         if (s.combo > this.lastCombo) this.streakPop = 1;
         this.lastCombo = s.combo;
         this.streakPop = Math.max(0, this.streakPop - dt * 5);
       } else this.anchors.soul = null;
       if (!this.use3D) this.spr('skullIcon', x - 2 + sx, y - 1 + sy + (low ? Math.round(Math.sin(this.t * 9)) : 0));
-      text(c, `${Math.ceil(s.hp)}`, x + 26 + sx, y + 1 + sy, UI.text, 16);
-      text(c, `/${Math.round(s.maxHp)}`, x + 26 + measure(c, `${Math.ceil(s.hp)}`) + sx, y + 1 + sy, UI.textDim, 16);
+      this.tl(c, `${Math.ceil(s.hp)}`, x + 26 + sx, y + 1 + sy, UI.text, 16);
+      this.tl(c, `/${Math.round(s.maxHp)}`, x + 26 + measure(c, `${Math.ceil(s.hp)}`) + sx, y + 1 + sy, UI.textDim, 16);
       // boost tail
       const by = y + 18;
       this.blit(barFrame(110, 10), x + 18, by);
@@ -556,7 +577,7 @@ export class Hud {
         const info = STATUS_INFO[st.id];
         this.blit(slot(18, 2), stx, y - 2);
         this.spr(info.icon, stx + 5, y + 3);
-        text(c, String(Math.round(st.stacks)), stx + 15, y + 6, info.css, 16);
+        this.tl(c, String(Math.round(st.stacks)), stx + 15, y + 6, info.css, 16);
         stx += 30;
       }
       // consumables above
@@ -568,7 +589,7 @@ export class Hud {
         this.anchors.items.push({ x: ix + 11, y: y - 19, size: 22, model: it.count > 0 ? it.model ?? '' : '', count: it.count });
         if (it.icon && !(this.use3D && this.items3D[ii])) this.spr(it.icon, ix + 7, y - 24);
         if (!this.touch) this.blit(keycap(it.key), ix + 3, y - 42);
-        if (it.count > 1) text(c, 'x' + it.count, ix + 14, y - 20, UI.text, 16);
+        if (it.count > 1) this.tl(c, 'x' + it.count, ix + 14, y - 20, UI.text, 16);
         ix += 28;
       }
     }
@@ -590,16 +611,16 @@ export class Hud {
         const star = starBadge(15);
         const bounce = Math.round(Math.sin(this.rankPop * Math.PI) * 4);
         this.blit(star, x, y - bounce);
-        text(c, String(s.rank), x + star.width / 2, y + 8 - bounce, UI.wood.o, 16, 'center', false);
+        this.tl(c, String(s.rank), x + star.width / 2, y + 8 - bounce, UI.wood.o, 16, 'center', false);
         // the bounty is a purse of reward money, counted up like a wanted poster's figure
         const bt = Math.round(s.bountyTotal ?? 0);
         if (bt > this.bountyShown + 0.5) this.bountyPop = 1;
         this.bountyShown += (bt - this.bountyShown) * Math.min(1, dt * 7);
         if (Math.abs(bt - this.bountyShown) < 0.5) this.bountyShown = bt;
         this.bountyPop = Math.max(0, this.bountyPop - dt * 3);
-        text(c, 'BOUNTY', x + 38, y + 1, UI.textDim, 16);
+        this.tl(c, 'BOUNTY', x + 38, y + 1, UI.textDim, 16);
         const lift = Math.round(this.bountyPop * 3);
-        text(c, '$' + Math.round(this.bountyShown).toLocaleString('en-US'), x + 38, y + 14 - lift, this.bountyPop > 0.2 ? '#fff3d6' : UI.brass.h, 16);
+        this.tl(c, '$' + Math.round(this.bountyShown).toLocaleString('en-US'), x + 38, y + 14 - lift, this.bountyPop > 0.2 ? '#fff3d6' : UI.brass.h, 16);
       }
       // gold purse
       this.goldShown += (s.gold - this.goldShown) * Math.min(1, dt * 8);
@@ -608,13 +629,13 @@ export class Hud {
       if (this.use3D) {
         const gy = Math.round(y + 38 * k);
         this.anchors.coin = { x: x + 12, y: gy + 6, pop: this.goldPop };
-        text(c, String(Math.round(this.goldShown)), x + 22, gy - 1, UI.brass.l, 16);
+        this.tl(c, String(Math.round(this.goldShown)), x + 22, gy - 1, UI.brass.l, 16);
       } else {
         const gy = y + 30;
         this.anchors.coin = { x: x + 44, y: gy + 6, pop: this.goldPop };
         this.spr('coinBig', x + 38, gy - Math.round(this.goldPop * 3));
-        text(c, String(Math.round(this.goldShown)), x + 54, gy - 1, UI.brass.l, 16);
-        if (s.combo > 2) text(c, `${s.combo} KILL STREAK`, x + 2, gy + 16, s.combo > 25 ? UI.blood.h : UI.brass.h, 16);
+        this.tl(c, String(Math.round(this.goldShown)), x + 54, gy - 1, UI.brass.l, 16);
+        if (s.combo > 2) this.tl(c, `${s.combo} KILL STREAK`, x + 2, gy + 16, s.combo > 25 ? UI.blood.h : UI.brass.h, 16);
       }
     }
 
@@ -647,11 +668,12 @@ export class Hud {
         const col = ringing ? UI.brass.h : 'rgba(240,220,180,0.92)';
         if (!this.touch) {
           const kc = keycap('T');
-          this.blit(kc, ex - Math.ceil(measure(c, l1, 16)) - kc.width - 4, wy - 15);
+          const kx = ex - Math.ceil(measure(c, l1, 16)) - kc.width - 4;
+          this.lt(() => this.blit(kc, kx, wy - 15));
         }
-        text(c, l1, ex, wy - 13, col, 16, 'right');
-        if (l2) text(c, l2, ex, wy + 1, col, 16, 'right');
-      } else text(c, s.zone, cx, Math.round(py + 15 * k + (tl < 900 ? 14 : 3) * k) + 4 - drop, 'rgba(240,220,180,0.85)', 16, 'center');
+        this.tl(c, l1, ex, wy - 13, col, 16, 'right');
+        if (l2) this.tl(c, l2, ex, wy + 1, col, 16, 'right');
+      } else this.tl(c, s.zone, cx, Math.round(py + 15 * k + (tl < 900 ? 14 : 3) * k) + 4 - drop, 'rgba(240,220,180,0.85)', 16, 'center');
     } else if (!s.boss) {
       if (s.wave !== this.lastWave) {
         this.lastWave = s.wave;
@@ -667,34 +689,27 @@ export class Hud {
       chain(c, sx + 12, -2, sy + 1);
       chain(c, sx + sgW - 12, -2, sy + 1);
       this.blit(woodPanel(sgW, sgH, 11, { iron: true }), sx, sy);
-      text(c, s.waveLabel, cx + sw, sy + 5, UI.text, 16, 'center');
+      this.tl(c, s.waveLabel, cx + sw, sy + 5, UI.text, 16, 'center');
       const tl = Math.ceil(s.waveTime);
       if (tl < 900) {
         const pw = 84;
         this.blit(parchment(pw, 16, 4), cx - pw / 2 + sw, sy + sgH + 1);
-        text(c, `${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}`, cx + sw, sy + sgH + 2, UI.wood.o, 16, 'center', false);
+        this.tl(c, `${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}`, cx + sw, sy + sgH + 2, UI.wood.o, 16, 'center', false);
       }
-      text(c, s.zone, cx, sy + sgH + 20, 'rgba(240,220,180,0.85)', 16, 'center');
+      this.tl(c, s.zone, cx, sy + sgH + 20, 'rgba(240,220,180,0.85)', 16, 'center');
     } else {
       const bw = Math.min(300, Math.round(W * 0.55));
       const bx = cx - bw / 2, by = 4 - slide * 60;
       this.blit(parchment(bw, 44, 9), bx, by);
-      text(c, 'WANTED', cx, by + 3, UI.blood.d, 16, 'center', false);
-      text(c, s.boss.name.toUpperCase(), cx, by + 16, UI.wood.o, 16, 'center', false);
+      this.tl(c, 'WANTED', cx, by + 3, UI.blood.d, 16, 'center', false);
+      this.tl(c, s.boss.name.toUpperCase(), cx, by + 16, UI.wood.o, 16, 'center', false);
       this.blit(barFrame(bw - 24, 12), bx + 12, by + 31);
       drawBarFill(c, bx + 12, by + 31, bw - 24, 12, s.boss.frac, UI.blood);
     }
 
     // ---------------------------------------------------------- skills + ultimate (bottom right)
-    if (this.use3D) {
-      for (const a of this.cardAnchors) {
-        if (!this.touch) {
-          const kc = keycap(a.key);
-          this.blit(kc, a.x - kc.width / 2, a.y + a.h / 2 + 2);
-        }
-        if (a.cd > 0.05 && a.cd < 99) text(c, a.cd < 1 ? a.cd.toFixed(1) : String(Math.ceil(a.cd)), a.x, a.y - 8, UI.text, 16, 'center');
-      }
-    } else {
+    // (2D-sprite cards draw their own key caps and cooldown figures: TarotBar.paint)
+    if (!this.use3D) {
       const ux = W - 26 + slide * 200, uy = H - 30;
       // ultimate ring
       const R = 19;
@@ -727,15 +742,74 @@ export class Hud {
           c.clip();
           px(c, x + 3, y + 3, sz - 6, sz - 6, 'rgba(10,6,3,0.6)');
           c.restore();
-          if (sk.cd < 9.5) text(c, sk.cd < 1 ? sk.cd.toFixed(1) : String(Math.ceil(sk.cd)), x + sz / 2, y + 4, UI.text, 16, 'center');
+          if (sk.cd < 9.5) this.tl(c, sk.cd < 1 ? sk.cd.toFixed(1) : String(Math.ceil(sk.cd)), x + sz / 2, y + 4, UI.text, 16, 'center');
         } else if (Math.sin(this.t * 3 + i) > 0.97) px(c, x + 4, y + 4, 2, 2, UI.brass.h);
         const kc = keycap(sk.key);
         if (!this.touch) this.blit(kc, x + sz / 2 - kc.width / 2, y + sz + 1);
-        if (sk.charges !== undefined && sk.charges > 1) text(c, String(sk.charges), x + sz - 4, y - 6, UI.text, 16);
+        if (sk.charges !== undefined && sk.charges > 1) this.tl(c, String(sk.charges), x + sz - 4, y - 6, UI.text, 16);
         kx -= 30;
       }
     }
 
+    // ---------------------------------------------------------- objective + marker
+    // ---------------------------------------------------------- arsenal: carried guns + treasure (3D layer)
+    if (this.use3D) {
+      const ar: ArsenalAnchors = { k: 1, x: cx, y: H - 32 + slide * 70, weapon: s.weapon ?? null, strip: null, markers: [] };
+      const car = s.weapon?.carried ?? [];
+      if (car.length > 1) {
+        const sy = H - 60 + slide * 70;
+        const slots = car.map((g, i) => ({ x: cx + 32 + i * SLOT, id: g.id, active: g.id === s.weapon!.id }));
+        ar.strip = { x: cx + 32 + ((car.length - 1) * SLOT) / 2, y: sy, slots };
+        if (!this.touch)
+          this.lt(() =>
+            car.forEach((g, i) => {
+              const kc = keycap(g.key);
+              this.blit(kc, slots[i].x - kc.width / 2, sy - 23 + (slots[i].active ? -2 : 0));
+            })
+          );
+      }
+      if (s.treasure?.length && this.project) {
+        const hw = s.heroWorld;
+        const list = s.treasure
+          .map((t) => ({ t, d: hw ? Math.hypot(t.x - hw.x, t.z - hw.z) : 0 }))
+          .sort((a, b) => a.d - b.d)
+          .slice(0, 4);
+        for (const { t, d } of list) {
+          const p = this.project(t);
+          let mx = p.x / this.scale, my = p.y / this.scale;
+          const M = 24;
+          let edge = !p.visible || mx < M || mx > W - M || my < M || my > H - M;
+          let ang = 0;
+          if (edge) {
+            let dx = mx - W / 2, dy = my - H / 2;
+            if (p.behind) {
+              dx = -dx;
+              dy = Math.abs(dy) + H;
+            }
+            ang = Math.atan2(dy, dx);
+            const kk = Math.min((W / 2 - M) / Math.max(1, Math.abs(dx)), (H / 2 - M) / Math.max(1, Math.abs(dy)));
+            mx = W / 2 + dx * kk;
+            my = H / 2 + dy * kk;
+            edge = true;
+          }
+          ar.markers.push({ x: mx, y: my, kind: t.kind, edge, ang });
+          if (hw) this.tl(c, `${Math.round(d)} m`, mx - (edge ? Math.cos(ang) * 8 : 0), my + 14, 'rgba(255,236,190,0.95)', 16, 'center');
+        }
+      }
+      this.anchors.arsenal = ar;
+    } else this.anchors.arsenal = null;
+    this.anchors.paper = { right: W - 8 + slide * 220, y: 10 * k, k, compact: H < 250 || W < 520, speed: s.speed };
+    if (s.objective && !this.use3D) {
+      const ow = Math.max(150, Math.ceil(Math.max(measure(c, s.objective.text, 16), measure(c, s.objective.sub, 16))) + 20);
+      const ox = W - ow - 8 + slide * 200, oy = 8;
+      this.blit(parchment(ow, 38, 7), ox, oy);
+      this.tl(c, s.objective.text.toUpperCase(), ox + 8, oy + 3, UI.blood.d, 16, 'left', false);
+      this.tl(c, s.objective.sub, ox + 8, oy + 19, UI.wood.d, 16, 'left', false);
+    }
+    // ---------------------------------------------------------- the picture layer, then the type over it
+    for (const p of this.painters) p.paint(c, dt);
+    for (const f of this.late) f();
+    this.late.length = 0;
     // ---------------------------------------------------------- HUD particles
     for (let i = this.parts.length - 1; i >= 0; i--) {
       const p = this.parts[i];
@@ -798,58 +872,6 @@ export class Hud {
           text(c, s.prompt.text, x - bw / 2 + kc.width + 9, y - 7, UI.wood.o, 16, 'left', false);
         }
       }
-    }
-    // ---------------------------------------------------------- objective + marker
-    // ---------------------------------------------------------- arsenal: carried guns + treasure (3D layer)
-    if (this.use3D) {
-      const ar: ArsenalAnchors = { k: 1, x: cx, y: H - 32 + slide * 70, weapon: s.weapon ?? null, strip: null, markers: [] };
-      const car = s.weapon?.carried ?? [];
-      if (car.length > 1) {
-        const sy = H - 60 + slide * 70;
-        const slots = car.map((g, i) => ({ x: cx + 32 + i * SLOT, id: g.id, active: g.id === s.weapon!.id }));
-        ar.strip = { x: cx + 32 + ((car.length - 1) * SLOT) / 2, y: sy, slots };
-        if (!this.touch) car.forEach((g, i) => {
-          const kc = keycap(g.key);
-          this.blit(kc, slots[i].x - kc.width / 2, sy - 23 + (slots[i].active ? -2 : 0));
-        });
-      }
-      if (s.treasure?.length && this.project) {
-        const hw = s.heroWorld;
-        const list = s.treasure
-          .map((t) => ({ t, d: hw ? Math.hypot(t.x - hw.x, t.z - hw.z) : 0 }))
-          .sort((a, b) => a.d - b.d)
-          .slice(0, 4);
-        for (const { t, d } of list) {
-          const p = this.project(t);
-          let mx = p.x / this.scale, my = p.y / this.scale;
-          const M = 24;
-          let edge = !p.visible || mx < M || mx > W - M || my < M || my > H - M;
-          let ang = 0;
-          if (edge) {
-            let dx = mx - W / 2, dy = my - H / 2;
-            if (p.behind) {
-              dx = -dx;
-              dy = Math.abs(dy) + H;
-            }
-            ang = Math.atan2(dy, dx);
-            const kk = Math.min((W / 2 - M) / Math.max(1, Math.abs(dx)), (H / 2 - M) / Math.max(1, Math.abs(dy)));
-            mx = W / 2 + dx * kk;
-            my = H / 2 + dy * kk;
-            edge = true;
-          }
-          ar.markers.push({ x: mx, y: my, kind: t.kind, edge, ang });
-          if (hw) text(c, `${Math.round(d)} m`, mx - (edge ? Math.cos(ang) * 8 : 0), my + 14, 'rgba(255,236,190,0.95)', 16, 'center');
-        }
-      }
-      this.anchors.arsenal = ar;
-    } else this.anchors.arsenal = null;
-    this.anchors.paper = { right: W - 8 + slide * 220, y: 10 * k, k, compact: H < 250 || W < 520, speed: s.speed };
-    if (s.objective && !this.use3D) {
-      const ow = Math.max(150, Math.ceil(Math.max(measure(c, s.objective.text, 16), measure(c, s.objective.sub, 16))) + 20);
-      const ox = W - ow - 8 + slide * 200, oy = 8;
-      this.blit(parchment(ow, 38, 7), ox, oy);
-      text(c, s.objective.text.toUpperCase(), ox + 8, oy + 3, UI.blood.d, 16, 'left', false);
-      text(c, s.objective.sub, ox + 8, oy + 19, UI.wood.d, 16, 'left', false);
     }
     if (s.marker && this.project) {
       const p = this.project(s.marker);
