@@ -60,8 +60,14 @@ export class FloatText3D {
     const px = this.o.px;
     this.c.font = `${px}px Alagard`;
     const w = Math.max(...this.lines.map((l) => this.c.measureText(l).width), 10) + px;
-    this.cv.width = Math.ceil(w);
-    this.cv.height = Math.ceil(this.lines.length * px * 1.2 + px * 0.6);
+    const W = Math.ceil(w), H = Math.ceil(this.lines.length * px * 1.2 + px * 0.6);
+    if (W !== this.cv.width || H !== this.cv.height) {
+      this.cv.width = W;
+      this.cv.height = H;
+      // the GPU copy has fixed storage (texStorage2D): a bigger canvas cannot be uploaded into it
+      // (GL_INVALID_VALUE, the old words stay on screen), so free it and let three allocate anew
+      this.tex.dispose();
+    }
     // one text line (px * 1.2 canvas pixels) is `size` metres tall
     const h = this.o.size * (this.cv.height / (px * 1.2));
     this.base.set(h * (this.cv.width / this.cv.height), h);
