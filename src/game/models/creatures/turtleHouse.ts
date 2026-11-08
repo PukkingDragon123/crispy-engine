@@ -22,8 +22,7 @@
 // Tamsin's (frozen, approved) rig: a turban instead of her headscarf, an olive
 // waistcoat for her shawl, a white beard, no coins or beads (`tortoiseGuyRig`).
 //
-// RIG (faces +Z, LEFT = +X, origin on the ground under the shell, 1/24 m; the
-// house parts are designed at 1/12 and re-gridded 2x):
+// RIG (faces +Z, LEFT = +X, origin on the ground under the shell, 1/12 m):
 //   shell (root, carapace + house + interior) → neck → neck2 → head → jaw → tongue,
 //     head → eye_l/eye_r, lid_l/lid_r
 //   shell → leg_fl → foot_fl → toes_fl (fr, bl, br), shell → tail → tail2 → tail3
@@ -35,7 +34,7 @@
 // secondary motion of the new joints (neck2, toes, tail2/3, the lure).
 import * as THREE from 'three';
 import { CRig, VoxelModel, VF, V3, RigSpec, ell, cap, tube, line, Prim, hollow, wetEye, vessel, n01, h01, mixc, sstep, add3, sub3, scl3, dot3, norm3, lerp3, exposed } from './ckit';
-import { fblob, plate, castIn, normalAt, splitMany, groove, surfaceCells, cullBuried, upsample2, type Pal } from './mkit';
+import { fblob, plate, castIn, normalAt, splitMany, groove, surfaceCells, cullBuried, type Pal } from './mkit';
 import { signPanel } from '../props/western';
 import { PR, textWidth } from '../props/helpers';
 import { merchantRig } from '../characters';
@@ -289,10 +288,10 @@ function buildTree(rig: CRig) {
   hollow(c, 2);
 }
 
-// ================================================================== THE BEAST (1/24 m)
-// Gobi himself is sculpted at twice the house's resolution. The house, its moving
-// parts and the acacia keep their 1/12 design and are re-gridded 2x into the rig.
-const VB = 1 / 24;
+// ================================================================== THE BEAST
+// Gobi is sculpted on the house's 1/12 grid: at 11 m long that is the same density
+// per body length as the 1/32 sand hippo, and it keeps the house's design exact.
+const VB = VS;
 const UB = (m: number) => m / VB;
 const PB = (x: number, y: number, z: number): V3 => [x / VB, y / VB, z / VB];
 const PBv = (v: V3) => PB(v[0], v[1], v[2]);
@@ -300,10 +299,10 @@ const PBv = (v: V3) => PB(v[0], v[1], v[2]);
 const MB = (i: number) => (i + 0.5) * VB;
 
 // sun-baked leathery hide, horn and keratin, the scute shell
-const SK = { base: 0x655b4a, shade: 0x4c4437, hi: 0x82765e, dark: 0x332d25, groove: 0x2a251e, belly: 0x9a8a68, warm: 0x786548, sand: 0xa89070, inner: 0x3a2e26 };
-const KER = { dark: 0x2e2822, base: 0x4a4136, mid: 0x6c604e, worn: 0xa8987a, edge: 0xd2c6a2 };
-const SCU = { a: 0x6a5536, b: 0x7c6743, c: 0x564429, bleach: 0xc4b089, bone: 0xe4d8b6, seam: 0x2a2016, sand: 0xa58b5e, lichen: 0x8c946a, lichen2: 0xb4b088, chip: 0xd6c69e };
-const HSC: Pal = { top: 0xb8a886, mid: 0x7e705a, base: 0x4c4234, rim: 0x625646, ring: 0x6e624e, crack: 0x2a241e, sand: 0x463e32 };
+const SK = { base: 0x7a6d58, shade: 0x695d4b, hi: 0x8e826a, dark: 0x4a4034, groove: 0x3e352b, belly: 0xb2a07c, warm: 0x86704f, sand: 0xb09a76, inner: 0x3a2e26 };
+const KER = { dark: 0x3e352c, base: 0x5c5040, mid: 0x857558, worn: 0xbcaa84, edge: 0xe2d6b0 };
+const SCU = { a: 0x8c6a3c, b: 0xa07c48, c: 0x6a5030, bleach: 0xd8c497, bone: 0xece0bc, seam: 0x35281a, sand: 0xb89a68, lichen: 0x9aa070, lichen2: 0xc0bc90, chip: 0xe0d0a6 };
+const HSC: Pal = { top: 0xb4a482, mid: 0x928266, base: 0x5e5240, rim: 0x7c6e56, ring: 0x86775c, crack: 0x463c30, sand: 0x5a4e3e };
 const HORN: Pal = { top: 0xe8dcbc, mid: 0xb09c76, base: 0x5c4e3e, rim: 0x86745a, ring: 0x9c8a66, crack: 0x3a3028, sand: 0x4a4034 };
 
 /** cellular scales (metres): distance to the nearest / second nearest cell point, and the cell id */
@@ -328,13 +327,13 @@ function vor(X: number, Y: number, Z: number, s: number, seed: number): [number,
 /** the hide: a mosaic of leathery scales (bigger on top), soft mottling, a pale throat and belly */
 function hide(X: number, Y: number, Z: number, under: number, scale = 0.11, seed = 3) {
   const [a, b, id] = vor(X, Y, Z, scale, seed);
-  if (b - a < 0.14) return mixc(SK.groove, SK.shade, under * 0.6);
+  // grooves one cell wide on this grid, never broken into dashes
+  if ((b - a) * scale < VB * 0.9) return mixc(mixc(SK.groove, SK.base, 0.35), SK.belly, under * 0.5);
   const k = ((id >>> 3) & 7) / 7;
-  let c = k < 0.3 ? SK.shade : k > 0.8 ? SK.hi : SK.base;
-  const m = n01(X, Y, Z, 1.6, seed + 5);
-  if (m > 0.64) c = mixc(c, SK.warm, 0.45);
-  else if (m < 0.34) c = mixc(c, SK.dark, 0.3);
-  if (a < 0.18) c = mixc(c, SK.hi, 0.35); // each scale catches the light at its crown
+  let c = k < 0.25 ? SK.shade : k > 0.85 ? SK.hi : SK.base;
+  const m = n01(X, Y, Z, 1.2, seed + 5);
+  if (m > 0.64) c = mixc(c, SK.warm, 0.4);
+  else if (m < 0.34) c = mixc(c, SK.dark, 0.25);
   if (under > 0) c = mixc(c, SK.belly, Math.min(1, under) * 0.65);
   return c;
 }
@@ -352,14 +351,14 @@ const SEEDS: Seed[] = (() => {
   const out: Seed[] = [];
   const n = (v: V3) => norm3(v);
   // vertebrals down the spine; the front and rear ones (clear of the house) rise into horned pyramids
-  [0.86, 0.5, 0.06, -0.4, -0.8].forEach((z, i) => out.push({ d: n([0, Math.sqrt(1 - z * z), z]), h: 0.24, kind: 0, spike: i === 0 ? 0.75 : i === 4 ? 0.95 : i === 3 ? 0.6 : 0 }));
+  [0.86, 0.5, 0.06, -0.4, -0.8].forEach((z, i) => out.push({ d: n([0, Math.sqrt(1 - z * z), z]), h: 0.3, kind: 0, spike: i === 0 ? 0.8 : i === 4 ? 1.0 : i === 3 ? 0.65 : 0 }));
   for (const s of [1, -1]) {
     // costals
-    [0.66, 0.24, -0.2, -0.62].forEach((z) => out.push({ d: n([s * 0.68, 0.6, z * 0.95]), h: 0.2, kind: 1, spike: 0 }));
+    [0.66, 0.24, -0.2, -0.62].forEach((z) => out.push({ d: n([s * 0.68, 0.6, z * 0.95]), h: 0.26, kind: 1, spike: 0 }));
     // marginals round the rim
     for (let i = 1; i <= 11; i++) {
       const a = (i / 12) * Math.PI;
-      out.push({ d: n([s * Math.sin(a), 0.06, Math.cos(a)]), h: 0.11, kind: 2, spike: 0 });
+      out.push({ d: n([s * Math.sin(a), 0.06, Math.cos(a)]), h: 0.15, kind: 2, spike: 0 });
     }
   }
   out.push({ d: n([0, 0.08, 1]), h: 0.12, kind: 2, spike: 0 }); // nuchal
@@ -372,7 +371,7 @@ function buildCarapace(m: VoxelModel) {
   const cut = (x: number, y: number, z: number) => MB(y) > H.floor - 0.06 && inHouse(MB(x), MB(z), 0.05);
   const RMAX = 0.36;
   const lo = PB(-CR[0] - RMAX - 0.1, 1.05, CC[2] - CR[2] - RMAX - 0.1), hi = PB(CR[0] + RMAX + 0.1, CC[1] + CR[1] + RMAX + 0.4, CC[2] + CR[2] + RMAX + 0.1);
-  const T = 0.16; // shell thickness (m)
+  const T = 0.2; // shell thickness (m)
   for (let i = Math.floor(lo[0]); i <= Math.ceil(hi[0]); i++)
     for (let k = Math.floor(lo[2]); k <= Math.ceil(hi[2]); k++)
       for (let j = Math.floor(lo[1]); j <= Math.ceil(hi[1]); j++) {
@@ -398,7 +397,7 @@ function buildCarapace(m: VoxelModel) {
         }
         const sd = SEEDS[s1];
         const cen = Math.min(1, (b1 - b2) / SEAM_W[sd.kind]); // 0 at a seam .. 1 at the areola
-        const rings = sd.kind === 2 ? 3 : 5;
+        const rings = sd.kind === 2 ? 2 : 3;
         const ring = Math.floor(cen * rings);
         // stepped growth terraces rising to the areola; seams sunk as grooves
         let rel = cen < 0.07 ? -0.03 : sd.h * (0.18 + 0.82 * Math.min(1, (ring + sstep(0.75, 1, cen * rings - ring)) / rings));
@@ -413,16 +412,16 @@ function buildCarapace(m: VoxelModel) {
         }
         // colour: growth bands, bleached areolas, dark sand-packed seams, lichen low on the flanks, wind-scour on top
         let c: number;
-        const top = rho > surf - 1.6 * (VB / R);
+        const top = rho > surf - 1.2 * (VB / R);
         if (!top) c = SCU.c;
-        else if (cen < 0.1) c = h01(i >> 1, j >> 1, k >> 1, 3) < 0.4 ? SCU.sand : SCU.seam;
-        else if (cen > 0.86) c = sd.kind === 2 ? SCU.bleach : SCU.bone;
+        else if (cen < 0.14) c = SCU.seam;
+        else if (cen > 0.84) c = sd.kind === 2 ? SCU.bleach : SCU.bone;
         else {
           c = ring & 1 ? SCU.b : SCU.a;
-          if (cen * rings - ring < 0.16) c = mixc(c, SCU.seam, 0.5); // the step's riser
-          if (dy > 0.55) c = mixc(c, SCU.bleach, sstep(0.55, 0.9, dy) * 0.55);
-          if (dy < 0.3 && n01(X, Y, Z, 1.3, 13) > 0.66) c = mixc(c, n01(X, Y, Z, 4, 2) > 0.5 ? SCU.lichen : SCU.lichen2, 0.6);
-          if (sd.kind === 2 && dy < 0.02) c = mixc(c, SCU.sand, 0.4);
+          if (cen * rings - ring < 0.1) c = mixc(c, SCU.seam, 0.4); // the step's riser
+          if (dy > 0.55) c = mixc(c, SCU.bleach, sstep(0.55, 0.9, dy) * 0.45);
+          if (dy < 0.28 && n01(X, Y, Z, 0.9, 13) > 0.7) c = mixc(c, SCU.lichen, 0.5);
+          if (cen < 0.22) c = mixc(c, SCU.sand, 0.45); // sand packed along the seams
         }
         m.set(i, j, k, c);
       }
@@ -474,8 +473,8 @@ function buildCarapace(m: VoxelModel) {
   for (const [x, y, z, ax, ay, az, l] of [[-1.75, 2.45, -2.1, -0.5, 0.6, -0.3, 0.55], [-1.6, 2.62, -2.32, -0.35, 0.75, -0.2, 0.4], [-1.95, 2.25, -2.42, -0.6, 0.5, -0.45, 0.32]] as number[][]) {
     const a = PB(x, y, z), d = norm3([ax, ay, az]);
     const b = add3(a, scl3(d, UB(l)));
-    cap(m, add3(a, scl3(d, -UB(0.08))), b, 0.7, 0.6, (_x, yy) => ((yy & 3) === 0 ? 0x6a4a2a : 0x8a643a));
-    cap(m, b, add3(b, scl3(d, 1.2)), 0.9, 0.5, 0x9a7a4c); // splintered end
+    cap(m, add3(a, scl3(d, -UB(0.08))), b, 0.55, 0.5, (_x, yy) => ((yy & 1) === 0 ? 0x6a4a2a : 0x8a643a));
+    cap(m, b, add3(b, scl3(d, 0.8)), 0.7, 0.4, 0x9a7a4c); // splintered end
   }
 }
 
@@ -491,8 +490,8 @@ function buildNeck(rig: CRig) {
   const under = (Y: number, Z: number) => sstep(0.1, -0.35, Y - (1.45 + (Z - 3.0) * 0.45));
   fblob(mass, prims, (x, y, z) => {
     const X = MB(x), Y = MB(y), Z = MB(z);
-    return hide(X, Y, Z, under(Y, Z), Y > 1.7 + (Z - 3.2) * 0.4 ? 0.13 : 0.085, 7);
-  }, { k: UB(0.18), inner: SK.inner, innerDepth: 2, disp: (x, y, z) => (n01(x, y, z, VB / 0.35, 4) - 0.5) * 0.6 });
+    return hide(X, Y, Z, under(Y, Z), Y > 1.7 + (Z - 3.2) * 0.4 ? 0.38 : 0.28, 7);
+  }, { k: UB(0.18), inner: SK.inner, innerDepth: 2, disp: (x, y, z) => (n01(x, y, z, VB / 0.45, 4) - 0.5) * 0.3 });
   // loose folds of hide across the throat and round the neck
   const surf = surfaceCells(mass);
   for (const z0 of [3.05, 3.38, 3.7, 4.0]) {
@@ -503,8 +502,8 @@ function buildNeck(rig: CRig) {
   for (let i = 0; i < 9; i++) {
     const t = i / 8;
     const z = 2.95 + t * 1.4;
-    for (const [sxv, side, len] of [[0, 0, 0.2 - t * 0.05], [0.42, 1, 0.12], [-0.42, -1, 0.12]] as number[][]) {
-      if (side && i % 2) continue;
+    for (const [sxv, side, len] of [[0, 0, 0.24 - t * 0.06], [0.42, 1, 0.12], [-0.42, -1, 0.12]] as number[][]) {
+      if (side && (i % 3 !== 1)) continue;
       const p = lerp3(NECK_PTS[1], NECK_PTS[4], t * 0.95);
       const from = PB(sxv * 1.6, p[1] + 1.2, z);
       const hit = castIn(mass, from, side ? norm3([-side * 0.6, -1, 0]) : [0, -1, 0]);
@@ -531,17 +530,18 @@ function buildHead(rig: CRig) {
   const prims: Prim[] = [
     { c: PB(0, 2.3, 4.85), r: [UB(0.62), UB(0.46), UB(0.72)] }, // cranium
     { c: PB(0, 2.2, 5.42), r: [UB(0.42), UB(0.34), UB(0.46)] }, // snout
-    { a: PB(0, 2.32, 5.7), b: PB(0, 1.9, 6.02), r0: UB(0.17), r1: UB(0.05) }, // the hooked tip of the upper beak
+    { a: PB(0, 2.36, 5.62), b: PB(0, 2.2, 5.98), r0: UB(0.24), r1: UB(0.17) }, // the upper beak
+    { a: PB(0, 2.2, 5.98), b: PB(0, 1.82, 6.12), r0: UB(0.17), r1: UB(0.05) }, // its hooked tip
     { c: PB(0.5, 2.07, 4.72), r: [UB(0.3), UB(0.36), UB(0.42)] }, // jaw muscles
     { c: PB(-0.5, 2.07, 4.72), r: [UB(0.3), UB(0.36), UB(0.42)] },
     { c: PB(0.37, 2.6, 4.98), r: [UB(0.22), UB(0.13), UB(0.32)] }, // brow ridges
     { c: PB(-0.37, 2.6, 4.98), r: [UB(0.22), UB(0.13), UB(0.32)] },
     { a: PB(0, 1.84, 4.5), b: PB(0, 1.86, 5.62), r0: UB(0.46), r1: UB(0.26) }, // lower jaw
-    { c: PB(0, 1.9, 5.84), r: [UB(0.17), UB(0.13), UB(0.15)] }, // chin, curling up to meet the hook
+    { c: PB(0, 1.86, 5.78), r: [UB(0.2), UB(0.15), UB(0.18)] }, // chin, curling up to meet the hook
     { c: PB(0, 1.62, 4.62), r: [UB(0.46), UB(0.3), UB(0.48)] }, // throat
     { a: PB(0, 2.02, 4.2), b: PB(0, 2.08, 4.55), r0: UB(0.54), r1: UB(0.54) }, // neck join
-    { c: PB(0.46, 2.43, 5.12), r: [UB(0.16), UB(0.15), UB(0.16)], sub: true, k: 2 }, // eye sockets
-    { c: PB(-0.46, 2.43, 5.12), r: [UB(0.16), UB(0.15), UB(0.16)], sub: true, k: 2 },
+    { c: PB(0.46, 2.43, 5.12), r: [UB(0.19), UB(0.18), UB(0.19)], sub: true, k: 1 }, // eye sockets
+    { c: PB(-0.46, 2.43, 5.12), r: [UB(0.19), UB(0.18), UB(0.19)], sub: true, k: 1 },
   ];
   fblob(mass, prims, (x, y, z) => {
     const X = MB(x), Y = MB(y), Z = MB(z);
@@ -554,8 +554,8 @@ function buildHead(rig: CRig) {
       return Z > 5.6 ? KER.mid : (Math.floor(Z / 0.09) & 1) ? KER.base : KER.dark;
     }
     if (Z > 4.55 && Math.abs(Y - my) < 0.04) return SK.groove;
-    return hide(X, Y, Z, sstep(1.95, 1.6, Y), Y > 2.35 ? 0.12 : 0.08, 11);
-  }, { k: UB(0.16), inner: SK.inner, innerDepth: 2, disp: (x, y, z) => (n01(x, y, z, VB / 0.3, 6) - 0.5) * 0.7, keep: (_x, _y, z) => MB(z) > 4.16 });
+    return hide(X, Y, Z, sstep(1.95, 1.6, Y), 0.42, 11);
+  }, { k: UB(0.16), inner: SK.inner, innerDepth: 2, disp: (x, y, z) => (n01(x, y, z, VB / 0.4, 6) - 0.5) * 0.3, keep: (_x, _y, z) => MB(z) > 4.16 });
   // horn shields: the frontal and parietals, prefrontals over the snout, horned brows, temporal spikes, cheek scutes
   let seed = 300;
   const shield = (at: V3, out: V3, fwd: V3, a: number, b: number, h: number, keel: number, tilt: number, spike = 0, lean = 0.9, pal = HSC) => {
@@ -564,16 +564,15 @@ function buildHead(rig: CRig) {
     if (!hit) return;
     plate(mass, [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5], normalAt(mass, hit, 3), fwd, { a: UB(a), b: UB(b), h: UB(h), keel, tilt, sink: 2.5, seed: seed++, sq: 2.6, spike: UB(spike), spikeLean: lean }, pal);
   };
-  shield([0, 2.76, 4.86], [0, 1, 0], [0, 0, 1], 0.2, 0.22, 0.06, 0.2, 0.3);
-  shield([0, 2.7, 4.5], [0, 1, -0.2], [0, 0, 1], 0.18, 0.26, 0.06, 0.25, 0.35);
-  shield([0, 2.6, 5.28], [0, 1, 0.3], [0, 0, 1], 0.17, 0.2, 0.05, 0.15, 0.25);
-  shield([0, 2.45, 5.6], [0, 1, 0.5], [0, 0, 1], 0.12, 0.15, 0.04, 0.15, 0.2);
+  // a bleached bone skull-cap of big shields, dark-rimmed (the monster's armoured brow)
+  shield([0, 2.76, 4.86], [0, 1, 0], [0, 0, 1], 0.26, 0.28, 0.09, 0.25, 0.3, 0, 0.9, HORN);
+  shield([0, 2.7, 4.42], [0, 1, -0.25], [0, 0, 1], 0.22, 0.32, 0.08, 0.3, 0.4, 0, 0.9, HORN);
+  shield([0, 2.6, 5.3], [0, 1, 0.3], [0, 0, 1], 0.2, 0.22, 0.07, 0.2, 0.25, 0, 0.9, HORN);
   for (const s of [1, -1]) {
-    shield([s * 0.36, 2.74, 4.98], [s * 0.3, 1, 0], [0, 0, 1], 0.17, 0.12, 0.07, 0.3, 0.4, 0.42, 0.95, HORN); // horned brow
-    shield([s * 0.5, 2.55, 4.55], [s * 0.7, 0.7, -0.2], [0, 0.3, 1], 0.14, 0.12, 0.06, 0.3, 0.4, 0.34, 1.1, HORN); // temporal horn
-    shield([s * 0.62, 2.2, 4.62], [s, 0.2, 0], [0, 1, 0], 0.16, 0.14, 0.05, 0.15, 0.4);
-    shield([s * 0.6, 2.08, 4.95], [s, 0.1, 0.3], [0, 1, 0], 0.12, 0.11, 0.04, 0.15, 0.4);
-    shield([s * 0.42, 2.38, 5.4], [s, 0.6, 0.3], [0, 1, 0], 0.1, 0.1, 0.035, 0.15, 0.3);
+    shield([s * 0.38, 2.74, 4.98], [s * 0.3, 1, 0], [0, 0, 1], 0.2, 0.15, 0.1, 0.3, 0.45, 0.62, 1.0, HORN); // horned brow
+    shield([s * 0.52, 2.55, 4.52], [s * 0.7, 0.7, -0.2], [0, 0.3, 1], 0.17, 0.14, 0.08, 0.3, 0.45, 0.52, 1.15, HORN); // temporal horn
+    shield([s * 0.64, 2.18, 4.62], [s, 0.2, 0], [0, 1, 0], 0.2, 0.18, 0.07, 0.15, 0.4);
+    shield([s * 0.6, 2.0, 5.0], [s, 0.1, 0.3], [0, 1, 0], 0.15, 0.13, 0.05, 0.15, 0.4);
   }
   // the nostrils: two slits on the beak-top behind raised valve rims that seal against the sand
   for (const s of [1, -1]) {
@@ -587,16 +586,16 @@ function buildHead(rig: CRig) {
   splitMany(mass, { head, jaw }, (x, y, z) => (MB(z) > 4.5 && MB(y) < mouthYT(MB(z)) ? 'jaw' : 'head'));
   // the mouth: the inside of the beak, a ridged palate, and the snapper's wormlike lure on the tongue
   jaw.forEach((x, y, z) => {
-    if (jaw.has(x, y + 1, z) || MB(z) < 4.6) return;
+    if (jaw.has(x, y + 1, z) || MB(z) < 4.7) return;
     const X = MB(x);
-    if (Math.abs(X) < 0.34 - (MB(z) - 4.6) * 0.18 && MB(z) < 5.75) {
+    if (Math.abs(X) < 0.24 - (MB(z) - 4.7) * 0.14 && MB(z) < 5.6) {
       jaw.del(x, y, z);
       if (jaw.has(x, y - 1, z)) jaw.set(x, y - 1, z, 0x8a5048, VF.METAL);
     }
   });
   head.forEach((x, y, z) => {
-    if (head.has(x, y - 1, z) || MB(z) < 4.6 || MB(z) > 5.8) return;
-    if (Math.abs(MB(x)) < 0.36) head.set(x, y, z, (z & 3) === 0 ? 0x6e3a34 : 0x8e5048, VF.METAL);
+    if (head.has(x, y - 1, z) || MB(z) < 4.7 || MB(z) > 5.6) return;
+    if (Math.abs(MB(x)) < 0.22) head.set(x, y, z, (z & 3) === 0 ? 0x6e3a34 : 0x8e5048, VF.METAL);
   });
   const tongue = rig.part('tongue', 'jaw', PB(0, 1.95, 4.75));
   for (const [z, r] of [[4.8, 0.2], [5.0, 0.18], [5.2, 0.14]] as number[][]) ell(tongue, PB(0, 1.98, z), [UB(r), UB(0.06), UB(0.13)], 0xa8605a, { fl: VF.METAL, keep: (_a, _b, _c, x, y, zz) => !jaw.has(x, y, zz) });
@@ -605,10 +604,10 @@ function buildHead(rig: CRig) {
   const E: V3 = [0.46, 2.43, 5.12];
   const fwd: V3 = [0.62, 0.04, 0.78];
   const eye = rig.part('eye_l', 'head', PBv(E));
-  wetEye(eye, PBv(E), UB(0.13), fwd, { iris: 0x9a6418, irisEdge: 0x3a2008, sclera: 0x1c140e, pupil: 0x060403, irisR: 0.84, pupilR: 0.36, bigGlint: 2 });
+  wetEye(eye, PBv(E), UB(0.17), fwd, { iris: 0xb07818, irisEdge: 0x4a2a08, sclera: 0x2a1c10, pupil: 0x060403, irisR: 0.9, pupilR: 0.42, bigGlint: 1, smallGlint: false });
   rig.mirror('eye_l', 'eye_r', 'head');
   const lid = rig.part('lid_l', 'head', PBv(E), [-1.15, 0, 0]);
-  ell(lid, PBv(E), [UB(0.165), UB(0.165), UB(0.165)], (x, y, z) => hide(MB(x), MB(y), MB(z), 0, 0.05, 21), {
+  ell(lid, PBv(E), [UB(0.2), UB(0.2), UB(0.2)], (x, y, z) => (MB(y) < E[1] - 0.04 ? SK.shade : SK.base), {
     keep: (lx, ly, lz) => lx * lx + ly * ly + lz * lz > 0.62 && ly > -0.2 && lx * fwd[0] + ly * fwd[1] + lz * fwd[2] > -0.15,
   });
   rig.mirror('lid_l', 'lid_r', 'head');
@@ -623,13 +622,13 @@ function buildHead(rig: CRig) {
 function buildLeg(rig: CRig, name: string, S: V3, K: V3, F: V3, front: boolean) {
   const fz = 1; // toes point forward on all four feet
   const pad: V3 = [F[0] + 0.1, 0.17, F[2] + (front ? 0.12 : 0.04)];
-  const legSkin = (x: number, y: number, z: number) => hide(MB(x), MB(y), MB(z), 0, MB(y) > 0.9 ? 0.12 : 0.09, front ? 15 : 16);
+  const legSkin = (x: number, y: number, z: number) => hide(MB(x), MB(y), MB(z), 0, MB(y) > 0.9 ? 0.4 : 0.32, front ? 15 : 16);
   const above = (a: V3, b: V3) => {
     const A = PBv(a), Bv = PBv(b), ax = sub3(Bv, A), L2 = dot3(ax, ax);
     return (x: number, y: number, z: number) => dot3(sub3([x + 0.5, y + 0.5, z + 0.5], A), ax) / L2 < 1 + 0.8 / Math.sqrt(L2);
   };
   const up = rig.part('leg_' + name, 'shell', PBv(S));
-  fblob(up, [{ a: PBv(S), b: PBv(K), r0: UB(0.64), r1: UB(0.52) }, { c: PBv(lerp3(S, K, 0.35)), r: [UB(0.6), UB(0.5), UB(0.6)] }], legSkin, { k: UB(0.2), inner: SK.inner, innerDepth: 2, keep: above(S, K), disp: (x, y, z) => (n01(x, y, z, VB / 0.3, 2) - 0.5) * 0.7 });
+  fblob(up, [{ a: PBv(S), b: PBv(K), r0: UB(0.64), r1: UB(0.52) }, { c: PBv(lerp3(S, K, 0.35)), r: [UB(0.6), UB(0.5), UB(0.6)] }], legSkin, { k: UB(0.2), inner: SK.inner, innerDepth: 2, keep: above(S, K), disp: (x, y, z) => (n01(x, y, z, VB / 0.45, 2) - 0.5) * 0.35 });
   const ft = rig.part('foot_' + name, 'leg_' + name, PBv(K));
   fblob(ft, [
     { a: PBv(K), b: PB(F[0], 0.42, F[2]), r0: UB(0.53), r1: UB(0.55) },
@@ -640,7 +639,7 @@ function buildLeg(rig: CRig, name: string, S: V3, K: V3, F: V3, front: boolean) 
     if (Y < 0.07) return SK.dark;
     if (Y < 0.32) return mixc(legSkin(x, y, z), SK.sand, 0.35); // caked sand
     return legSkin(x, y, z);
-  }, { k: UB(0.16), inner: SK.inner, innerDepth: 2, keep: (_x, y) => y >= 0, disp: (x, y, z) => (n01(x, y, z, VB / 0.3, 3) - 0.5) * 0.6 });
+  }, { k: UB(0.16), inner: SK.inner, innerDepth: 2, keep: (_x, y) => y >= 0, disp: (x, y, z) => (n01(x, y, z, VB / 0.45, 3) - 0.5) * 0.3 });
   // wrinkle rings round the ankle
   const surf = surfaceCells(ft);
   for (const y0 of [0.5, 0.64]) groove(ft, (x, y, z) => (MB(y) - y0 - Math.sin(MB(x) * 5 + MB(z) * 4) * 0.025) / VB, { depth: 1, rim: 1.2, floor: (c) => mixc(c, SK.groove, 0.7), front: (c) => mixc(c, SK.hi, 0.2), cand: surf });
@@ -674,7 +673,7 @@ function buildLeg(rig: CRig, name: string, S: V3, K: V3, F: V3, front: boolean) 
     const root: V3 = [pad[0] + d[0] * 0.5, 0.16, pad[2] + d[2] * 0.55];
     const mid = add3(root, [d[0] * 0.14, 0.02, d[2] * 0.14]);
     const tip = add3(root, [d[0] * 0.3, -0.12, d[2] * 0.3]);
-    cap(toes, PBv(root), PBv(mid), UB(0.13), UB(0.11), (x, y, z) => hide(MB(x), MB(y), MB(z), 0, 0.06, 18));
+    cap(toes, PBv(root), PBv(mid), UB(0.13), UB(0.11), SK.shade);
     const chipped = (k + n) % 3 === 0;
     tube(toes, [PBv(mid), PBv(lerp3(mid, tip, 0.5)), PBv(chipped ? lerp3(mid, tip, 0.82) : tip)], [UB(0.1), UB(0.075), UB(chipped ? 0.05 : 0.025)], (x, y) => {
       const Y = MB(y);
@@ -694,7 +693,7 @@ function buildTail(rig: CRig) {
     const last = i === 2;
     const prims: Prim[] = [{ a: PBv(TAIL_PTS[i]), b: PBv(TAIL_PTS[i + 1]), r0: UB(TAIL_R[i]), r1: UB(TAIL_R[i + 1]) }];
     if (last) prims.push({ a: PBv(TAIL_PTS[3]), b: PBv(TAIL_PTS[4]), r0: UB(TAIL_R[3]), r1: UB(TAIL_R[4]) });
-    fblob(m, prims, (x, y, z) => hide(MB(x), MB(y), MB(z), sstep(0, -0.6, MB(y) - (TAIL_PTS[i][1] - 0.05)), 0.09, 25), { k: UB(0.1), inner: SK.inner });
+    fblob(m, prims, (x, y, z) => hide(MB(x), MB(y), MB(z), sstep(0, -0.6, MB(y) - (TAIL_PTS[i][1] - 0.05)), 0.28, 25), { k: UB(0.1), inner: SK.inner, innerDepth: 2 });
     // a triple crest of tubercles (the snapper's saw-backed tail)
     const a = TAIL_PTS[i], b = TAIL_PTS[last ? 4 : i + 1];
     const nS = last ? 3 : 2;
@@ -862,7 +861,7 @@ function buildPots(rig: CRig, at: V3) {
 let cached: RigSpec | null = null;
 export function turtleHouseRig(): RigSpec {
   if (cached) return cached;
-  // ---- the house and everything on it, at its own 1/12 grid
+  // ---- the house and everything on it
   const hr = new CRig('turtle_house_12', VS);
   const house = hr.part('shell', undefined, Pv(J.shell));
   buildHouse(house);
@@ -877,11 +876,11 @@ export function turtleHouseRig(): RigSpec {
   buildLantern(hr, 'lantern_b', [H.porchX + 0.02, 4.55, 0.8]);
   buildChime(hr, [H.porchX + 0.05, 4.52, -1.25]);
   buildPots(hr, [2.0, 4.72, 1.05]);
-  // ---- the beast at 1/24
+  // ---- the beast
   const rig = new CRig('turtle_house', VB);
   const shell = rig.part('shell', undefined, PBv(J.shell));
   buildCarapace(shell);
-  upsample2(house, shell);
+  house.forEach((x, y, z, c, f) => shell.set(x, y, z, c, f));
   buildNeck(rig);
   buildHead(rig);
   buildLeg(rig, 'fl', J.legF, J.kneeF, J.footF, true);
@@ -892,14 +891,21 @@ export function turtleHouseRig(): RigSpec {
     rig.mirror('toes_' + a, 'toes_' + b, 'foot_' + b);
   }
   buildTail(rig);
-  // ---- the house parts, re-gridded (pivots and rest angles carry over)
-  for (const p of hr.parts) {
-    if (p.name === 'shell') continue;
-    upsample2(p.model, rig.part(p.name, p.parent, [p.pivot[0] * 2, p.pivot[1] * 2, p.pivot[2] * 2], p.rest));
-  }
+  // ---- the house parts (pivots and rest angles carry over)
+  for (const p of hr.parts) if (p.name !== 'shell') rig.part(p.name, p.parent, p.pivot, p.rest).merge(p.model);
   // buried ends never meshed; overlapping parts never share an exposed cell
   const beast = /^(neck|neck2|head|jaw|tongue|leg_|foot_|toes_|tail)/;
   for (const p of rig.parts) if (p.parent && beast.test(p.name) && p.name !== 'jaw' && p.name !== 'tongue') cullBuried(p.model, rig.m(p.parent), 3);
+  // the roots of the limbs, neck and tail hidden inside the shell's flesh bag (they only ever move further in)
+  for (const p of rig.parts) {
+    if (!/^(leg_|neck$|tail$)/.test(p.name)) continue;
+    const del: V3[] = [];
+    p.model.forEach((x, y, z) => {
+      const lx = MB(x) / 2.45, ly = (MB(y) - 1.42) / 0.5, lz = (MB(z) + 0.2) / 3.15;
+      if (lx * lx + ly * ly + lz * lz < 0.62 && MB(y) > 1.0) del.push([x, y, z]);
+    });
+    for (const [x, y, z] of del) p.model.del(x, y, z);
+  }
   for (const p of rig.parts) {
     if (!p.parent || !beast.test(p.name)) continue;
     const par = rig.m(p.parent);

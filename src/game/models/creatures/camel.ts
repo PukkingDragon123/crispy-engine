@@ -20,7 +20,8 @@ import type { RigSpec, V3 } from '../../../engine/voxel/Rig';
 import type { RigInstance } from '../../../engine/voxel/Rig';
 import { RBm, Sc, M3, VF, mix, mulRGB, hash3, noise, ell, cap, tube, paint, hollow, lumpy } from '../enemies/real/rk';
 import { VoxelModel } from '../../../engine/voxel/VoxelModel';
-import { Prim, splitInto, wetEye, thicken, smoothVox, fur as cfur } from './ckit';
+import { Prim, splitInto, wetEye, thicken, smoothVox, fur as cfur, norm3 } from './ckit';
+import { plate, castIn, normalAt, type Pal } from './mkit';
 
 const VS = 1 / 40;
 export const CAMEL_EXPRESSIONS = ['neutral', 'bored', 'smug', 'spit'];
@@ -31,6 +32,8 @@ const WOOD = { base: 0x7a5432, dark: 0x553820, hi: 0x9a6e44 };
 const LEATHER = { base: 0x6e4428, dark: 0x4a2c18, hi: 0x8e5a36 };
 const ROPE: [number, number] = [0xc8a66e, 0x9a7a48];
 const BRASS = 0xd8a840;
+/** the calluses: thick, worn keratin pads (chest, knees, elbows, stifles, hocks) */
+const CALLUS: Pal = { top: 0xb4a088, mid: 0x8a745e, base: 0x5a4a3c, rim: 0x6c5a48, ring: 0x7a6650, crack: 0x3a2e26, sand: 0x5a4a3c };
 
 const V = (p: M3): V3 => [p[0] / VS, p[1] / VS, p[2] / VS];
 const E = (c: M3, r: M3, rot?: V3, sub = false): Prim => ({ c: V(c), r: [r[0] / VS, r[1] / VS, r[2] / VS], rot, sub });
@@ -242,6 +245,35 @@ function buildCamel(): RigSpec {
   tufts(head.m, (X, Y, Z) => Y > 2.16 && Z < 1.46, (src, t) => mix(mix(src, HIDE.shag, 0.55), 0x5e3e22, t * 0.4), 0.7, 2, 7);
   tufts(body.m, (X, Y, Z) => Math.abs(Math.abs(X) - 0.27) < 0.06 && Y > 1.12 && Y < 1.3 && Z > 0.3 && Z < 0.55, (src) => mix(src, HIDE.shag, 0.4), 0.4, 2, 8); // elbow tufts
 
+  // ================================================================ the neck in two: the low U-bend and the upright upper neck (the head rides on neck2)
+  {
+    const NB: M3 = [0, 1.53, 1.08];
+    const nn = norm3([0, 0.19, 0.3]);
+    const neck2 = rb.pm('neck2', 'neck', NB);
+    const side = (x: number, y: number, z: number) => (M(y) - NB[1]) * nn[1] + (M(z) - NB[2]) * nn[2];
+    const mv: [number, number, number, number, number][] = [];
+    const plug: [number, number, number, number, number][] = [];
+    neck.m.forEach((x, y, z, c, f) => {
+      const d = side(x, y, z);
+      if (d > 0) mv.push([x, y, z, c, f]);
+      else if (d > -0.05) {
+        // a hidden plug so the bend never opens a gap
+        let inner = true;
+        for (const [dx, dy, dz] of N6) if (!neck.m.has(x + dx * 2, y + dy * 2, z + dz * 2)) inner = false;
+        if (inner) plug.push([x, y, z, c, f]);
+      }
+    });
+    for (const [x, y, z, c, f] of mv) {
+      neck.m.del(x, y, z);
+      neck2.m.set(x, y, z, c, f);
+    }
+    for (const [x, y, z, c, f] of plug) neck2.m.set(x, y, z, c, f);
+    rb.parts.find((p) => p.name === 'head')!.parent = 'neck2';
+    const i2 = rb.parts.findIndex((p) => p.name === 'neck2');
+    const [n2] = rb.parts.splice(i2, 1);
+    rb.parts.splice(rb.parts.findIndex((p) => p.name === 'neck') + 1, 0, n2);
+  }
+
   // ================================================================ head dressing: brow, halter, tassels
   const hs = head;
   for (const sx of [-1, 1]) ell(hs, [sx * 0.082, 2.158, 1.475], [0.032, 0.022, 0.05], coat); // bony brow ridge
@@ -345,6 +377,35 @@ function buildCamel(): RigSpec {
   cap(shinB, FB, [0.2, 0.08, -0.62], 0.042, 0.048, legCoat);
   foot(shinB, PB, 0.08, 0.105);
   for (const s of [legF, legB, shinF, shinB]) lumpy(s.m, 4, 1, 12, 0.5);
+  // the third segment: fetlock, pastern and the broad padded foot flex on their own
+  const footSplit = (shin: Sc, name: string, parent: string, at: M3) => {
+    const ft = rb.pm(name, parent, at);
+    const mv: [number, number, number, number, number][] = [];
+    shin.m.forEach((x, y, z, c, f) => {
+      if (M(y) < at[1] + 0.03) mv.push([x, y, z, c, f]);
+    });
+    for (const [x, y, z, c, f] of mv) {
+      shin.m.del(x, y, z);
+      ft.m.set(x, y, z, c, f);
+    }
+    return ft;
+  };
+  footSplit(shinF, 'foot_fl', 'shin_fl', FT);
+  footSplit(shinB, 'foot_bl', 'shin_bl', FB);
+  // the calluses grown into thick keratin pads (what a camel kneels on), worn pale on top
+  {
+    let seed = 500;
+    const pad = (m: VoxelModel, at: M3, from: M3, fwdv: V3, a: number, b: number, h: number) => {
+      const hit = castIn(m, V(from), [at[0] - from[0], at[1] - from[1], at[2] - from[2]]);
+      if (!hit) return;
+      plate(m, [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5], normalAt(m, hit, 2), fwdv, { a: a / VS, b: b / VS, h: h / VS, keel: 0, tilt: 0.1, sink: 1.5, seed: seed++, sq: 2.4, rings: true, cracks: true }, CALLUS);
+    };
+    pad(body.m, [0, 1.12, 0.48], [0, 0.7, 0.48], [0, 0, 1], 0.13, 0.11, 0.03); // the sternal pad
+    pad(legF.m, [0.195, 0.64, 0.47], [0.195, 0.64, 0.9], [0, 1, 0], 0.062, 0.05, 0.022); // knees
+    pad(legF.m, [0.21, 1.07, 0.4], [0.21, 0.8, 0.45], [0, 0, 1], 0.05, 0.045, 0.018); // elbows
+    pad(legB.m, [0.24, 1.02, -0.44], [0.45, 1.02, -0.3], [0, 1, 0], 0.045, 0.04, 0.016); // stifles
+    pad(legB.m, [0.2, 0.71, -0.79], [0.2, 0.71, -1.1], [0, 1, 0], 0.045, 0.035, 0.016); // hocks
+  }
 
   // ================================================================ tail with a dark switch
   const T0: M3 = [0, 1.66, -0.97];
@@ -375,6 +436,8 @@ function buildCamel(): RigSpec {
   mirror('shin_fl', 'shin_fr', 'leg_fr');
   mirror('leg_bl', 'leg_br');
   mirror('shin_bl', 'shin_br', 'leg_br');
+  mirror('foot_fl', 'foot_fr', 'shin_fr');
+  mirror('foot_bl', 'foot_br', 'shin_br');
 
   for (const p of rb.parts) if (p.model.count > 4000) hollow(p.model, 3);
   // gentle sky-light on top, darker undersides
@@ -525,6 +588,7 @@ export class CamelIdle {
   private nextLook = 2;
   private lookTY = 0;
   private bodyY0: number | null = null;
+  private n2Y = 0;
   chewing = true;
   constructor(public rig: RigInstance) {}
 
@@ -563,8 +627,17 @@ export class CamelIdle {
     this.lookY += (this.lookTY - this.lookY) * Math.min(1, dt * 1.6);
     this.lookP += (Math.sin(t * 0.23) * 0.08 - this.lookP) * Math.min(1, dt);
     // kneeling, the neck stands up tall and proud
-    n['neck']?.rotation.set(Math.sin(t * 0.7) * 0.03 + this.lookP - k * 0.5, this.lookY * 0.45, Math.sin(t * 0.5) * 0.02);
+    // (the upper neck carries part of the turn a beat later, so the long neck curves into a look)
+    const hasN2 = !!n['neck2'];
+    this.n2Y += (this.lookY - this.n2Y) * Math.min(1, dt * 1.1);
+    n['neck']?.rotation.set(Math.sin(t * 0.7) * 0.03 + this.lookP - k * 0.5, this.lookY * (hasN2 ? 0.28 : 0.45), Math.sin(t * 0.5) * 0.02);
+    n['neck2']?.rotation.set(Math.sin(t * 0.7 - 0.6) * 0.025 + this.lookP * 0.3, this.n2Y * 0.22, Math.sin(t * 0.5 - 0.5) * 0.015);
     n['head']?.rotation.set(Math.sin(t * 0.9 + 1) * 0.04 - this.lookP * 0.5 + k * 0.42, this.lookY * 0.5, Math.sin(t * 0.6) * 0.04);
+    // breathing: the barrel swells a little
+    const bm = this.rig.meshes['body'];
+    if (bm) bm.scale.set(1 + Math.sin(t * 1.1) * 0.008, 1 + Math.sin(t * 1.1) * 0.01, 1);
+    // feet: the pads settle flat; kneeling, the pasterns fold back under the cannons
+    for (const id of ['fl', 'fr', 'bl', 'br']) n['foot_' + id]?.rotation.set(-0.35 * k + Math.sin(t * 0.3 + id.length) * 0.004, 0, 0);
     // ---- cud chewing: open/close + side-to-side grind
     if (n['jaw']) {
       const ph = t * Math.PI * 2 * 1.25;

@@ -745,9 +745,10 @@ export class Bench3D implements Mode {
       const i0 = Math.floor(s), i1 = Math.min(bays.length - 1, i0 + 1), f = s - i0;
       const c = bays[i0].centre.clone().lerp(bays[i1].centre, f);
       const mid = bays[1].centre;
-      const look = new THREE.Vector3(c.x, 1.76, this.rack.backZ);
-      const pos = new THREE.Vector3(c.x * 0.62 + mid.x * 0.38, 1.8, this.rack.frontZ + 1.7);
-      return { pos, look, fov: 47 };
+      // the look leads toward the bay, the camera follows less: a glide along the rack that keeps it in frame
+      const look = new THREE.Vector3(mid.x + (c.x - mid.x) * 0.6, 1.73, this.rack.backZ);
+      const pos = new THREE.Vector3(mid.x + (c.x - mid.x) * 0.35, 1.77, this.rack.frontZ + 1.7);
+      return { pos, look, fov: 50 };
     }
     const T = this.ttAt;
     const rev = (this.work?.g ?? this.sel) === 'revolver';

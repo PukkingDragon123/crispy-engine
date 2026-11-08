@@ -2667,6 +2667,7 @@ export class Shop {
     if (v.hooks.hunter) v.hooks.hunter.rig.root.visible = true;
     for (const ft of v.plaques) ft.dispose();
     if (this.bodies.length) this.clearWares();
+    this.clearShelf();
     g.indoor = false;
     g.lookAt = null;
     if (!g.riderWalking) g.setDoor(false);
@@ -2825,6 +2826,7 @@ export class Shop {
       this.fwdAng = facing + Math.PI;
     }
     const g = this.group;
+    this.clearShelf(); // (a visit's tags never outlive it)
     const stallObj = this.indoor && her instanceof Turtle ? her.stallObj : null;
     this.stall = stallObj ? stallModel() : null;
     if (stallObj) {

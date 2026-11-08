@@ -29,8 +29,9 @@
 //    something new happens (the break, the shop, a rank-up, a boss wave coming,
 //    a zone opening, a blueprint or relic found). Each shows once, ever.
 //
-// RunScene hooks (one each): construct after the director exists, update at the
-// end of updateHud, dispose in exit.
+// RunScene hooks: construct it once the director exists, dispose it in exit. It
+// ticks itself after every engine update (engine.onAfterUpdate) and follows the
+// HUD's visibility, so cutscenes, the cave and the Weighing hide it too.
 import * as THREE from 'three';
 import type { Engine } from '../../engine/Engine';
 import type { Ctx } from '../Ctx';
@@ -42,7 +43,8 @@ import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { VF } from '../../engine/voxel/VoxelModel';
 import { buildRigGeo, clearRigCache, RigInstance, type RigSpec } from '../../engine/voxel/Rig';
 import { modelEntry } from '../models/lookup';
-import { blueprintScroll, mapFragment } from '../models/props/treasure';
+import { blueprintScroll } from '../models/props/treasure';
+import { signpost } from '../models/props/western';
 import { sculpt, Surf, fbm3, h3, mixc, mulc, clamp, clamp01, len2, sdRoundBox2, TAU, METAL, KNZ } from './HudKit';
 import { SpriteBank, Shot, Sprite, blitC, blitObj, variant, framingBox, wrap, pixelText, pixelTextWidth } from './HudSprites';
 import { Blueprints } from '../meta/Blueprints';
@@ -436,7 +438,9 @@ export class ProgressLadder {
     });
     this.want('ledger');
     for (let i = 0; i < 4; i++) this.rows.push({ short: '', title: '', sub: '', pop: 0, key: '', slide: 0 });
+    d.engine.onAfterUpdate.push(this.tick);
   }
+  private tick = (_dt: number, rdt: number) => this.update(rdt);
 
   private resize() {
     this.s = this.d.hud.scale || (window.innerWidth > 1800 ? 3 : 2);
@@ -492,13 +496,13 @@ export class ProgressLadder {
     return this.bank.get('lg:cart', 'c', 53, (): Shot => ({ obj: piece('cart', () => new THREE.Mesh(geoOf(cartridgeModel(), 4), this.bank.material())), w: 6, h: 12, yaw: 0.3, pitch: 0.1, fit: true }));
   }
   /** a prop model from the game (a map scrap, a blueprint roll) */
-  private prop(name: string, S: number, make: () => { model: any; voxelSize: number }, yaw: number, pitch: number) {
+  private prop(name: string, S: number, make: () => { model: any; voxelSize: number }, yaw: number, pitch: number, crop?: { fill: number; dy: number }) {
     return this.bank.get('lg:' + name, S, 52, (): Shot => ({
       obj: piece(name, () => {
         const m = make();
         return new THREE.Mesh(buildVoxelGeometry(m.model, { voxelSize: m.voxelSize, pivot: 'center' }), this.bank.material());
       }),
-      w: S, h: S, yaw, pitch, fit: true,
+      w: S, h: S, yaw, pitch, ...(crop ? { fill: crop.fill, dy: crop.dy } : { fit: true }),
     }));
   }
   /** the next boss, photographed from its own rig (built once, then let go) */
@@ -508,8 +512,9 @@ export class ProgressLadder {
       if (!spec?.parts) return null;
       const ck = 'ledger:' + key;
       const rig = new RigInstance(buildRigGeo(spec, ck), { material: this.bank.material() });
+      // head and shoulders: the top of the rig fills the badge
       return {
-        obj: wrap(rig.root), w: S, h: S, yaw: 0.5, pitch: 0.1, fit: true,
+        obj: wrap(rig.root), w: S, h: S, yaw: 0.45, pitch: 0.08, fill: 2.2, dy: 0.3,
         after: () => {
           rig.root.traverse((o) => (o as THREE.Mesh).isMesh && (o as THREE.Mesh).geometry.dispose());
           clearRigCache(ck);
@@ -556,14 +561,14 @@ export class ProgressLadder {
     const frac = clamp01(run.bounty / Math.max(1, run.bountyToNext));
     R[0].short = String(run.rank);
     R[0].title = `RANK ${run.rank}`;
-    R[0].sub = 'next rank: an upgrade';
+    R[0].sub = `to rank ${run.rank + 1}: a card`;
     // the next boss: the wave you are on or the one coming
     const cur = Math.max(1, dr.inBreak ? dr.nextWave : dr.wave || 1);
     const bw = Math.ceil(cur / 5) * 5;
     const fighting = dr.phase === 'boss' && dr.wave === bw;
     const b = bossAt(bw);
     R[1].short = fighting ? 'NOW' : String(bw);
-    R[1].title = fighting ? 'BOSS: NOW' : `BOSS AT WAVE ${bw}`;
+    R[1].title = fighting ? 'BOSS: NOW' : `WAVE ${bw} BOSS`;
     R[1].sub = b.name;
     // the next zone (or the storm parting to the next region)
     const zs = world.sa.zones, zi = world.activeZone;
@@ -639,13 +644,13 @@ export class ProgressLadder {
     const sx = x0 + 9;
     const strap = this.strap();
     if (strap) blitObj(c, strap, sx, top + strap.h / 2 - 9, 2, this.show);
-    const pitch = 30;
+    const pitch = 32;
     const y0 = top + 22;
     const icons: (Sprite | null)[] = [
-      this.concho(22),
-      this.boss(S.boss.model, 24),
-      this.prop('map', 22, () => mapFragment(5), 0.3, 1.2),
-      this.prop('scroll', 22, () => blueprintScroll('gun'), 0.6, 0.35),
+      this.concho(26),
+      this.boss(S.boss.model, 28),
+      this.prop('sign', 28, () => signpost(2), 0.55, 0.12, { fill: 2.0, dy: 0.3 }),
+      this.prop('scroll', 28, () => blueprintScroll('gun'), 0.95, 0.42),
     ];
     this.rows.forEach((r, i) => {
       const cy = y0 + i * pitch;
@@ -673,7 +678,7 @@ export class ProgressLadder {
   }
 
   private paintTag(c: CanvasRenderingContext2D, r: Row, i: number, x: number, cy: number, S: ReturnType<ProgressLadder['compute']>) {
-    const tw = Math.max(pixelTextWidth(r.title, 16), pixelTextWidth(r.sub, 16) + 4) + (i === 0 ? 0 : 0);
+    const tw = Math.max(pixelTextWidth(r.title, 16), pixelTextWidth(r.sub, 16) + 4 + (i === 0 ? 52 : 0));
     const W = Math.min(220, Math.ceil((tw + 22) / 16) * 16);
     const H = 30;
     const pp = this.paper(W, H, 'left');
@@ -691,17 +696,17 @@ export class ProgressLadder {
     const al = this.show * clamp01(r.slide * 1.6 - 0.4);
     c.globalAlpha = al;
     pixelText(c, r.title, tx, ty, { size: 16, color: '#3a1c0a', lip: '#f6e8c4' });
-    pixelText(c, r.sub, tx, ty + 13, { size: 16, color: i === 1 ? '#8a2016' : '#6a4a28' });
+    pixelText(c, r.sub, tx + (i === 0 ? 52 : 0), ty + 13, { size: 16, color: i === 1 ? '#8a2016' : '#6a4a28' });
     c.globalAlpha = 1;
     // the rank row: eight cartridges in their loops, one per eighth of the bounty to the next rank
     if (i === 0) {
       const cart = this.cartridge();
       if (cart) {
         const n = 8, filled = Math.floor(S.frac * n + 1e-6);
-        const cx0 = tx + pixelTextWidth(r.title, 16) + 8;
+        const cx0 = tx + 3;
         for (let j = 0; j < n; j++) {
           const on = j < filled;
-          const xx = cx0 + j * 6, yy = ty + 6;
+          const xx = cx0 + j * 6, yy = ty + 20;
           c.globalAlpha = al * (on ? 1 : 0.35);
           blitC(c, on ? cart : variant(cart, 'shadow'), xx, yy);
         }
@@ -724,12 +729,12 @@ export class ProgressLadder {
     let x = p.x / s, y = p.y / s;
     const onScreen = p.visible && !p.behind && x > 20 && x < W - 20 && y > 30 && y < H - 30;
     const dist = `${Math.round(shop.dist)} m`;
-    const tur = this.turtle(22, shop.hidden);
+    const tur = this.turtle(30, shop.hidden);
     const al = C.show * this.show;
     if (onScreen) {
       // over Gobi: the little turtle house and the distance under it
       const bob = Math.round(Math.sin(this.t * 2.2) * 1.5);
-      if (tur) blitObj(c, tur, x, y - 10 + bob, 3, al);
+      if (tur) blitObj(c, tur, x, y - 14 + bob, 3, al);
       c.globalAlpha = al;
       pixelText(c, shop.hidden ? 'dug in' : dist, x, y + 4 + bob, { size: 16, color: shop.hidden ? '#c9a97c' : '#ffd36b', align: 'center', outline: '#1a0e06' });
       c.globalAlpha = 1;
@@ -749,7 +754,7 @@ export class ProgressLadder {
     const wob = Math.round(Math.sin(this.t * 3.1) * 0.6);
     if (cmp) blitObj(c, cmp, x, y + wob, 3, al);
     // the turtle house and the distance on the inner side
-    const ix = x - Math.sin(ang) * 30, iy = y + Math.cos(ang) * 22;
+    const ix = x - Math.sin(ang) * 38, iy = y + Math.cos(ang) * 26;
     if (tur) blitObj(c, tur, ix, iy - 4, 2, al * 0.95);
     c.globalAlpha = al;
     pixelText(c, shop.hidden ? 'dug in' : dist, ix, iy + 8, { size: 16, color: shop.hidden ? '#c9a97c' : '#ffd36b', align: 'center', outline: '#1a0e06' });
@@ -782,7 +787,8 @@ export class ProgressLadder {
       this.tip = null;
       return;
     }
-    const W = 208, H = 52;
+    const tw = Math.max(...lines.map((l) => pixelTextWidth(l, 16)));
+    const W = Math.min(272, Math.max(160, Math.ceil((tw + 24) / 16) * 16)), H = 52;
     const pp = this.paper(W, H, 'top');
     if (!pp) return;
     const inK = clamp01(T.t / 0.45), outK = clamp01((T.t - (DUR - 0.5)) / 0.5);
@@ -824,6 +830,8 @@ export class ProgressLadder {
   }
 
   dispose() {
+    const L = this.d.engine.onAfterUpdate, i = L.indexOf(this.tick);
+    if (i >= 0) L.splice(i, 1);
     for (const u of this.unsub) u();
     this.unsub = [];
     this.cv.remove();

@@ -546,6 +546,7 @@ export class Terrain {
       this.live.add(c);
     }
     c.mesh.castShadow = lod <= 2;
+    c.mesh.userData.lod = lod;
     c.builtLod = lod;
     this.built++;
   }

@@ -9,7 +9,10 @@ import * as PM from '../models/props';
 import { deadBush, dryGrass } from '../models/props/flora';
 import type { VoxelModel } from '../../engine/voxel/VoxelModel';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
-import { sharedFoliageMaterial, sharedVoxelMaterial } from '../../engine/render/VoxelMaterial';
+import { sharedFoliageMaterial, sharedVoxelMaterial, makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
+import { Foliage } from './Foliage';
+import { buildSkinGeometry, type SkinHint } from './BlockSkin';
+import { pixelAtlas, PIXEL_GLSL } from './PixelTex';
 import type { World } from './World';
 import type { Anchor, ZoneDef } from './RegionGen';
 import type { Collider } from './Colliders';
@@ -261,6 +264,32 @@ const KINDS: Record<string, KindDef> = {
   rimGate: { variants: 2, build: (v) => rimStone(6 + v), solid: 'circle', radius: 0.7 },
 };
 const RIM_KINDS = new Set(['rimStone', 'rimGate']);
+/** plants drawn as pixel-art sprites by the Foliage layer instead of voxel batches */
+const SPRITE_KINDS = new Set(['deadBush', 'dryGrass', 'oasisReeds', 'reeds', 'oasisFlowers']);
+/**
+ * Structures that wear the big-block pixel skin (see BlockSkin): walls, roofs, hulls and
+ * stones become big textured faces instead of millions of tiny voxel quads.
+ */
+const SKIN: Record<string, SkinHint | ((v: number) => SkinHint)> = {
+  shack: 'wood', watchtower: 'wood', windmill: 'wood', waterTower: 'wood', outhouse: 'wood', gallows: 'wood',
+  saloonFacade: 'wood', sheriffFacade: 'wood', storeFacade: 'wood', wagon: 'wood', shipwreck: 'wood',
+  fence: 'wood', fenceBroken: 'wood', mineCart: 'wood',
+  outpost: (v) => (v % 2 === 0 ? 'wood' : 'stone'),
+  tent: 'cloth',
+  ruinWall: 'adobe',
+  hieroglyphWall: 'stone', stoneGate: 'stone', sphinx: 'stone', obelisk: 'stone', obeliskBroken: 'stone', column: 'stone', shrine: 'stone',
+  rockArch: 'rock', colossusLegs: 'rock', colossusHead: 'rock', rimStone: 'rock', rimGate: 'rock', boulder: 'rock',
+  cactus: 'cactus',
+};
+let skinMat: ReturnType<typeof makeVoxelMaterial> | null = null;
+/** the voxel material with the pixel-art material atlas on skinned faces */
+const skinMaterial = () => (skinMat ??= makeVoxelMaterial({ pixel: { tex: pixelAtlas(), glsl: PIXEL_GLSL } }));
+/** snap colours to a coarse grid so a far LOD merges into big quads (its colour detail is sub-pixel) */
+function quantize(m: VoxelModel, step = 12): VoxelModel {
+  const q = (c: number) => Math.min(255, Math.round(c / step) * step);
+  for (const [k, v] of m.map) m.map.set(k, ((v & 0xff000000) | (q((v >> 16) & 255) << 16) | (q((v >> 8) & 255) << 8) | q(v & 255)) | 0);
+  return m;
+}
 const SIGHT_KINDS = new Set(['rockArch', 'colossusLegs', 'colossusHead', 'shipwreck', 'shrine', 'cairn']);
 
 const LANDMARKS: Record<string, () => SM> = {
@@ -278,6 +307,8 @@ const LANDMARKS: Record<string, () => SM> = {
 
 interface Variant {
   sm: SM;
+  /** big-block pixel skin material class (null: plain voxel colours) */
+  skin?: SkinHint;
   geo: THREE.BufferGeometry;
   lodGeo?: THREE.BufferGeometry;
   mesh: THREE.InstancedMesh | null;
@@ -372,9 +403,16 @@ export class Props {
 
   private lod(v: Variant) {
     if (!v.lodGeo) {
-      const ds = downsampleModel(v.sm.model, 2);
       const pv = v.sm.pivot;
-      v.lodGeo = ds.count > 0 ? buildVoxelGeometry(ds, { voxelSize: v.sm.voxelSize * 2, pivot: pv ? [pv[0] / 2, pv[1] / 2, pv[2] / 2] : 'bottom' }) : v.geo;
+      const pivot: [number, number, number] | 'bottom' = pv ? [pv[0] / 2, pv[1] / 2, pv[2] / 2] : 'bottom';
+      if (v.skin) {
+        // the skinned far LOD: the flattened colours, halved, still textured until the haze takes it
+        const ds = downsampleModel((v.geo.userData.flat as VoxelModel | undefined) ?? v.sm.model, 2);
+        v.lodGeo = ds.count > 0 ? buildSkinGeometry(ds, { voxelSize: v.sm.voxelSize * 2, pivot, hint: v.skin, blur: 0, tones: 4 }) : v.geo;
+      } else {
+        const ds = quantize(downsampleModel(v.sm.model, 2));
+        v.lodGeo = ds.count > 0 ? buildVoxelGeometry(ds, { voxelSize: v.sm.voxelSize * 2, pivot }) : v.geo;
+      }
     }
     return v.lodGeo;
   }
@@ -383,12 +421,13 @@ export class Props {
   /** unique mesh with automatic distance LOD; culled past `hide` m (the storm and the haze hide it anyway) */
   private lodMesh(v: Variant, foliage: boolean, nearDist = 60, hide = v.height > 6 ? 560 : 320) {
     const lod = new THREE.LOD();
-    const mat = foliage ? sharedFoliageMaterial : sharedVoxelMaterial;
+    const mat = v.skin ? skinMaterial() : foliage ? sharedFoliageMaterial : sharedVoxelMaterial;
     const a = new THREE.Mesh(v.geo, mat);
     a.castShadow = true;
     a.receiveShadow = true;
     const b = new THREE.Mesh(this.lod(v), mat);
-    b.castShadow = true;
+    // past the near LOD the structure is outside the sun's shadow map (46 m): no caster pass
+    b.castShadow = false;
     b.receiveShadow = true;
     lod.addLevel(a, 0);
     lod.addLevel(b, nearDist);
@@ -396,9 +435,14 @@ export class Props {
     return lod;
   }
 
+  /** pixel-art ground cover (grass, brush, flowers, reeds) */
+  foliage: Foliage;
+
   constructor(private world: World) {
     this.group.name = 'props';
     world.group.add(this.group);
+    this.foliage = new Foliage(world);
+    this.group.add(this.foliage.mesh);
   }
 
   private variant(kind: string, v: number, a: Anchor): Variant | null {
@@ -413,10 +457,12 @@ export class Props {
       console.warn('[props] build failed', kind, e);
     }
     if (!sm || !sm.model) return null;
-    const geo = buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot ?? 'bottom' });
+    const sk = SKIN[kind];
+    const skin = typeof sk === 'function' ? sk(v) : sk;
+    const geo = skin ? buildSkinGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot ?? 'bottom', hint: skin }) : buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot ?? 'bottom' });
     geo.computeBoundingBox();
     const bb = geo.boundingBox!;
-    vr = { sm, geo, mesh: null, count: 0, cap: 0, height: bb.max.y - bb.min.y, halfX: (bb.max.x - bb.min.x) / 2, halfZ: (bb.max.z - bb.min.z) / 2 };
+    vr = { sm, skin, geo, mesh: null, count: 0, cap: 0, height: bb.max.y - bb.min.y, halfX: (bb.max.x - bb.min.x) / 2, halfZ: (bb.max.z - bb.min.z) / 2 };
     this.variants.set(key, vr);
     return vr;
   }
@@ -473,6 +519,11 @@ export class Props {
       }
       if (a.kind === 'oasisPool') {
         this.addPool(a);
+        continue;
+      }
+      if (SPRITE_KINDS.has(a.kind) && KINDS[a.kind]) {
+        // plants are pixel-art sprites now (one instanced draw for all of them)
+        this.foliage.addAnchor(a.kind, this.variantIndex(a), a.x, a.z, a.rot ?? this.rng.range(0, Math.PI * 2), a.scale ?? 1);
         continue;
       }
       const p = planOf(a);
@@ -533,7 +584,7 @@ export class Props {
         const bkey = z.index + ':' + kind + ':' + this.variantKey(v);
         let b = zoneBatches.get(bkey);
         if (!b) {
-          const mat = def.foliage ? sharedFoliageMaterial : sharedVoxelMaterial;
+          const mat = v.skin ? skinMaterial() : def.foliage ? sharedFoliageMaterial : sharedVoxelMaterial;
           const cap = plan.filter((q) => q.v === v).length + 1;
           const near = new THREE.InstancedMesh(v.geo, mat, cap);
           const far = new THREE.InstancedMesh(this.lod(v), mat, cap);
@@ -543,6 +594,9 @@ export class Props {
             im.count = 0;
             this.group.add(im);
           }
+          // the far batch lies outside the sun's shadow map (46 m): skip its caster pass
+          // (an instanced batch's bounds span the zone, so it would otherwise always be drawn)
+          far.castShadow = false;
           b = { v, near, far, insts: [], foliage: !!def.foliage, hide: def.foliage || v.height < 0.9 ? 170 : RIM_KINDS.has(kind) ? 380 : 280 };
           zoneBatches.set(bkey, b);
           this.batches.push(b);
@@ -733,10 +787,12 @@ export class Props {
     }
     let v = this.lmVariants.get(type);
     if (!v) {
-      const geo = buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot ?? 'bottom' });
+      // the ghost-town landmarks wear the plank skin (the turtle's campfire stays as it is)
+      const skin: SkinHint | undefined = sm.meta?.turtleCamp ? undefined : 'wood';
+      const geo = skin ? buildSkinGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot ?? 'bottom', hint: skin }) : buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot ?? 'bottom' });
       geo.computeBoundingBox();
       const bb = geo.boundingBox!;
-      v = { sm, geo, mesh: null, count: 1, cap: 1, height: bb.max.y - bb.min.y, halfX: (bb.max.x - bb.min.x) / 2, halfZ: (bb.max.z - bb.min.z) / 2 };
+      v = { sm, skin, geo, mesh: null, count: 1, cap: 1, height: bb.max.y - bb.min.y, halfX: (bb.max.x - bb.min.x) / 2, halfZ: (bb.max.z - bb.min.z) / 2 };
       if (sm.ruin) this.lmVariants.set(type, v);
     }
     const g = this.world.groundAt(a.x, a.z);
@@ -941,6 +997,7 @@ export class Props {
   }
 
   update(dt: number, focus: THREE.Vector3, wind: { x: number; z: number }, fx?: any) {
+    this.foliage.update(focus);
     if (focus.distanceTo(this.lastLodPos) > 8) {
       this.lastLodPos.copy(focus);
       for (const b of this.batches) this.layoutBatch(b, focus);

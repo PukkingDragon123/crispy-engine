@@ -12,7 +12,8 @@
 //    lead in to his camp (one from where the ride starts), re-pressed as you
 //    ride near them so the wind never quite fills them in
 //  • a short toast the first time you come within sight of him (and another if
-//    he is dug in when you arrive)
+//    he is dug in when you arrive); the bell and the toast come back with every
+//    fresh stock (after each boss wave)
 // Shop.ts makes one per turtle house and drives it from animateMerchant; the
 // HUD compass (ui/ProgressLadder) reads `info`.
 import * as THREE from 'three';
@@ -87,10 +88,12 @@ export class ShopBeacon {
     );
   }
 
-  /** the hunter went inside: no more "nearby" toasts, the bell stops calling */
+  /** the hunter went inside: no more "nearby" toasts and the bell stops calling, until the next fresh stock (every boss wave) */
   visited() {
+    this.visitedAt = Math.floor(Math.max(0, this.ctx.run.wave) / 5);
     this.info.visited = true;
   }
+  private visitedAt = -1;
 
   // ------------------------------------------------------------------ the trails
   /**
@@ -164,6 +167,7 @@ export class ShopBeacon {
     const I = this.info;
     I.pos.copy(root.position);
     I.hidden = hidden;
+    I.visited = this.visitedAt === Math.floor(Math.max(0, ctx.run.wave) / 5);
     I.dist = hunter ? Math.hypot(hunter.x - root.position.x, hunter.z - root.position.z) : 1e9;
     const d = I.dist;
     const wind = ctx.world.sa?.wind ?? { x: 1, z: 0 };
