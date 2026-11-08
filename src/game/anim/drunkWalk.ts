@@ -1,22 +1,27 @@
 // Sundown's whiskey swagger: the procedural on-foot walk shared by every place he
-// walks (the cold open, the intro, the hideout). Drunk, but readable as swagger:
-// - uneven steps: a heavy long step, then a quick short one, each a little random;
-// - now and then the toe catches: he pitches forward, arms fly out, a quick catch
-//   step, then he rights himself with a small lean back;
-// - hips roll and shift onto each landing foot, the shoulders sway the other way
-//   on a slower, lagging rhythm;
-// - the head is on loose springs: it lolls and bobs late;
-// - the arms hang like pendulums from swaying shoulders, out of step with the legs;
-// - his line weaves gently from side to side, the body turning into the weave.
+// walks (the cold open, the intro, the hideout). Drunk, but readable as swagger.
+//
+// The centre of mass leads and the feet chase it:
+// - his balance point wanders on its own (slow, layered noise: never the same
+//   twice) and the body follows it on soft springs, so he sways, overshoots and
+//   leans into the drift;
+// - every step lands where the body is falling (the capture point: where the
+//   centre of mass is plus where it is heading), so the feet go wide, cross over
+//   or hurry to catch up; falling forward makes the steps quicker and longer;
+// - weight: each landing sinks into the knee, harder on the heavy steps, and the
+//   hips hike over the stance leg;
+// - a stumble is just a harder shove to that balance point (the toe catches, or
+//   he lurches sideways): the body pitches, the catch steps hurry under it, the
+//   arms swing out to the side he is falling toward, and the springs pull him
+//   back upright with a small overcorrection. No keyframes, so no pops;
+// - the arms are pendulums hung from the moving shoulders and the head floats on
+//   a loose neck that tries to stay level: both trail the body by a beat.
 // One stride = two steps = phase 2π; the left foot lands at π/2, the right at 3π/2.
 import type * as THREE from 'three';
 import { SpringF } from './spring';
 import { clamp01, vnoise } from './math';
 
-const smooth = (k: number) => {
-  k = clamp01(k);
-  return k * k * (3 - 2 * k);
-};
+const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
 
 export interface DrunkOpts {
   /** metres either side of the walking line (0.17 open desert, less indoors) */
@@ -36,7 +41,7 @@ export class DrunkGait {
   foot: 1 | -1 = 1;
   /** phase-rate multiplier of the current step (callers that drive their own phase use it) */
   tempo = 1;
-  /** 0..1 the stumble's forward pitch */
+  /** 0..1 how far he is pitching forward out of balance */
   trip = 0;
   /** 0..1 the lean back as he rights himself */
   recover = 0;
@@ -54,38 +59,54 @@ export class DrunkGait {
   shin = { l: 0, r: 0 };
 
   private stepIdx = 0;
-  private tempoTarget = 1;
+  private tempoBase = 1;
   private stride = [1, 1];
   private strideTarget = [1, 1];
-  private place = [0, 0];
+  private place = [0.03, 0.03];
   private placeTarget = [0.03, 0.03];
-  private st = -1;
+  private heavy = 1;
   private nextStumble: number;
-  private rush = 0;
   private weaveAmp: number;
   private every: [number, number];
   private prevWeave = 0;
   private weaveYaw = 0;
-  private lurch = new SpringF(0, 1.5, 0.32);
-  private headZ = new SpringF(0, 1.25, 0.24);
-  private headX = new SpringF(0, 1.55, 0.3);
-  private headY = new SpringF(0, 0.7, 0.55);
-  private swingL = new SpringF(0, 1.05, 0.16);
-  private swingR = new SpringF(0, 0.92, 0.18);
-  private foreL = new SpringF(-0.25, 1.9, 0.2);
-  private foreR = new SpringF(-0.3, 1.7, 0.22);
+  // the centre of mass (m, rig-local, relative to the line between the feet)
+  private comX = new SpringF(0, 1.05, 0.34);
+  private comZ = new SpringF(0.02, 1.3, 0.42);
+  /** which way the weight is shifting (the stance foot), eased */
+  private stance = 0;
+  // weight in the knees, upper-body inertia, the loose neck, the pendulum arms
+  private sink = new SpringF(0, 2.4, 0.38);
+  private chestZ = new SpringF(0, 1.5, 0.4);
+  private chestX = new SpringF(0.06, 1.7, 0.45);
+  private twist = new SpringF(0, 1.6, 0.5);
+  private headZ = new SpringF(0, 1.15, 0.28);
+  private headX = new SpringF(0.06, 1.35, 0.3);
+  private headY = new SpringF(0, 0.6, 0.55);
+  private swingL = new SpringF(0, 1.0, 0.2);
+  private swingR = new SpringF(0, 0.9, 0.22);
+  private outL = new SpringF(0.12, 1.3, 0.4);
+  private outR = new SpringF(-0.11, 1.2, 0.42);
+  private foreL = new SpringF(-0.25, 1.6, 0.3);
+  private foreR = new SpringF(-0.3, 1.5, 0.32);
   private base = new WeakMap<THREE.Object3D, THREE.Vector3>();
 
   constructor(private seed = Math.random() * 97, o: DrunkOpts = {}) {
     this.weaveAmp = o.weave ?? 0.17;
-    this.every = o.stumbleEvery ?? [3.4, 6.2];
-    this.nextStumble = 1.6 + this.rand(0.5) * 1.6;
+    this.every = o.stumbleEvery ?? [3.6, 6.4];
+    this.nextStumble = 2.2 + this.rand(0.5) * 1.8;
   }
 
   private n = 0;
   private rand(k = 0) {
     const s = Math.sin((this.n++ + k * 13.1) * 12.9898 + this.seed * 78.233) * 43758.5453;
     return s - Math.floor(s);
+  }
+
+  /** layered noise in about [-1, 1]: never quite repeats */
+  private wander(t: number, f: number, k: number) {
+    const sd = this.seed + k * 7.31;
+    return vnoise(t * f, sd) * 0.6 + vnoise(t * f * 2.37 + 3.1, sd + 1) * 0.28 + Math.sin(t * f * 0.71 + sd) * 0.12;
   }
 
   /**
@@ -99,98 +120,112 @@ export class DrunkGait {
     this.stepped = false;
     const walking = amt > 0.05;
     if (walking) this.t += dt;
-    const t = this.t, sd = this.seed;
-    // ---- the stumble clock
-    if (this.st >= 0) {
-      this.st += dt;
-      if (this.st > 1.0) this.st = -1;
-    } else if (walking && amt > 0.5) this.nextStumble -= dt;
-    const a = this.st >= 0 ? this.st / 1.0 : -1;
-    this.trip = a < 0 ? 0 : a < 0.2 ? smooth(a / 0.2) : 1 - smooth((a - 0.2) / 0.45);
-    this.rush = a < 0 ? 0 : Math.sin(clamp01((a - 0.06) / 0.42) * Math.PI);
-    this.recover = a < 0 ? 0 : Math.sin(clamp01((a - 0.42) / 0.58) * Math.PI);
-    // ---- uneven tempo: heavy long steps and quick short ones
-    this.tempo += (this.tempoTarget - this.tempo) * (1 - Math.exp(-dt * 9));
+    const t = this.t;
+    const A = amt;
+    if (walking && amt > 0.5) this.nextStumble -= dt;
+    // ---- the balance point wanders; the body follows it on springs
+    const cx = this.comX.x, cz = this.comZ.x;
+    const driftX = this.wander(t, 0.42, 1) * 0.07 + this.stance * 0.028;
+    const driftZ = 0.022 + this.wander(t, 0.55, 2) * 0.022;
+    this.comX.step(driftX * A, dt);
+    this.comZ.step(driftZ * A, dt);
+    // falling forward hurries the feet; leaning back slows them (the feet chase the body)
+    const fall = clamp((cz - 0.02) * 9, -0.25, 0.75);
+    const tempo = this.tempoBase * (1 + fall);
+    this.tempo += (tempo - this.tempo) * (1 - Math.exp(-dt * 10));
     for (let i = 0; i < 2; i++) {
-      this.stride[i] += (this.strideTarget[i] - this.stride[i]) * (1 - Math.exp(-dt * 7));
-      this.place[i] += (this.placeTarget[i] - this.place[i]) * (1 - Math.exp(-dt * 6));
+      this.stride[i] += (this.strideTarget[i] - this.stride[i]) * (1 - Math.exp(-dt * 8));
+      this.place[i] += (this.placeTarget[i] - this.place[i]) * (1 - Math.exp(-dt * 7));
     }
-    if (extPh === undefined) this.ph += dt * rate * this.tempo * (1 + 0.85 * this.rush) * (walking ? 1 : 0);
+    if (extPh === undefined) this.ph += dt * rate * this.tempo * (walking ? 1 : 0);
     else this.ph = extPh;
+    // ---- a foot lands
     const idx = Math.floor((this.ph - Math.PI / 2) / Math.PI);
     if (idx !== this.stepIdx) {
       this.stepIdx = idx;
       if (walking) {
         this.stepped = true;
         this.foot = idx % 2 === 0 ? 1 : -1;
-        const heavy = idx % 2 === 0;
-        this.tempoTarget = (heavy ? 0.84 : 1.2) * (0.9 + this.rand() * 0.22);
+        const r = this.rand();
+        // uneven steps: heavier and lighter ones, never a clean alternation
+        this.heavy = 0.75 + r * 0.6 + (idx % 2 === 0 ? 0.12 : -0.08);
+        this.tempoBase = (1.08 - (this.heavy - 1) * 0.35) * (0.94 + this.rand() * 0.12);
+        this.sink.kick(-0.28 * this.heavy * A);
+        this.headX.kick(0.35 * this.heavy * A);
+        this.stance = this.foot;
+        // the swinging foot will land where the body is going (capture point), a little wide or crossed
         const leg = this.foot === 1 ? 1 : 0; // the leg that swings next
-        this.strideTarget[leg] = (heavy ? 0.86 : 1.16) * (0.88 + this.rand() * 0.26);
-        // where the swinging foot lands: wide for balance, or crossing over the line
-        this.placeTarget[leg] = this.rand() < 0.3 ? -0.05 - this.rand() * 0.04 : 0.02 + this.rand() * 0.07;
-        // the weight drops onto the landing foot (harder some steps than others)
-        this.lurch.kick(this.foot * (5 + this.rand() * 6));
-        if (this.nextStumble <= 0 && this.st < 0) {
-          this.st = 0;
+        const sideOf = leg === 0 ? 1 : -1;
+        const capture = (cx + this.comX.v * 0.32) * sideOf;
+        this.placeTarget[leg] = clamp(0.03 + capture * 1.6 + (this.rand() - 0.5) * 0.04, -0.09, 0.13);
+        this.strideTarget[leg] = clamp((0.92 + this.rand() * 0.18) * (1 + fall * 0.6), 0.75, 1.45);
+        // the toe catches, or he lurches off sideways: a shove to the balance point, nothing more
+        if (this.nextStumble <= 0) {
           this.nextStumble = this.every[0] + this.rand() * (this.every[1] - this.every[0]);
-          this.lurch.kick(-this.foot * 12);
-          this.headX.kick(-1.6);
-          this.headZ.kick(this.foot * 1.2);
+          if (this.rand() < 0.6) {
+            this.comZ.kick(0.6 * A);
+            this.comX.kick((this.rand() - 0.5) * 0.25 * A);
+          } else this.comX.kick(-this.foot * (0.28 + this.rand() * 0.12) * A);
+          this.headX.kick(-0.8 * A);
         }
       }
     }
     const ph = this.ph;
     const s = Math.sin(ph), c = Math.cos(ph);
-    const lurch = this.lurch.step(0, dt);
-    // ---- the slow sway of a man three whiskeys in, and the weave of his line
-    const sway = Math.sin(t * 1.21 + sd) * 0.62 + vnoise(t * 0.55, sd + 1) * 0.38;
-    const swayLag = Math.sin((t - 0.45) * 1.21 + sd) * 0.62 + vnoise((t - 0.45) * 0.55, sd + 1) * 0.38;
-    const weave = (vnoise(t * 0.32, sd + 2) * 0.72 + Math.sin(t * 0.83 + sd * 3) * 0.28) * this.weaveAmp;
+    this.stance *= Math.exp(-dt * 1.5);
+    const comX = this.comX.x, comZ = this.comZ.x;
+    this.trip = clamp01((comZ - 0.045) / 0.07);
+    this.recover = clamp01((0.0 - comZ) / 0.03);
+    // ---- his line weaves; the body turns into the weave
+    const weave = this.wander(t, 0.3, 3) * this.weaveAmp;
     const dW = dt > 0 ? (weave - this.prevWeave) / dt : 0;
     this.prevWeave = weave;
-    this.weaveYaw += (Math.max(-0.28, Math.min(0.28, dW / 1.25)) - this.weaveYaw) * (1 - Math.exp(-dt * 4));
-    const A = amt;
-    const tr = this.trip, rc = this.recover;
-    // ---- pelvis: onto the stance foot, rolling (swagger), bobbing, surging on the lurch
-    const roll = -c * 0.075 + sway * 0.04 + lurch * 0.03;
-    this.pelvisPos.x = (weave + sway * 0.03 + lurch * 0.032) * A;
-    this.pelvisPos.y = (Math.abs(c) * 0.034 * (0.75 + 0.35 * this.stride[c < 0 ? 1 : 0]) - 0.012 - tr * 0.05) * A;
-    this.pelvisPos.z = (0.022 * Math.cos(2 * ph) + tr * 0.07) * A;
-    this.pelvisRot.x = (tr * 0.12 - rc * 0.03) * A;
-    this.pelvisRot.y = (-s * 0.1 + this.weaveYaw) * A;
-    this.pelvisRot.z = roll * A;
-    // ---- shoulders: counter-twist, a lagging sway the other way, a slouch; the stumble pitches him over
-    this.torsoRot.x = (0.06 + 0.035 * Math.cos(2 * ph - 0.9) + tr * 0.4 - rc * 0.13) * A;
-    this.torsoRot.y = (s * 0.15 + vnoise(t * 0.5, sd + 4) * 0.07 - this.weaveYaw * 0.4) * A;
-    this.torsoRot.z = (-roll * 0.65 + swayLag * 0.075) * A;
-    // ---- the head: loose, late, lolling
-    const hz = this.headZ.step((-(this.torsoRot.z + this.pelvisRot.z) * 0.75 + lurch * 0.1 + vnoise(t * 0.42, sd + 5) * 0.13) * A, dt);
-    const hx = this.headX.step((0.07 + 0.055 * Math.cos(2 * ph) - tr * 0.22 + rc * 0.1) * A, dt);
-    const hy = this.headY.step((vnoise(t * 0.27, sd + 6) * 0.16 - this.torsoRot.y * 0.5) * A, dt);
+    this.weaveYaw += (clamp(dW / 1.25, -0.28, 0.28) - this.weaveYaw) * (1 - Math.exp(-dt * 4));
+    // ---- pelvis: carried by the centre of mass, sinking into each landing, hiking over the stance leg
+    const sink = this.sink.step(0, dt);
+    const hike = -c * 0.07;
+    this.pelvisPos.x = (weave + comX * 0.9) * A;
+    this.pelvisPos.y = (Math.abs(c) * 0.03 * (0.8 + 0.3 * this.heavy) - 0.012 - this.trip * 0.04) * A + sink * 0.1;
+    this.pelvisPos.z = (comZ * 0.6 + 0.012 * Math.cos(2 * ph)) * A;
+    this.pelvisRot.x = (comZ * 1.2) * A;
+    this.pelvisRot.y = (-s * 0.09 + this.weaveYaw) * A;
+    this.pelvisRot.z = (hike - comX * 0.35) * A + sink * 0.05 * this.stance;
+    // ---- chest: leans into the fall with a beat of inertia, counter-twists the hips
+    const cz2 = this.chestZ.step((-comX * 1.6 - hike * 0.55) * A, dt);
+    const cx2 = this.chestX.step((0.06 + comZ * 3.2 + 0.03 * Math.cos(2 * ph - 0.9)) * A, dt);
+    const tw = this.twist.step((s * 0.14 + this.wander(t, 0.5, 4) * 0.06 - this.weaveYaw * 0.4) * A, dt);
+    this.torsoRot.x = cx2;
+    this.torsoRot.y = tw;
+    this.torsoRot.z = cz2;
+    // ---- the head: a loose neck trying to keep the eyes level, a beat late; lolls when he is not fighting it
+    const hz = this.headZ.step((-(cz2 + this.pelvisRot.z) * 0.7 + this.wander(t, 0.4, 5) * 0.1) * A, dt);
+    const hx = this.headX.step((0.06 - (cx2 - 0.06) * 0.45 + this.wander(t, 0.33, 6) * 0.05) * A, dt);
+    const hy = this.headY.step((this.wander(t, 0.25, 7) * 0.16 - tw * 0.5) * A, dt);
     this.head.x = hx;
     this.head.y = hy;
     this.head.z = hz;
-    // ---- arms: pendulums hung from the swaying shoulders, out of step with the legs, flung out on a stumble
-    const dl = 0.55 * Math.sin(t * 0.37 + sd), dr = 0.6 * Math.sin(t * 0.29 + sd * 2);
-    const sl = this.swingL.step((Math.sin(ph + 0.45 + dl) * 0.36 - lurch * 0.06) * A, dt);
-    const sr = this.swingR.step((-Math.sin(ph + 0.8 + dr) * 0.3 + lurch * 0.06) * A, dt);
-    this.armL.x = sl - tr * 0.55 * A;
-    this.armL.z = (0.13 + Math.abs(sway) * 0.05 + Math.max(0, lurch) * 0.05 + tr * 0.85) * A;
-    this.armL.fore = this.foreL.step(-0.22 - Math.max(0, -sl) * 0.55 - tr * 0.4 * A, dt);
-    this.armR.x = sr - tr * 0.45 * A;
-    this.armR.z = -(0.11 + Math.abs(sway) * 0.05 + Math.max(0, -lurch) * 0.05 + tr * 0.75) * A;
-    this.armR.fore = this.foreR.step(-0.28 - Math.max(0, -sr) * 0.5 - tr * 0.35 * A, dt);
-    // ---- legs: uneven strides, feet landing wide or crossing over; the toe catches on a stumble
+    // ---- arms: pendulums. They swing with the opposite leg (a beat late), fling forward as he
+    // pitches over, and the arm on the high side lifts out to balance a sideways fall
+    const sl = this.swingL.step((s * 0.34 - comZ * 3.5) * A, dt);
+    const sr = this.swingR.step((-s * 0.3 - comZ * 3.2) * A, dt);
+    const ol = this.outL.step((0.12 + Math.max(0, -comX) * 4.5 + this.trip * 0.35) * A, dt);
+    const or = this.outR.step(-(0.11 + Math.max(0, comX) * 4.5 + this.trip * 0.3) * A, dt);
+    this.armL.x = sl;
+    this.armL.z = ol;
+    this.armL.fore = this.foreL.step(-0.22 - Math.max(0, -sl) * 0.5 - this.trip * 0.3 * A, dt);
+    this.armR.x = sr;
+    this.armR.z = or;
+    this.armR.fore = this.foreR.step(-0.28 - Math.max(0, -sr) * 0.45 - this.trip * 0.25 * A, dt);
+    // ---- legs: uneven strides reaching under the falling body, feet landing wide or crossed
     const kL = this.stride[0], kR = this.stride[1];
-    const drag = 1 - tr * 0.6;
-    this.thigh.lx = -s * 0.56 * kL * A - tr * 0.18 * A;
-    this.thigh.rx = s * 0.56 * kR * A - tr * 0.18 * A;
     const swL = Math.max(0, c), swR = Math.max(0, -c);
+    this.thigh.lx = (-s * 0.55 * kL - comZ * 1.3) * A;
+    this.thigh.rx = (s * 0.55 * kR - comZ * 1.3) * A;
     this.thigh.lz = (0.035 + this.place[0] * (0.4 + swL)) * A;
     this.thigh.rz = -(0.035 + this.place[1] * (0.4 + swR)) * A;
-    this.shin.l = Math.max(0, Math.sin(ph + 1.4)) * 0.88 * kL * drag * A + tr * 0.25 * A;
-    this.shin.r = Math.max(0, Math.sin(ph + 1.4 + Math.PI)) * 0.88 * kR * drag * A + tr * 0.25 * A;
+    // knees: the swing tuck, plus the give of the stance knee as the weight sinks in
+    this.shin.l = Math.max(0, Math.sin(ph + 1.4)) * 0.86 * kL * A - sink * 0.6 * swR;
+    this.shin.r = Math.max(0, Math.sin(ph + 1.4 + Math.PI)) * 0.86 * kR * A - sink * 0.6 * swL;
   }
 
   /**
@@ -208,8 +243,8 @@ export class DrunkGait {
     n['torso']?.rotation.set(this.torsoRot.x, this.torsoRot.y, this.torsoRot.z);
     n['thigh_l']?.rotation.set(this.thigh.lx, 0, this.thigh.lz);
     n['thigh_r']?.rotation.set(this.thigh.rx, 0, this.thigh.rz);
-    n['shin_l']?.rotation.set(this.shin.l, 0, 0);
-    n['shin_r']?.rotation.set(this.shin.r, 0, 0);
+    n['shin_l']?.rotation.set(Math.max(0, this.shin.l), 0, 0);
+    n['shin_r']?.rotation.set(Math.max(0, this.shin.r), 0, 0);
     if (o.armL !== false) {
       n['arm_l']?.rotation.set(this.armL.x, 0, this.armL.z);
       n['fore_l']?.rotation.set(this.armL.fore, 0, 0);
@@ -219,7 +254,7 @@ export class DrunkGait {
       n['fore_r']?.rotation.set(this.armR.fore, 0, 0);
     }
     if (o.head) n['head']?.rotation.set(this.head.x, this.head.y, this.head.z);
-    // the duster's skirt trails the stride and flaps on the lurch
+    // the duster's skirt trails the stride and flaps as he lurches
     if (n['coat']) n['coat'].rotation.set(-Math.abs(Math.sin(this.ph)) * 0.12 * this.amt - 0.04 - this.trip * 0.1, 0, -this.pelvisRot.z * 0.6);
   }
 }

@@ -25,7 +25,7 @@ import { RARITY } from '../run/Upgrades';
 import { makeSkillCard, SkillCard3D, CARD_W, CARD_H, PANEL_W } from './SkillCards';
 import { SkillArt } from './SkillArt';
 import { Spring } from '../../engine/Tween';
-import type { Input } from '../../engine/Input';
+import { touchScreen, type Input } from '../../engine/Input';
 import { damp } from '../../engine/math/rand';
 import { RankUpCine, CineHero, LightPillar, SkillUnlock, GambleShow } from './RankUpCine';
 import { resolveGamble, GambleOutcome } from '../run/UpgradesExtra';
@@ -90,7 +90,12 @@ const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
-const hintCards = (rerolls: number) => `HOVER for details · CLICK or 1–4 to claim · RIGHT-DRAG to turn · R reroll (${rerolls}) · B banish`;
+const hintCards = (rerolls: number) =>
+  TOUCH
+    ? `TAP a card to lift it, TAP it again to claim · HOLD to turn · SWIPE UP: reroll (${rerolls}) · SWIPE DOWN: banish the lifted card`
+    : `HOVER for details · CLICK or 1–4 to claim · RIGHT-DRAG to turn · R reroll (${rerolls}) · B banish`;
+/** a touch screen: the first tap lifts a card (its ledger opens), a second tap on it claims it */
+const TOUCH = touchScreen();
 /** a chime per rarity tier, up a major arpeggio */
 const STING = [1, 1.26, 1.5, 2, 2.52, 3];
 const PRISM = [0xff8a8a, 0xffe08a, 0x9aff9a, 0x8ad8ff, 0xd8a0ff];
@@ -119,6 +124,8 @@ export class CardPicker {
   private hitGroup = new THREE.Group();
   private ray = new THREE.Raycaster();
   private hovered: Card | null = null;
+  /** touch: the card the first tap lifted (a second tap claims it) */
+  private touchLift: Card | null = null;
   private dragging: Card | null = null;
   private dragX = 0;
   private hint: HTMLDivElement;
@@ -622,13 +629,14 @@ export class CardPicker {
     }
     // keyboard picks
     for (let i = 0; i < this.cards.length; i++) if (inp.wasPressed('Digit' + (i + 1)) && allReady) return this.pick(this.cards[i]);
-    if (inp.wasPressed('KeyR') && this.up.rerolls > 0 && allReady) {
+    if ((inp.wasPressed('KeyR') || inp.gesture === 'swipeUp') && this.up.rerolls > 0 && allReady) {
       this.up.rerolls--;
       ctx.toast('REROLL', '#c9a97c', `${this.up.rerolls} left`);
       const n = this.cards.length;
       for (const c of this.cards) this.crumble(c);
       this.cards = [];
       this.hovered = null;
+      this.touchLift = null;
       const offers = this.up.roll(n);
       if (offers.length) this.spawn(offers, T + 0.3);
       else this.release();
@@ -646,9 +654,10 @@ export class CardPicker {
       if (h) ctx.sfx('card_hover', null, 0.5);
       this.hovered = h;
     }
-    if (inp.wasPressed('KeyB') && this.hovered) {
-      this.up.banished.add(this.hovered.offer.def.id);
-      ctx.toast('BANISHED', '#ff8a6a', this.hovered.offer.def.name);
+    const ban = inp.wasPressed('KeyB') ? this.hovered : inp.gesture === 'swipeDown' ? (this.touchLift ?? this.hovered) : null;
+    if (ban) {
+      this.up.banished.add(ban.offer.def.id);
+      ctx.toast('BANISHED', '#ff8a6a', ban.offer.def.name);
     }
     if (inp.wasPressed('Mouse2') && h) {
       this.dragging = h;
@@ -663,7 +672,11 @@ export class CardPicker {
       this.dragging.flip = this.dragging.flipCur;
       this.dragX = inp.mouseX;
     }
-    if (inp.wasPressed('Mouse0') && h && h.ready) return this.pick(h);
+    if (inp.wasPressed('Mouse0') && h && h.ready) {
+      // touch: nothing hovers before the finger lands, so the first tap only lifts the card
+      if (!TOUCH || this.touchLift === h) return this.pick(h);
+      this.touchLift = h;
+    }
     // the head follows the hovered card
     cine.gaze = this.hovered ? this.hovered.mesh.position : null;
     this.animate(rdt, hits[0] && h ? hits[0].point : null);

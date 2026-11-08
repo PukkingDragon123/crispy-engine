@@ -1051,6 +1051,8 @@ export class Bench3D implements Mode {
   // ======================================================================= input: drag / swipe, click-on-release
   private onDown = (e: PointerEvent) => {
     if ((e.target as HTMLElement)?.closest?.('button,a,input')) return;
+    // this drag is ours: the touch layer must not also turn its swipe into an arrow key
+    this.h.engine.input.swipeOwned = true;
     const d = this.drag;
     d.down = true;
     d.moved = false;

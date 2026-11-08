@@ -14,6 +14,7 @@ import * as THREE from 'three';
 import type { Ctx, EnemyLike } from '../Ctx';
 import type { Player } from '../player/Player';
 import type { Input } from '../../engine/Input';
+import { touchText } from '../ui/TouchControls';
 import type { Ware } from '../ui/Shop';
 import { RARITY } from './Upgrades';
 import { Ease } from '../../engine/Tween';
@@ -248,12 +249,14 @@ export class GearPickups {
     ctx.sfx('loot_reveal', null, 0.8);
     const def = GEAR[id];
     const color = RARITY[def.rarity].color;
-    this.ui.innerHTML = `<div style="position:absolute;left:0;right:0;top:7vh;font-size:44px;color:${color}">NEW GEAR</div>` +
+    this.ui.innerHTML = touchText(
+      `<div style="position:absolute;left:0;right:0;top:7vh;font-size:44px;color:${color}">NEW GEAR</div>` +
       `<div style="position:absolute;left:0;right:0;top:calc(7vh + 52px);font-size:18px;opacity:0.9">${SLOT_INFO[def.slot].name.toUpperCase()} SLOT${worn ? ` · replaces ${GEAR[worn].name}` : ''}</div>` +
       (worn
         ? `<div style="position:absolute;left:30%;top:20vh;transform:translateX(-50%);font-size:20px;color:${color}">EQUIP</div><div style="position:absolute;left:70%;top:20vh;transform:translateX(-50%);font-size:20px;opacity:0.8">KEEP CURRENT</div>`
         : '') +
-      `<div style="position:absolute;left:0;right:0;bottom:8vh;font-size:17px">${worn ? `CLICK a card · E equip new · K keep current (+${SCRAP(id)} gold)` : `CLICK or E to equip · K leave it (+${SCRAP(id)} gold)`} · RIGHT-DRAG to turn</div>`;
+      `<div style="position:absolute;left:0;right:0;bottom:8vh;font-size:17px">${worn ? `CLICK a card · E equip new · K keep current (+${SCRAP(id)} gold)` : `CLICK or E to equip · K leave it (+${SCRAP(id)} gold)`} · RIGHT-DRAG to turn</div>`
+    );
     this.ui.style.display = 'block';
     const cam = ctx.camera;
     const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
@@ -373,7 +376,7 @@ export class GearPickups {
     }
     if (ready) {
       if (inp.wasPressed('KeyE') || inp.wasPressed('Enter')) return this.resolve(true);
-      if (inp.wasPressed('KeyK') || inp.wasPressed('Backspace')) return this.resolve(false);
+      if (inp.wasPressed('KeyK') || inp.wasPressed('Backspace') || (inp.touchDevice && inp.wasPressed('Escape'))) return this.resolve(false);
       if (inp.clicked(0) && h) return this.resolve(h.role === 'new');
     }
     if (inp.wasPressed('Mouse2') && h) {

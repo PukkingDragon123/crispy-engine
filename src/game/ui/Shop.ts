@@ -44,6 +44,7 @@
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Input } from '../../engine/Input';
+import { touchText } from './TouchControls';
 import type { CameraRig, CineShot } from '../player/CameraRig';
 import { RigInstance } from '../../engine/voxel/Rig';
 import type { Collider } from '../world/Colliders';
@@ -1684,6 +1685,8 @@ export class Shop {
   private bodies: Body[] = [];
   private ray = new THREE.Raycaster();
   private hovered: Body | null = null;
+  /** touch: the ware the first tap picked (a second tap on it buys) */
+  private touchPick: Body | null = null;
   private hoverLock = 0;
   private tip: HTMLDivElement;
   private bar: HTMLDivElement;
@@ -2244,7 +2247,7 @@ export class Shop {
     return TALK.filter((c) => !c.haggle || this.book.haggle === 'none');
   }
   private talkBar(v: Visit) {
-    this.bar.innerHTML = `click or press 1-${v.opts.length} to answer &nbsp;·&nbsp; ESC to ride on`;
+    this.bar.innerHTML = touchText(`click or press 1-${v.opts.length} to answer &nbsp;·&nbsp; ESC to ride on`);
   }
 
   private updateVisit(h: number) {
@@ -3172,7 +3175,7 @@ export class Shop {
     const keys = n > 1 ? `click a ware or 1-${n} &nbsp;·&nbsp; click / Enter buys` : 'click to buy';
     const off = bk.haggle === 'won' ? ' &nbsp;<span style="color:#b8f07a">fifteen off today</span>' : '';
     const restock = this.stall ? `<div style="font-size:15px;color:#c9a97c;margin-top:4px">fresh stock after the wave ${bk.nextRestock} boss &nbsp;·&nbsp; right-click shoots</div>` : '<div style="font-size:15px;color:#c9a97c;margin-top:4px">right-click shoots</div>';
-    this.bar.innerHTML = `<span style="color:#ffd36b">${Math.floor(this.ctx.run.gold)} gold</span>${off} &nbsp;·&nbsp; ${keys} &nbsp;·&nbsp; ESC leaves${restock}`;
+    this.bar.innerHTML = touchText(`<span style="color:#ffd36b">${Math.floor(this.ctx.run.gold)} gold</span>${off} &nbsp;·&nbsp; ${keys} &nbsp;·&nbsp; ESC leaves${restock}`);
   }
 
   dispose() {
@@ -3373,7 +3376,12 @@ export class Shop {
       for (let k = 0; k < 9; k++) if (inp.wasPressed('Digit' + (k + 1)) || inp.wasPressed('Numpad' + (k + 1))) this.focusWare(k);
       this.pick();
       if (inp.wasPressed('Mouse2') && this.shotCd <= 0) this.shoot();
-      if (this.hovered && (inp.wasPressed('Mouse0') || inp.wasPressed('Enter'))) this.buy(this.hovered);
+      if (this.hovered && inp.wasPressed('Enter')) this.buy(this.hovered);
+      else if (this.hovered && inp.wasPressed('Mouse0')) {
+        // touch: nothing hovers before the finger lands, so the first tap shows the ware's card, a second buys it
+        if (!inp.touchDevice || this.touchPick === this.hovered) this.buy(this.hovered);
+        else this.touchPick = this.hovered;
+      }
     }
     this.updateCard(h);
     const tagsDown = this.phase === 'leave' && this.pt > 0.55;

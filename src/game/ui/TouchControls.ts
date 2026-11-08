@@ -29,7 +29,7 @@
 // own spectral hand. Gameplay never sees any of this: everything lands in the
 // normal Input as actions (Input.touchHold / touchTap / stick).
 import * as THREE from 'three';
-import type { Input, Action } from '../../engine/Input';
+import { touchScreen, type Input, type Action } from '../../engine/Input';
 import type { Qte } from './Qte';
 import type { Hud } from './Hud';
 import { PixelFx, TAU } from './HudKit';
@@ -38,12 +38,42 @@ import { SOUL_JAR_HIT } from './SoulBar';
 import { PUSH } from '../player/Board';
 import { TouchTutor, tutorSeen } from './TouchTutor';
 
+/**
+ * A key hint in gesture words on a touch screen (click = tap, Esc = two fingers,
+ * A / D = swipe, right-click = hold...); unchanged with a mouse and keyboard.
+ */
+export function touchText(s: string) {
+  if (!isTouchDevice()) return s;
+  for (const [re, to] of TOUCH_WORDS) s = s.replace(re, to);
+  return s;
+}
+const TOUCH_WORDS: [RegExp, string][] = [
+  [/RIGHT-DRAG to turn/g, 'HOLD to turn'],
+  [/right-click shoots/g, 'hold to shoot'],
+  [/press 1-\d+, click or tap/g, 'tap'],
+  [/click or press 1-\d+ to answer/g, 'tap to answer'],
+  [/click a ware or 1-\d+ &nbsp;·&nbsp; click \/ Enter buys/g, 'tap a ware, tap it again to buy'],
+  [/click to buy/g, 'tap it again to buy'],
+  [/CLICK a card · E equip new · K keep current/g, 'TAP a card: the new one equips, yours stays'],
+  [/CLICK or E to equip · K leave it/g, 'TAP it to equip · TWO FINGERS: leave it'],
+  [/E · CLICK · SPACE to roll it up/g, 'TAP to roll it up'],
+  [/ESC \/ T to leave/g, 'TWO FINGERS to leave'],
+  [/ESC to ([a-z ]+)/g, 'TWO FINGERS to $1'],
+  [/ESC leaves/g, 'TWO FINGERS: leave'],
+  [/Esc: /g, 'two fingers: '],
+  [/A \/ D(?: or the arrows)?: /g, 'swipe: '],
+  [/Drag, A \/ D or the wheel: /g, 'Swipe: '],
+  [/R: reload/g, 'swipe down: reload'],
+  [/ \((?:H|S)\)/g, ''],
+  [/\bHover\b/g, 'Tap'],
+  [/\bHOVER\b/g, 'TAP'],
+  [/\bclick\b/g, 'tap'],
+  [/\bClick\b/g, 'Tap'],
+  [/\bCLICK\b/g, 'TAP'],
+];
+
 export function isTouchDevice() {
-  try {
-    return new URLSearchParams(location.search).get('touch') === '1' || matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
-  } catch {
-    return false;
-  }
+  return touchScreen();
 }
 
 /** what the touch layer reads from the scene (RunScene / CaveScene hand it over with attach) */
@@ -330,11 +360,16 @@ export class TouchControls {
       }
       return;
     }
-    const tg = e.target as HTMLElement | null;
-    if (tg?.closest?.('button,input,select,a,[data-touch-pass]')) return;
-    e.preventDefault();
     const now = performance.now();
+    // a quick ring (an empowered cast, the bounty rip) is answered by tapping it: Qte reads that touch
+    const q = this.qte.quickActive;
+    const qs = (this.qte as unknown as { scale?: number }).scale ?? 2;
+    let mine = false;
     for (const t of Array.from(e.changedTouches)) {
+      // only the game itself: labels and buttons over it (the lesson's skip, the intro's) keep their own taps
+      if (t.target !== this.input.surface) continue;
+      if (q && !q.done && Math.hypot(t.clientX - q.x * qs, t.clientY - q.y * qs) < 62) continue;
+      mine = true;
       const f: Finger = {
         id: t.identifier, role: 'tap', x0: t.clientX, y0: t.clientY, t0: now, x: t.clientX, y: t.clientY, ax: t.clientX, ay: t.clientY, moved: 0, hud: null,
         samples: [{ t: now, x: t.clientX, y: t.clientY }], flickAt: 0, jump: false, jumpPeak: 0, jumpAt: 0, drift: false, trick: false, boost: false, ads: false,
@@ -366,6 +401,7 @@ export class TouchControls {
         this.assignZone(f, now);
       }
     }
+    if (mine) e.preventDefault();
   }
 
   /** a fresh touch (or one that slid off an interactable) takes its side's job */
@@ -747,9 +783,13 @@ export class TouchControls {
     this.lastT = now;
     this.discover();
     const qteOn = !!this.qte.active;
-    const live = this.visible && (!modal || qteOn);
+    // a QTE always takes the fingers; otherwise only live play does (dead: the reaping's hold-to-skip)
+    const alive = this.d ? this.d.player.alive : true;
+    const live = this.visible && (qteOn || (!modal && alive));
     if (this.live && !live) this.releaseAll();
     this.live = live;
+    // outside live play the screen works as a mouse (Input's touch layer)
+    this.input.touchLive = live;
     this.modal = modal;
     if (!modal && now - this.ledgerArmed > 400) this.ledgerArmed = 0;
     this.root.style.display = this.visible ? 'block' : 'none';
@@ -927,6 +967,7 @@ export class TouchControls {
     this.tutor?.dispose();
     this.root.remove();
     this.input.touchMode = false;
+    this.input.touchLive = false;
   }
 }
 

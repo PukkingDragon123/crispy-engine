@@ -790,7 +790,7 @@ export class CaveScene implements GameScene {
     if (!this.ready || this.phase === 'gone') return;
     const e = this.engine;
     this.run.time += dt;
-    this.touch?.update(this.picker.active || this.pausedByUser);
+    this.touch?.update(this.picker.active || this.pausedByUser || this.gearLoot.active);
     if (!this.picker.active && !this.gearLoot.active && !this.cine && e.input.hit('pause')) this.setPaused(!this.pausedByUser);
     this.qte.update(rdt);
     this.picker.update(rdt);

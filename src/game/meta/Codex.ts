@@ -10,6 +10,8 @@
 //   Codex.discover('bounty', 'husk', 'kill')    → points gained (0 if nothing new)
 //   Codex.listen(ctx.events, () => kills)        → wires the run's events (returns an unsubscribe)
 //   Codex.onDiscover((d) => ...)                 → the in-run toast hooks in here
+//   Codex.rides(key) / Codex.claims(key)         → tallies Thoth's research reads (rides it was met on,
+//                                                   times it was claimed: defeated, found, worn, used)
 import { loadSave, writeSave, GUN_PARTS, GUN_PERKS, BOARDS, PRICES } from './Save';
 import { ENEMIES, EnemyDef } from '../enemies/EnemyDefs';
 import { GEAR, GEAR_IDS, GearDef } from '../player/Equipment';
@@ -103,6 +105,8 @@ const WILDLIFE: { id: string; name: string; title: string; model: string; lore: 
   { id: 'jerboa', name: 'Giant Jerboa', title: 'Dances When Nobody Is Looking', model: 'giant_jerboa', lore: 'A jumping desert mouse the size of a calf. Startle it and it is gone in three hops. Be patient and it dances.', hint: 'Shy. Wanders the open dunes between waves.' },
   { id: 'rainFrog', name: 'Desert Rain Frog', title: 'Squeaks at Thunder', model: 'rain_frog_mama', lore: 'A round little frog that lives where no frog should, under the damp sand by old puddles. Mama keeps her babies close and her wig closer.', hint: 'After the rare desert rain, listen for squeaking.' },
   { id: 'dungScarab', name: 'Dung Scarab', title: 'Rolls With It', model: 'dumb_scarab', lore: 'Not a fighter. A worker. It pushes its ball across the whole Reach and will not be told otherwise, not even by a bullet.', hint: 'Roams the trails pushing a dung ball.' },
+  { id: 'sandHippo', name: 'Sand Hippo', title: 'Wallows in Dunes, Bites in Earnest', model: 'sand_hippo', lore: 'A hippo that traded the river for the dunes and never looked back. It wallows in the warm sand, honks at the moon and bounces anything that lands on its back. It does not mind you. It minds very much if you touch the calves.', hint: 'Herds wallow near the wild spots of every stretch.' },
+  { id: 'hippoCalf', name: 'Sand Hippo Calf', title: 'Squeaks When Squeezed', model: 'sand_hippo_calf', lore: 'Round, warm and about as heavy as a sack of flour. A calf will sit on your head with its little legs paddling, and if you throw it, the whole herd comes to find out why.', hint: 'Stays close to the herd. Pick one up, if you dare.' },
 ];
 
 const PLACE_LORE: Record<string, string> = {
@@ -307,10 +311,46 @@ function build() {
 // ======================================================================= state
 const listeners: ((d: Discovery) => void)[] = [];
 
-function flags() {
+/** the save's book: the flags, plus the tallies Thoth's research reads (additive, kept beside the flags) */
+interface BookTallies {
+  f: Record<string, number>;
+  /** rides (runs) on which the entry was met (discovered at any level at least once that ride) */
+  n?: Record<string, number>;
+  /** times the entry was claimed outside bounties: bosses defeated, gear found or worn, items used, relics dug */
+  c?: Record<string, number>;
+}
+function bookSave() {
   const d = loadSave();
   if (!d.book?.f) d.book = { f: {} };
-  return d.book.f;
+  return d.book as BookTallies;
+}
+function flags() {
+  return bookSave().f;
+}
+/** entries met so far this ride (Codex.listen starts a ride) */
+const rideSeen = new Set<string>();
+let tallyTimer: ReturnType<typeof setTimeout> | null = null;
+/** tallies change many times a fight: write them out in one go a moment later */
+function queueWrite() {
+  if (tallyTimer) return;
+  tallyTimer = setTimeout(() => {
+    tallyTimer = null;
+    writeSave();
+  }, 1500);
+}
+function tally(e: CodexEntry, level: CodexLevel) {
+  const b = bookSave();
+  let dirty = false;
+  if (!rideSeen.has(e.key)) {
+    rideSeen.add(e.key);
+    (b.n ??= {})[e.key] = (b.n[e.key] ?? 0) + 1;
+    dirty = true;
+  }
+  if (level !== 'sight' && e.cat !== 'bounty') {
+    (b.c ??= {})[e.key] = (b.c[e.key] ?? 0) + 1;
+    dirty = true;
+  }
+  if (dirty) queueWrite();
 }
 
 function entryPoints(e: CodexEntry, f: number) {
@@ -351,6 +391,14 @@ export const Codex = {
   /** saved kills for a bounty (all runs) */
   kills(id: string) {
     return loadSave().codex[id] ?? 0;
+  },
+  /** rides on which the entry was met */
+  rides(key: string) {
+    return bookSave().n?.[key] ?? 0;
+  },
+  /** times the entry was claimed (bosses defeated, gear found or worn, items used, relics dug; not bounty kills) */
+  claims(key: string) {
+    return bookSave().c?.[key] ?? 0;
   },
   points() {
     build();
@@ -414,6 +462,7 @@ export const Codex = {
     if (!e) return 0;
     const f = flags();
     const was = f[e.key] ?? 0;
+    if (!quiet) tally(e, level);
     let want = was | F_SEEN;
     if (level === 'kill' || level === 'master') want |= F_CLAIM;
     if (level === 'master') want |= F_MASTER;
@@ -465,6 +514,8 @@ export const Codex = {
    * kills banked so far this run (per enemy id) for the mastery check. Returns an unsubscribe.
    */
   listen(events: EventBus, runKills?: () => Record<string, number>) {
+    // a new ride: everything met from here on counts toward its ride tally again
+    rideSeen.clear();
     const offs: (() => void)[] = [];
     const on = (ev: string, fn: (...a: any[]) => void) => offs.push(events.on(ev, fn));
     on('enemyKilled', (en: any) => {

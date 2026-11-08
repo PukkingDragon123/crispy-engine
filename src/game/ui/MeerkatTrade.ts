@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Input } from '../../engine/Input';
+import { touchText } from './TouchControls';
 import type { CameraRig } from '../player/CameraRig';
 import { ITEMS, ItemId } from '../player/Items';
 import { modelEntry } from '../models/lookup';
@@ -191,7 +192,7 @@ export class MeerkatTrade {
     ctx.sfx('merchant_greet', null, 0.5, 1.9);
     ctx.toast('THE BURROW EXCHANGE', '#ffd36b', pick(LINES.greet));
     o.react('greet');
-    this.bar.innerHTML = `click a swap &nbsp;·&nbsp; ESC / T to leave`;
+    this.bar.innerHTML = touchText(`click a swap &nbsp;·&nbsp; ESC / T to leave`);
     this.bar.style.display = 'block';
   }
 

@@ -1,11 +1,11 @@
-// The cold open: ~4.5 s, straight to the point.
+// The cold open: ~2.8 s, straight to the point.
 //
 // Dusk out in the dunes. Sundown staggers away from the lens, three whiskeys
-// deep (anim/drunkWalk.ts), stops, turns round and outdraws the camera: the
-// round punches a hole through the lens (cracked glass, a scorched ember lip,
-// light bleeding through), time freezes, and the view flies into the hole until
-// it burns white - the white-hot desert sun the intro picks up from (LensShot).
-// Without a lens rig it cuts to black. Uses the intro's own skip.
+// deep (anim/drunkWalk.ts), stops, turns round and outdraws the camera. The
+// muzzle flash blooms out of the barrel and swallows the frame in one move as
+// the view lunges at it, burning white - the white of the hot desert sun the
+// intro opens on (LensShot). Without a lens rig it cuts to black.
+// Uses the intro's own skip.
 import * as THREE from 'three';
 import type { Engine } from '../../engine/Engine';
 import type { CameraRig } from '../player/CameraRig';
@@ -114,16 +114,16 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
   let last = performance.now();
   const dtCap = d.dtCap ?? 0.05;
   let T = 0;
-  let rate = 1;
   const gait = new DrunkGait(3.7);
   let fadeOut = false, turnStep = false, rattled = false;
   // ---- the draw: he stops, turns round, looks into the lens and shoots it (needs the intro's lens rig)
   const lens = d.lens ?? null;
   const DRAW = 1.3;
-  /** after the shot: the frozen beat, then the push into the hole */
-  const PUSH_AT = 0.95, PUSH_DUR = 0.95;
-  const END = lens ? DRAW + 1.05 + PUSH_AT + PUSH_DUR + 0.05 : DRAW + 1.9;
-  let drawn = false, fired = false, heart = false, pushing = false;
+  /** the shot (after DRAW) and how long its flash takes to swallow the frame */
+  const FIRE = 1.05, BLOOM = 0.34;
+  const END = lens ? DRAW + FIRE + BLOOM : DRAW + 1.9;
+  let drawn = false, fired = false;
+  const muzzleUv = new THREE.Vector2();
   const mz = new THREE.Vector3(), camW = new THREE.Vector3(), tv = new THREE.Vector3();
   const HOL = { x: 0.2, z: -0.26, f: -0.7 };
   const aim = { x: 0, z: 0 };
@@ -146,11 +146,8 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
       if ((window as any).__cineHold) continue; // dev: freeze for a screenshot
       T += dt;
       (window as any).__coldT = T;
-      // real time until the shot; the shot freezes the world (once the flash has burnt out); only the lens lives on
-      rate = fired && T > DRAW + 1.05 + 0.09 ? 0.05 : 1;
-      const cdt = dt * rate;
+      const cdt = dt;
       const dd = T - DRAW;
-      eng.slowMo(rate, 30);
       // ---- Sundown staggers away from the lens, stops, and turns round on it
       const walkAmt = 1 - ease((dd + 0.15) / 0.35);
       gait.update(cdt, 6.0, walkAmt);
@@ -213,10 +210,10 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
           n['arm_r'].rotation.set(ax0 + (aim.x - ax0) * k2 - recoil, 0, az0 + (aim.z - az0) * k2);
           n['fore_r'].rotation.set(f0 * (1 - k2) - recoil * 0.4, 0, 0);
         }
-        if (dd > 0.9 && dd < 0.95 && !fired) eng.audio.play('rev_hammer', { volume: 0.8 });
+        if (dd > FIRE - 0.15 && dd < FIRE - 0.1 && !fired) eng.audio.play('rev_hammer', { volume: 0.8 });
         actor.root.updateMatrixWorld(true);
         // BANG
-        if (!fired && dd >= 1.05) {
+        if (!fired && dd >= FIRE) {
           fired = true;
           if (!(gun.sockets['muzzle']?.getWorldPosition(mz))) gun.root.getWorldPosition(mz);
           const dc = camW.clone().sub(mz).normalize();
@@ -229,43 +226,19 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
           kit.light(mz, 0xffb050, 12, 0.14, 10);
           eng.audio.play('rev_shot', { volume: 1, pitch: 0.92 });
           eng.flash(0xfff0c8, 0.45, 0.1);
-          cam.addTrauma(0.55);
+          cam.addTrauma(0.3);
           recoil = 0.5;
-          // the round goes through the lens where the muzzle points
-          LensShot.toUv(cam.camera, mz, lens.hole);
-          lens.hole.set(THREE.MathUtils.clamp(lens.hole.x, 0.3, 0.7), THREE.MathUtils.clamp(lens.hole.y, 0.32, 0.72));
-          lens.on = 1;
-          lens.burn = 1;
-          lens.light = 0.35;
-          lens.crack = 0;
-          kit.after(0.0, () => eng.audio.play('glass_break', { volume: 1, pitch: 0.8 }));
-          eng.audio.play('time_slow', { volume: 0.6, pitch: 1.2 });
-          // glass splinters hang in the frozen air just in front of the lens
-          const cv = cam.camera;
-          const ray = new THREE.Vector3(lens.hole.x * 2 - 1, lens.hole.y * 2 - 1, 0.5).unproject(cv).sub(cv.position).normalize();
-          const gp = cv.position.clone().addScaledVector(ray, 0.55);
-          P.emit({ pos: gp, count: 18, vel: { x: -ray.x * 1.2, y: -ray.y * 1.2 + 0.2, z: -ray.z * 1.2 }, spread: 1.6, life: [2.5, 4], size: [0.012, 0.006], sprite: ['star4', 'spark', 'dot3'], additive: true, color: [0xffffff, 0xfff4d8, 0xd8ecff], drag: 1, gravity: 1 });
+          // the flash blooms from the barrel
+          LensShot.toUv(cam.camera, mz, muzzleUv);
+          eng.audio.play('whoosh_big', { volume: 0.8, pitch: 0.7 });
         }
         if (fired) {
-          const f = dd - 1.05;
-          // cracks race out from the hole, the lip cools, the light behind it swells
-          lens.crack = 1 - Math.pow(1 - sat(f / 0.16), 3);
-          lens.burn = 0.35 + 0.65 * Math.exp(-f * 1.4);
-          lens.light = 0.35 + 0.85 * ease((f - 0.15) / 0.75);
-          if (!heart && f > 0.25) {
-            heart = true;
-            eng.audio.play('heartbeat', { volume: 0.7, pitch: 0.9 });
-          }
-          // ...then the view flies into the hole and burns white: the desert sun
-          const pk = sat((f - PUSH_AT) / PUSH_DUR);
-          if (pk > 0 && !pushing) {
-            pushing = true;
-            eng.audio.play('whoosh_big', { volume: 0.9, pitch: 0.55 });
-            eng.audio.play('wind_loop', { volume: 0.5, pitch: 1.4 });
-          }
-          lens.push = pk * pk * (3 - 2 * pk);
-          lens.white = Math.pow(sat((pk - 0.5) / 0.5), 1.5);
-          lens.blaze = Math.max(lens.white, pk * 0.3);
+          // one move: the flash swells out of the muzzle and swallows the frame as the view lunges at it
+          const f = sat((dd - FIRE) / BLOOM);
+          lens.burstAt.copy(muzzleUv);
+          lens.burst = f * (0.6 + 0.4 * f);
+          lens.white = Math.pow(sat((f - 0.35) / 0.65), 1.4);
+          lens.blaze = f;
         }
         lens.sync();
       }
@@ -275,9 +248,11 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
         pinch.root.rotation.y = Math.sin(T * 1.3) * 0.3;
       }
       actor.root.updateMatrixWorld(true);
-      // ---- the camera: low behind him as he walks off; he turns round into it, it creeps in, then holds
-      const k = ease(sat(dd / 1.05));
-      shot(ap.clone().addScaledVector(dir, 2.95 - k * 0.3).addScaledVector(side, 0.34).add(new THREE.Vector3(0, 1.2, 0)), ap.clone().add(new THREE.Vector3(0, 1.3, 0)).addScaledVector(dir, -2.2 * (1 - turnK)).addScaledVector(side, 0.06), 40 - k * 2);
+      // ---- the camera: low behind him as he walks off; he turns round into it, it creeps in; on the shot it lunges at the muzzle
+      const k = ease(sat(dd / FIRE));
+      const cp = ap.clone().addScaledVector(dir, 2.95 - k * 0.3).addScaledVector(side, 0.34).add(new THREE.Vector3(0, 1.2, 0));
+      if (fired) cp.lerp(mz, 0.55 * Math.pow(sat((dd - FIRE) / BLOOM), 1.6));
+      shot(cp, ap.clone().add(new THREE.Vector3(0, 1.3, 0)).addScaledVector(dir, -2.2 * (1 - turnK)).addScaledVector(side, 0.06), 40 - k * 2);
       kit.update(cdt, cdt);
       if (!lens && !fadeOut && T >= END - 0.7) {
         fadeOut = true;

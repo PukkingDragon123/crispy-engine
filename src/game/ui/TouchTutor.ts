@@ -21,6 +21,14 @@ export function tutorSeen() {
     return false;
   }
 }
+/** show the touch lesson again on the next ride (settings) */
+export function resetTutor() {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    /* storage blocked */
+  }
+}
 function markSeen() {
   try {
     localStorage.setItem(KEY, '1');

@@ -498,7 +498,7 @@ export class ShootingRange implements Mode {
     } else if (this.phase === 'live') {
       this.left = Math.max(0, ROUND - this.t);
       if (inp.wasPressed('Mouse0')) this.fire();
-      if (inp.wasPressed('KeyR')) this.startReload();
+      if (inp.wasPressed('KeyR') || inp.gesture === 'swipeDown') this.startReload();
       const clear = this.targets.every((q) => q.state !== 'up' && q.state !== 'air');
       if (this.left <= 0 || clear) this.finish(clear);
     } else if (this.phase === 'end') {

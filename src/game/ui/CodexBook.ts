@@ -9,6 +9,9 @@
 //
 // Opened from the hideout's Book of Skills lectern. The hub hands over its
 // scene/camera; the book swaps the post stack to its own and back on close.
+//
+// THE CODEX IS NOW THOTH'S HALL: `CodexBook` (what the hideout and the menu open) is the
+// hall (scenes/ThothHall.ts). The old field book stays here as `FieldBook`, untouched.
 import * as THREE from 'three';
 import type { Engine } from '../../engine/Engine';
 import type { RigSpec } from '../../engine/voxel/Rig';
@@ -106,7 +109,7 @@ function labelTexture(text: string) {
   return t;
 }
 
-export class CodexBook {
+export class FieldBook {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(34, 1, 0.02, 30);
   private state: 'idle' | 'opening' | 'open' | 'closing' | 'done' = 'idle';
@@ -825,3 +828,6 @@ export class CodexBook {
     if ((window as any).__codex === this) (window as any).__codex = null;
   }
 }
+
+/** the codex opens Thoth's Hall now (same constructor, open / update / close / dispose) */
+export { ThothHall as CodexBook } from '../scenes/ThothHall';

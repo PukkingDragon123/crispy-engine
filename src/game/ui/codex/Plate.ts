@@ -81,6 +81,68 @@ function moundGeometry(seed: number) {
 
 let mound: THREE.BufferGeometry | null = null;
 
+/** the live puppet for a codex entry (the plates, and the jars of Thoth's Hall); null if it has no model */
+export function entryPuppet(e: CodexEntry, hero: RigSpec | null): Puppet | null {
+  try {
+    if (e.enemy) return Puppet.enemy(e.enemy);
+    if (e.model === '@hero') return hero ? Puppet.rig(hero, { key: 'codex:hero:' + hero.name }) : null;
+    if (e.model?.startsWith('@long:')) {
+      const g = e.model.slice(6);
+      const spec = ((LG as any)[g === 'tommy' ? 'tommyRig' : 'shotgunRig']?.() ?? null) as RigSpec | null;
+      return spec?.parts ? Puppet.rig(spec, { spin: true, key: 'codex:long:' + g }) : null;
+    }
+    if (e.model?.startsWith('@cart:')) {
+      const m = (LG as any).cartridgeTrio?.(+e.model.slice(6));
+      return m?.model ? Puppet.model(m, 'codex:cart:' + e.model.slice(6)) : null;
+    }
+    if (e.model === '@revlaser') {
+      const m = (LG as any).revolverLaserModel?.();
+      return m?.model ? Puppet.model(m, 'codex:revlaser') : null;
+    }
+    if (e.model?.startsWith('@gun:')) {
+      const [slot, part] = e.model.slice(5).split(':');
+      const spec = (CH as any).revolverRig?.({ barrel: 'standard', cylinder: 'standard', grip: 'wood', sight: 'iron', [slot]: part }) as RigSpec;
+      return spec?.parts ? Puppet.rig(spec, { spin: true, key: 'codex:gun:' + slot + part }) : null;
+    }
+    if (e.model && CONSUMABLES[e.model]) return Puppet.model(CONSUMABLES[e.model](), e.model);
+    if (e.model) return Puppet.fromKey(e.model);
+  } catch (err) {
+    console.warn('[codex] plate model', e.key, err);
+  }
+  return null;
+}
+
+/** a place's miniature: the game's own props for that stretch, arranged round a mound about 1 m across */
+export function placeProps(theme: string): THREE.Object3D[] {
+  const out: THREE.Object3D[] = [];
+  for (const [key, x, z, ry, sc] of PLACES[theme] ?? []) {
+    try {
+      const r = modelEntry(key)?.() as any;
+      if (!r) continue;
+      let obj: THREE.Object3D;
+      if (r.parts) obj = Puppet.rig(r as RigSpec, { key: 'codex:place:' + key }).root;
+      else {
+        const m = new THREE.Mesh(buildVoxelGeometry(r.model, { voxelSize: r.voxelSize, pivot: 'bottom' }), sharedVoxelMaterial);
+        m.castShadow = m.receiveShadow = true;
+        m.userData.own = true;
+        obj = m;
+      }
+      obj.position.set(x * 0.7, 0, z * 0.7);
+      obj.rotation.y = ry;
+      obj.scale.setScalar(sc * 0.55);
+      out.push(obj);
+    } catch (err) {
+      console.warn('[codex] place prop', key, err);
+    }
+  }
+  return out;
+}
+
+/** the plate's sand mound (shared geometry, unit radius ~1 m) */
+export function plateMound() {
+  return (mound ??= moundGeometry(7));
+}
+
 const BACK_FS = /* glsl */ `
 uniform vec3 uTop, uMid, uLow, uSun;
 uniform float uBlue;
@@ -146,30 +208,7 @@ export class Plate {
     this.entry = e;
     this.locked = locked;
     this.style = locked ? 3 : e.plate === 'blueprint' ? 2 : 1;
-    let p: Puppet | null = null;
-    try {
-      if (e.enemy) p = Puppet.enemy(e.enemy);
-      else if (e.model === '@hero') p = hero ? Puppet.rig(hero, { key: 'codex:hero:' + hero.name }) : null;
-      else if (e.model?.startsWith('@long:')) {
-        const g = e.model.slice(6);
-        const spec = ((LG as any)[g === 'tommy' ? 'tommyRig' : 'shotgunRig']?.() ?? null) as RigSpec | null;
-        if (spec?.parts) p = Puppet.rig(spec, { spin: true, key: 'codex:long:' + g });
-      } else if (e.model?.startsWith('@cart:')) {
-        const m = (LG as any).cartridgeTrio?.(+e.model.slice(6));
-        if (m?.model) p = Puppet.model(m, 'codex:cart:' + e.model.slice(6));
-      } else if (e.model === '@revlaser') {
-        const m = (LG as any).revolverLaserModel?.();
-        if (m?.model) p = Puppet.model(m, 'codex:revlaser');
-      } else if (e.model?.startsWith('@gun:')) {
-        const [slot, part] = e.model.slice(5).split(':');
-        const spec = (CH as any).revolverRig?.({ barrel: 'standard', cylinder: 'standard', grip: 'wood', sight: 'iron', [slot]: part }) as RigSpec;
-        if (spec?.parts) p = Puppet.rig(spec, { spin: true, key: 'codex:gun:' + slot + part });
-      } else if (e.model && CONSUMABLES[e.model]) p = Puppet.model(CONSUMABLES[e.model](), e.model);
-      else if (e.model) p = Puppet.fromKey(e.model);
-    } catch (err) {
-      console.warn('[codex] plate model', e.key, err);
-      p = null;
-    }
+    const p = entryPuppet(e, hero);
     if (e.theme) this.buildPlace(e.theme);
     this.puppet = p;
     if (p) {
@@ -184,26 +223,7 @@ export class Plate {
   }
 
   private buildPlace(theme: string) {
-    for (const [key, x, z, ry, sc] of PLACES[theme] ?? []) {
-      try {
-        const r = modelEntry(key)?.() as any;
-        if (!r) continue;
-        let obj: THREE.Object3D;
-        if (r.parts) obj = Puppet.rig(r as RigSpec, { key: 'codex:place:' + key }).root;
-        else {
-          const m = new THREE.Mesh(buildVoxelGeometry(r.model, { voxelSize: r.voxelSize, pivot: 'bottom' }), sharedVoxelMaterial);
-          m.castShadow = m.receiveShadow = true;
-          m.userData.own = true;
-          obj = m;
-        }
-        obj.position.set(x * 0.7, 0, z * 0.7);
-        obj.rotation.y = ry;
-        obj.scale.setScalar(sc * 0.55);
-        this.props.add(obj);
-      } catch (err) {
-        console.warn('[codex] place prop', key, err);
-      }
-    }
+    for (const o of placeProps(theme)) this.props.add(o);
   }
 
   /** frame the subject: whatever is on the mound fills the plate with a little air round it */

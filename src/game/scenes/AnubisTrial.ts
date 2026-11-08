@@ -1192,7 +1192,8 @@ export class AnubisTrial {
     const eng = this.engine;
     const intro = this.phase === 'tunnel' || this.phase === 'descent' || this.phase === 'gate' || this.phase === 'hall' || this.phase === 'throne';
     // HOLD to skip: a stray tap never throws the arrival away
-    const held = eng.input.isDown('Space') || eng.input.isDown('Escape') || eng.input.isDown('Enter');
+    // (touch: a finger held still on the screen)
+    const held = eng.input.isDown('Space') || eng.input.isDown('Escape') || eng.input.isDown('Enter') || eng.input.touchHolding;
     this.skipHold = intro && held && !this.skipping ? this.skipHold + rdt : 0;
     this.qte.hold = this.skipHold > 0.08 ? { label: 'HOLD TO SKIP', k: Math.min(1, this.skipHold / 0.9) } : null;
     if (intro && !this.skipping && this.skipHold >= 0.9) {

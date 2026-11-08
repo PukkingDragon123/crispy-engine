@@ -466,7 +466,7 @@ export class DeathCine implements GameScene {
     this.ui.style.cssText = 'position:absolute;inset:0;z-index:9;pointer-events:none';
     this.title.style.cssText = "position:absolute;left:0;right:0;top:30%;text-align:center;font-family:'Alagard';font-size:clamp(40px,9vw,120px);letter-spacing:.08em;color:#fff1d2;opacity:0;transform:translateY(14px) scale(.96);transition:opacity 1.4s ease,transform 2.2s cubic-bezier(.2,.7,.2,1);text-shadow:0 4px 0 #2a1408,0 0 26px rgba(255,190,110,.55),0 0 80px rgba(255,140,60,.35);white-space:nowrap";
     this.skipEl.style.cssText = "position:absolute;right:28px;bottom:calc(11vh + 14px);font-family:'Alagard';font-size:15px;color:#fff3d6;opacity:0;transition:opacity 1s;text-shadow:0 2px 0 #2a1408,0 0 8px #000";
-    this.skipEl.textContent = 'Space · Esc · click — skip';
+    this.skipEl.textContent = this.engine.input.touchDevice ? 'tap to skip' : 'Space · Esc · click — skip';
     this.ui.append(this.title, this.skipEl);
     eng.overlay.appendChild(this.ui);
     eng.letterbox(true, 0.4);

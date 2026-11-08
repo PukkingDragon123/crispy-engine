@@ -28,6 +28,7 @@ import { loadSave } from '../meta/Save';
 import { Ease } from '../../engine/Tween';
 import { clamp, damp, noise } from '../../engine/math/rand';
 import { nav } from '../Nav';
+import { resetTutor } from '../ui/TouchTutor';
 
 type Pivot = [number, number, number] | 'bottom' | 'center';
 function vmesh(model: VoxelModel, vs: number, pivot: Pivot = 'bottom', mat: THREE.Material = sharedVoxelMaterial, shadow = true) {
@@ -721,12 +722,22 @@ export class MenuScene implements GameScene {
     sens.max = '300';
     sens.value = String(Math.round(((eng.input as any).sensitivity ?? 1) * 100));
     sens.oninput = () => ((eng.input as any).sensitivity = +sens.value / 100);
-    row('Mouse', sens);
-    const ap = document.createElement('input');
-    ap.type = 'checkbox';
-    ap.checked = eng.input.autoPushDesktop;
-    ap.onchange = () => eng.input.setAutoPushDesktop(ap.checked);
-    row('Auto push', ap);
+    const touch = eng.input.touchDevice;
+    row(touch ? 'Aim speed' : 'Mouse', sens);
+    if (touch) {
+      // the board always kicks along by itself on a touch screen; the lesson can be shown again
+      const tl = document.createElement('input');
+      tl.type = 'checkbox';
+      tl.checked = false;
+      tl.onchange = () => tl.checked && resetTutor();
+      row('Touch lesson again', tl);
+    } else {
+      const ap = document.createElement('input');
+      ap.type = 'checkbox';
+      ap.checked = eng.input.autoPushDesktop;
+      ap.onchange = () => eng.input.setAutoPushDesktop(ap.checked);
+      row('Auto push', ap);
+    }
     p.querySelectorAll('input,select').forEach((el) => ((el as HTMLElement).style.cssText = 'font-family:Alagard;font-size:16px;accent-color:#8a2a18'));
     eng.overlay.appendChild(p);
     this.panel = p;
@@ -783,6 +794,8 @@ export class MenuScene implements GameScene {
     const eng = this.engine;
     const inp = eng.input;
     const n = this.planks.length;
+    // the settings card closes with Esc (on a touch screen: two fingers)
+    if (this.panel && inp.wasPressed('Escape')) this.openSettings();
     // keyboard
     const up = inp.wasPressed('ArrowUp') || inp.wasPressed('KeyW');
     const down = inp.wasPressed('ArrowDown') || inp.wasPressed('KeyS');

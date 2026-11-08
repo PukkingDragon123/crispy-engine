@@ -597,7 +597,8 @@ export class SoulReaping {
   private update(rdt: number) {
     const eng = this.ctx.engine;
     // hold SPACE / ENTER to skip (a tap is never enough: a stray press must not throw the scene away)
-    const held = eng.input.isDown('Space') || eng.input.isDown('Enter');
+    // (touch: a finger held still on the screen)
+    const held = eng.input.isDown('Space') || eng.input.isDown('Enter') || eng.input.touchHolding;
     this.skipHold = held && !this.skipping ? this.skipHold + rdt : 0;
     this.h.qte.hold = this.skipHold > 0.08 ? { label: 'HOLD TO SKIP', k: Math.min(1, this.skipHold / 0.9) } : null;
     if (!this.skipping && this.skipHold >= 0.9) {

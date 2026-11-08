@@ -35,6 +35,33 @@ export const DEFAULT_BINDINGS: Record<Action, string[]> = {
   trick: ['Mouse4', 'KeyB'],
 };
 
+/** a touch screen (or ?touch=1 to try the touch controls with a mouse) */
+export function touchScreen() {
+  try {
+    return new URLSearchParams(location.search).get('touch') === '1' || matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+  } catch {
+    return false;
+  }
+}
+
+/** a finger on the screen outside gameplay (the screen as a mouse) */
+interface TouchFinger {
+  id: number;
+  x0: number;
+  y0: number;
+  t0: number;
+  x: number;
+  y: number;
+  moved: number;
+  /** another finger came down with it: a two-finger tap */
+  pair: TouchFinger | null;
+  /** held still long enough to be a long press (the right button) */
+  long: boolean;
+}
+
+/** a finished touch gesture outside gameplay; swipes name the way the finger went */
+export type TouchGesture = 'tap' | 'back' | 'swipeLeft' | 'swipeRight' | 'swipeUp' | 'swipeDown';
+
 function readFlag(key: string) {
   try {
     const q = new URLSearchParams(location.search).get('autopush');
@@ -131,6 +158,21 @@ export class Input {
       this.lockFailed = true;
       if (this.wantLock) this.locked = true; // pseudo-lock: raw mouse movement steers
     });
+    if (this.touchDevice) {
+      const o = { passive: false, capture: true } as AddEventListenerOptions;
+      window.addEventListener('touchstart', (e) => this.tStart(e), o);
+      window.addEventListener('touchmove', (e) => this.tMove(e), o);
+      window.addEventListener('touchend', (e) => this.tEnd(e), o);
+      window.addEventListener('touchcancel', (e) => this.tEnd(e, true), o);
+      // no browser panning, zooming or long-press menus over the game
+      try {
+        document.documentElement.style.touchAction = 'none';
+        (document.documentElement.style as any).webkitUserSelect = 'none';
+        (document.documentElement.style as any).webkitTouchCallout = 'none';
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   /** gameplay wants pointer lock (re-acquired on click) */
@@ -230,6 +272,141 @@ export class Input {
     this.stick.x = this.stick.y = 0;
   }
 
+  // ---------------------------------------------------------------- touch outside gameplay
+  // Everywhere the gameplay gesture layer is not live (menus, the hideout, shops,
+  // pickers, cutscenes, pause), a finger on the game canvas works the mouse:
+  //   tap = left click where the finger lifted (it hovers while it rests)
+  //   press and hold still = right button (turn a card, shoot in the shop), and
+  //   `touchHolding` for hold-to-skip; two fingers tapped together = Escape (back,
+  //   close, leave, pause); a swipe = the arrow key that moves the view the way the
+  //   finger went (finger left = ArrowRight: next page, look right).
+  // Touches on DOM controls (buttons, sliders, labels) are left to the browser.
+  /** this device has a touch screen (or ?touch=1) */
+  readonly touchDevice = touchScreen();
+  /** the gameplay gesture layer (ui/TouchControls) owns the screen this frame */
+  touchLive = false;
+  /** a finger rests on the screen, held still: hold-to-skip and other holds */
+  touchHolding = false;
+  /** this frame's finished touch gesture (outside gameplay) */
+  gesture: TouchGesture | null = null;
+  /** a scene with its own pointer drag (the gun rack) took this touch: its swipe is not an arrow key */
+  swipeOwned = false;
+  private fingers = new Map<number, TouchFinger>();
+  /** the game canvas */
+  get surface() {
+    return this.el;
+  }
+  private setPointer(x: number, y: number) {
+    this.mouseX = x;
+    this.mouseY = y;
+    this.ndcX = (x / window.innerWidth) * 2 - 1;
+    this.ndcY = -(y / window.innerHeight) * 2 + 1;
+  }
+  private tap(code: string) {
+    this.pressed.add(code);
+    this.released.add(code);
+    this.anyKeyPressed = true;
+  }
+  private tStart(e: TouchEvent) {
+    if (this.touchLive) return;
+    let mine = false;
+    const now = performance.now();
+    for (const t of Array.from(e.changedTouches)) {
+      if (t.target !== this.el) continue;
+      mine = true;
+      const f: TouchFinger = { id: t.identifier, x0: t.clientX, y0: t.clientY, t0: now, x: t.clientX, y: t.clientY, moved: 0, pair: null, long: false };
+      for (const o of this.fingers.values()) {
+        if (o.pair || now - o.t0 > 220 || o.moved > 18) continue;
+        o.pair = f;
+        f.pair = o;
+        break;
+      }
+      this.fingers.set(f.id, f);
+      if (!f.pair) this.setPointer(f.x, f.y);
+      this.anyKeyPressed = true;
+    }
+    if (mine) e.preventDefault();
+  }
+  private tMove(e: TouchEvent) {
+    if (this.touchLive) return;
+    let mine = false;
+    for (const t of Array.from(e.changedTouches)) {
+      const f = this.fingers.get(t.identifier);
+      if (!f) continue;
+      mine = true;
+      f.x = t.clientX;
+      f.y = t.clientY;
+      f.moved = Math.max(f.moved, Math.hypot(f.x - f.x0, f.y - f.y0));
+      if (!f.pair) this.setPointer(f.x, f.y);
+    }
+    if (mine) e.preventDefault();
+  }
+  private tEnd(e: TouchEvent, cancel = false) {
+    const now = performance.now();
+    let mine = false;
+    for (const t of Array.from(e.changedTouches)) {
+      const f = this.fingers.get(t.identifier);
+      if (!f) continue;
+      mine = true;
+      this.fingers.delete(f.id);
+      if (f.long) this.release('Mouse2');
+      if (cancel || this.touchLive) continue;
+      f.x = t.clientX;
+      f.y = t.clientY;
+      const dur = now - f.t0;
+      const still = f.moved < 18 && dur < 450;
+      if (f.pair) {
+        // two fingers: both lift as taps = Escape; the first to lift waits for the other
+        const o = f.pair;
+        if (this.fingers.has(o.id)) {
+          if (!still) o.pair = null;
+          continue;
+        }
+        if (still && o.moved < 18 && !o.long) {
+          this.tap('Escape');
+          this.gesture = 'back';
+        }
+        continue;
+      }
+      if (f.long) continue;
+      if (still) {
+        this.setPointer(f.x, f.y);
+        this.tap('Mouse0');
+        this.gesture = 'tap';
+        continue;
+      }
+      const dx = f.x - f.x0, dy = f.y - f.y0;
+      const d = Math.hypot(dx, dy);
+      if (d > 48 && dur < 600 && d / Math.max(1, dur) > 0.3) {
+        const horiz = Math.abs(dx) > Math.abs(dy);
+        this.gesture = horiz ? (dx < 0 ? 'swipeLeft' : 'swipeRight') : dy < 0 ? 'swipeUp' : 'swipeDown';
+        // the view moves with the finger: a swipe to the left brings in what lies to the right
+        if (!this.swipeOwned) this.tap(horiz ? (dx < 0 ? 'ArrowRight' : 'ArrowLeft') : dy < 0 ? 'ArrowDown' : 'ArrowUp');
+      }
+    }
+    if (!this.fingers.size) this.swipeOwned = false;
+    if (mine) e.preventDefault();
+  }
+  /** per frame (from endFrame): long presses, the hold flag, and the gesture layer taking over */
+  private touchFrame() {
+    if (this.touchLive && this.fingers.size) {
+      for (const f of this.fingers.values()) if (f.long) this.release('Mouse2');
+      this.fingers.clear();
+    }
+    const now = performance.now();
+    let hold = false;
+    for (const f of this.fingers.values()) {
+      if (f.pair || f.moved >= 18) continue;
+      const age = now - f.t0;
+      if (age > 300) hold = true;
+      if (age > 480 && !f.long) {
+        f.long = true;
+        this.press('Mouse2');
+      }
+    }
+    this.touchHolding = hold;
+  }
+
   isDown(code: string) {
     return this.down.has(code);
   }
@@ -281,6 +458,8 @@ export class Input {
     this.pushLead = 0;
     this.wheel = 0;
     this.anyKeyPressed = false;
+    this.gesture = null;
+    if (this.touchDevice) this.touchFrame();
   }
   keyName(a: Action) {
     const c = this.bindings[a][0] ?? '?';

@@ -1,5 +1,5 @@
-// "Sundown" HD — the player: a stylized, high-voxel skeleton cowboy in a punk,
-// Ghost-Rider style biker jacket, rebuilt at 1/54 m with a bespoke builder.
+// "Sundown" HD — the player: a half-dead punk cowboy, rebuilt at 1/54 m with a
+// bespoke builder. (The API keeps its old names: skeletonCowboyRig & co.)
 //
 // DESIGN UNITS: every shape is authored in u = 1/36 m (the legacy humanoid grid,
 // see skeleton.ts J) and rasterised onto the 1/54 grid (S = 1.5 voxels per u) by
@@ -7,15 +7,24 @@
 // joints * S, so animation, the board stance, cameras and cloth anchors still fit.
 // Mirror plane: geometric x = 0. Character LEFT = +X, faces +Z, origin on the ground.
 //
-// Look ('punk', the new default): a carved skull with a cracked brow, deep sockets
-// holding modelled eyeballs with glowing Serket-green pupils, cheekbones, teeth and a
-// hinged jaw; readable ribs, sternum, spine, iliac crests and finger bones. A cropped
-// black biker jacket thrown open over the rib cage (studded lapels, popped collar,
-// zippers, hot-rod flames, back rocker patch), a big spiked pauldron + chain on the
-// right shoulder, the left sleeve torn off (short spikes on the stump, Pinch's perch),
-// spiked and studded wrist cuffs, red bandana, a saddle-leather board sling across the
-// chest, studded gun belt with an oval buckle, ripped skinny jeans with a wallet chain,
-// black harness cowboy boots with rowel spurs, and a battered cowboy hat.
+// Half zombie, half human. His LEFT half lives: sun-dark weathered skin, a strong
+// stubbled jaw, an old knife scar, a broken nose, a steel-blue modelled eye under a
+// heavy brow, a human ear, a fleshed left hand with scabbed knuckles. His RIGHT half
+// has rotted away: the skin torn back (raw meat at the lip, necrotic grey-green, a
+// bruised ring) to the bare skull, cheekbone and teeth, sinew strung across the
+// torn cheek, crude black stitches where someone sewed him shut, a glowing Serket-
+// green eye deep in the bare socket, the right breast torn open over the ribs and a
+// skeletal right hand on the gun. Scraggly black hair falls from under the hat to
+// the shoulders in rigged locks (hair_l, hair_r, hair_b chains) that sway on their
+// own (hairSway.ts).
+//
+// Look ('punk', the default): a cropped black biker jacket thrown open over the
+// chest (studded lapels, popped collar, zippers, hot-rod flames, back rocker patch),
+// a big spiked pauldron + chain on the right shoulder, the left sleeve torn off
+// (short spikes on the stump, Pinch's perch), spiked and studded wrist cuffs, the
+// outlaw mask, round shades, a saddle-leather board sling across the chest, studded
+// gun belt with an oval buckle, ripped skinny jeans with a wallet chain, black
+// harness cowboy boots with rowel spurs, and a battered cowboy hat.
 import * as THREE from 'three';
 import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
 import { voxelMesh } from '../../../engine/voxel/Rig';
@@ -26,6 +35,8 @@ import { SUNDOWN_EXPRESSIONS } from './skeleton';
 import { frogWigHat, FROG_WIG_TOP } from '../enemies/frog';
 import type { CowboyLook, HatId, OutfitId } from './skeleton';
 import { Sc, Col, clamp, lerp, sstep, vadd, vsub, vmul, vdot, vcross, vlen, vnorm, distPoly, spline, resample, shadeRamps, splitOff } from './sculpt';
+import { SKIN, STUB, STUB_DOT, SCAR, LIP, NAIL, BROWHAIR, HEYE, ROT, BRUISE, MEAT, SINEW, CAVITY, THREAD_BLK, HAIR, HAIR_ALT, HAIR_TIP, HAIR_GREY, rng, vhash, dedupe, skinOver, rotEdgeCol, markBone, boneEdgeCol, stitch, strand, splitY } from './fleshKit';
+import { installHairSway, type HairChain } from './hairSway';
 
 /** metres per voxel of the HD player build */
 export const SUNDOWN_HD_VS = 1 / 54;
@@ -54,6 +65,7 @@ const HEEL = ramp(0x4b3527, 0x37261b, 0x604534, 0x22150d);
 const STITCH = 0x9c9aa4;
 const VENOM = 0x8cf03c;
 const M = VF.METAL;
+markBone(BN.base, BN.shade, BN.hi, ENAMEL);
 
 // ================================================================== JOINTS (design units, identical to the legacy grid)
 const J: Record<string, V3> = {
@@ -225,7 +237,7 @@ function chain(m: Sc, pts: V3[], link = 1.7, col: Ramp = CHR) {
 interface SkullParts {
   head: Sc;
   jaw: Sc;
-  brow_l: VoxelModel;
+  /** the bone brow over the bare (right) socket; the living brow is humanBrow() */
   brow_r: VoxelModel;
 }
 const SOCKET_C = (s: number): V3 => [s * 3.2, 53.85, 7.1];
@@ -297,7 +309,7 @@ function buildSkull(): SkullParts {
   for (const s of [1, -1])
     br.path([[s * 5.65, 55.95, 4.25], [s * 4.65, 56.7, 5.6], [s * 3.1, 57.05, 6.35], [s * 1.35, 56.9, 6.45]], (t) => 0.86 - 0.12 * Math.abs(t - 0.6), B);
   shadeRamps(br.m, [BN], true);
-  const brow_l = splitOff(br, 'brow_l', (x) => x > 0.9);
+  splitOff(br, 'brow_l', (x) => x > 0.9); // (under the living brow: dropped)
   const brow_r = splitOff(br, 'brow_r', (x) => x < -0.9);
   h.merge(br.m); // the bit over the glabella stays on the skull
 
@@ -324,7 +336,7 @@ function buildSkull(): SkullParts {
   });
   shadeRamps(h.m, [BN], true);
   shadeRamps(jw.m, [BN], false);
-  return { head: h, jaw: jw, brow_l, brow_r };
+  return { head: h, jaw: jw, brow_r };
 }
 
 // ---- modelled eyes: dark glossy orbs nested in the sockets with glowing pupils
@@ -374,6 +386,418 @@ const EYE_EXPR: Record<string, [EyeVar, EyeVar]> = {
   dead: ['dead', 'dead'],
   determined: ['intense', 'intense'],
 };
+
+// ================================================================== THE HALF-DEAD FACE
+const keyAt = (k: [number, number][], v: number) => {
+  if (v <= k[0][0]) return k[0][1];
+  for (let i = 1; i < k.length; i++) if (v <= k[i][0]) return lerp(k[i - 1][1], k[i][1], sstep((v - k[i - 1][0]) / (k[i][0] - k[i - 1][0])));
+  return k[k.length - 1][1];
+};
+/** x of the torn edge across the face at height y (front view): the right half has rotted away */
+const HEAD_EDGE: [number, number][] = [[42, -1.3], [45.5, -1.45], [47.4, -2.05], [49.4, -1.75], [50.6, -0.95], [52.4, -0.72], [54.2, -0.5], [56.2, -0.32], [57.6, 0.45], [59.0, 1.3], [61, 1.0], [64, 0.8]];
+/** signed distance (u, approx.) to the rot on the head: < 0 eaten to the bone, > 0 living skin.
+ *  The edge runs down beside the nose, bites into the right cheek, climbs over the forehead and
+ *  wraps back round the right temple (the back of the head keeps its skin and hair). */
+function headRotSdf(x: number, y: number, z: number) {
+  const jag = 0.32 * Math.sin(y * 2.7 + z * 0.8) + 0.2 * Math.sin(y * 6.3 + x * 0.9 + 1.3) + 0.12 * Math.sin(z * 4.1 + y);
+  return x - (keyAt(HEAD_EDGE, y) + jag - 0.95 * Math.max(0, 1.6 - z));
+}
+const cen = (i: number) => (i + 0.5) / S;
+const vi = (x: number) => Math.round(x * S - 0.5);
+
+/** the living eye's opening, voxel rows (y = 53.0 / 53.67 / 54.33) with their column spans */
+const ALMOND: [number, number, number][] = [[81, 3, 6], [80, 2, 7], [79, 3, 6]];
+/**
+ * His living left eye: a wet orb (white, steel-blue iris, pupil, catch-light) with real lids
+ * that close over it for the expressions. Cells the head already fills are skipped.
+ */
+function humanEye(v: EyeVar, head: VoxelModel | null) {
+  const m = new VoxelModel('eye_l');
+  const free = (i: number, j: number, l: number) => !head || !head.has(i, j, l);
+  for (let j = 77; j <= 83; j++)
+    for (let i = 0; i <= 9; i++)
+      for (let l = 3; l <= 9; l++) {
+        const x = cen(i), y = cen(j), z = cen(l);
+        if (((x - 3.4) / 2.25) ** 2 + ((y - 53.67) / 1.6) ** 2 + ((z - 4.65) / 2.0) ** 2 > 1 || !free(i, j, l)) continue;
+        m.set(i, j, l, y > 54 ? HEYE.whiteSh : HEYE.white, M);
+      }
+  const front = (i: number, j: number) => {
+    for (let l = 9; l >= 3; l--) if (m.has(i, j, l)) return l;
+    return -1;
+  };
+  const dead = v === 'dead';
+  const iris = dead ? HEYE.cloud : HEYE.iris, irisLo = dead ? HEYE.cloud : HEYE.irisLo, irisSh = dead ? 0x6e777a : HEYE.irisSh;
+  const face: Record<string, number> = {
+    '2,80': HEYE.corner, '3,80': HEYE.white, '4,80': dead || v === 'dim' ? iris : HEYE.glint, '5,80': dead ? 0x5c6467 : HEYE.pupil, '6,80': iris, '7,80': HEYE.whiteSh,
+    '3,81': HEYE.whiteSh, '4,81': v === 'wide' ? iris : irisSh, '5,81': v === 'wide' ? iris : irisSh, '6,81': v === 'wide' ? iris : irisSh,
+    '3,79': HEYE.white, '4,79': irisLo, '5,79': irisLo, '6,79': iris,
+  };
+  for (const [j, i0, i1] of ALMOND)
+    for (let i = i0; i <= i1; i++) {
+      const l = front(i, j);
+      const c = face[i + ',' + j];
+      if (l >= 0 && c !== undefined) m.set(i, j, l, c, c === HEYE.glint ? VF.EMISSIVE : M);
+    }
+  // lids (skin, one voxel proud of the ball) close over the opening per expression
+  const lid = (j: number, i0: number, i1: number, c: number) => {
+    for (let i = i0; i <= i1; i++) if (free(i, j, 10)) m.set(i, j, 10, c);
+  };
+  if (v === 'intense') {
+    lid(81, 3, 6, HEYE.lash); // the lid drops into a hard glare
+    lid(79, 3, 3, SKIN.shade);
+    lid(79, 6, 6, SKIN.shade);
+  } else if (v === 'dim') lid(81, 3, 6, SKIN.base);
+  else if (dead) {
+    lid(81, 3, 6, SKIN.shade);
+    lid(80, 2, 7, HEYE.lash);
+  } else if (v === 'shut') {
+    lid(81, 3, 6, SKIN.base);
+    lid(80, 3, 6, SKIN.base);
+    lid(80, 2, 2, HEYE.lash);
+    lid(80, 7, 7, HEYE.lash);
+    lid(79, 3, 6, HEYE.lash);
+  }
+  return m;
+}
+
+/** heavy living brow with a thick black eyebrow, split by an old scar (part brow_l) */
+function humanBrow() {
+  const b = sc('brow_l');
+  const pts: V3[] = [[5.9, 56.35, 4.4], [4.75, 57.0, 5.95], [3.2, 57.35, 6.7], [1.45, 57.15, 6.85]];
+  const browY = (x: number) => keyAt([[1.45, 57.15], [3.2, 57.35], [4.75, 57.0], [5.9, 56.35]], x);
+  b.path(pts, (t) => 0.98 - 0.12 * t, (x, y, z) => {
+    if (y < browY(x) - 0.1) return SKIN.base;
+    if (Math.abs(x - 4.05) < 0.3) return SCAR;
+    return BROWHAIR;
+  });
+  return b.m;
+}
+
+/** the living ear on the left of the head */
+function humanEar(f: Sc) {
+  const K = SKIN.base;
+  f.ell([6.4, 52.45, -2.4], [0.42, 1.75, 1.05], K); // the flat of the ear
+  const rim: V3[] = [];
+  for (let a = -0.35; a <= 3.45; a += 0.22) rim.push([6.62 + 0.22 * Math.sin(a), 52.55 + 1.85 * Math.cos(a - 0.15), -2.45 - 1.15 * Math.sin(a)]);
+  f.path(rim, () => 0.42, K); // helix
+  f.ell([6.55, 50.85, -2.15], [0.42, 0.58, 0.5], K); // lobe
+  f.ell([6.62, 52.05, -1.35], [0.3, 0.42, 0.3], K); // tragus
+  f.ell([6.85, 52.3, -2.3], [0.4, 0.8, 0.52], SKIN.dark, { mode: 'paint' }); // concha in shadow
+}
+
+/** skin colour of the living face (lips, scar, stubble, eye bags, crow's feet); `jaw` = the lower-face part */
+function faceSkinCol(x: number, y: number, z: number, i: number, j: number, l: number, jaw: boolean): number {
+  const ax = Math.abs(x);
+  // lips
+  if (!jaw && y < 48.0 && ax < 1.95 && z > 5.55) return LIP;
+  if (jaw && y > 46.25 && ax < 1.85 && z > 5.35) return LIP;
+  if (ax > 1.9 && ax < 2.45 && y > 46.9 && y < 47.75 && z > 4.2) return SKIN.dark; // mouth corners
+  // an old knife scar down the left cheek (no stubble grows on it)
+  if (x > 0 && z > 2.2 && distPoly([x, y, 0], [[5.3, 52.8, 0], [4.65, 51.05, 0], [3.85, 48.55, 0]]) < 0.3) return SCAR;
+  // eye bags, the lid crease and crow's feet round the living eye
+  if (x > 1.4 && x < 5.4 && y > 51.95 && y < 52.7 && z > 5.3) return SKIN.shade;
+  if (x > 1.8 && x < 5.2 && y > 54.7 && y < 55.35 && z > 5.6) return SKIN.shade;
+  if (x > 5.2 && x < 6.4 && z > 2 && (distPoly([x, y, 0], [[5.3, 53.95, 0], [6.25, 54.45, 0]]) < 0.17 || distPoly([x, y, 0], [[5.3, 53.4, 0], [6.3, 53.2, 0]]) < 0.17)) return SKIN.shade;
+  // two weathered lines across the forehead
+  if (x > 0.7 && x < 4.4 && z > 4 && (Math.abs(y - 58.05 - 0.08 * x) < 0.2 || Math.abs(y - 58.75 - 0.05 * x) < 0.18)) return SKIN.shade;
+  // stubble: the jaw, chin and upper lip (thinning out toward the cheekbones)
+  const top = 50.1 + 0.4 * Math.sin(x * 2.1) - (ax < 1.4 && z > 6.2 ? 9 : 0);
+  if ((jaw || y < top) && z > -2.8 && y > 42.5) {
+    const h = vhash(i, j, l);
+    if (y > top - 0.7 && !jaw) return h < 0.3 ? STUB_DOT : h < 0.6 ? STUB : SKIN.base;
+    return h < 0.24 ? STUB_DOT : STUB;
+  }
+  if (jaw && Math.abs(x - 0.1) < 0.35 && Math.abs(y - 44.6) < 0.35) return SKIN.shade; // the cleft of a hard chin
+  return SKIN.base;
+}
+
+/** merge bone and living skin: skin wins on the living side, the bone shows where it has rotted away */
+function composeFace(bone: VoxelModel, skin: VoxelModel, name: string, jaw: boolean) {
+  const out = new VoxelModel(name);
+  bone.forEach((i, j, l, c, f) => {
+    const d = headRotSdf(cen(i), cen(j), cen(l));
+    if (d < 0 || !skin.has(i, j, l)) out.set(i, j, l, d < 0 ? boneEdgeCol(c, d) : c, f);
+  });
+  skin.forEach((i, j, l) => {
+    const x = cen(i), y = cen(j), z = cen(l);
+    const d = headRotSdf(x, y, z);
+    if (d < 0) return;
+    const c = skin.get(i, j, l)! & 0xffffff;
+    const base = c === (SKIN.base & 0xffffff) ? faceSkinCol(x, y, z, i, j, l, jaw) : c;
+    out.set(i, j, l, rotEdgeCol(d, x, y, z, base));
+  });
+  // the torn lip stands a little proud of the bone and curls back
+  const lip: V3[] = [];
+  out.forEach((i, j, l) => {
+    const d = headRotSdf(cen(i), cen(j), cen(l));
+    if (d < 0.05 || d > 0.6) return;
+    for (const [a, b, c] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] as V3[]) {
+      const ni = i + a, nj = j + b, nl = l + c;
+      if (out.has(ni, nj, nl) || headRotSdf(cen(ni), cen(nj), cen(nl)) < 0) continue;
+      if (Math.hypot(cen(ni), cen(nl) + 0.8) < Math.hypot(cen(i), cen(l) + 0.8)) continue; // only outward
+      lip.push([ni, nj, nl]);
+    }
+  });
+  for (const [i, j, l] of lip) if (vhash(i, j, l) < 0.55) out.set(i, j, l, ROT.dark);
+  return out;
+}
+
+interface HeadBuild {
+  head: VoxelModel;
+  jaw: VoxelModel;
+  brow_l: VoxelModel;
+  brow_r: VoxelModel;
+}
+/** the half-dead head: skull, living skin over the left half, the rot, the scalp hair (unless hairless under a headdress) */
+function buildHead(hair: boolean): HeadBuild {
+  const sk = buildSkull();
+  const K = SKIN.base;
+  // ---- skin over the head: one voxel over the bone, the left orbit filled (the living eye sits in it)
+  const base = sk.head.m.clone();
+  const orbit = sc('orbit');
+  orbit.region([0.4, 50, 2], [6, 57.6, 6.0], (x, y, z) => inSocket(x, y, z) && z < 6.0, K);
+  base.merge(orbit.m);
+  const f = sc('skin');
+  skinOver(base, f.m, K);
+  // scalp, nape and the hard planes of the face
+  f.ell([0, 55.4, -0.8], [6.75, 8.1, 7.45], K, { p: 2.15, mode: 'under' });
+  f.ell([0, 50.0, -4.4], [4.4, 2.9, 3.05], K, { p: 2.2, mode: 'under' });
+  for (const s of [1, -1]) {
+    f.ell([s * 4.4, 51.6, 4.35], [1.9, 1.5, 1.85], K, { p: 2.2, mode: 'under' }); // cheekbone
+    f.ell([s * 5.45, 51.4, 1.2], [1.25, 1.2, 2.9], K, { mode: 'under' }); // over the zygomatic arch
+    f.ell([s * 4.9, 48.9, 2.5], [1.45, 1.95, 2.5], K, { mode: 'under' }); // masseter: a square, hard jaw
+    f.ell([s * 4.65, 49.3, -2.4], [1.65, 1.85, 1.75], K, { mode: 'under' }); // under the ear
+  }
+  f.ell([0, 48.7, 4.35], [3.3, 1.5, 2.25], K, { p: 2.3, mode: 'under' }); // muzzle over the upper teeth
+  // the nose: long and strong, broken once (a bump on the bridge, a kink to his left)
+  f.cap([0, 55.7, 6.45], [0.12, 51.2, 7.9], 0.88, 1.02, K, { mode: 'under' });
+  f.ell([0.15, 50.6, 7.8], [0.98, 0.9, 0.88], K, { mode: 'under' });
+  for (const s of [1, -1]) f.ell([s * 0.95 + 0.1, 50.2, 7.05], [0.64, 0.6, 0.72], K, { mode: 'under' });
+  f.ell([0.22, 53.5, 7.2], [0.5, 0.5, 0.42], K, { mode: 'under' });
+  for (const s of [1, -1]) f.ell([s * 0.55 + 0.15, 49.85, 7.45], [0.34, 0.26, 0.5], SKIN.dark, { mode: 'paint' }); // nostrils
+  humanEar(f);
+  // the eye opening, and the parting of the lips (the jaw part carries everything below it)
+  for (const [j, i0, i1] of ALMOND) for (let i = i0; i <= i1; i++) for (let l = 6; l <= 13; l++) f.m.del(i, j, l);
+  f.region([-8, 40, 1.0], [8, 47.34, 10], (x, y) => y < 47.34, 0, { mode: 'carve' });
+  const head = composeFace(sk.head.m, f.m, 'head', false);
+  // ---- jaw: skin over the mandible, a square chin, the lower lip
+  const g = sc('jaw_skin');
+  skinOver(sk.jaw.m, g.m, K);
+  g.ell([0, 44.75, 5.5], [2.35, 1.45, 1.35], K, { p: 2.6, mode: 'under' });
+  for (const s of [1, -1]) {
+    g.sweep([[s * 5.0, 46.0, -1.7], [s * 4.7, 45.3, 1.6], [s * 3.6, 44.9, 4.2], [s * 1.7, 44.7, 5.55], [0, 44.65, 5.95]], () => [1.1, 1.2, 1.05], K, 0.3, { mode: 'under' });
+    g.ell([s * 5.1, 45.95, -1.5], [1.2, 1.25, 1.35], K, { mode: 'under' }); // the angle of the jaw
+  }
+  g.ell([0, 46.75, 5.7], [1.85, 0.48, 0.72], K, { mode: 'under' }); // lower lip
+  g.region([-8, 47.34, -6], [8, 51, 10], () => true, 0, { mode: 'carve' });
+  const jaw = composeFace(sk.jaw.m, g.m, 'jaw', true);
+  const hs = sc('head');
+  hs.m = head;
+  // ---- the rotted side: the ear torn off (a ragged stub round the canal), a flap of cheek hanging
+  // off the torn edge, sinew strung across the open cheek, the edge sewn to the skull with black thread
+  hs.region([-7.2, 50.8, -3.4], [-5.2, 52.6, -1.2], (x, y, z) => ((x + 6.15) / 0.75) ** 2 + ((y - 51.7) / 0.62) ** 2 + ((z + 2.3) / 0.6) ** 2 <= 1, SOCK.void, { mode: 'paint' });
+  strand(hs, [[-6.25, 53.1, -2.55], [-6.55, 52.5, -3.05], [-6.6, 51.7, -3.35]], 0.4, 0.26, ROT.dark, MEAT.shade, 0.35);
+  strand(hs, [[-1.9, 51.5, 6.3], [-2.15, 50.75, 6.65], [-2.2, 49.95, 6.55]], 0.46, 0.26, ROT.base, ROT.dark, 0.4);
+  for (const [a, b] of [[[-3.0, 50.9, 5.65], [-3.2, 47.65, 5.55]], [[-4.0, 51.0, 4.95], [-4.25, 47.6, 4.75]], [[-4.9, 50.8, 3.85], [-5.05, 47.7, 3.35]]] as [V3, V3][]) {
+    const mid: V3 = [(a[0] + b[0]) / 2 - 0.1, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2 + 0.35];
+    strand(hs, [a, mid, b], 0.3, 0.26, SINEW.base, SINEW.shade, 0.3);
+  }
+  // stitches across the edge where it climbs the forehead (thread from the skin into holes in the bone)
+  for (const y of [55.35, 56.3, 57.25, 58.15]) {
+    let ex = -3;
+    for (let x = -3; x < 3; x += 0.05)
+      if (headRotSdf(x, y, 6) >= 0) {
+        ex = x;
+        break;
+      }
+    const zs = (x: number) => {
+      const i = vi(x), j = vi(y);
+      for (let l = 20; l > -5; l--) if (head.has(i, j, l)) return cen(l);
+      return 5;
+    };
+    const a: V3 = [ex + 0.85, y + 0.3, zs(ex + 0.85) + 0.3], b: V3 = [ex - 0.75, y - 0.2, zs(ex - 0.75) + 0.3];
+    stitch(hs, a, b);
+    hs.ell(b, [0.3, 0.3, 0.3], SOCK.deep, { mode: 'paint' });
+  }
+  if (hair) hairCap(hs);
+  shadeRamps(head, [BN, SKIN, ROT, HAIR], true);
+  shadeRamps(jaw, [BN, SKIN, ROT], false);
+  return { head, jaw, brow_l: humanBrow(), brow_r: sk.brow_r };
+}
+
+// ---- hair
+/** hairline height by angle round the head (0 = front, pi = back) */
+const HAIRLINE: [number, number][] = [[0, 58.35], [0.8, 58.0], [1.05, 56.4], [1.3, 55.2], [1.52, 54.7], [1.85, 54.5], [2.1, 52.7], [2.45, 50.7], [Math.PI, 49.9]];
+/** a scraggly cap of black hair over the scalp: thin and flat under the hat crown, full below the brim,
+ *  combed into vertical clumps, ragged at the hairline, thinning to dead grey strands at the rot */
+function hairCap(h: Sc) {
+  const H = h.m;
+  const thOf = (x: number, z: number) => Math.atan2(Math.abs(x), z + 0.8);
+  const clumpOf = (x: number, y: number, z: number) => Math.sin(thOf(x, z) * 21 * (x >= 0 ? 1 : -1) + y * 0.35);
+  const hlOf = (x: number, z: number) => {
+    const th = thOf(x, z);
+    return keyAt(HAIRLINE, th) + 0.42 * Math.sin(th * 15 + (x >= 0 ? 1 : -1)) + 0.25 * Math.sin(th * 29 + 0.7);
+  };
+  h.region([-8.8, 49, -10.4], [8.8, 64.8, 7.6], (x, y, z) => {
+    if (H.has(vi(x), vi(y), vi(z)) || y < hlOf(x, z)) return false;
+    const d = headRotSdf(x, y, z);
+    if (d < 0.35) return false;
+    const cl = clumpOf(x, y, z);
+    let t = (y > 58.6 ? 0.5 : 0.5 + 0.8 * sstep((58.6 - y) / 1.4)) * (1 + 0.22 * cl);
+    if (d < 1.4) t = cl > 0.2 ? t * 0.75 : 0;
+    const n = Math.pow(Math.abs(x) / (6.75 + t), 2.15) + Math.pow(Math.abs(y - 55.4) / (8.1 + t), 2.15) + Math.pow(Math.abs(z + 0.8) / (7.45 + t), 2.15);
+    return n <= 1;
+  }, (x, y, z) => {
+    const cl = clumpOf(x, y, z);
+    if (headRotSdf(x, y, z) < 2 && cl > 0.55) return HAIR_GREY;
+    if (y < hlOf(x, z) + 0.6) return HAIR_ALT;
+    return cl > 0.55 ? HAIR.hi : cl < -0.45 ? HAIR.shade : HAIR.base;
+  });
+  // the sideburn running down in front of the living ear
+  h.region([4.5, 50.6, -1.4], [7.4, 55.8, 2.2], (x, y, z) => {
+    if (H.has(vi(x), vi(y), vi(z))) return false;
+    const th = thOf(x, z);
+    if (th < 1.24 || th > 1.43 || y < 50.9 + 0.3 * Math.sin(z * 4)) return false;
+    return Math.pow(x / 7.05, 2) + Math.pow((z + 0.8) / 7.7, 2) <= 1 && Math.pow(x / 6.2, 2) + Math.pow((z + 0.8) / 6.9, 2) > 0.92;
+  }, (x, y) => (y < 51.6 ? HAIR_ALT : HAIR.base));
+}
+
+/** a point off the scalp at angle th (0 front, +left, +-pi back), height y, `gap` u out from the skin;
+ *  below the widest row (y 55.4) the hair falls straight */
+function scalpPt(th: number, y: number, gap: number): V3 {
+  const yy = Math.max(y, 55.4);
+  const f = Math.pow(Math.max(0, 1 - Math.pow(Math.abs(yy - 55.4) / 8.1, 2.15)), 1 / 2.15);
+  return [(6.75 * f + gap) * Math.sin(th), y, -0.8 + (7.45 * f + gap) * Math.cos(th)];
+}
+interface HairLock {
+  name: string;
+  parent: string;
+  model: VoxelModel;
+  pivot: V3;
+}
+/**
+ * The swaying locks, each a two-segment chain hung from the head: hair_l (left, tucked behind the
+ * living ear, down to the shoulder), hair_r (a few thin, half-grey strands behind the rotted temple)
+ * and hair_b (the curtain down the back of the neck). Pivots in design units.
+ */
+function hairLocks(): { locks: HairLock[]; chains: HairChain[] } {
+  const R = rng(7412);
+  const locks: HairLock[] = [];
+  type St = { pts: V3[]; r0: number; r1: number; col: number; tip: number | null };
+  const build = (name: string, cut: number, st: St[]) => {
+    const m = sc(name);
+    for (const s of st) strand(m, s.pts, s.r0, s.r1, s.col, s.tip, 0.28);
+    shadeRamps(m.m, [HAIR], true);
+    const [up, lo] = splitY(m.m, S, cut, name, name + '2');
+    const avg = (pick: (s: St) => V3): V3 => {
+      const a: V3 = [0, 0, 0];
+      for (const s of st) {
+        const p = pick(s);
+        a[0] += p[0] / st.length;
+        a[1] += p[1] / st.length;
+        a[2] += p[2] / st.length;
+      }
+      return a;
+    };
+    const root = avg((s) => s.pts[0]);
+    const mid = avg((s) => {
+      let best = s.pts[0];
+      for (const p of s.pts) if (Math.abs(p[1] - cut) < Math.abs(best[1] - cut)) best = p;
+      return best;
+    });
+    mid[1] = cut;
+    locks.push({ name, parent: 'head', model: up, pivot: root });
+    locks.push({ name: name + '2', parent: name, model: lo, pivot: mid });
+  };
+  const cols = [HAIR.base, HAIR_ALT, HAIR.shade, HAIR.base, HAIR_ALT];
+  const tip = () => (R() < 0.45 ? HAIR_TIP : null);
+  const flick = (pts: V3[], out: number, th: number) => {
+    // scraggly tips: the last point curls out and a little forward or back
+    const p = pts[pts.length - 1];
+    pts.push([p[0] + Math.sin(th) * out, p[1] - 0.7, p[2] + Math.cos(th) * out + (R() - 0.5) * 0.4]);
+  };
+  // ---- left: from the temple, swept back over the top of the ear, down behind it to the shoulder
+  const L: St[] = [];
+  for (let k = 0; k < 10; k++) {
+    const stray = k === 3 || k === 8;
+    const th0 = 1.12 + k * 0.14 + (R() - 0.5) * 0.05;
+    const y0 = 57.5 - 0.22 * k + (R() - 0.5) * 0.3;
+    const yEnd = 46.3 + R() * 1.7 + (stray ? 1.5 : 0);
+    const thEnd = Math.max(th0, 2.06) + 0.04 * k + (R() - 0.5) * 0.08;
+    const pts: V3[] = [];
+    for (let y = y0; y >= yEnd; y -= 0.9) {
+      const th = lerp(th0, thEnd, sstep((y0 - y) / 2.6)) + 0.035 * Math.sin(y * 1.3 + k);
+      const gap = lerp(0.1, 1.05, sstep((y0 - y) / 1.2)) + 0.11 * (55.4 - Math.min(y, 55.4)) + 0.2 * Math.sin(y * 0.9 + k * 2.1);
+      pts.push(scalpPt(th, y, gap));
+    }
+    flick(pts, stray ? 0.9 : 0.45, thEnd);
+    L.push({ pts, r0: stray ? 0.32 : 0.55, r1: stray ? 0.2 : 0.3, col: cols[k % cols.length], tip: tip() });
+  }
+  build('hair_l', 51.4, L);
+  // ---- right: thin and patchy behind the bare temple, two dead grey strands
+  const Rr: St[] = [];
+  for (let k = 0; k < 6; k++) {
+    const th0 = -(2.18 + k * 0.12) + (R() - 0.5) * 0.04;
+    const y0 = 56.6 - 0.2 * k;
+    const yEnd = 47.3 + R() * 2.2;
+    const pts: V3[] = [];
+    for (let y = y0; y >= yEnd; y -= 0.9) {
+      const gap = lerp(0.1, 0.9, sstep((y0 - y) / 1.2)) + 0.1 * (55.4 - Math.min(y, 55.4)) + 0.25 * Math.sin(y * 1.1 + k * 1.7);
+      pts.push(scalpPt(th0 + 0.04 * Math.sin(y * 1.5 + k), y, gap));
+    }
+    flick(pts, 0.7, th0);
+    const grey = k === 1 || k === 4;
+    Rr.push({ pts, r0: 0.38, r1: 0.2, col: grey ? HAIR_GREY : k & 1 ? HAIR.shade : HAIR_ALT, tip: grey ? null : tip() });
+  }
+  build('hair_r', 52.0, Rr);
+  // ---- back: a curtain from under the brim down the back of the neck, resting toward the collar;
+  // the right side (where the board rides) stays shorter
+  const B: St[] = [];
+  for (let k = 0; k < 13; k++) {
+    const stray = k === 4 || k === 10;
+    let th = 2.45 + (k / 12) * 1.27 + (R() - 0.5) * 0.04;
+    if (th > Math.PI) th -= Math.PI * 2;
+    const right = Math.sin(th) < -0.2;
+    const y0 = 56.9 + (R() - 0.5) * 0.5;
+    const yEnd = (right ? 46.8 : 44.7) + R() * 1.3 + (stray ? 1.2 : 0);
+    const pts: V3[] = [];
+    for (let y = y0; y >= yEnd; y -= 0.9) {
+      let gap = lerp(0.1, 1.15, sstep((y0 - y) / 1.1)) + 0.18 * Math.sin(y * 0.8 + k * 1.9);
+      if (y < 50) gap -= 0.21 * (50 - y);
+      pts.push(scalpPt(th + 0.03 * Math.sin(y * 1.2 + k), y, Math.max(gap, -0.1)));
+    }
+    flick(pts, stray ? 0.8 : 0.35, th);
+    B.push({ pts, r0: stray ? 0.3 : 0.56, r1: stray ? 0.18 : 0.3, col: cols[(k + 2) % cols.length], tip: tip() });
+  }
+  build('hair_b', 50.6, B);
+  return {
+    locks,
+    chains: [
+      { parts: ['hair_l', 'hair_l2'], lim: [-0.22, 0.95, -0.1, 0.7], phase: 0 },
+      { parts: ['hair_r', 'hair_r2'], lim: [-0.22, 0.95, -0.7, 0.1], phase: 1.7, stiff: 130 },
+      { parts: ['hair_b', 'hair_b2'], lim: [-0.06, 1.05, -0.45, 0.45], phase: 3.1, stiff: 95 },
+    ],
+  };
+}
+
+/** hats with a crown: below this height the head may show, above it only what the crown encloses */
+const CROWN_BASE: Partial<Record<HatId, number>> = { stetson: 59.15, bandit: 59.15, tophat: 59.15, sombrero: 59.15 };
+/** shave whatever of the head / hair pokes out through a hat crown (and drop cells shared with the hat) */
+function fitUnderHat(m: VoxelModel, hat: VoxelModel, id: HatId) {
+  dedupe(m, hat);
+  const yb = CROWN_BASE[id];
+  if (yb === undefined) return;
+  const del: V3[] = [];
+  m.forEach((i, j, l) => {
+    const y = cen(j);
+    if (y < yb) return;
+    const x = cen(i), z = cen(l), r = Math.hypot(x, z + 0.9) || 1;
+    const dx = x / r, dz = (z + 0.9) / r;
+    for (let s = 0.5; s <= 11; s += 0.5) if (hat.has(Math.round(i + dx * s), j, Math.round(l + dz * s))) return;
+    del.push([i, j, l]);
+  });
+  for (const [i, j, l] of del) m.del(i, j, l);
+}
 
 // ================================================================== BONES
 const zSpine = (y: number) => {

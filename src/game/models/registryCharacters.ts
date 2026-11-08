@@ -39,3 +39,12 @@ CHARACTER_MODELS['serket_girl'] = scorpionGirlRig;
 // the realm of spirits: the Anubis trial's tomb gate, hall, scales, soul avatar and the dead
 import { REALM_MODELS } from './anubis/realm';
 Object.assign(CHARACTER_MODELS, REALM_MODELS);
+// Thoth, keeper of the Hall: the tiny ibis-headed scribe god (characters/thoth.ts; animate with ThothAnim)
+import { thothRig } from './characters/thoth';
+CHARACTER_MODELS['thoth'] = thothRig;
+// the bookworms, librarians of Thoth's Hall (creatures/bookworm.ts; animate with BookwormAnim)
+import { bookwormRig } from './creatures/bookworm';
+CHARACTER_MODELS['bookworm'] = () => bookwormRig(0);
+CHARACTER_MODELS['bookworm_elder'] = () => bookwormRig(1);
+CHARACTER_MODELS['bookworm_apprentice'] = () => bookwormRig(2);
+CHARACTER_MODELS['bookworm_archivist'] = () => bookwormRig(3);

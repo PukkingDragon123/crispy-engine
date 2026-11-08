@@ -21,6 +21,7 @@
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Input } from '../../engine/Input';
+import { touchText } from '../ui/TouchControls';
 import type { ChoiceOption } from '../ui/Choice';
 import { HumanNpc, type NpcMode } from '../run/TravelerEscort';
 import { modelEntry } from '../models/lookup';
@@ -558,7 +559,7 @@ export class ChoiceStage {
     this.pt = 0;
     if (p === 'choose') {
       const n = this.options.length;
-      this.hint.innerHTML = `${escapeHtml(this.heading)}<div style="font-size:15px;opacity:.8;margin-top:6px">press 1-${n}, click or tap${this.canCancel ? '  ·  ESC to walk away' : ''}</div>`;
+      this.hint.innerHTML = touchText(`${escapeHtml(this.heading)}<div style="font-size:15px;opacity:.8;margin-top:6px">press 1-${n}, click or tap${this.canCancel ? '  ·  ESC to walk away' : ''}</div>`);
       this.hint.style.display = 'block';
       this.opts.forEach((o, i) => (o.appear = -(0.12 + i * 0.14)));
       this.ctx.engine.audio.play('paper_flutter', { volume: 0.45 });

@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Input } from '../../engine/Input';
+import { touchText } from './TouchControls';
 import { Ease } from '../../engine/Tween';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { buildRigGeo, RigInstance } from '../../engine/voxel/Rig';
@@ -251,7 +252,7 @@ export class BlueprintReveal {
       `<div style="font-size:34px;color:${col}">${def.name.toUpperCase()}</div>` +
       `<div style="font-size:17px;margin-top:8px;line-height:1.35;color:#f6e8c8">${def.desc}</div>` +
       `<div style="font-size:15px;margin-top:10px;color:#e0b373">PERMANENTLY UNLOCKED · ${cnt.found} / ${cnt.total} BLUEPRINTS</div></div>` +
-      `<div style="position:absolute;left:0;right:0;bottom:3vh;font-size:16px;opacity:0" data-b>E · CLICK · SPACE to roll it up</div>`;
+      `<div style="position:absolute;left:0;right:0;bottom:3vh;font-size:16px;opacity:0" data-b>${touchText('E · CLICK · SPACE to roll it up')}</div>`;
     this.ui.style.display = 'block';
     const fade = (sel: string, d: number) => eng.tweens.after(d, () => this.ui.querySelectorAll<HTMLElement>(sel).forEach((e) => {
       e.style.transition = 'opacity .35s';

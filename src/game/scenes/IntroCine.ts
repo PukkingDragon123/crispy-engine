@@ -1,11 +1,10 @@
 // Opening cinematic (NEW RUN, about a minute; SPACE / ESC / the SKIP label skips):
-//   0. COLD OPEN (cine/ColdOpen.ts, ~4.5 s) - Sundown staggers away from the
-//      lens out in the dunes, stops, turns round and shoots it: a bullet hole
-//      punches through the glass (cine/LensShot.ts), time freezes, and the view
-//      flies into the hole until it burns white.
-//      0b. Out of the white: the blinding hot desert sun, the air boiling, the
-//      signpost and its flapping sheet against the glare, and a drunk skeleton
-//      silhouette staggering out of the sun toward it.
+//   0. COLD OPEN (cine/ColdOpen.ts, ~2.8 s) - Sundown staggers away from the
+//      lens out in the dunes, stops, turns round and shoots it: the muzzle flash
+//      blooms out of the barrel and swallows the frame (cine/LensShot.ts).
+//      0b. Out of that white, in one move, the flash collapses into the blinding
+//      hot desert sun: the air boiling, the signpost and its flapping sheet
+//      against the glare, and a drunk silhouette staggering out of the sun.
 //   1. SHOW YOUR BOUNTY - his own WANTED bill nailed to the signpost snaps in the
 //      golden-hour wind: DEAD OR ALIVE, SUNDOWN, NAME UNKNOWN, $1,000,000. The
 //      portrait is his real rig photographed (CardStudio) in deep shadow under
@@ -749,7 +748,8 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     const hot = golden ? { ...golden, sunColor: 0xfff0d0, sunIntensity: golden.sunIntensity * 1.2, horizon: 0xffd29a, clouds: 0.3 } : null;
     if (!skipped) {
       if (hot) env.apply?.(hot);
-      Object.assign(lens, { on: 0, push: 0, crack: 0, burn: 0, light: 0, white: 1, blaze: 1, glare: 0.9, shimmer: 1 });
+      // the muzzle flash that swallowed the frame is the sun now: it collapses into the disc
+      Object.assign(lens, { white: 1, blaze: 1, burst: 1, glare: 0, shimmer: 1 });
       if (poster) poster.backlight = 1.1;
       const far = S0.clone().addScaledVector(nP, 10.5);
       far.y = gy(far);
@@ -763,17 +763,20 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
       eng.audio.play('whoosh_big', { volume: 0.5, pitch: 0.4 });
       eng.audio.play('sand_spray', { volume: 0.4, pitch: 0.7 });
       let cut = true;
-      await runFor(2.3, (k, t) => {
+      await runFor(2.0, (k, t) => {
         actor.root.position.lerpVectors(far, actorPos, k);
-        lens.white = 1 - (1 - Math.pow(1 - Math.min(1, t / 1.0), 3));
-        lens.glare = 0.9 - 0.25 * k;
-        lens.blaze = Math.max(1 - t * 1.5, 0.14 - 0.06 * k);
+        const w = Math.min(1, t / 0.5), b = Math.min(1, t / 0.75);
+        lens.white = Math.pow(1 - w, 2.2);
+        lens.burstAt.copy(lens.sun);
+        lens.burst = Math.pow(1 - b, 1.6);
+        lens.glare = (0.9 - 0.25 * k) * ease(b);
+        lens.blaze = Math.max(1 - t * 1.6, 0.14 - 0.06 * k);
         const cp = sunCam.clone().addScaledVector(nP, k * 0.45).add(new THREE.Vector3(0, k * 0.08, 0));
         shot(cp, sunLook.clone().add(new THREE.Vector3(0, -0.35 * ease(k), 0)), 40 - k * 3, !cut);
         cut = false;
       });
       // cut to the sheet through a hot flash (the eye adjusts)
-      eng.flash(0xfff2d8, 0.65, 0.55);
+      eng.flash(0xfff2d8, 0.45, 0.45);
       if (poster) {
         poster.backlight = 0.3;
         poster.reset();

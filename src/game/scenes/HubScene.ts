@@ -51,6 +51,7 @@ import { CodexBook } from '../ui/CodexBook';
 import { WantedPoster, PosterData } from './ResultsScene';
 import { HouseExtras } from './hub/HouseExtras';
 import { HubUI, STATION_CAN, UIHit, pixelBubbleStyle } from './hub/HubUI';
+import { touchText } from '../ui/TouchControls';
 import type { HubHost } from './hub/HubKit';
 
 /** how he gets home: normally he walks in from the street; after a death he wakes up on the couch */
@@ -1091,7 +1092,7 @@ export class HubScene implements GameScene {
     this.prompt.onmousedown = (e) => e.stopPropagation();
     this.prompt.onclick = () => this.act();
     this.hint.style.cssText = "position:absolute;left:50%;bottom:24px;transform:translateX(-50%);z-index:7;pointer-events:none;font-family:'Alagard';font-size:15px;color:#fff3d6;opacity:0;transition:opacity 1.5s;text-shadow:0 2px 0 #2a1408,0 0 8px #000;white-space:nowrap";
-    this.hint.textContent = this.touch ? 'Tap the arrows to look around · tap the prompt to use it' : 'A / D or the arrows: look around   ·   E: use   ·   Esc: menu';
+    this.hint.textContent = this.touch ? 'Tap the arrows or swipe to look around · tap the prompt to use it · two fingers: menu' : 'A / D or the arrows: look around   ·   E: use   ·   Esc: menu';
     this.bubble.style.cssText = pixelBubbleStyle('max-width:260px');
     eng.overlay.append(this.bubble);
     this.hui = new HubUI(eng.overlay);
@@ -2007,7 +2008,7 @@ export class HubScene implements GameScene {
     const n = this.stations.length;
     const nb = (d: number) => this.stations[(((this.idx + d) % n) + n) % n];
     const verb = ex?.verbFor(st) ?? (st.id === 'gramophone' ? (this.music ? 'Hush the record' : 'Play a record') : st.verb);
-    const hint = busy ? (ex?.uiHint ?? '') : this.touch ? 'Tap an arrow: look around   ·   tap the plate: use it' : 'A / D: look around   ·   E: use   ·   Esc: menu';
+    const hint = busy ? touchText(ex?.uiHint ?? '') : this.touch ? 'Tap an arrow or swipe: look around   ·   tap the plate: use it   ·   two fingers: menu' : 'A / D: look around   ·   E: use   ·   Esc: menu';
     const tip = busy ? (ex?.uiTip ?? null) : tipText ? { text: tipText, x: inp.mouseX, y: inp.mouseY } : null;
     ui.frame(rdt, {
       hidden: !!this.book || !!this.panel,
