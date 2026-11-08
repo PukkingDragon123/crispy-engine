@@ -13,6 +13,7 @@ import { Voice } from '../../audio/Voice';
 import { armIK } from '../../anim/playerAnim';
 import * as WSK from '../../models/props/workshop';
 import { buy, owns } from '../../meta/Save';
+import { pixelBubbleStyle } from './HubUI';
 
 export type SM = { model: VoxelModel; voxelSize: number; meta?: any } | undefined | null;
 export type HubPose = 'door' | 'bench' | 'board' | 'mirror' | 'book' | 'hearth' | 'music' | 'range' | 'cards' | 'trophies';
@@ -237,7 +238,7 @@ export class HeroBubble {
   private t = 0;
   private life = 0;
   constructor(private host: HubHost) {
-    this.el.style.cssText = "position:absolute;z-index:7;pointer-events:none;display:none;transform:translate(-50%,-100%);max-width:280px;padding:8px 12px;background:#efe2c8;border:3px solid #3a2414;border-radius:14px;box-shadow:0 4px 0 #1a0c04;font-family:'Alagard';font-size:16px;color:#1e140c;text-align:center";
+    this.el.style.cssText = pixelBubbleStyle();
     host.engine.overlay.appendChild(this.el);
   }
   say(text: string, voice = true) {

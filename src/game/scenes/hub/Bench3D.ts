@@ -34,6 +34,8 @@ import type { Mode, Pick, View } from './HouseExtras';
 const IN = HX.CABIN_IN;
 const FV = 1 / 48;
 const proxyMat = new THREE.MeshBasicMaterial({ visible: false });
+/** the work tags' size (the card is 0.12 m wide at 1) */
+const TAG_SCALE = 1.36;
 const GOLD_SLOTS = Object.keys(GUN_PARTS) as (keyof GunLoadout)[];
 /** what each slot is called on its tag, and what sits there when nothing is fitted */
 const SLOT_NAME: Record<string, string> = { barrel: 'BARREL', muzzle: 'MUZZLE', optic: 'OPTIC', under: 'UNDER THE BARREL', mag: 'MAGAZINE', stock: 'STOCK', cylinder: 'CYLINDER', grip: 'GRIP', sight: 'SIGHT' };
@@ -181,10 +183,11 @@ export class Bench3D implements Mode {
     this.felt = (ts?.meta?.felt as number) ?? 0.16;
     this.feltTop = this.felt - (this.tt?.nodes['top']?.position.y ?? 0.1);
     if (ts?.meta?.crank) this.crank.set(...(ts.meta.crank as [number, number, number]));
-    const trs = safe(() => WS.partsTray(44, 3.5));
-    this.trayX = this.ttAt.x - 0.62;
-    this.trayZ = this.zFront - 4.5 * FV;
-    this.trayLen = 44 * FV;
+    // two rows: the parts you own along the front, the ones for sale (chained, priced) behind them
+    const trs = safe(() => WS.partsTray(40, 7));
+    this.trayX = this.ttAt.x - 0.57;
+    this.trayZ = this.zFront - 0.17;
+    this.trayLen = 40 * FV;
     k.put(trs, this.trayX, this.trayZ, 0, this.top, 1, false);
     this.trayY = this.top + (trs?.meta.top ?? 0.04) + 0.003;
     const cb = safe(() => WS.workClipboard());
@@ -273,7 +276,7 @@ export class Bench3D implements Mode {
     if (bb.isEmpty()) return;
     const c = bb.getCenter(new THREE.Vector3());
     const part: Part = { ...p, c, len: Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z, 0.03), lock: null, proxy: null, home: null };
-    if (p.key && !owns(p.key)) part.lock = new PriceLock(this.h, p.key, PRICES[p.key] ?? 0, 16, 0.75);
+    if (p.key && !owns(p.key)) part.lock = new PriceLock(this.h, p.key, PRICES[p.key] ?? 0, 14, 0.5);
     if (part.lock) this.h.scene.add(part.lock.grp);
     p.grp.visible = false;
     this.h.scene.add(p.grp);
@@ -380,11 +383,11 @@ export class Bench3D implements Mode {
       tm.position.copy(hole).negate();
       tag.add(tm);
       const [w, hh] = this.tagSm.meta.size;
-      const card = new TextCard(w, hh, 256);
+      const card = new TextCard(w, hh, 448);
       card.mesh.position.set(...this.tagSm.meta.face).sub(hole);
       card.mesh.position.z += 0.0025;
       tag.add(card.mesh);
-      tag.scale.setScalar(1.2);
+      tag.scale.setScalar(TAG_SCALE);
       hold.add(tag);
       this.h.scene.add(hold);
       const cord = this.cordGeo ? new THREE.Mesh(this.cordGeo, sharedVoxelMaterial) : new THREE.Mesh();
@@ -400,11 +403,11 @@ export class Bench3D implements Mode {
       tm.position.copy(hole).negate();
       tag.add(tm);
       const [w, hh] = this.tagSm.meta.size;
-      const card = new TextCard(w, hh, 256);
+      const card = new TextCard(w, hh, 448);
       card.mesh.position.set(...this.tagSm.meta.face).sub(hole);
       card.mesh.position.z += 0.0025;
       tag.add(card.mesh);
-      tag.scale.setScalar(1.2);
+      tag.scale.setScalar(TAG_SCALE);
       hold.add(tag);
       this.h.scene.add(hold);
       const cord = this.cordGeo ? new THREE.Mesh(this.cordGeo, sharedVoxelMaterial) : new THREE.Mesh();
@@ -451,18 +454,18 @@ export class Bench3D implements Mode {
       const lk = this.lockedCount(g, s.slot);
       const foot = opts.length > 1 ? `${i + 1} of ${opts.length}` : lk ? (g === 'revolver' ? `${lk} for sale in the tray` : `${lk} more out there`) : 'nothing else fits';
       s.card.set([
-        { t: (g === 'revolver' && s.slot === 'mag' ? 'SPEEDLOADER' : SLOT_NAME[s.slot] ?? s.slot.toUpperCase()), size: 0.24, color: '#8a2a14' },
-        { t: opts[i]?.name ?? '', size: 0.27 },
-        { t: foot, size: 0.19, color: '#5a4228' },
-      ], 0.07);
+        { t: (g === 'revolver' && s.slot === 'mag' ? 'SPEEDLOADER' : SLOT_NAME[s.slot] ?? s.slot.toUpperCase()), size: 0.27, color: '#8a2a14' },
+        { t: opts[i]?.name ?? '', size: 0.34 },
+        { t: foot, size: 0.23, color: '#4a3420' },
+      ], 0.05);
     }
     if (this.carry && this.work) {
       const carried = Blueprints.guns().find((q) => q.id === this.work!.g)?.carried;
       this.carry.card.set([
-        { t: 'SLING', size: 0.24, color: '#8a2a14' },
-        { t: carried ? 'Rides with me' : 'Stays home', size: 0.27 },
-        { t: carried ? 'click: leave it home' : 'click: take it along', size: 0.18, color: '#5a4228' },
-      ], 0.07);
+        { t: 'SLING', size: 0.27, color: '#8a2a14' },
+        { t: carried ? 'Rides with me' : 'Stays home', size: 0.34 },
+        { t: carried ? 'click: leave it home' : 'click: take it along', size: 0.22, color: '#4a3420' },
+      ], 0.05);
     }
   }
   /** lay the tags out over and under the gun, their twine to the pins; they turn to face you and sway */
@@ -480,7 +483,7 @@ export class Bench3D implements Mode {
       if (row === 0 && heads[i].x > shade.x0 && heads[i].x < shade.x1) row = 1;
       rows[row].push(s);
     });
-    const gap = 0.152;
+    const gap = 0.19;
     const yRow = [this.ttAt.y + this.felt + 0.235, this.ttAt.y + this.felt + 0.035];
     const zRow = [this.ttAt.z - 0.2, this.ttAt.z + 0.26];
     rows.forEach((list, r) => {
@@ -502,7 +505,7 @@ export class Bench3D implements Mode {
         s.tag.position.set(s.x, yRow[r] + Math.sin(this.t * 1.4 + k) * 0.003, zRow[r]);
         s.tag.lookAt(cam);
         s.tag.rotateZ(Math.sin(this.t * 1.1 + k * 1.7) * 0.04);
-        s.tag.scale.setScalar(1.2 * (1 + hov * 0.08));
+        s.tag.scale.setScalar(TAG_SCALE * (1 + hov * 0.1));
       });
     });
     this.spots.forEach((s, i) => this.tieCord(s.cord, heads[i], s.tag));
@@ -512,7 +515,7 @@ export class Bench3D implements Mode {
       c.tag.position.set(this.ttAt.x + 0.44, yRow[1] - 0.01, zRow[1] + 0.02);
       c.tag.lookAt(cam);
       c.tag.rotateZ(Math.sin(this.t * 1.3) * 0.05);
-      c.tag.scale.setScalar(1.2 * (this.hovered === 'carry' ? 1.08 : 1));
+      c.tag.scale.setScalar(TAG_SCALE * (this.hovered === 'carry' ? 1.1 : 1));
       this.tieCord(c.cord, crank, c.tag);
     }
   }
@@ -533,25 +536,34 @@ export class Bench3D implements Mode {
     const g = this.sel;
     const loose = this.parts.filter((p) => p.gun === g && !this.fittedNow(p) && this.fly?.p !== p);
     const q = this.trayQuat();
-    const sc = g === 'revolver' ? 1.1 : 0.85;
-    const tot = loose.reduce((a, p) => a + p.len * sc + 0.03, 0);
-    const span = this.trayLen - 0.06;
-    const k = tot > span ? span / tot : 1;
-    let x = this.trayX - Math.min(tot * k, span) / 2;
     const show = this.state !== 'rack';
     for (const p of this.parts) {
       const flying = this.fly?.p === p || this.offs.some((f) => f.p === p);
       p.grp.visible = show && p.gun === g && (flying || !this.fittedNow(p));
       p.lock?.show(p.grp.visible && !flying);
     }
-    for (const p of loose) {
-      const L = p.len * sc * k;
-      const at = new THREE.Vector3(x + L / 2, this.trayY, this.trayZ);
-      x += L + 0.03 * k;
+    // yours along the front row, the chained ones for sale along the back (smaller)
+    const rows: [Part[], number, number][] = [
+      [loose.filter((p) => this.usable(p)), this.trayZ + 0.068, g === 'revolver' ? 1.05 : 0.82],
+      [loose.filter((p) => !this.usable(p)), this.trayZ - 0.07, g === 'revolver' ? 0.8 : 0.7],
+    ];
+    const span = this.trayLen - 0.07;
+    const place: { p: Part; at: THREE.Vector3; s: number }[] = [];
+    for (const [list, z, sc] of rows) {
+      const tot = list.reduce((a, p) => a + p.len * sc + 0.028, 0) - 0.028;
+      const k = tot > span ? span / tot : 1;
+      let x = this.trayX - Math.min(tot * k, span) / 2;
+      for (const p of list) {
+        const L = p.len * sc * k;
+        place.push({ p, at: new THREE.Vector3(x + L / 2, this.trayY, z), s: sc * k });
+        x += L + 0.028 * k;
+      }
+    }
+    for (const { p, at, s: sk } of place) {
       const m = new THREE.Object3D();
       m.quaternion.copy(q);
-      m.scale.setScalar(sc * k);
-      m.position.copy(at).sub(p.c.clone().multiplyScalar(sc * k).applyQuaternion(q));
+      m.scale.setScalar(sk);
+      m.position.copy(at).sub(p.c.clone().multiplyScalar(sk).applyQuaternion(q));
       m.updateMatrixWorld(true);
       // measure it lying there to sit it on the felt
       p.home = m.matrixWorld.clone();
@@ -567,7 +579,7 @@ export class Bench3D implements Mode {
       if (!this.offs.some((f) => f.p === p)) {
         p.home.decompose(p.grp.position, p.grp.quaternion, p.grp.scale);
         if (p.lock) {
-          p.lock.grp.position.set(at.x, this.trayY + Math.max(0.05, bb.max.y - bb.min.y) + 0.02, at.z + 0.02);
+          p.lock.grp.position.set(at.x, this.trayY + Math.max(0.04, bb.max.y - bb.min.y) + 0.012, at.z - 0.01);
           p.lock.grp.rotation.y = 0;
         }
       }
@@ -656,7 +668,7 @@ export class Bench3D implements Mode {
   }
   private rackRest() {
     const c = this.rack.bays[1]?.centre ?? new THREE.Vector3(0.2, 1.6, -3.1);
-    const at = new THREE.Vector2(this.bx + 0.38, this.zFront + 0.3);
+    const at = new THREE.Vector2(this.bx + 0.12, this.zFront + 0.4);
     return { at, face: Math.atan2(c.x - at.x, c.z - at.y) };
   }
   private workRest() {
@@ -753,8 +765,8 @@ export class Bench3D implements Mode {
     const T = this.ttAt;
     const rev = (this.work?.g ?? this.sel) === 'revolver';
     return rev
-      ? { pos: new THREE.Vector3(T.x + 0.4, T.y + 0.98, T.z + 1.18), look: new THREE.Vector3(T.x - 0.1, T.y + this.felt + 0.1, T.z - 0.06), fov: 40 }
-      : { pos: new THREE.Vector3(T.x + 0.5, T.y + 1.12, T.z + 1.44), look: new THREE.Vector3(T.x - 0.15, T.y + this.felt + 0.1, T.z - 0.07), fov: 40 };
+      ? { pos: new THREE.Vector3(T.x + 0.3, T.y + 1.02, T.z + 1.26), look: new THREE.Vector3(T.x - 0.22, T.y + this.felt + 0.08, T.z - 0.02), fov: 42 }
+      : { pos: new THREE.Vector3(T.x + 0.42, T.y + 1.14, T.z + 1.5), look: new THREE.Vector3(T.x - 0.24, T.y + this.felt + 0.08, T.z - 0.04), fov: 42 };
   }
   step(d: number) {
     if (this.state === 'rack') this.focusTo((this.rack.focus ?? 1) + d);

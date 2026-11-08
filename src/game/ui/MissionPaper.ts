@@ -15,9 +15,10 @@
 //   • failed: the note catches fire and burns away to embers
 // Several quests stack on the same nail, fanned a little, the newest on top.
 import * as THREE from 'three';
-import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
-import { sculpt, Surf, PixelFx, wrapInk, fbm3, h3, mixc, mulc, clamp, clamp01, TAU, uiSfx, METAL, KNZ, len2 } from './HudKit';
-import { SpriteBank, Shot, blitC, blitObj, blitShear, blitShearObj, shadowOffset, variant, palNearest, pixelText, pixelTextWidth, wrap } from './HudSprites';
+import { PixelFx, wrapInk, h3, clamp, clamp01, TAU, uiSfx, KNZ } from './HudKit';
+import { blitObj, blitShear, blitShearObj, shadowOffset, variant, pixelText, pixelTextWidth } from './HudSprites';
+import { sprite, nine } from './PixelUI';
+import { HUD_ART as ART } from './HudArt';
 
 /** what one note says */
 export interface PaperQuest {
@@ -69,104 +70,15 @@ const sm = (a: number, b: number, v: number) => {
   const t = clamp01((v - a) / (b - a));
   return t * t * (3 - 2 * t);
 };
-// ------------------------------------------------------------------ the nail
-/** a hand-forged rosehead nail head, hammered facets, rust (4 voxels per HUD px, head faces +z) */
-function nailModel() {
-  const V = 4;
-  const facets: [number, number, number][] = [];
-  for (let k = 0; k < 5; k++) {
-    const a = (k / 5) * TAU + 0.3, st = 0.62;
-    facets.push([Math.cos(a) * st, Math.sin(a) * st, Math.cos(Math.asin(st))]);
-  }
-  const sd = (x: number, y: number, z: number) => {
-    const X = x / V, Y = y / V, Z = z / V;
-    if (Z < 0) return 1;
-    // the domed rosehead: a 5-facet pyramid on a short neck
-    let d = -9;
-    const dent = 0.25 * fbm3(X * 1.3, Y * 1.3, 0.5);
-    for (const [nx, ny, nz] of facets) d = Math.max(d, X * nx + Y * ny + Z * nz - 2.05 + dent);
-    d = Math.max(d, len2(X, Y) - 3.3, -Z);
-    return d * V;
-  };
-  const IRON = { base: 0x5a5250, shade: 0x3a3232, hi: 0x9a948c, rust: 0x8a4a22, rustL: 0xb8692e, dark: 0x22180f };
-  const paint = (x: number, y: number, z: number, s: Surf): [number, number] => {
-    const n = fbm3(x * 0.12, y * 0.12, z * 0.12 + 3);
-    const lit = s.nx * -0.4 + s.ny * 0.55 + s.nz * 0.73;
-    let c = lit > 0.82 ? IRON.hi : lit > 0.5 ? IRON.base : IRON.shade;
-    if (n > 0.05) c = mixc(c, n > 0.4 ? IRON.rustL : IRON.rust, clamp01((n - 0.05) * 1.6));
-    if (s.exp < 0.3) c = mixc(c, IRON.dark, 0.5);
-    if (s.exp > 0.55) c = mixc(c, IRON.hi, 0.4);
-    return [mulc(c, 0.92 + h3(x, y, z, 9) * 0.14), METAL];
-  };
-  return { model: sculpt('mission_nail', [-14, -14, 0, 14, 14, 10], sd, paint), vs: 1 / V };
-}
-
-
-/** the note's parchment at HUD-pixel resolution, on the pixel kit's parchment palette, ink-outlined */
+/** the note's paper: the authored torn-parchment frame (HudArt nine_parch) stretched to the note */
 function notePaper(w: number, h: number, seed: number, coffee: [number, number, number], scorch: [number, number]) {
-  const fold: [number, number] = [0.46 + ((seed * 7.3) % 1) * 0.1, 0.3 + ((seed * 3.1) % 1) * 0.1];
   const cv = document.createElement('canvas');
   cv.width = w;
   cv.height = h;
   const c = cv.getContext('2d')!;
-  const img = c.createImageData(w, h);
-  const d = img.data;
-  const asp = w / h;
-  const o = seed * 97.3;
-  const solid = new Uint8Array(w * h);
-  const mixv = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-  for (let j = 0; j < h; j++)
-    for (let i = 0; i < w; i++) {
-      const u = (i + 0.5) / w, v = (j + 0.5) / h;
-      const edge = Math.min(Math.min(u, 1 - u) * asp, Math.min(v, 1 - v));
-      const tear = 0.012 + fbm01(u * 19 + o, v * 19) * 0.03;
-      if (edge < tear) continue;
-      const k = (j * w + i) * 4;
-      solid[j * w + i] = 1;
-      let col = mixv([0.94, 0.86, 0.69], [0.8, 0.66, 0.46], sm(0.25, 0.85, fbm01(u * 4 + o, v * 3)));
-      const fib = 0.94 + 0.06 * (0.5 + 0.5 * KNZ.n2(u * 150 + o, v * 34));
-      col = [col[0] * fib, col[1] * fib, col[2] * fib];
-      col = mixv(col, [0.64, 0.43, 0.24], sm(0.66, 0.84, fbm01(u * 12 + 7 + o, v * 12 + 7)) * 0.4);
-      // coffee: a dried ring with a darker lip and a faint pool
-      const cd = Math.hypot((u - coffee[0]) * asp, v - coffee[1]);
-      const wob = (fbm01(u * 9 + o, v * 9) - 0.5) * 0.02;
-      const ring = Math.exp(-(((cd - coffee[2] - wob) / 0.014) ** 2));
-      const pool = sm(coffee[2] + wob, coffee[2] - 0.03, cd) * 0.16;
-      col = mixv(col, [0.42, 0.24, 0.1], clamp01(Math.min(0.65, ring * 0.55 + pool)));
-      // browned rim and a charred corner
-      col = mixv(col, [0.4, 0.23, 0.1], sm(tear + 0.06, tear, edge) * 0.7);
-      const sc = sm(0.55, 0, Math.hypot((u - scorch[0]) * asp, v - scorch[1]) + (fbm01(u * 7 + o, v * 7) - 0.5) * 0.35);
-      col = mixv(col, [0.3, 0.15, 0.06], sc * 0.55);
-      col = mixv(col, [0.08, 0.04, 0.02], sc * sm(tear + 0.09, tear + 0.01, edge));
-      // folded in thirds and in half once: each facet takes the upper-left light a little differently,
-      // every fold a lit ridge over a shadowed valley; the bottom corner curls up off the nail board
-      const fy = Math.round(h * fold[0]), fx = Math.round(w * fold[1]);
-      let lit = (j < fy ? 1.035 : 0.95) * (i < fx ? 1.02 : 0.985);
-      if (j === fy - 1) lit *= 1.1;
-      else if (j === fy || j === fy + 1) lit *= j === fy ? 0.8 : 0.9;
-      if (j > h * 0.1 && i === fx - 1) lit *= 1.07;
-      else if (j > h * 0.1 && i === fx) lit *= 0.86;
-      const cu = Math.hypot((1 - u) * asp, 1 - v);
-      if (cu < 0.16) lit *= 0.82 + (cu / 0.16) * 0.18 + (Math.abs(cu - 0.1) < 0.012 ? 0.3 : 0);
-      col = [col[0] * lit, col[1] * lit, col[2] * lit];
-      const p = palNearest(clamp01(col[0]) * 255, clamp01(col[1]) * 255, clamp01(col[2]) * 255);
-      d[k] = p[0];
-      d[k + 1] = p[1];
-      d[k + 2] = p[2];
-      d[k + 3] = 255;
-    }
-  // the ink outline round the torn silhouette
-  for (let j = 0; j < h; j++)
-    for (let i = 0; i < w; i++) {
-      if (!solid[j * w + i]) continue;
-      const out = i === 0 || j === 0 || i === w - 1 || j === h - 1 || !solid[j * w + i - 1] || !solid[j * w + i + 1] || !solid[(j - 1) * w + i] || !solid[(j + 1) * w + i];
-      if (!out) continue;
-      const k = (j * w + i) * 4;
-      d[k] = 42;
-      d[k + 1] = 22;
-      d[k + 2] = 10;
-    }
-  c.putImageData(img, 0, 0);
+  c.drawImage(nine(seed > 0.5 ? ART.nine_parch2 : ART.nine_parch, w, h, 8), 0, 0);
+  void coffee;
+  void scorch;
   return cv;
 }
 
@@ -474,12 +386,10 @@ export interface PaperAnchor {
   speed: number;
 }
 
-let nailRig: THREE.Group | null = null;
 
 export class MissionPaper {
   private notes: Note[] = [];
   private scraps: { n: Note; t: number; ox: number; oy: number; vx: number; vy: number }[] = [];
-  private bank = SpriteBank.get();
   private nailT = 1;
   private nailShow = 0;
   private dust: PixelFx;
@@ -508,18 +418,10 @@ export class MissionPaper {
     this.glow.update(dt, s);
   }
 
-  private nail(k: number) {
-    const S = Math.round(9 * k) + 2;
-    return this.bank.get('paper:nail', S, 56, (): Shot => {
-      if (!nailRig) {
-        const n = nailModel();
-        const m = new THREE.Mesh(buildVoxelGeometry(n.model, { voxelSize: n.vs, pivot: [0, 0, 0] }), SpriteBank.get().material());
-        m.rotation.set(0.25, 0, 0.4);
-        nailRig = wrap(m);
-      }
-      return { obj: nailRig, w: S, h: S, yaw: -0.3, pitch: 0.25, fit: true };
-    });
+  private nailSprite() {
+    return sprite(ART.nail);
   }
+
 
   paint(c: CanvasRenderingContext2D, dt: number, quests: PaperQuest[], pa: PaperAnchor, s: number, recent: { text: string; age: number }[]) {
     dt = Math.min(dt, 0.1);
@@ -601,7 +503,7 @@ export class MissionPaper {
     const anyPinned = this.notes.some((n) => n.state === 'pinned' || n.state === 'stamp' || n.state === 'burn');
     this.nailShow += ((anyPinned || this.scraps.length ? 1 : 0) - this.nailShow) * Math.min(1, dt * 8);
     this.nailT = Math.min(1, this.nailT + dt / 0.11);
-    const nl = this.nail(k);
+    const nl = { cv: this.nailSprite(), w: this.nailSprite().width };
     if (nl && this.nailShow > 0.05) {
       const drive = this.nailT < 1 ? 1 - this.nailT : 0;
       const sz = nl.w * Math.max(0.2, this.nailShow) * (1 + drive * 0.7);

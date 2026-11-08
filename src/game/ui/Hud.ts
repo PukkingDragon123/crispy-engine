@@ -16,6 +16,11 @@ import { WATCH_DROP, type OutlawAnchors } from './OutlawHud';
 import { isTouchDevice } from './TouchControls';
 import { SLOT, type ArsenalAnchors } from './ArsenalHud';
 import { shadowOffset, variant } from './HudSprites';
+import { nine, strip3, type PixelSprite } from './PixelUI';
+import { HUD_ART as ART } from './HudArt';
+
+/** the title banner's right tail: the authored left tail mirrored */
+const RIBBON_R: PixelSprite = { w: ART.ribbon_end.w, h: ART.ribbon_end.h, rows: ART.ribbon_end.rows.map((r) => r.split('').reverse().join('')) };
 
 /** one quest note on the mission paper stack */
 export type HudQuest = PaperQuest;
@@ -871,14 +876,14 @@ export class Hud {
           // touch: no key, just the verb (the thing itself is what you touch)
           const label = s.prompt.text || 'TOUCH IT';
           const bw = Math.ceil(measure(c, label, 16)) + 16;
-          this.blit(parchment(bw, 20, 3), x - bw / 2, y - 10);
+          this.blit(nine(ART.nine_toast, bw + 4, 22, 6), x - bw / 2 - 2, y - 11, 3);
           text(c, label, x, y - 7, UI.wood.o, 16, 'center', false);
         } else {
           const kc = keycap(s.prompt.key);
           const tw = Math.ceil(measure(c, s.prompt.text, 16)) + 14;
           const bw = tw + kc.width + 6;
-          this.blit(parchment(bw, 20, 3), x - bw / 2, y - 10);
-          this.blit(kc, x - bw / 2 + 4, y - 7);
+          this.blit(nine(ART.nine_toast, bw + 4, 22, 6), x - bw / 2 - 2, y - 11, 3);
+          this.blit(kc, x - bw / 2 + 4, y - 7, 1);
           text(c, s.prompt.text, x - bw / 2 + kc.width + 9, y - 7, UI.wood.o, 16, 'left', false);
         }
       }
@@ -918,8 +923,9 @@ export class Hud {
         const tw = Math.ceil(measure(c, tt.text, 32)) + 24;
         const yy = Math.round(H * 0.34 + (1 - easeOutBounce(k)) * -50);
         c.globalAlpha = out;
-        const rb = ribbon(Math.round(tw * Math.min(1, k * 1.5)), { o: UI.wood.o, d: UI.leather.m, m: UI.leather.l, l: '#a06a3a' }, 2);
-        this.blit(rb, cx - rb.width / 2, yy - 2);
+        // a red title banner with forked tails, unfurling from the middle
+        const rb = strip3(ART.ribbon_end, ART.ribbon_mid, RIBBON_R, Math.round((tw + 24) * Math.min(1, k * 1.5)), 'ribbon');
+        this.blit(rb, cx - rb.width / 2, yy - 8, 3);
         if (k > 0.4) text(c, tt.text, cx, yy - 10, tt.color, 32, 'center');
         if (tt.sub && k > 0.6) text(c, tt.sub, cx, yy + 22, UI.textDim, 16, 'center');
         c.globalAlpha = 1;
@@ -930,7 +936,8 @@ export class Hud {
       const tw = Math.ceil(Math.max(measure(c, tt.text, 16), tt.sub ? measure(c, tt.sub, 16) : 0)) + 14;
       const xx = W - 10 - tw - Math.round((1 - easeOutBack(inK)) * -120);
       c.globalAlpha = out;
-      this.blit(parchment(tw + 6, tt.sub ? 32 : 18, (tt.text.length * 7) % 13), xx - 3, ty - 1);
+      // a clean parchment slip with a brass rule and rivets
+      this.blit(nine(ART.nine_toast, tw + 12, tt.sub ? 36 : 22, 6), xx - 6, ty - 3, 3);
       text(c, tt.text, xx + 4, ty + 1, darken(tt.color), 16, 'left', false);
       if (tt.sub) text(c, tt.sub, xx + 4, ty + 15, UI.wood.d, 16, 'left', false);
       c.globalAlpha = 1;

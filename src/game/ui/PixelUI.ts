@@ -2,6 +2,7 @@
 // by pixel into cached offscreen canvases, plus Alagard text helpers.
 // Everything is integer-aligned for crisp nearest-neighbour upscaling.
 import { RNG } from '../../engine/math/rand';
+import { HUD_ART } from './HudArt';
 
 export const UI = {
   wood: { o: '#24140a', d: '#4f2f15', m: '#74461f', l: '#93602f', h: '#b98244', g: '#603818' },
@@ -229,16 +230,13 @@ export function drawBarFill(c: Ctx2, x: number, y: number, w: number, h: number,
 export function keycap(label: string) {
   const w = Math.max(14, label.length * 7 + 7);
   return cached(`key:${label}`, w, 15, (c) => {
-    const P = UI.parch;
-    px(c, 0, 0, w, 15, UI.wood.o);
-    px(c, 1, 1, w - 2, 12, P.l);
-    px(c, 1, 12, w - 2, 2, P.d);
-    px(c, 1, 1, w - 2, 1, P.h);
+    // the authored key cap (bone face, lit top, deep bottom lip) stretched to the label
+    c.drawImage(nine(HUD_ART.nine_key, w, 15, 5), 0, 0);
     c.font = `16px '${FONT}'`;
     c.textAlign = 'center';
     c.textBaseline = 'top';
     c.fillStyle = UI.wood.o;
-    c.fillText(label, Math.floor(w / 2), -1);
+    c.fillText(label, Math.floor(w / 2), -2);
   });
 }
 
@@ -293,6 +291,155 @@ export function chain(c: Ctx2, x: number, y0: number, y1: number) {
       px(c, x, y, 1, 3, I.m);
     }
   }
+}
+
+// ---------------------------------------------------------------- authored pixel sprites
+// The HUD's hand-authored pixel art (HudArt.ts) is palette-indexed data: one char per
+// pixel on this palette, '.' transparent. sprite() turns a sprite into a cached canvas,
+// optionally with a palette swap (a dimmed piece, a white hit flash, a rarity colour);
+// nine() / strip3() stretch authored frames to any size by tiling their edges.
+export interface PixelSprite {
+  w: number;
+  h: number;
+  rows: string[];
+}
+
+/** the HUD's limited warm palette (ramps dark to light) */
+export const HUD_PAL: Record<string, string> = { 'k': '#1a0e08', 'K': '#3a2414', '0': '#0c0806', 'a': '#22262c', 'b': '#3a424c', 'c': '#56616e', 'd': '#7c8a98', 'e': '#b4c0ca', 'f': '#4a300c', 'g': '#7c5214', 'h': '#b88426', 'i': '#e2b24a', 'j': '#fff0a6', 'l': '#3a200e', 'm': '#5a3418', 'n': '#7a4a22', 'o': '#9a6430', 'p': '#c08848', 'q': '#7a5430', 'r': '#a9844e', 's': '#d6b985', 't': '#efdcb0', 'u': '#fff4d8', 'v': '#2e180c', 'w': '#4e2a16', 'x': '#6e3c20', 'y': '#8e5430', 'z': '#b07040', 'A': '#3a0806', 'B': '#6a120c', 'C': '#a8221a', 'D': '#dc4430', 'E': '#ff8a6a', 'F': '#0b3d2c', 'G': '#1d6a4a', 'H': '#2fbf7e', 'I': '#7cf2b4', 'J': '#eafff2', 'L': '#6e5a40', 'M': '#b8a07a', 'N': '#e0cfa8', 'O': '#f6ead0', 'P': '#4e4a44', 'Q': '#8a867c', 'R': '#bdb9ae', 'S': '#f2efe6', 'T': '#141c3a', 'U': '#283a7a', 'V': '#4468c0', 'W': '#8ab0e8', 'X': '#5a2a12', 'Y': '#8a4a22', 'Z': '#c06a2e', '#': '#ffffff', '@': '#d4ebe0', '%': '#a2c8b8', '&': '#6e9a8a', '1': '#2a0806', '2': '#4a0e0a', '3': '#6a1a14', '4': '#c8a070', '5': '#e8c890' };
+/** the palette's ramps, darkest first (palette swaps step along them) */
+export const HUD_RAMPS: Record<string, string> = {
+  iron: 'abcde', brass: 'fghij', wood: 'lmnop', parch: 'qrstu', leather: 'vwxyz', blood: 'ABCDE', jade: 'FGHIJ',
+  linen: 'LMNO', tin: 'PQRS', blue: 'TUVW', rust: 'XYZ', glass: '&%@', ox: '123',
+};
+const STEP: Record<string, [string, string]> = {};
+for (const r of Object.values(HUD_RAMPS)) for (let i = 0; i < r.length; i++) STEP[r[i]] = [r[Math.max(0, i - 1)], r[Math.min(r.length - 1, i + 1)]];
+/** a palette swap one step darker along every ramp (the darkest step falls to the soft ink) */
+export const SWAP_DIM: Record<string, string> = Object.fromEntries(Object.keys(HUD_PAL).map((c) => [c, HUD_PAL[STEP[c] ? (STEP[c][0] === c ? 'K' : STEP[c][0]) : c]]));
+/** a palette swap one step lighter (lit, hovered, ready) */
+export const SWAP_LIT: Record<string, string> = Object.fromEntries(Object.keys(HUD_PAL).map((c) => [c, HUD_PAL[STEP[c]?.[1] ?? c]]));
+/** the hit flash: every colour to bone white, the ink to warm brown */
+export const SWAP_FLASH: Record<string, string> = Object.fromEntries(Object.keys(HUD_PAL).map((c) => [c, c === 'k' || c === 'K' ? '#7a4a22' : '#fff8e8']));
+
+const spriteCache = new WeakMap<PixelSprite, Map<string, HTMLCanvasElement>>();
+/**
+ * An authored sprite as a canvas (cached per sprite and swap). `swap` maps palette chars
+ * to colours (a palette swap); `key` names the swap for the cache (default: its JSON).
+ */
+export function sprite(def: PixelSprite, swap?: Record<string, string>, key?: string): HTMLCanvasElement {
+  let m = spriteCache.get(def);
+  if (!m) spriteCache.set(def, (m = new Map()));
+  const k = swap ? key ?? JSON.stringify(swap) : '';
+  let cv = m.get(k);
+  if (cv) return cv;
+  cv = document.createElement('canvas');
+  cv.width = def.w;
+  cv.height = def.h;
+  const c = cv.getContext('2d')!;
+  const img = c.createImageData(def.w, def.h);
+  const rgb = new Map<string, number[]>();
+  const col = (ch: string) => {
+    let v = rgb.get(ch);
+    if (!v) {
+      const hex = swap?.[ch] ?? HUD_PAL[ch] ?? '#ff00ff';
+      const n = parseInt(hex.slice(1), 16);
+      v = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+      rgb.set(ch, v);
+    }
+    return v;
+  };
+  for (let y = 0; y < def.h; y++) {
+    const row = def.rows[y] ?? '';
+    for (let x = 0; x < def.w; x++) {
+      const ch = row[x];
+      if (!ch || ch === '.') continue;
+      const v = col(ch);
+      const o = (y * def.w + x) * 4;
+      img.data[o] = v[0];
+      img.data[o + 1] = v[1];
+      img.data[o + 2] = v[2];
+      img.data[o + 3] = 255;
+    }
+  }
+  c.putImageData(img, 0, 0);
+  m.set(k, cv);
+  return cv;
+}
+
+/** draw a sprite canvas on whole pixels: centred on (cx, cy), optionally mirrored / quarter-turned */
+export function drawSprite(c: Ctx2, cv: HTMLCanvasElement, cx: number, cy: number, o: { flipX?: boolean; flipY?: boolean; turns?: number; alpha?: number } = {}) {
+  const turns = (((o.turns ?? 0) % 4) + 4) % 4;
+  const w = turns % 2 ? cv.height : cv.width, h = turns % 2 ? cv.width : cv.height;
+  const x = Math.round(cx - w / 2), y = Math.round(cy - h / 2);
+  const a = c.globalAlpha;
+  if (o.alpha !== undefined) c.globalAlpha = a * o.alpha;
+  if (!turns && !o.flipX && !o.flipY) c.drawImage(cv, x, y);
+  else {
+    c.save();
+    c.translate(x + w / 2, y + h / 2);
+    c.rotate((turns * Math.PI) / 2);
+    c.scale(o.flipX ? -1 : 1, o.flipY ? -1 : 1);
+    c.drawImage(cv, -cv.width / 2, -cv.height / 2);
+    c.restore();
+  }
+  c.globalAlpha = a;
+}
+
+const nineCache = new WeakMap<PixelSprite, Map<string, HTMLCanvasElement>>();
+/** a frame sprite stretched to w×h: corners kept, edges and centre tiled (`m` = corner size) */
+export function nine(def: PixelSprite, w: number, h: number, m: number, swap?: Record<string, string>): HTMLCanvasElement {
+  w = Math.max(m * 2 + 1, Math.round(w));
+  h = Math.max(m * 2 + 1, Math.round(h));
+  let mc = nineCache.get(def);
+  if (!mc) nineCache.set(def, (mc = new Map()));
+  const key = `${w}x${h}:${m}:${swap ? JSON.stringify(swap) : ''}`;
+  let cv = mc.get(key);
+  if (cv) return cv;
+  const src = sprite(def, swap);
+  cv = document.createElement('canvas');
+  cv.width = w;
+  cv.height = h;
+  const c = cv.getContext('2d')!;
+  const sw = def.w, sh = def.h, cw = sw - m * 2, chh = sh - m * 2;
+  const tile = (sx: number, sy: number, tw: number, th: number, dx: number, dy: number, dw: number, dh: number) => {
+    for (let y = 0; y < dh; y += th)
+      for (let x = 0; x < dw; x += tw) {
+        const ww = Math.min(tw, dw - x), hh = Math.min(th, dh - y);
+        c.drawImage(src, sx, sy, ww, hh, dx + x, dy + y, ww, hh);
+      }
+  };
+  tile(m, m, cw, chh, m, m, w - m * 2, h - m * 2);
+  tile(m, 0, cw, m, m, 0, w - m * 2, m);
+  tile(m, sh - m, cw, m, m, h - m, w - m * 2, m);
+  tile(0, m, m, chh, 0, m, m, h - m * 2);
+  tile(sw - m, m, m, chh, w - m, m, m, h - m * 2);
+  c.drawImage(src, 0, 0, m, m, 0, 0, m, m);
+  c.drawImage(src, sw - m, 0, m, m, w - m, 0, m, m);
+  c.drawImage(src, 0, sh - m, m, m, 0, h - m, m, m);
+  c.drawImage(src, sw - m, sh - m, m, m, w - m, h - m, m, m);
+  mc.set(key, cv);
+  if (mc.size > 60) mc.delete(mc.keys().next().value!);
+  return cv;
+}
+
+const stripCache = new Map<string, HTMLCanvasElement>();
+/** a horizontal strip: left cap, middle tile repeated, right cap, `w` wide */
+export function strip3(l: PixelSprite, mid: PixelSprite, r: PixelSprite, w: number, key: string, swap?: Record<string, string>): HTMLCanvasElement {
+  w = Math.max(l.w + r.w, Math.round(w));
+  const k = `${key}:${w}:${swap ? JSON.stringify(swap) : ''}`;
+  let cv = stripCache.get(k);
+  if (cv) return cv;
+  const h = Math.max(l.h, mid.h, r.h);
+  cv = document.createElement('canvas');
+  cv.width = w;
+  cv.height = h;
+  const c = cv.getContext('2d')!;
+  const L = sprite(l, swap), M = sprite(mid, swap), R = sprite(r, swap);
+  for (let x = l.w; x < w - r.w; x += mid.w) c.drawImage(M, 0, 0, Math.min(mid.w, w - r.w - x), mid.h, x, 0, Math.min(mid.w, w - r.w - x), mid.h);
+  c.drawImage(L, 0, 0);
+  c.drawImage(R, w - r.w, 0);
+  stripCache.set(k, cv);
+  if (stripCache.size > 80) stripCache.delete(stripCache.keys().next().value!);
+  return cv;
 }
 
 // ---------------------------------------------------------------- text

@@ -1,9 +1,7 @@
 // THE TRAIL LEDGER: what you are working toward in a run, as one tactile pixel-
-// art object on its own HUD layer (a canvas over the run, on the HUD's pixel
-// grid), in the HUD's style: real models sculpted on dense voxel grids and
-// photographed once (HudSprites' SpriteBank), finished as flat pixel art, with
-// Alagard type on top. Nothing on it is drawn by hand except the type and
-// little square pixel sparks.
+// art object on its own HUD layer (a canvas over the run, on the HUD's pixel grid),
+// in the HUD's stylized pixel-art style: authored sprites (HudArt.ts) with Alagard
+// type on top; only the next boss's portrait is a photograph of its own rig.
 //
 //  • A worn leather strap hangs down the left edge from a brass buckle, a
 //    bandolier with punched notches. Four badges ride on it:
@@ -46,7 +44,9 @@ import { modelEntry } from '../models/lookup';
 import { blueprintScroll } from '../models/props/treasure';
 import { signpost } from '../models/props/western';
 import { sculpt, Surf, fbm3, h3, mixc, mulc, clamp, clamp01, len2, sdRoundBox2, TAU, METAL, KNZ } from './HudKit';
-import { SpriteBank, Shot, Sprite, blitC, blitObj, variant, framingBox, wrap, pixelText, pixelTextWidth } from './HudSprites';
+import { SpriteBank, Shot, Sprite, blitC, blitObj, variant, wrap, pixelText, pixelTextWidth } from './HudSprites';
+import { sprite, nine, SWAP_DIM, HUD_PAL } from './PixelUI';
+import { HUD_ART as ART } from './HudArt';
 import { Blueprints } from '../meta/Blueprints';
 import { SUBAREAS } from '../world/RegionGen';
 
@@ -60,240 +60,7 @@ export interface LadderDeps {
   camera: THREE.Camera;
 }
 
-const V2 = 2; // voxels per HUD px
-// (models are built a quarter of a HUD px per unit: the photo studio's lens keeps them well inside its far plane)
-const geoOf = (m: ReturnType<typeof sculpt>, vph: number) => buildVoxelGeometry(m, { voxelSize: 1 / (vph * 4), pivot: [0, 0, 0] });
-const lit = (s: Surf) => s.nx * -0.45 + s.ny * 0.6 + s.nz * 0.66;
-
-// ================================================================== the models (only ever photographed)
-const LEATHER = { base: 0x6e4226, shade: 0x4a2a16, dark: 0x2a160a, hi: 0x9a6438, worn: 0xb08050 };
-const BRASS = { base: 0xb88426, shade: 0x7c5214, hi: 0xf0d27a, dark: 0x4a3008, tarnish: 0x6a5426 };
-const PAPER = { base: 0xe2cc98, shade: 0xc4a874, hi: 0xf2e2b8, edge: 0x9a7a48, fox: 0xa8844e };
 const STRAP_L = 128;
-
-/** the strap: stitched, notched leather hanging from a brass buckle, a pointed tip at the foot */
-function strapModel() {
-  const L = STRAP_L, half = L / 2;
-  const holes: number[] = [];
-  for (let y = half - 22; y > -half + 10; y -= 12) holes.push(y);
-  const col = (x: number, y: number) => {
-    const X = x / V2, Y = y / V2;
-    // strap outline: rounded sides, tapering to a point at the foot
-    const hw = Math.min(6, Math.max(0, (Y + half + 3) * 0.75));
-    const strap = Math.max(Math.abs(X) - hw, Math.abs(Y - 3) - (half + 3));
-    // the buckle frame round the top
-    const by = half + 4;
-    const outer = sdRoundBox2(X, Y - by, 8.2, 5.4, 2.2), inner = sdRoundBox2(X, Y - by, 5.6, 2.9, 1.2);
-    const frame = Math.max(outer, -inner);
-    const prong = Math.max(Math.abs(X) - 0.8, Math.abs(Y - (by - 1.5)) - 4);
-    let hole = 9;
-    for (const hy of holes) hole = Math.min(hole, len2(X, Y - hy));
-    return { strap, frame, prong, hole, X, Y };
-  };
-  type C = ReturnType<typeof col>;
-  const sd = (x: number, y: number, z: number, c: C) => {
-    const Z = z / V2;
-    let d = 9;
-    if (c.strap < 0.5) {
-      const top = 1.5 + 0.35 * (1 - (c.X / 6) ** 2) + 0.15 * fbm3(c.X * 0.4, c.Y * 0.2, 1);
-      let s = Math.max(c.strap, Z - top, -Z);
-      if (c.hole < 1.25) s = Math.max(s, 1.25 - c.hole);
-      // saddle stitching down both edges
-      if (Math.abs(Math.abs(c.X) - 4.3) < 0.45 && ((c.Y + 400) % 2.6) < 1.5 && c.Y < STRAP_L / 2) s = Math.min(s, Math.max(c.strap, Z - top - 0.45, -Z));
-      d = s;
-    }
-    if (c.frame < 0.5) d = Math.min(d, Math.max(c.frame, Math.abs(Z - 2.1) - 1.1 - 0.4 * clamp01(-c.frame)));
-    if (c.prong < 0.5) d = Math.min(d, Math.max(c.prong, Math.abs(Z - 2.6) - 0.7));
-    return d * V2;
-  };
-  const paint = (x: number, y: number, z: number, s: Surf): [number, number] => {
-    const c = col(x, y);
-    const L0 = lit(s);
-    if ((c.frame < 0.6 || c.prong < 0.6) && z / V2 > 0.9) {
-      let k = L0 > 0.8 ? BRASS.hi : L0 > 0.45 ? BRASS.base : L0 > 0.1 ? BRASS.shade : BRASS.dark;
-      if (s.exp < 0.3) k = mixc(k, BRASS.tarnish, 0.5);
-      if (s.exp > 0.55) k = mixc(k, BRASS.hi, 0.4);
-      return [k, METAL];
-    }
-    let k = L0 > 0.85 ? LEATHER.hi : L0 > 0.5 ? LEATHER.base : L0 > 0.15 ? LEATHER.shade : LEATHER.dark;
-    const n = fbm3(x * 0.07, y * 0.03, 3);
-    if (n > 0.32 && s.nz > 0.5) k = mixc(k, LEATHER.worn, 0.35); // rubbed where it lies on the coat
-    if (Math.abs(Math.abs(c.X) - 4.3) < 0.5 && z / V2 > 1.55) k = 0xd8c49a; // waxed thread
-    if (c.hole < 2.0) k = mixc(k, LEATHER.dark, 0.6);
-    if (s.exp < 0.3) k = mixc(k, LEATHER.dark, 0.4);
-    return [mulc(k, 0.94 + h3(x, y, z, 2) * 0.1), VF.SOLID];
-  };
-  return sculpt('ledger_strap', [-18, -(STRAP_L / 2 + 6) * V2, 0, 18, (STRAP_L / 2 + 11) * V2, 8], sd, paint, VF.SOLID, col);
-}
-
-/** a stamped brass concho: scalloped rim, a bead, a domed boss with a raised five-point star */
-function conchoModel() {
-  const sdStar5 = (x: number, y: number, r: number) => {
-    const a = Math.atan2(x, y), n = 5;
-    const seg = TAU / n;
-    const b = ((a % seg) + seg) % seg - seg / 2;
-    const L = len2(x, y);
-    const px = L * Math.cos(b), py = Math.abs(L * Math.sin(b));
-    // the edge from the tip (r, 0) to the notch (0.45 r at half a segment)
-    const ax = r, ay = 0, bx = 0.45 * r * Math.cos(seg / 2), by = 0.45 * r * Math.sin(seg / 2);
-    const ex = bx - ax, ey = by - ay;
-    const t = clamp(((px - ax) * ex + (py - ay) * ey) / (ex * ex + ey * ey), 0, 1);
-    const dx = px - ax - ex * t, dy = py - ay - ey * t;
-    return len2(dx, dy) * Math.sign(ex * (py - ay) - ey * (px - ax)) * -1;
-  };
-  const col = (x: number, y: number) => {
-    const X = x / V2, Y = y / V2;
-    const r = len2(X, Y), a = Math.atan2(Y, X);
-    const R = 10 + 0.7 * Math.cos(a * 12);
-    return { r, d2: r - R, star: sdStar5(X, Y, 5.6) };
-  };
-  type C = ReturnType<typeof col>;
-  const sd = (x: number, y: number, z: number, c: C) => {
-    const Z = z / V2;
-    if (c.d2 > 0.5) return 1;
-    let top = 1.0 + 1.5 * (1 - (c.r / 10.7) ** 2);
-    if (c.r > 7.8 && c.r < 9.0) top += 0.5; // the bead
-    if (c.star < 0) top += 1.0 + 0.3 * clamp01(-c.star);
-    top += 0.1 * fbm3(x * 0.2, y * 0.2, 4);
-    return Math.max(c.d2, Z - top, -Z) * V2;
-  };
-  const paint = (x: number, y: number, z: number, s: Surf): [number, number] => {
-    const c = col(x, y);
-    const L0 = lit(s);
-    let k = L0 > 0.86 ? BRASS.hi : L0 > 0.55 ? BRASS.base : L0 > 0.2 ? mixc(BRASS.base, BRASS.shade, 0.6) : BRASS.shade;
-    if (s.exp < 0.3) k = mixc(k, BRASS.tarnish, 0.55);
-    if (c.star < -0.4 && L0 > 0.5) k = mixc(k, BRASS.hi, 0.5); // the polished star
-    if (s.exp > 0.5) k = mixc(k, BRASS.hi, 0.4);
-    return [mulc(k, 0.95 + h3(x, y, z, 3) * 0.08), METAL];
-  };
-  return sculpt('ledger_concho', [-24, -24, 0, 24, 24, 10], sd, paint, VF.SOLID, col);
-}
-
-/** a strip of foxed parchment, torn ragged at the free end, held by an iron tack (left, or top for a note) */
-function paperModel(W: number, H: number, pin: 'left' | 'top', seed: number) {
-  const tack = pin === 'left' ? [5, 0] : [0, H / 2 - 5];
-  const col = (x: number, y: number) => {
-    const X = x / V2, Y = y / V2;
-    const tear = KNZ.n2(Y * 0.45 + seed, seed * 3) * 2.2 + KNZ.n2(Y * 1.7, seed) * 0.8;
-    const tearY = KNZ.n2(X * 0.3 + seed * 2, seed) * 0.9;
-    let d = sdRoundBox2(X - W / 2, Y, W / 2, H / 2 + tearY * 0.6, 1.2);
-    if (pin === 'left') d = Math.max(d, X - (W - 3 + tear));
-    else d = Math.max(d, -Y - (H / 2 - 2 + tear * 0.7));
-    return { d, nail: len2(X - (pin === 'left' ? tack[0] : W / 2), Y - tack[1]), X, Y };
-  };
-  type C = ReturnType<typeof col>;
-  const sd = (x: number, y: number, z: number, c: C) => {
-    const Z = z / V2;
-    const curl = 0.7 * Math.sin((c.X / W) * Math.PI) * (pin === 'left' ? 1 : 0.6) + 0.25 * fbm3(c.X * 0.12, c.Y * 0.12, seed);
-    let d = Math.max(c.d, Math.abs(Z - 0.9 - curl) - 0.55);
-    if (c.nail < 2.2) d = Math.min(d, len2(c.nail / 1.6, (Z - 2.2) / 0.8) - 1);
-    return d * V2;
-  };
-  const paint = (x: number, y: number, z: number, s: Surf): [number, number] => {
-    const c = col(x, y);
-    if (c.nail < 2.2 && z / V2 > 1.6) {
-      const L0 = lit(s);
-      return [L0 > 0.7 ? 0x8a8478 : L0 > 0.3 ? 0x5a5650 : 0x302c28, METAL];
-    }
-    const L0 = lit(s);
-    let k = L0 > 0.9 ? PAPER.hi : L0 > 0.45 ? PAPER.base : PAPER.shade;
-    const n = fbm3(x * 0.05, y * 0.05, seed);
-    if (n > 0.3) k = mixc(k, PAPER.shade, 0.5);
-    if (c.d > -1.6) k = mixc(k, PAPER.edge, 0.6); // the dark, handled edge
-    if (h3(Math.floor(x / 3), Math.floor(y / 3), seed) > 0.985) k = PAPER.fox;
-    if (c.nail < 3.2) k = mixc(k, 0x6a4a28, 0.4); // rust bleeding from the tack
-    return [k, VF.SOLID];
-  };
-  return sculpt('ledger_paper', [-2, -(H / 2 + 3) * V2, 0, (W + 2) * V2, (H / 2 + 3) * V2, 7], sd, paint, VF.SOLID, col);
-}
-
-/** a brass cartridge standing up: rimmed base, waisted case, lead round nose */
-function cartridgeModel() {
-  const V = 4;
-  const sd = (x: number, y: number, z: number) => {
-    const X = x / V, Y = y / V, Z = z / V - 2;
-    const r = len2(X, Z);
-    let R: number;
-    if (Y < 0.6) R = 1.95; // rim
-    else if (Y < 0.9) R = 1.5; // extractor groove
-    else if (Y < 6.6) R = 1.7 - (Y - 0.9) * 0.02;
-    else if (Y < 10) R = 1.55 * Math.sqrt(Math.max(0, 1 - ((Y - 6.6) / 3.6) ** 2)); // the bullet's round nose
-    else return 1;
-    return Math.max(r - R, -Y) * V;
-  };
-  const paint = (x: number, y: number, z: number, s: Surf): [number, number] => {
-    const Y = y / V;
-    const L0 = lit(s);
-    if (Y >= 6.6) return [L0 > 0.75 ? 0x9a9690 : L0 > 0.35 ? 0x6e6a66 : 0x45423e, METAL];
-    let k = L0 > 0.8 ? BRASS.hi : L0 > 0.4 ? BRASS.base : BRASS.shade;
-    if (Y < 0.9) k = mixc(k, BRASS.dark, 0.3);
-    return [k, METAL];
-  };
-  return sculpt('ledger_cartridge', [-8, 0, 0, 8, 42, 16], sd, paint);
-}
-
-/** a brass pocket compass: knurled bezel, enamel dial with four studs (north in red), the bail at the top */
-function compassModel() {
-  const col = (x: number, y: number) => {
-    const X = x / V2, Y = y / V2;
-    return { r: len2(X, Y), a: Math.atan2(Y, X), X, Y, bail: len2(len2(X, Y - 12.2) - 2.4, 0) };
-  };
-  type C = ReturnType<typeof col>;
-  const studs = [[0, 6.3], [6.3, 0], [0, -6.3], [-6.3, 0]];
-  const sd = (x: number, y: number, z: number, c: C) => {
-    const Z = z / V2;
-    let d = 9;
-    if (c.r < 10.6) {
-      const edge = clamp01((c.r - 8.4) / 2.2);
-      let top = c.r < 8.2 ? 2.2 : 3.4 - edge * edge * 1.6;
-      if (c.r > 8.2 && c.r < 9.4) top += 0.25 * (Math.cos(c.a * 36) > 0 ? 1 : 0); // knurling
-      for (const [sx, sy] of studs) if (len2(c.X - sx, c.Y - sy) < 0.9) top = 2.8;
-      d = Math.max(c.r - 10.3, Z - top, -Z);
-    }
-    // the bail ring standing up from the crown, and the crown stem
-    const ring = len2(len2(c.X, c.Y - 12.4) - 2.3, Z - 1.6) - 0.75;
-    const stem = Math.max(Math.abs(c.X) - 1.1, Math.abs(c.Y - 10.4) - 1.0, Math.abs(Z - 1.6) - 1.1);
-    return Math.min(d, ring, stem) * V2;
-  };
-  const paint = (x: number, y: number, z: number, s: Surf): [number, number] => {
-    const c = col(x, y);
-    const Z = z / V2;
-    const L0 = lit(s);
-    if (c.r < 8.2 && Z < 2.5 && Z > 1.6) {
-      // the enamel dial, crazed with age
-      let k = 0xe6d8b8;
-      if (fbm3(x * 0.1, y * 0.1, 7) > 0.35) k = 0xd2c098;
-      if (Math.abs(Math.sin(c.a * 8)) < 0.05 && c.r > 5 && c.r < 7.6) k = 0x6a5030;
-      return [k, VF.SOLID];
-    }
-    for (const [sx, sy] of studs) if (len2(c.X - sx, c.Y - sy) < 1.0 && Z > 2.3) return [sx === 0 && sy > 0 ? 0xb8322a : 0x3a2a1a, VF.SOLID];
-    let k = L0 > 0.86 ? BRASS.hi : L0 > 0.5 ? BRASS.base : L0 > 0.15 ? BRASS.shade : BRASS.dark;
-    if (s.exp < 0.3) k = mixc(k, BRASS.tarnish, 0.5);
-    if (s.exp > 0.55) k = mixc(k, BRASS.hi, 0.35);
-    return [k, METAL];
-  };
-  return sculpt('ledger_compass', [-24, -24, 0, 24, 32, 9], sd, paint, VF.SOLID, col);
-}
-
-/** the needle: a slim lozenge, the north half red-lacquered, the south half blued steel, a brass cap */
-function needleModel() {
-  const V = 3;
-  const sd = (x: number, y: number, z: number) => {
-    const X = x / V, Y = y / V, Z = z / V;
-    const w = 1.25 * (1 - Math.abs(Y) / 6.6);
-    const d = Math.max(Math.abs(X) - w, Math.abs(Y) - 6.6, Math.abs(Z - 0.5) - 0.45);
-    const cap = len2(len2(X, Y) - 0, Z - 0.9) - 1.2;
-    return Math.min(d, cap) * V;
-  };
-  const paint = (x: number, y: number, z: number, s: Surf): [number, number] => {
-    const X = x / V, Y = y / V;
-    const L0 = lit(s);
-    if (len2(X, Y) < 1.25) return [L0 > 0.6 ? BRASS.hi : BRASS.base, METAL];
-    if (Y > 0) return [L0 > 0.6 ? 0xd85a44 : 0xa8281c, VF.SOLID];
-    return [L0 > 0.6 ? 0x7a8aa8 : 0x3a4a6a, METAL];
-  };
-  return sculpt('ledger_needle', [-5, -21, 0, 5, 21, 7], sd, paint);
-}
 
 // ------------------------------------------------------------------ boss table (mirrors bosses/BossRoster)
 const BOSS: Record<string, { name: string; model: string }> = {
@@ -367,16 +134,6 @@ interface Row {
 }
 
 const _cv = new THREE.Vector3();
-const M = new Map<string, THREE.Object3D>();
-function piece(name: string, make: () => THREE.Object3D) {
-  let g = M.get(name);
-  if (!g) {
-    g = wrap(make());
-    M.set(name, g);
-  }
-  return g;
-}
-
 export class ProgressLadder {
   private cv = document.createElement('canvas');
   private c: CanvasRenderingContext2D;
@@ -478,35 +235,59 @@ export class ProgressLadder {
     this.tipQ.push(id);
   }
 
-  // ---------------------------------------------------------------- photographs
+  // ---------------------------------------------------------------- pictures (authored pixel sprites)
+  private ledgerCache = new Map<string, Sprite>();
+  /** a canvas as the Sprite shape the paint code uses */
+  private asSprite(key: string, make: () => HTMLCanvasElement): Sprite {
+    let sp = this.ledgerCache.get(key);
+    if (!sp) {
+      const cv = make();
+      sp = { cv, w: cv.width, h: cv.height, bx: 0, by: 0, bw: cv.width, bh: cv.height };
+      this.ledgerCache.set(key, sp);
+    }
+    return sp;
+  }
+  /** the leather strap hanging from its brass buckle */
   private strap() {
-    const w = 18, h = STRAP_L + 18;
-    return this.bank.get('lg:strap', `${w}x${h}`, 58, (): Shot => ({ obj: piece('strap', () => new THREE.Mesh(geoOf(strapModel(), V2), this.bank.material())), w, h, yaw: 0.05, pitch: 0.06, fit: true }));
+    return this.asSprite('strap', () => {
+      const w = ART.strap.w, h = STRAP_L + 18;
+      const cv = document.createElement('canvas');
+      cv.width = Math.max(w, ART.buckle.w);
+      cv.height = h;
+      const g = cv.getContext('2d')!;
+      const sx = Math.round((cv.width - w) / 2);
+      for (let y = 6; y < h; y += ART.strap.h) g.drawImage(sprite(ART.strap), sx, y);
+      g.drawImage(sprite(ART.buckle), Math.round((cv.width - ART.buckle.w) / 2), 0);
+      return cv;
+    });
   }
   private concho(S: number) {
-    return this.bank.get('lg:concho', S, 57, (): Shot => ({ obj: piece('concho', () => new THREE.Mesh(geoOf(conchoModel(), V2), this.bank.material())), w: S, h: S, yaw: 0.18, pitch: 0.14, fit: true }));
+    void S;
+    return this.asSprite('concho', () => sprite(ART.concho_l));
   }
+  /** a pinned parchment tag (the authored torn-parchment frame), its nail at the left or the top */
   private paper(W: number, H: number, pin: 'left' | 'top') {
-    const k = `${W}x${H}${pin}`;
-    return this.bank.get('lg:paper' + k, k, 54, (): Shot => ({
-      obj: piece('paper' + k, () => new THREE.Mesh(geoOf(paperModel(W, H, pin, (W * 7 + H) % 13), V2), this.bank.material())),
-      w: W + 4, h: H + 6, yaw: 0, pitch: 0.04, fit: true,
-    }));
+    return this.asSprite(`paper${W}x${H}${pin}`, () => {
+      const cv = document.createElement('canvas');
+      cv.width = W + 4;
+      cv.height = H + 6;
+      const g = cv.getContext('2d')!;
+      g.drawImage(nine(ART.nine_parch, W, H, 8), 2, 3);
+      const nl = sprite(ART.nail);
+      if (pin === 'left') g.drawImage(nl, 3, Math.round(3 + H / 2 - nl.height / 2));
+      else g.drawImage(nl, Math.round(2 + W / 2 - nl.width / 2), 3);
+      return cv;
+    });
   }
   private cartridge() {
-    return this.bank.get('lg:cart', 'c', 53, (): Shot => ({ obj: piece('cart', () => new THREE.Mesh(geoOf(cartridgeModel(), 4), this.bank.material())), w: 6, h: 12, yaw: 0.3, pitch: 0.1, fit: true }));
+    return this.asSprite('cart', () => sprite(ART.cart));
   }
-  /** a prop model from the game (a map scrap, a blueprint roll) */
-  private prop(name: string, S: number, make: () => { model: any; voxelSize: number }, yaw: number, pitch: number, crop?: { fill: number; dy: number }) {
-    return this.bank.get('lg:' + name, S, 52, (): Shot => ({
-      obj: piece(name, () => {
-        const m = make();
-        return new THREE.Mesh(buildVoxelGeometry(m.model, { voxelSize: m.voxelSize, pivot: 'center' }), this.bank.material());
-      }),
-      w: S, h: S, yaw, pitch, ...(crop ? { fill: crop.fill, dy: crop.dy } : { fit: true }),
-    }));
+  /** the zone badge (a signpost) and the finds badge (a blueprint roll) */
+  private prop(name: string, S: number, ..._rest: unknown[]) {
+    void S;
+    return this.asSprite('prop:' + name, () => sprite(name === 'sign' ? ART.signpost : ART.prize_blueprint));
   }
-  /** the next boss, photographed from its own rig (built once, then let go) */
+  /** the next boss, photographed from its own rig (its portrait in the badge; built once, then let go) */
   private boss(key: string, S: number) {
     return this.bank.get('lg:boss', key + '@' + S, 40, (): Shot | null => {
       const spec = modelEntry(key)?.() as RigSpec | undefined;
@@ -523,33 +304,33 @@ export class ProgressLadder {
       };
     });
   }
-  /** Gobi's turtle house, as the compass's picture */
+  /** Gobi's turtle house, the compass's picture (greyed while he is dug in) */
   private turtle(S: number, grey: boolean) {
-    const sp = this.bank.get('lg:turtle', S, 56, (): Shot | null => {
-      const spec = modelEntry('turtle_house')?.() as RigSpec | undefined;
-      if (!spec?.parts) return null;
-      const rig = new RigInstance(buildRigGeo(spec, 'turtle_house:npc'), { material: this.bank.material() });
-      return { obj: wrap(rig.root), w: Math.round(S * 1.25), h: S, yaw: -0.75, pitch: 0.18, fit: true };
-    });
-    return sp && grey ? variant(sp, 'grey') : sp;
+    void S;
+    return this.asSprite('turtle' + (grey ? ':grey' : ''), () => (grey ? sprite(ART.turtle_house, SWAP_DIM, 'dim') : sprite(ART.turtle_house)));
   }
+  /** the brass compass with its needle turned to one of 16 headings */
   private compass(frame: number) {
-    return this.bank.get('lg:cmp' + frame, 'c', 50, (): Shot => {
-      const g = piece('compass', () => {
-        const body = new THREE.Group();
-        body.add(new THREE.Mesh(geoOf(compassModel(), V2), this.bank.material()));
-        const nd = new THREE.Group();
-        nd.name = 'needle';
-        const nm = new THREE.Mesh(geoOf(needleModel(), 3), this.bank.material());
-        nm.position.z = 2.3 / 4;
-        nd.add(nm);
-        body.add(nd);
-        body.add(framingBox([-3, -3, 0], [3, 4, 1.25]));
-        return body;
-      });
-      const nd = g.getObjectByName('needle');
-      if (nd) nd.rotation.z = -(frame / 16) * TAU;
-      return { obj: g, w: 24, h: 28, yaw: 0, pitch: 0.08, fit: true };
+    return this.asSprite('cmp' + frame, () => {
+      const body = ART.compass, dial = ART.compass_dial;
+      const cv = document.createElement('canvas');
+      cv.width = body.w;
+      cv.height = body.h;
+      const g = cv.getContext('2d')!;
+      g.drawImage(sprite(body), 0, 0);
+      const cx = (body.w - 1) / 2, cy = cx + 5;
+      let R = 0;
+      for (let y = 0; y < dial.h; y++) for (let x = 0; x < dial.w; x++) if (dial.rows[y][x] === 'u') R = Math.max(R, Math.hypot(x - cx, y - cy));
+      const a = (frame / 16) * TAU;
+      // the needle: the north half painted red, the south half tin
+      for (let r = -R; r <= R; r += 0.5) {
+        const x = Math.round(cx + Math.sin(a) * r), y = Math.round(cy - Math.cos(a) * r);
+        g.fillStyle = r > 0 ? HUD_PAL.C : HUD_PAL.Q;
+        g.fillRect(x, y, 1, 1);
+      }
+      g.fillStyle = HUD_PAL.i;
+      g.fillRect(Math.round(cx), Math.round(cy), 1, 1);
+      return cv;
     });
   }
 

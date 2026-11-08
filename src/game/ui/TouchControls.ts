@@ -34,6 +34,7 @@ import type { Qte } from './Qte';
 import type { Hud } from './Hud';
 import { PixelFx, TAU } from './HudKit';
 import { WATCH_DROP } from './OutlawHud';
+import { SOUL_JAR_HIT } from './SoulBar';
 import { PUSH } from '../player/Board';
 import { TouchTutor, tutorSeen } from './TouchTutor';
 
@@ -254,9 +255,10 @@ export class TouchControls {
     // the soul jar with Pinch on the stopper, and the heart under it
     const so = A.soul;
     if (so) {
-      const k = so.k * 1.3;
-      if (Math.abs(hx - so.x) < 12 * k + 3 && hy < so.y - 36 * k && hy > so.y - 58 * k) return { kind: 'pinch' };
-      if (Math.abs(hx - so.x) < 16 * k + 2 && hy <= so.y + 4 && hy >= so.y - 36 * k) return { kind: 'ult' };
+      // the pixel jar is one size: its stopper with Pinch above the shoulder, the jar below
+      const J = SOUL_JAR_HIT;
+      if (Math.abs(hx - so.x) < J.halfW - 2 && hy < so.y - J.body && hy > so.y - J.top) return { kind: 'pinch' };
+      if (Math.abs(hx - so.x) < J.halfW + 2 && hy <= so.y + 4 && hy >= so.y - J.body) return { kind: 'ult' };
     }
     if (near(A.heart.x, A.heart.y - 3, 19)) return { kind: 'ult' };
     for (let i = 0; i < A.items.length; i++) if (near(A.items[i].x, A.items[i].y, 15)) return { kind: 'item', i };

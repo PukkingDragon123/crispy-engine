@@ -50,6 +50,7 @@ import { Codex } from '../meta/Codex';
 import { CodexBook } from '../ui/CodexBook';
 import { WantedPoster, PosterData } from './ResultsScene';
 import { HouseExtras } from './hub/HouseExtras';
+import { HubUI, STATION_CAN, UIHit, pixelBubbleStyle } from './hub/HubUI';
 import type { HubHost } from './hub/HubKit';
 
 /** how he gets home: normally he walks in from the street; after a death he wakes up on the couch */
@@ -504,6 +505,11 @@ export class HubScene implements GameScene {
   private bankToast: HTMLDivElement | null = null;
   /** everything new in the house (hub/HouseExtras): decor, trophies, the 3D wardrobe / bench / rack, the toys */
   private extras: HouseExtras | null = null;
+  /** the hideout's pixel-art screen furniture (bank, station sign, arrows, use plate, controls, tooltips) */
+  private hui: HubUI | null = null;
+  private uiHot: UIHit = null;
+  /** the bank plaque is up (it waits for the wake-up to bank the haul) */
+  private bankUp = true;
 
   constructor(private engine: Engine, private onRide: () => void, private onMenu: () => void, private arrival: HubArrival = {}) {
     this.tip = document.createElement('div');
@@ -1070,7 +1076,8 @@ export class HubScene implements GameScene {
     } else {
       if (wk) lastPoster = wk.result;
       if (lastPoster) this.nailPoster(lastPoster, true);
-      this.go(Math.max(0, this.stations.findIndex((st) => st.id === 'bench')), true);
+      // no walk-in: the hideout opens on the bench, settled (the scene change fades it in)
+      this.settle(Math.max(0, this.stations.findIndex((st) => st.id === 'bench')));
     }
     (window as any).__music?.setMood('hub');
     this.wind = eng.audio.loop('wind_loop', 0.16);
@@ -1085,8 +1092,9 @@ export class HubScene implements GameScene {
     this.prompt.onclick = () => this.act();
     this.hint.style.cssText = "position:absolute;left:50%;bottom:24px;transform:translateX(-50%);z-index:7;pointer-events:none;font-family:'Alagard';font-size:15px;color:#fff3d6;opacity:0;transition:opacity 1.5s;text-shadow:0 2px 0 #2a1408,0 0 8px #000;white-space:nowrap";
     this.hint.textContent = this.touch ? 'Tap the arrows to look around · tap the prompt to use it' : 'A / D or the arrows: look around   ·   E: use   ·   Esc: menu';
-    this.bubble.style.cssText = "position:absolute;z-index:7;pointer-events:none;display:none;transform:translate(-50%,-100%);max-width:260px;padding:8px 12px;background:#f4e6c4;border:3px solid #5a3418;border-radius:14px;box-shadow:0 4px 0 #2a1408;font-family:'Alagard';font-size:16px;color:#2a1a10;text-align:center";
-    eng.overlay.append(this.tip, this.bank, this.title, this.prompt, this.hint, this.bubble);
+    this.bubble.style.cssText = pixelBubbleStyle('max-width:260px');
+    eng.overlay.append(this.bubble);
+    this.hui = new HubUI(eng.overlay);
     setTimeout(() => (this.title.style.opacity = '1'), 900);
     setTimeout(() => (this.title.style.opacity = '0'), 5200);
     setTimeout(() => (this.hint.style.opacity = '0.85'), 4600);
@@ -1182,6 +1190,7 @@ export class HubScene implements GameScene {
 
   private updateBank() {
     const d = loadSave();
+    this.hui?.setBank({ gold: d.bank, runs: d.runs, best: d.bestWave, kills: d.kills });
     this.bank.innerHTML = `BANK: ${d.bank} gold<div style="font-size:15px;color:#fff3d6;opacity:.8">Runs ${d.runs} · Best wave ${d.bestWave} · Outlaws ${d.kills}</div>`;
   }
 
@@ -1482,6 +1491,7 @@ export class HubScene implements GameScene {
     this.go((((this.idx + d) % n) + n) % n);
     const a = this.arrows.find((q) => q.dir === Math.sign(d));
     if (a) a.push = 1;
+    this.hui?.kick(d);
   }
 
   /** swing the camera over to a station on an eased arc while Sundown walks there */
@@ -1554,6 +1564,8 @@ export class HubScene implements GameScene {
   exit() {
     this.panel?.remove();
     for (const el of [this.tip, this.bank, this.title, this.prompt, this.hint, this.bubble, ...this.arrows.map((a) => a.label)]) el.remove();
+    this.hui?.dispose();
+    this.hui = null;
     this.wind?.stop(0.5);
     this.fireLoop?.stop(0.3);
     document.body.style.cursor = 'default';
@@ -1899,6 +1911,7 @@ export class HubScene implements GameScene {
     // the Codex owns the screen while it is open
     if (this.book) {
       this.book.update(rdt);
+      this.drawHUD(rdt, '');
       return;
     }
     if (this.wake) {
@@ -1908,6 +1921,7 @@ export class HubScene implements GameScene {
       this.updateTitle(rdt);
       this.animateLife(t, rdt);
       this.particles.update(rdt, this.scene.fog as THREE.Fog);
+      this.drawHUD(rdt, '');
       return;
     }
     if (inp.wasPressed('Escape')) {
@@ -1934,11 +1948,12 @@ export class HubScene implements GameScene {
     let arrowDir = 0;
     let hit: Station | null = null;
     let duck = false;
+    const uiHit: UIHit = free && this.hui ? this.hui.hit(inp.mouseX, inp.mouseY) : null;
+    this.uiHot = uiHit;
     if (free) {
       this.ray.setFromCamera(new THREE.Vector2(inp.ndcX, inp.ndcY), this.camera);
-      const ah = this.ray.intersectObjects(this.arrows.filter((a) => a.grp.visible).map((a) => a.mesh), false);
-      if (ah.length) arrowDir = this.arrows.find((a) => a.mesh === ah[0].object)?.dir ?? 0;
-      else {
+      if (uiHit === 'l' || uiHit === 'r') arrowDir = uiHit === 'l' ? -1 : 1;
+      else if (!uiHit) {
         const hits = this.ray.intersectObjects(this.stations.flatMap((s) => s.objs), true);
         if (hits.length) {
           let o: THREE.Object3D | null = hits[0].object;
@@ -1952,78 +1967,84 @@ export class HubScene implements GameScene {
         }
       }
     }
-    const hoverKey = arrowDir ? 'a' + arrowDir : duck ? 'duck' : (hit?.id ?? '');
+    const hoverKey = uiHit === 'prompt' ? 'prompt' : arrowDir ? 'a' + arrowDir : duck ? 'duck' : (hit?.id ?? '');
     if (hoverKey !== this.hoverKey) {
       if (hoverKey) eng.audio.play('ui_hover', { volume: 0.25 });
       this.hoverKey = hoverKey;
       document.body.style.cursor = hoverKey ? 'pointer' : 'default';
     }
     this.hoverArrow = arrowDir;
-    const tipText = arrowDir ? '' : duck ? 'Squeeze the duck' : hit ? (hit === this.here ? hit.verb : 'Go to the ' + hit.short.toLowerCase()) : '';
-    if (tipText) {
-      this.tip.textContent = tipText;
-      this.tip.style.display = 'block';
-      this.tip.style.left = `${inp.mouseX + 16}px`;
-      this.tip.style.top = `${inp.mouseY + 12}px`;
-    } else this.tip.style.display = 'none';
+    const tipText = arrowDir || uiHit ? '' : duck ? 'Squeeze the duck' : hit ? (hit === this.here ? hit.verb : 'Go to the ' + hit.short.toLowerCase()) : '';
     if (free && inp.wasPressed('Mouse0')) {
-      if (arrowDir) this.step(arrowDir);
+      if (uiHit === 'prompt') this.act();
+      else if (arrowDir) this.step(arrowDir);
       else if (duck && this.here.id === 'gramophone') this.use({ ...this.here, id: 'duck' });
       else if (hit) {
         if (hit === this.here) this.act();
         else this.go(hit);
       }
     }
-    // ------------------------------------------------ the action prompt under the shot
-    const showPrompt = free && this.arrived;
-    this.prompt.style.opacity = showPrompt ? '1' : '0';
-    this.prompt.style.pointerEvents = showPrompt ? 'auto' : 'none';
-    const st = this.here;
-    const verb = this.extras?.verbFor(st) ?? (st.id === 'gramophone' ? (this.music ? 'Hush the record' : 'Play a record') : st.verb);
-    const key = this.touch ? 'TAP' : 'E';
-    const html = `<span style="display:inline-block;padding:1px 9px;margin-right:10px;background:#e8d4a4;color:#2a1a10;border:3px solid #2a1408;box-shadow:0 3px 0 #2a1408">${key}</span>${verb.toUpperCase()}`;
-    if (this.prompt.innerHTML !== html) this.prompt.innerHTML = html;
-
     // ------------------------------------------------ the house breathes
     this.animateLife(t, rdt);
     this.extras?.update(t, rdt);
     this.particles.update(rdt, this.scene.fog as THREE.Fog);
     this.stepMoveArt();
+    // ------------------------------------------------ the screen furniture (after the stations had their say)
+    this.drawHUD(rdt, tipText);
+  }
+
+  /** the pixel-art layer: what the hideout shows on screen this frame */
+  private drawHUD(rdt: number, tipText: string) {
+    const ui = this.hui;
+    if (!ui) return;
+    const inp = this.engine.input;
+    const ex = this.extras;
+    const busy = !!ex?.busy;
+    const settled = !busy && !this.panel && !this.intro && this.arrived;
+    const st = this.here;
+    const n = this.stations.length;
+    const nb = (d: number) => this.stations[(((this.idx + d) % n) + n) % n];
+    const verb = ex?.verbFor(st) ?? (st.id === 'gramophone' ? (this.music ? 'Hush the record' : 'Play a record') : st.verb);
+    const hint = busy ? (ex?.uiHint ?? '') : this.touch ? 'Tap an arrow: look around   ·   tap the plate: use it' : 'A / D: look around   ·   E: use   ·   Esc: menu';
+    const tip = busy ? (ex?.uiTip ?? null) : tipText ? { text: tipText, x: inp.mouseX, y: inp.mouseY } : null;
+    ui.frame(rdt, {
+      hidden: !!this.book || !!this.panel,
+      bank: this.bankUp && !this.book,
+      station: settled && !this.wake ? { id: st.id, title: st.title, sub: st.sub, can: STATION_CAN[st.id] ?? [] } : null,
+      arrows: !busy && !this.panel && !this.intro && !this.wake && n > 1 ? { left: nb(-1).short, right: nb(1).short } : null,
+      prompt: settled && !this.wake ? { key: this.touch ? 'TAP' : 'E', verb } : null,
+      hint: this.wake ? '' : hint,
+      tip: this.wake ? null : tip,
+    }, this.uiHot);
+  }
+
+  /** open straight on a station, settled: no walk in, no swing (the scene change fades it up) */
+  private settle(i: number) {
+    const st = this.stations[i];
+    if (!st) return;
+    this.idx = i;
+    this.pos.copy(st.stand);
+    this.yaw = st.face;
+    this.route = [];
+    this.mv = null;
+    this.intro = false;
+    this.atK = 1;
+    const shot = this.shotOf(st);
+    this.baseP.copy(shot.pos);
+    this.baseL.copy(shot.look);
+    this.camPos.copy(shot.pos);
+    this.camLook.copy(shot.look);
+    this.camera.position.copy(shot.pos);
+    this.camera.lookAt(shot.look);
+    this.camera.fov = shot.fov;
+    this.camera.updateProjectionMatrix();
   }
   private hoverKey = '';
 
   /** the two carved arrow signs ride at the screen's edges, a hand's breadth in front of the lens */
+  /** the screen furniture is the pixel-art layer (hub/HubUI.ts); the 3D group only carries what rides with the lens */
   private buildUI() {
-    const s = this.scene;
-    s.add(this.ui);
-    for (const dir of [-1, 1] as const) {
-      const sm = safe(() => WS.arrowSign(dir));
-      const g = geoOf(sm, 'center');
-      if (!sm || !g) continue;
-      const mat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false });
-      const mesh = new THREE.Mesh(bakeUILight(g), mat);
-      mesh.renderOrder = 6;
-      const grp = new THREE.Group();
-      grp.add(mesh);
-      grp.visible = false;
-      this.ui.add(grp);
-      this.arrowScale = 0.19 / sm.meta.length;
-      const label = document.createElement('div');
-      label.style.cssText = "position:absolute;z-index:7;pointer-events:auto;cursor:pointer;transform:translate(-50%,0);font-family:'Alagard';font-size:15px;color:#fff3d6;text-shadow:0 2px 0 #2a1408,0 0 8px #000;white-space:nowrap;opacity:0";
-      label.onmousedown = (e) => e.stopPropagation();
-      label.onclick = () => this.step(dir);
-      this.engine.overlay.appendChild(label);
-      this.arrows.push({ dir, grp, mesh, mat, hover: 0, push: 0, label });
-    }
-    this.titleMat = new THREE.MeshBasicMaterial({ vertexColors: true, fog: false });
-    this.titleMat.color.setScalar(1.18);
-    for (const st of this.stations) {
-      this.titles.set(st.id, voxelTitle(st.title, 0.08, this.titleMat));
-      const sub = new FloatText3D(st.sub, { size: 0.03, px: 48, cps: 34, wrap: 60, align: 'left', hdr: 1.15, color: '#fff3d6', glow: '#ffb070' });
-      sub.show(false);
-      s.add(sub.mesh);
-      this.subs.set(st.id, sub);
-    }
+    this.scene.add(this.ui);
   }
 
   private placeUI(t: number, rdt: number) {
@@ -2546,6 +2567,7 @@ export class HubScene implements GameScene {
     this.nailPoster(res, false);
     this.title.style.display = 'none';
     for (const e of [this.hint, this.prompt, this.bank]) e.style.visibility = 'hidden';
+    this.bankUp = false;
     this.wakeCam = { pos: new THREE.Vector3(fc.x + 0.05, 1.74, fc.z + 2.1), look: new THREE.Vector3(fc.x + 0.25, sy + 0.2, fc.z + 0.05), fov: 44 };
     this.updateWake(0);
   }
@@ -2671,7 +2693,11 @@ export class HubScene implements GameScene {
   private showBank(n: number) {
     this.updateBank();
     this.bank.style.visibility = '';
+    this.bankUp = true;
     if (!n) return;
+    this.hui?.toast(`+${n} GOLD BANKED`);
+    this.engine.audio.play('gold_burst', { volume: 0.7 });
+    if (this.hui) return;
     const el = document.createElement('div');
     el.style.cssText = "position:absolute;left:50%;top:13vh;transform:translate(-50%,8px);z-index:9;pointer-events:none;font-family:'Alagard';font-size:30px;color:#ffd36b;opacity:0;transition:opacity .5s,transform .8s cubic-bezier(.2,.7,.2,1);text-shadow:0 3px 0 #2a1408,0 0 16px rgba(255,180,80,.5);white-space:nowrap";
     el.textContent = `+${n} GOLD BANKED`;
@@ -2711,6 +2737,7 @@ export class HubScene implements GameScene {
     this.gasp = 0;
     this.title.style.display = '';
     for (const e of [this.hint, this.prompt, this.bank]) e.style.visibility = '';
+    this.bankUp = true;
     const hearth = this.stations.find((s) => s.id === 'hearth') ?? this.stations[0];
     this.go(hearth);
     // round behind Mama's chair (between it and the fire) rather than through the coffee table

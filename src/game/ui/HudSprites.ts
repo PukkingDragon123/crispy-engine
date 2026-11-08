@@ -1,17 +1,12 @@
-// The run HUD's sprite bank: every picture on the HUD (the revolver cylinder,
-// shells, drum, soul jar, heart, tin star, tally board, wave plaque, stopwatch,
-// tarot frames, guns, treasure, gear, items) is a PHOTOGRAPH of the game's own
-// 3D model taken once by the IconFactory at the exact HUD-pixel size it is
-// shown at, then finished as flat pixel art: posterised onto one limited warm
-// palette (the pixel UI kit's ramps), with IconFactory's chunky ink outline and
-// warm rim light. The pictures are blitted into the 2D HUD canvas on its integer
-// pixel grid (nearest-neighbour upscale), so the whole HUD is one crisp layer,
-// the same as the BOUNTY plank. Things that move are flip-books (several
-// captures) or layers composited in 2D; nothing is re-photographed per frame.
-//
-// Captures are queued (highest priority first) and taken a few per frame from
-// Hud3D.render(); a piece shows the last picture it had (any size) until the new
-// one is ready, so a window resize never blinks. The cache lives for the session.
+// Shared helpers for the run HUD's pixel layer:
+//  • blitObj / blitSquashObj / blitShearObj: a piece as a physical object (its hard
+//    pixel shadow down-right, lifted further the higher it rises), glint(): light
+//    catching a bright edge, variant(): post-processed copies (shadow, flash, dim).
+//  • pixelText(): Alagard at any size as hard-edged pixel type.
+//  • SpriteBank: the few HUD pictures that are still photographs of the game's own 3D
+//    models (the next boss's portrait on the trail ledger), taken once by the
+//    IconFactory at their exact HUD-pixel size and posterised onto a warm palette.
+// The HUD's pieces themselves are authored pixel sprites (HudArt.ts, PixelUI.sprite).
 import * as THREE from 'three';
 import { IconFactory } from './IconFactory';
 import { UI } from './PixelUI';

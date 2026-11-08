@@ -19,6 +19,9 @@
 import type { Input, Action } from '../../engine/Input';
 import type { AudioEngine } from '../../engine/audio/AudioEngine';
 import { isTouchDevice } from './TouchControls';
+import { nine, SWAP_DIM } from './PixelUI';
+import { HUD_ART } from './HudArt';
+import { variant } from './HudSprites';
 
 export type QteResult = 'perfect' | 'good' | 'fail';
 export type QuickResult = QteResult | 'skip';
@@ -540,15 +543,12 @@ export class Qte {
   private track(cx: number, cy: number, w: number, zone: number, perfect: number, x: number, inside: boolean) {
     const c = this.ctx;
     const x0 = Math.round(cx - w / 2), y0 = cy - 5;
-    // a dropped shadow, then the frame: ink, dark leather well, a lit top lip
-    c.fillStyle = 'rgba(26,14,6,0.45)';
-    c.fillRect(x0 - 1, y0 + 1, w + 4, 14);
-    c.fillStyle = INK;
-    c.fillRect(x0 - 2, y0 - 2, w + 4, 14);
-    c.fillStyle = '#3e2414';
-    c.fillRect(x0 - 1, y0 - 1, w + 2, 12);
-    c.fillStyle = '#5e3820';
-    c.fillRect(x0 - 1, y0 - 1, w + 2, 1);
+    // the authored gauge well (brass-riveted frame round dark leather) and its dropped shadow
+    const well = nine(HUD_ART.nine_track, w + 8, 18, 5);
+    c.globalAlpha = 0.4;
+    c.drawImage(variant(well, 'shadow'), x0 - 3, y0 - 2);
+    c.globalAlpha = 1;
+    c.drawImage(well, x0 - 4, y0 - 4);
     // tick marks every tenth
     c.fillStyle = '#80502c';
     for (let i = 1; i < 10; i++) c.fillRect(x0 + Math.round((w * i) / 10), y0 + 7, 1, 3);
@@ -613,18 +613,9 @@ export class Qte {
       cv.width = w + 2;
       cv.height = h + 4;
       const c = cv.getContext('2d')!;
-      const face = mode === 'done' ? '#3e8f78' : mode === 'idle' ? '#bfae88' : '#efe0bc';
-      const lip = mode === 'done' ? '#22594a' : mode === 'idle' ? '#8a7656' : '#a8875a';
-      // ink outline with rounded corners, a face, a lit top edge and a deep bottom lip
-      c.fillStyle = INK;
-      c.fillRect(1, 0, w, h + 4);
-      c.fillRect(0, 1, w + 2, h + 2);
-      c.fillStyle = lip;
-      c.fillRect(1, 1, w, h + 2);
-      c.fillStyle = face;
-      c.fillRect(1, 1, w, h - 1);
-      c.fillStyle = 'rgba(255,255,255,0.55)';
-      c.fillRect(2, 1, w - 2, 1);
+      // the HUD's authored key cap (bone face, lit top, deep lip); answered keys turn jade, waiting ones sink
+      const swap = mode === 'done' ? { u: '#9ff0c8', t: '#3e8f78', s: '#2f7a64', r: '#22594a', q: '#163f34' } : mode === 'idle' ? SWAP_DIM : undefined;
+      c.drawImage(nine(HUD_ART.nine_key, w + 2, h + 4, 5, swap), 0, 0);
       c.font = `16px 'Alagard'`;
       c.textAlign = 'center';
       c.textBaseline = 'top';

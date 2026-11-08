@@ -73,6 +73,9 @@ export class HouseExtras {
   juke: Jukebox;
   bubble: HeroBubble;
   mode: Mode | null = null;
+  /** what the hideout's pixel layer shows for the station that owns the screen: its controls and the hover tag */
+  uiHint = '';
+  uiTip: { text: string; x: number; y: number } | null = null;
   private tip = document.createElement('div');
   private hintEl = document.createElement('div');
   private hover: Pick | null = null;
@@ -99,7 +102,7 @@ export class HouseExtras {
     resetJobs();
     this.tip.style.cssText = HUD_CSS + ';display:none;font-size:17px;z-index:9';
     this.hintEl.style.cssText = HUD_CSS + ';left:50%;bottom:24px;transform:translateX(-50%);font-size:16px;opacity:0;transition:opacity .4s';
-    h.engine.overlay.append(this.tip, this.hintEl);
+    // (the tag and the controls line are drawn by the pixel layer now: uiTip / uiHint)
   }
 
   build(k: BuildKit) {
@@ -263,6 +266,7 @@ export class HouseExtras {
       } else this.lifted.set(o, nk);
     }
     const tipText = hov?.tip() ?? '';
+    this.uiTip = tipText ? { text: tipText, x: inp.mouseX, y: inp.mouseY } : null;
     if (tipText) {
       this.tip.textContent = tipText;
       this.tip.style.display = 'block';
@@ -272,6 +276,7 @@ export class HouseExtras {
     const hubHint = (this.h as unknown as { hint: HTMLDivElement }).hint;
     if (hubHint) hubHint.style.visibility = this.mode ? 'hidden' : '';
     const hint = this.mode?.hint() ?? '';
+    this.uiHint = hint;
     if (this.hintEl.textContent !== hint) this.hintEl.textContent = hint;
     this.hintEl.style.opacity = hint ? '0.92' : '0';
     // ---- the camera

@@ -1,15 +1,14 @@
-// The ability bar: tarot cards fanned at the bottom right of the HUD — the
-// three active skills (I Magician, XVI Tower, XIX Sun) and the big XIII Death
-// ultimate — as flat pixel art on the HUD grid. Each card is the sculpted
-// gilded relief frame (props/tarot.ts) photographed face and back by the sprite
-// bank (HudSprites), with the art window carrying the CardStudio photograph of
-// the card's diorama, shrunk to the window's pixels and posterised onto the HUD
-// palette. Faces are photographed progressively (time-sliced; the cards are dealt
-// face-down and turn over as their art is ready). Cooldown is sand pouring back
-// into the art from the bottom (the sleeping part greyed, a glowing sand line);
-// a ready card shines; the mouse lifts the card under it; on use a card pops,
-// turns over to show its sculpted back (a 2D squash turn) and throws
-// skill-themed 2D pixel-art particles.
+// The ability bar: tarot cards fanned at the bottom right of the HUD — the three
+// active skills (I Magician, XVI Tower, XIX Sun) and the big XIII Death ultimate — as
+// stylized pixel art on the HUD grid. Each card is an authored pixel frame (HudArt.ts:
+// a gilt border on ivory card stock with numeral and title plates; the back oxblood
+// with a gilt lattice round Serket's lapis medallion), its art window carrying the
+// CardStudio painting of the card's diorama shrunk to the window's pixels. Faces are
+// painted progressively (time-sliced; the cards are dealt face down and turn over as
+// their art is ready). Cooldown is sand pouring back into the art from the bottom (the
+// sleeping part greyed, a glowing sand line); a ready card shines; the mouse lifts the
+// card under it; on use a card pops, turns over to show its back (a 2D squash turn)
+// and throws skill-themed 2D pixel-art particles.
 // A hunt starts with the three skill cards SEALED: they lie face down, dimmed,
 // with no key cap, until the skill is learned from a rank-up card; then the
 // card leaps, turns over in a full flourish and bursts with its own particles.
@@ -23,8 +22,9 @@ import { CardStudio } from './CardStudio';
 import { Kit, TAROT_BAR, TarotDef, TarotFx } from './TarotCards';
 import { CARD, tarotFrame } from '../models/props/tarot';
 import { isSkillLearned } from '../player/Skills';
-import { SpriteBank, Shot, Sprite, blitC, blitSquash, blitShear, shadowOffset, variant, wrap, palNearest } from './HudSprites';
-import { UI, keycap, text, px } from './PixelUI';
+import { blitC, blitSquash, blitShear, shadowOffset, variant, palNearest } from './HudSprites';
+import { HUD_ART as ART, HUD_ART_META } from './HudArt';
+import { UI, keycap, text, px, sprite, SWAP_DIM } from './PixelUI';
 import { isTouchDevice } from './TouchControls';
 
 /** photo size of the 66×88-voxel art window */
@@ -223,23 +223,6 @@ const WIN = CARD.win;
 /** art window in frame-local voxel units (pivot at the card centre, y up) */
 const ART_RECT = { x: (WIN.x0 + WIN.x1 + 1) / 2 - FW / 2, y: (WIN.y0 + WIN.y1 + 1) / 2 - FH / 2, w: WIN.x1 - WIN.x0 + 1, h: WIN.y1 - WIN.y0 + 1 };
 
-/** the sculpted frame, built once and only ever photographed */
-let frameRig: THREE.Group | null = null;
-function frame() {
-  if (frameRig) return frameRig;
-  const fr = tarotFrame();
-  const g = new THREE.Group();
-  // a tenth scale: the IconFactory's lens only reaches 200 units
-  const V = 0.1;
-  g.add(new THREE.Mesh(buildVoxelGeometry(fr.model, { voxelSize: V, pivot: fr.pivot }), SpriteBank.get().material()));
-  // card-stock core inside the slab so a crack in the relief never shows through
-  const core = new THREE.Mesh(new THREE.PlaneGeometry((FW - 0.6) * V, (FH - 0.6) * V), new THREE.MeshStandardMaterial({ color: 0xb8a078, roughness: 0.9, side: THREE.DoubleSide }));
-  core.position.z = -0.5 * V;
-  g.add(core);
-  frameRig = wrap(g);
-  return frameRig;
-}
-
 /** area-average a photograph down to w×h, then posterise it onto the HUD palette */
 function shrinkArt(src: HTMLCanvasElement, w: number, h: number) {
   const sc = src.getContext('2d', { willReadFrequently: true })!;
@@ -288,7 +271,6 @@ export class TarotBar {
   private started = false;
   private add = new PixelSparks(700, true, 61);
   private norm = new PixelSparks(500, false, 60);
-  private bank = SpriteBank.get();
   private t = 0;
   private lastUlt = 0;
   private pr = 1;
@@ -392,19 +374,19 @@ export class TarotBar {
   }
 
   // ---------------------------------------------------------------- pictures
+  /** the authored card frame for this size: face (with its art window) or back */
   private frameSprite(back: boolean, big: boolean, ck: number) {
-    const w = Math.round(46 * ck * (big ? 1.22 : 1)) + 2, h = Math.round(74.75 * ck * (big ? 1.22 : 1)) + 2;
-    return this.bank.get(`tarot:${back ? 'back' : 'face'}:${big ? 'z' : 'n'}`, `${w}x${h}`, back ? 63 : 59, (): Shot => ({ obj: frame(), w, h, yaw: back ? Math.PI : 0, pitch: 0.04, fit: true }));
+    const size = ck < 0.75 ? (big ? '29x47' : '24x39') : big ? '56x92' : '46x75';
+    const def = ART[`card_${back ? 'back' : 'face'}_${size}`];
+    const win = (HUD_ART_META as Record<string, unknown>)[`card_win_${size}`] as [number, number, number, number];
+    return { cv: sprite(def), w: def.w, h: def.h, win, key: size };
   }
 
-  /** the face at this size: the frame photograph with the shrunk diorama in its window */
-  private faceOf(c: CardObj, fr: Sprite) {
+  /** the face at this size: the authored frame with the diorama shrunk into its window */
+  private faceOf(c: CardObj, fr: { cv: HTMLCanvasElement; w: number; h: number; win: [number, number, number, number]; key: string }) {
     if (!c.art) return null;
-    const key = `${fr.w}x${fr.h}`;
-    if (c.face?.key === key) return c.face;
-    const wx = Math.round(fr.bx + (WIN.x0 / FW) * fr.bw), wx1 = Math.round(fr.bx + ((WIN.x1 + 1) / FW) * fr.bw);
-    const wy = Math.round(fr.by + ((FH - 1 - WIN.y1) / FH) * fr.bh), wy1 = Math.round(fr.by + ((FH - WIN.y0) / FH) * fr.bh);
-    const ww = Math.max(2, wx1 - wx), wh = Math.max(2, wy1 - wy);
+    if (c.face?.key === fr.key) return c.face;
+    const [wx, wy, ww, wh] = fr.win;
     const art = shrinkArt(c.art, ww, wh);
     const dim = variant(variant(art, 'grey'), 'dim');
     const cv = document.createElement('canvas');
@@ -413,7 +395,7 @@ export class TarotBar {
     const g = cv.getContext('2d')!;
     g.drawImage(fr.cv, 0, 0);
     g.drawImage(art, wx, wy);
-    c.face = { key, cv, art, dim, win: [wx, wy, ww, wh] };
+    c.face = { key: fr.key, cv, art, dim, win: [wx, wy, ww, wh] };
     return c.face;
   }
 
@@ -478,7 +460,9 @@ export class TarotBar {
     // the cardAnchors below follow, so the touch layer's hit-tests stay in sync
     const ck = Math.max(0.48, Math.min(1, W / 620, H / 340));
     this.cardK = ck;
-    const cw = 46 * ck, ch = 74.75 * ck;
+    // the authored card sizes: full from ck 0.75 up, the small cut on a phone
+    const smallCards = ck < 0.75;
+    const cw = smallCards ? 24 : 46, ch = smallCards ? 39 : 75;
     const n = this.cards.length;
     const locked = !!document.pointerLockElement;
     const draws: (() => void)[] = [];
@@ -494,10 +478,10 @@ export class TarotBar {
       card.lastCharges = charges;
       // sealed until learned; learning it turns the card over with a flourish
       const sealed = !isSkillLearned(card.def.key);
-      const big = ult ? 1.22 : 1;
+      const big = ult ? (smallCards ? 47 / 39 : 92 / 75) : 1;
       const front = this.frameSprite(false, ult, ck);
       const back = this.frameSprite(true, ult, ck);
-      const face = front ? this.faceOf(card, front) : null;
+      const face = this.faceOf(card, front);
       if (card.locked && !sealed) {
         card.unlock = 1;
         card.pop = 1;
@@ -552,7 +536,7 @@ export class TarotBar {
       draws.push(() => {
         let pic: HTMLCanvasElement | null = null;
         if (showFace && face) pic = this.liveFace(card, face, frac);
-        else if (back) pic = card.locked ? variant(back, 'dim') : back.cv;
+        else pic = card.locked ? sprite(ART[`card_back_${back.key}`], SWAP_DIM, 'dim') : back.cv;
         if (!pic) return;
         const sx = Math.max(0.08, Math.abs(cs)) * (1 + swell);
         const tilt = fan + Math.sin(this.t * 0.9 + i) * 0.02;

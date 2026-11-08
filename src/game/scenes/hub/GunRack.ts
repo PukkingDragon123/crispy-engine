@@ -206,8 +206,9 @@ export class TextCard {
     this.cv.height = Math.max(16, Math.round((px * h) / w));
     this.tex = new THREE.CanvasTexture(this.cv);
     this.tex.colorSpace = THREE.SRGBColorSpace;
-    this.tex.anisotropy = 4;
-    const mat = new THREE.MeshStandardMaterial({ map: this.tex, transparent: true, roughness: 0.92, metalness: 0, depthWrite: false });
+    this.tex.anisotropy = 8;
+    // unlit ink: the type keeps its exact colour and edge whatever the light on the card
+    const mat = new THREE.MeshBasicMaterial({ map: this.tex, transparent: true, depthWrite: false, toneMapped: false });
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
     this.mesh.renderOrder = 2;
   }
@@ -289,7 +290,7 @@ export function hangingTag(scale = 1) {
   m.position.copy(top).negate();
   grp.add(m);
   const [w, h] = ts.meta.size as [number, number];
-  const card = new TextCard(w, h, 256);
+  const card = new TextCard(w, h, 384);
   card.mesh.position.set(...(ts.meta.face as [number, number, number])).sub(top);
   // meta.face sits mid-card: half a voxel (1/96) out to the printed face, and a hair proud of it
   card.mesh.position.z += 0.5 / 96 + 0.0015;
@@ -422,7 +423,7 @@ export class GunRack {
         const grp = new THREE.Group();
         grp.add(meshOf(pg, sharedVoxelMaterial, false));
         const bb = pg.boundingBox!;
-        const card = new TextCard((bb.max.x - bb.min.x) * 0.8, (bb.max.y - bb.min.y) * 0.72, 384);
+        const card = new TextCard((bb.max.x - bb.min.x) * 0.84, (bb.max.y - bb.min.y) * 0.8, 512);
         card.mesh.position.z = bb.max.z + 0.0012;
         grp.add(card.mesh);
         grp.position.copy(b.plate).setZ(b.plate.z - bb.min.z + 0.0005);
@@ -435,7 +436,7 @@ export class GunRack {
     this.plateText(b);
     // ---- the tag on the bay: what it is and how it rides
     if (own && !b.tag) {
-      const t = hangingTag(0.8);
+      const t = hangingTag(0.95);
       if (t) {
         t.grp.position.copy(b.peg);
         this.h.scene.add(t.grp);
@@ -451,7 +452,7 @@ export class GunRack {
   }
   private plateText(b: Bay) {
     const own = this.owned(b.g);
-    b.plateCard?.set([{ t: own ? GUNS[b.g].name.replace(/^The /, '').toUpperCase() : '?   ?   ?', size: 0.62, color: own ? '#2c1c0a' : '#2a2a1c', emboss: true }], 0.04);
+    b.plateCard?.set([{ t: own ? GUNS[b.g].name.replace(/^The /, '').toUpperCase() : '?   ?   ?', size: 0.72, color: own ? '#24160a' : '#22221a', emboss: true }], 0.03);
   }
   /** the tags' words (call after the sling changes) */
   refreshTags() {
@@ -459,9 +460,9 @@ export class GunRack {
       if (!b.tag) continue;
       const carried = b.g === 'revolver' || Blueprints.guns().find((q) => q.id === b.g)?.carried;
       b.tag.card.set([
-        { t: GUNS[b.g].title.toUpperCase(), size: 0.3, color: '#7a2a16' },
-        { t: b.g === 'revolver' ? 'on my hip' : carried ? 'on the sling' : 'stays home', size: 0.3 },
-      ], 0.08);
+        { t: GUNS[b.g].title.toUpperCase(), size: 0.34, color: '#7a2a16' },
+        { t: b.g === 'revolver' ? 'on my hip' : carried ? 'on the sling' : 'stays home', size: 0.36 },
+      ], 0.05);
     }
   }
   /** the owned upgrades as live cartridges on the shelf, the moon clip beside them when it is fitted */
