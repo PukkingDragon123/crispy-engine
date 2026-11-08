@@ -30,7 +30,7 @@ import { blueprintPhoto } from '../../ui/BlueprintReveal';
 import { loadSave, writeSave, owns, buy, PRICES, GUN_PARTS, GUN_PERKS, GunLoadout } from '../../meta/Save';
 import { BuildKit, HubHost, HubStation, HeroBubble, PriceLock, safe, geoOf, meshOf, reach, ease, clamp01, sstep, stepJob, nailGeo } from './HubKit';
 import { GunRack, GunKey, RACK_ORDER, REV_DEFAULT, Display, Q_FLAT, buildDisplay, poseBox, scaleOf, slotPieces, slotBoxes, diffZones, gunSpec, revolverLaserMesh, TextCard } from './GunRack';
-import { GunsmithUI, SmithHit, SmithView, SmithStat, SmithOption } from './GunsmithUI';
+import { GunsmithUI, SmithHit, SmithView, SmithStat, SmithOption, RackInfo } from './GunsmithUI';
 import { RuneCircle, shellMaterial, decompose, Component, ExplodeLayout, gunSchematic, JADE, GOLD } from './GunsmithFX';
 import type { Mode, Pick, View } from './HouseExtras';
 
@@ -253,10 +253,11 @@ export class Bench3D implements Mode {
     // ---- the gunsmith's panels and magic
     this.smith = new GunsmithUI(this.h.engine.overlay);
     this.rune = new RuneCircle(0.3);
-    this.rune.grp.position.set(this.ttAt.x, this.top + 0.008, this.ttAt.z);
+    const F = this.floatAt();
+    this.rune.grp.position.set(F.x, F.y - 0.3, F.z - 0.04);
     this.h.scene.add(this.rune.grp);
     this.aura = new THREE.PointLight(JADE, 0, 1.1, 2);
-    this.aura.position.set(this.ttAt.x, this.ttAt.y + this.felt + 0.28, this.ttAt.z + 0.05);
+    this.aura.position.set(F.x, F.y - 0.12, F.z + 0.12);
     this.h.scene.add(this.aura);
     this.paperJob = this.makePapers();
   }
@@ -429,6 +430,7 @@ export class Bench3D implements Mode {
       pin.position.set(zn.lo.x - 0.002, zn.c.y, zn.c.z);
       pin.rotation.z = Math.PI / 2;
       pin.scale.setScalar(0.8 / d.hold.scale.x);
+      pin.visible = false;
       d.root.add(pin);
       this.spots.push({ slot, c: zn.c.clone(), lo: zn.lo.clone(), hi: zn.hi.clone(), pin });
     }
@@ -590,6 +592,16 @@ export class Bench3D implements Mode {
       busy: !!this.fly,
     };
   }
+  /** the card beside the rack for the gun you are looking at (while you browse) */
+  private rackInfo(): RackInfo | null {
+    if (this.state !== 'rack' || this.done || this.rack.focus === null || !this.st) return null;
+    const g = RACK_ORDER[this.rack.focus];
+    const found = this.rack.owned(g);
+    if (!found) return { name: '? ? ?', title: 'An empty cradle', status: 'Not found yet', desc: 'Its shape is still in the dust on the boards. Somewhere out in the dunes there is a blueprint for it.', fitted: [], found };
+    const carried = g === 'revolver' || Blueprints.guns().find((q) => q.id === g)?.carried;
+    const fitted = this.slotIds(g).map((sl) => this.allOptions(g, sl).find((o) => o.state === 'fitted')).filter((o): o is Opt => !!o && (!!o.def || (!!o.gold && o.gold !== (REV_DEFAULT as unknown as Record<string, string>)[o.key.split(':')[1]]))).map((o) => o.name);
+    return { name: GUNS[g].name, title: GUNS[g].title, status: g === 'revolver' ? 'On my hip' : carried ? 'On the sling' : 'Stays home', desc: GUNS[g].desc, fitted, found };
+  }
   /** the schematic photograph for what is shown (shot once a choice has held for a moment, then kept) */
   private schematicFor(g: GunKey, slot: string, o: Opt) {
     const key = `${g}:${this.configKey(g)}:${slot}:${o.key}`;
@@ -720,10 +732,12 @@ export class Bench3D implements Mode {
     this.rune?.update(rdt, on, this.t);
     this.auraK += ((on ? 1 : 0) - this.auraK) * (1 - Math.exp(-rdt * 2.5));
     if (this.aura) this.aura.intensity = this.auraK * (0.55 + Math.sin(this.t * 2.3) * 0.12);
-    if (this.auraK > 0.4 && Math.random() < rdt * 9) {
-      const a = Math.random() * Math.PI * 2, r = 0.2 + Math.random() * 0.1;
-      this.h.particles.emit({ pos: { x: this.ttAt.x + Math.cos(a) * r, y: this.top + 0.02, z: this.ttAt.z + Math.sin(a) * r }, count: 1, vel: { x: 0, y: 0.06, z: 0 }, spread: 0.02, life: [1.6, 2.8], size: [0.012, 0.003], sprite: 'spark', color: [JADE, GOLD], additive: true, gravity: -0.05 });
+    if (this.auraK > 0.4 && Math.random() < rdt * 10) {
+      const a = Math.random() * Math.PI * 2, r = 0.12 + Math.random() * 0.2;
+      const F = this.floatAt();
+      this.h.particles.emit({ pos: { x: F.x + Math.cos(a) * r, y: F.y - 0.29, z: F.z - 0.04 + Math.sin(a) * r * 0.6 }, count: 1, vel: { x: 0, y: 0.07, z: 0 }, spread: 0.02, life: [1.6, 2.8], size: [0.012, 0.003], sprite: 'spark', color: [JADE, GOLD], additive: true, gravity: -0.05 });
     }
+    if (this.board) this.board.grp.visible = this.state !== 'work' && this.state !== 'down';
     // exploded view: the components fly apart along their axes (staggered), the gun itself steps aside
     const want = this.exploded && this.state === 'work' && !this.fly ? 1 : 0;
     this.explodeK += (want - this.explodeK) * (1 - Math.exp(-rdt * (want ? 2.6 : 4)));
@@ -982,17 +996,18 @@ export class Bench3D implements Mode {
     this.layout();
   }
   /** where a gun lies on the turntable (world) */
-  private benchPose(d: Display) {
+  /** where the gun floats over the turntable while you work on it: in front of the lamp, at the lens' height */
+  private floatAt() {
+    return this.ttAt.clone().add(new THREE.Vector3(0, 0.55, 0.3));
+  }
+  /** the gun's pose floating over the turntable: upright, its right flank to you, turned by the platter's spin (world) */
+  private benchPose(d: Display, spin = 0, bob = 0) {
     const s = scaleOf(d.g, 'bench');
-    const box = poseBox(d, Q_FLAT, s);
-    const c = box.getCenter(new THREE.Vector3());
-    const top = this.tt?.nodes['top'];
-    if (!top || !this.tt) return { p: new THREE.Vector3(-c.x, this.felt - box.min.y, -c.z).add(this.ttAt), q: Q_FLAT.clone(), s };
-    // lined up with the bench at rest whatever way the platter was set down, then turned with the platter
-    const yaw0 = this.tt.root.quaternion.clone().invert();
-    const local = new THREE.Vector3(-c.x, this.feltTop - box.min.y + 0.002, -c.z).applyQuaternion(yaw0);
-    top.updateWorldMatrix(true, false);
-    return { p: top.localToWorld(local), q: top.getWorldQuaternion(new THREE.Quaternion()).multiply(yaw0.multiply(Q_FLAT)), s };
+    const c0 = poseBox(d, Q_SIDE, s).getCenter(new THREE.Vector3());
+    const r = new THREE.Quaternion().setFromAxisAngle(_up, spin);
+    const p = this.floatAt().sub(c0.applyQuaternion(r));
+    p.y += bob;
+    return { p, q: r.multiply(Q_SIDE), s };
   }
 
   view(): View | null {
@@ -1010,10 +1025,12 @@ export class Bench3D implements Mode {
     }
     const T = this.ttAt;
     const rev = (this.work?.g ?? this.sel) === 'revolver';
-    const k = 1 + this.explodeK * 0.18;
+    void T;
+    const F = this.floatAt();
+    const k = 1 + this.explodeK * 0.22;
     return rev
-      ? { pos: new THREE.Vector3(T.x + 0.02, T.y + 0.95 * k, T.z + 0.82 * k), look: new THREE.Vector3(T.x - 0.02, T.y + this.felt + 0.03, T.z - 0.02), fov: 40 }
-      : { pos: new THREE.Vector3(T.x + 0.02, T.y + 1.3 * k, T.z + 1.12 * k), look: new THREE.Vector3(T.x - 0.02, T.y + this.felt + 0.03, T.z - 0.03), fov: 40 };
+      ? { pos: F.clone().add(new THREE.Vector3(0, 0.1, 1.0 * k)), look: F.clone().add(new THREE.Vector3(0, -0.03, 0)), fov: 40 }
+      : { pos: F.clone().add(new THREE.Vector3(0, 0.14, 1.52 * k)), look: F.clone().add(new THREE.Vector3(0, -0.03, 0)), fov: 40 };
   }
   step(d: number) {
     if (this.state === 'rack') this.focusTo((this.rack.focus ?? 1) + d);
@@ -1173,12 +1190,7 @@ export class Bench3D implements Mode {
     d.hold.position.copy(old.hold.position);
     d.hold.quaternion.copy(old.hold.quaternion);
     d.hold.scale.copy(old.hold.scale);
-    // a longer or shorter barrel: keep it centred on the platter
-    const s = d.hold.scale.x;
-    const b0 = poseBox(old, Q_FLAT, s), b1 = poseBox(d, Q_FLAT, s);
-    const shift = b0.getCenter(new THREE.Vector3()).sub(b1.getCenter(new THREE.Vector3()));
-    shift.y = b0.min.y - b1.min.y;
-    d.hold.position.add(shift);
+    // (a longer or shorter barrel: the float pose recentres it next frame)
     for (const p of this.parts) {
       if (p.proxy?.parent === old.root) {
         p.proxy.removeFromParent();
@@ -1353,12 +1365,19 @@ export class Bench3D implements Mode {
       this.spin = damp(this.spin, this.spinTo, 4, rdt);
       top.rotation.y = this.spin + (this.state === 'work' ? Math.sin(this.t * 0.35) * 0.05 : 0);
     }
+    // ---- the gun floats over the platter while you work on it, turning with it and breathing a little
+    if (this.state === 'work' && this.work && !this.gunFly) {
+      const pz = this.benchPose(this.work, this.spin + Math.sin(this.t * 0.35) * 0.05, Math.sin(this.t * 1.4) * 0.006);
+      this.work.hold.position.copy(pz.p);
+      this.work.hold.quaternion.copy(pz.q);
+      this.work.hold.scale.setScalar(pz.s);
+    }
     // ---- the gun coming down or going back up
     const gf = this.gunFly;
     if (gf) {
       gf.t += rdt;
       const u = clamp01(gf.t / gf.dur), e = ease(u);
-      const b = gf.down ? this.benchPose(gf.d) : gf.b;
+      const b = gf.down ? this.benchPose(gf.d, this.spin) : gf.b;
       const hold = gf.d.hold;
       hold.position.lerpVectors(gf.a.p, b.p, e);
       // out from the wall and up, then down onto the baize (or back into the cradle)
@@ -1370,7 +1389,6 @@ export class Bench3D implements Mode {
         this.gunFly = null;
         const bay = this.rack.bayOf(gf.d.g);
         if (gf.down) {
-          if (top) top.attach(hold);
           this.work = gf.d;
           this.state = 'work';
           eng.audio.play('counter_clang', { volume: 0.22, pitch: 0.7 });
@@ -1388,7 +1406,7 @@ export class Bench3D implements Mode {
     }
     // ---- the warm spot follows the gun down onto the turntable, and back up to the rack
     const T = this.ttAt;
-    this.rack.spotOverride = this.state === 'work' || this.state === 'down' ? { pos: _sp.set(T.x + 0.32, T.y + 0.85, T.z + 0.55), target: _st.set(T.x - 0.08, T.y + this.felt, T.z) } : null;
+    this.rack.spotOverride = this.state === 'work' || this.state === 'down' ? { pos: _sp.set(T.x + 0.3, T.y + 1.25, T.z + 0.85), target: _st.copy(this.floatAt()) } : null;
     // ---- pins, the hover, the work order, the panels and the magic
     if (this.state === 'work') {
       this.refreshSpots();
@@ -1396,7 +1414,7 @@ export class Bench3D implements Mode {
     }
     this.writeBoard();
     this.updateMagic(rdt);
-    this.smith?.frame(rdt, this.smithView(), this.uiHover);
+    this.smith?.frame(rdt, this.smithView(), this.uiHover, this.rackInfo());
     // ---- parts flying off the gun back to the tray
     for (const f of this.offs) {
       f.t += rdt;
@@ -1534,7 +1552,9 @@ export class Bench3D implements Mode {
 }
 
 /** move an object along a matrix blend (position eased with a hop, rotation slerped, scale lerped) */
-const _sp = new THREE.Vector3(), _st = new THREE.Vector3();
+const _sp = new THREE.Vector3(), _st = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+/** floating at the turntable: upright, muzzle to the right, the right flank to you */
+const Q_SIDE = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0)));
 const _pa = new THREE.Vector3(), _qa = new THREE.Quaternion(), _sa = new THREE.Vector3(), _pb = new THREE.Vector3(), _qb = new THREE.Quaternion(), _sb = new THREE.Vector3();
 function lerpMatrix(o: THREE.Object3D, A: THREE.Matrix4, B: THREE.Matrix4, e: number, hop: number) {
   A.decompose(_pa, _qa, _sa);

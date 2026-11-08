@@ -49,6 +49,15 @@ export interface SmithView {
   exploded: boolean;
   busy: boolean;
 }
+/** the card beside the rack for the gun you are looking at */
+export interface RackInfo {
+  name: string;
+  title: string;
+  status: string;
+  desc: string;
+  fitted: string[];
+  found: boolean;
+}
 export type SmithHit = { kind: 'slot'; i: number } | { kind: 'opt'; i: number } | { kind: 'explode' } | { kind: 'sling' } | { kind: 'panel' } | null;
 
 type Rect = { x: number; y: number; w: number; h: number };
@@ -96,6 +105,8 @@ export class GunsmithUI {
   private rects: { slots: Rect[]; opts: Rect[]; explode: Rect | null; sling: Rect | null; panels: Rect[] } = { slots: [], opts: [], explode: null, sling: null, panels: [] };
   private hoverHit: SmithHit = null;
   private last: SmithView | null = null;
+  private rackK = 0;
+  private rackLast: RackInfo | null = null;
   private onResize = () => this.resize();
 
   constructor(parent: HTMLElement) {
@@ -127,16 +138,19 @@ export class GunsmithUI {
     return null;
   }
 
-  frame(rdt: number, v: SmithView | null, hover: SmithHit) {
+  frame(rdt: number, v: SmithView | null, hover: SmithHit, rack: RackInfo | null = null) {
     this.t += rdt;
     this.hoverHit = hover;
     if (v) this.last = v;
     this.k += ((v ? 1 : 0) - this.k) * (1 - Math.exp(-rdt * (v ? 5 : 9)));
+    if (rack) this.rackLast = rack;
+    this.rackK += ((rack ? 1 : 0) - this.rackK) * (1 - Math.exp(-rdt * (rack ? 5 : 9)));
     const c = this.c;
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     c.clearRect(0, 0, this.W, this.H);
     c.imageSmoothingEnabled = false;
     this.rects = { slots: [], opts: [], explode: null, sling: null, panels: [] };
+    if (this.rackLast && this.rackK > 0.01) this.drawRackCard(this.rackLast, this.rackK);
     const d = this.last;
     if (!d || this.k < 0.01) return;
     const a = this.k;
@@ -294,6 +308,14 @@ export class GunsmithUI {
       const r = Math.max(iw / img.width, ih / img.height);
       const sw = iw / r, sh = ih / r;
       c.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, ix, iy, iw, ih);
+      // graded to a cyanotype: the photograph's paper goes prussian blue, its ink lines stay pale
+      c.globalCompositeOperation = 'multiply';
+      c.fillStyle = '#4a7ec8';
+      c.fillRect(ix, iy, iw, ih);
+      c.globalCompositeOperation = 'screen';
+      c.fillStyle = 'rgba(20,40,90,0.35)';
+      c.fillRect(ix, iy, iw, ih);
+      c.globalCompositeOperation = 'source-over';
       c.imageSmoothingEnabled = false;
       c.globalAlpha = 1;
     } else {
@@ -416,6 +438,39 @@ export class GunsmithUI {
       this.ink(right, rx + rw * S - 8, ty + 2, fitted ? '#9affd0' : o.state === 'buy' ? '#8a5a10' : o.state === 'blueprint' ? '#7a6a52' : '#1a7a4a', 15, 'right', false, a);
       ty += 30;
     });
+  }
+
+  /** the focused gun's card beside the rack: its name, how it rides, what it is, what is fitted */
+  private drawRackCard(r: RackInfo, a: number) {
+    const S = this.S;
+    const w = Math.round(Math.min(300, Math.max(230, this.W * 0.21)));
+    const inner = w - 32;
+    const desc = this.wrap(r.desc, inner, 16).slice(0, 4);
+    const fit = r.fitted.length ? this.wrap('Fitted: ' + r.fitted.join(', '), inner, 15).slice(0, 3) : [];
+    const h = 20 + 36 + 24 + desc.length * 19 + (fit.length ? 8 + fit.length * 18 : 0) + 34;
+    const pw = Math.ceil(w / S), ph = Math.ceil(h / S);
+    const x = 16 - (1 - a) * (w + 30), y = Math.round(this.H * 0.22);
+    this.blit(parchment(pw, ph, 27), x, y, a);
+    let ty = y + 12;
+    this.ink(r.title.toUpperCase(), x + 16, ty, '#8a2a14', 15, 'left', false, a);
+    ty += 20;
+    const big = this.tw(r.name, 32) > inner ? 24 : 32;
+    this.ink(r.name, x + 16, ty, r.found ? '#2a160a' : '#6a5a42', big, 'left', false, a);
+    ty += big + 4;
+    this.ink(r.status, x + 16, ty, r.found ? '#1a7a4a' : '#7a6a52', 16, 'left', false, a);
+    ty += 24;
+    for (const l of desc) {
+      this.ink(l, x + 16, ty, '#3a2414', 16, 'left', false, a);
+      ty += 19;
+    }
+    if (fit.length) ty += 8;
+    for (const l of fit) {
+      this.ink(l, x + 16, ty, '#6a4a2a', 15, 'left', false, a);
+      ty += 18;
+    }
+    const kc = keycap(r.found ? 'CLICK' : '...');
+    this.blit(kc, x + 14, y + ph * S - kc.height * S - 8, a);
+    this.ink(r.found ? 'work on it' : 'find its blueprint', x + 22 + kc.width * S, y + ph * S - kc.height * S - 2, '#3a2414', 16, 'left', false, a);
   }
 
   dispose() {

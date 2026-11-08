@@ -27,7 +27,7 @@ import { Sc, clamp, lerp, sstep, spline } from './sculpt';
 import {
   GunLod, gunK, gunVS, MET, PI, fract, fil, BLUED, GOLD, LEAD, COPPER, LENS, VENOM, BORE,
   blued, caseHardened, walnut, brassMat, goldMat, jiggedBone, agedBone, ivoryMat, lapisMat,
-  lathe, ring, lz, finishPart, gunWear, once, compose, thick, GunRigBuilder,
+  lathe, ring, lz, finishPart, gunWear, once, compose, thick, GunRigBuilder, runJob,
 } from './gunkit';
 
 export interface GunParts {
@@ -89,6 +89,7 @@ const gripIn = (x: number, y: number, z: number, grow = 0) => {
 const MED_S = 8.4; // where the panel ornaments sit along the grip
 
 const CASE = caseHardened(4);
+const CASE_H = caseHardened(17);
 const BLUE = blued();
 const SEAM = 0x1c1a1c;
 const darker = (c: (x: number, y: number, z: number) => number, f: number) => (x: number, y: number, z: number) => {
@@ -326,8 +327,15 @@ function cylinderModel(kind: GunParts['cylinder'], k: number) {
       }
       return false;
     };
-    const fluteCol = kind === 'venom' ? VENOM.deep : kind === 'bone' ? 0xa9845a : kind === 'gold' ? GOLD.shade : 0x5a6880;
-    s.walls([-RC - 1, -RC - 1, -2.6], [RC + 1, RC + 1, 3.2], flute, fluteCol, kind === 'venom' ? VF.EMISSIVE | MET : flags);
+    const fluteCol = kind === 'venom' ? 0x2c4a34 : kind === 'bone' ? 0xa9845a : kind === 'gold' ? GOLD.shade : 0x5a6880;
+    s.walls([-RC - 1, -RC - 1, -2.6], [RC + 1, RC + 1, 3.2], flute, fluteCol, flags);
+    if (kind === 'venom') {
+      // a thin venom inlay run down the floor of each flute
+      for (let i = 0; i < 6; i++) {
+        const a = PI / 2 + PI / 6 + (i * PI) / 3, ca = Math.cos(a), sa = Math.sin(a);
+        s.region([ca * RC - 1, sa * RC - 1, -1.2], [ca * RC + 1, sa * RC + 1, 1.9], (x, y, z) => Math.abs(-x * sa + y * ca) < Math.max(0.16, 0.7 / k) && x * ca + y * sa < RC - 0.2, VENOM.base, { mode: 'paint', flags: VF.EMISSIVE | MET });
+      }
+    }
     // bolt stops near the rear, in line with each chamber, each with its lead-in groove
     for (let i = 0; i < 6; i++) {
       const a = PI / 2 + (i * PI) / 3, ca = Math.cos(a), sa = Math.sin(a);
@@ -372,9 +380,9 @@ function hammerModel(k: number) {
       if (Math.hypot(y, z) <= 1.05) return Math.abs(x) <= W;
       const front = y < 3.8 ? 2.25 : 2.25 - (y - 3.8) * 0.9, back = -0.95 + 0.22 * y;
       return y >= -0.6 && y <= 5.3 && z <= front && z >= back && Math.abs(x) <= W - fil(Math.min(front - z, z - back), 0.2);
-    }, ...lz(CASE, MET));
+    }, ...lz(CASE_H, MET));
     const spur = spline([[0, 4.4, 1.4], [0, 5.5, 0.4], [0, 6.05, -1.1], [0, 6.2, -2.6], [0, 5.85, -3.8]], 8);
-    const LC = lz(CASE, MET);
+    const LC = lz(CASE_H, MET);
     s.sweep(spur, (t) => [lerp(W, 0.8, sstep((t - 0.35) / 0.4)), lerp(0.8, 0.6, t), 0.7], LC[0], 0.08, LC[1]);
     // firing-pin nose at the hammer's face, in line with the bore
     s.cap([0, YB - HINGE[1], 2.2], [0, YB - HINGE[1], 2.5], 0.26, 0.18, BLUED.worn, { flags: MET });
@@ -545,6 +553,10 @@ function scopeRingModel(kind: GunParts['barrel'], front: boolean, k: number) {
 export const REVOLVER_LASER_AT = LASER_AT;
 
 export function revolverRig(gi: Partial<GunParts> = DEFAULT_GUN, lod: GunLod = 'hd'): RigSpec {
+  return runJob(revolverRigJob(gi, lod));
+}
+/** the same build as a job: one component per step (Weapons runs it in idle time) */
+export function* revolverRigJob(gi: Partial<GunParts> = DEFAULT_GUN, lod: GunLod = 'hd'): Generator<void, RigSpec, void> {
   const g: GunParts = { ...DEFAULT_GUN, ...gi };
   const k = gunK('revolver', lod);
   const D = frameOff(k);
@@ -553,35 +565,55 @@ export function revolverRig(gi: Partial<GunParts> = DEFAULT_GUN, lod: GunLod = '
   b.root('frame', once(`rev:frameD:${k}`, () => compose('frame', [frameModel(k)], D)), [0, 0, 0], 'Frame', D);
   const X = (parent: string, name: string, m: VoxelModel | null, at: V3, label: string, ex: V3, dist: number, slot?: string, delay = 0, local = false) =>
     b.add(name, m, parent, at, { label, slot, ex, dist, delay, local });
+  yield;
   X('frame', 'barrel', barrelModel(g.barrel, k), [0, YB, 17.6], 'Barrel', [0, 0, 1], 0.15, 'barrel', 0.25);
+  yield;
   X('barrel', 'front_sight', g.sight === 'none' && g.barrel !== 'serket' ? null : frontSightModel(g.barrel, k), [0, YB + RB, mz - 1.2], g.barrel === 'serket' ? 'Stinger Sight' : 'Front Sight', [0, 1, 0], 0.04, g.barrel === 'serket' ? 'barrel' : 'sight', 0.55);
+  yield;
   X('frame', 'rear_sight', g.sight === 'none' ? null : rearSightModel(k), [0, 18.6, 5.75], 'Rear Sight', [0, 1, 0], 0.05, 'sight', 0.4);
+  yield;
   X('frame', 'ejector_housing', housingModel(g.barrel, k), [EJX, EJY, 16.0], 'Ejector Housing', [-0.75, -0.3, 0.6], 0.1, 'barrel', 0.15);
+  yield;
   X('ejector_housing', 'ejector_rod', rodModel(g.barrel, k), [EJX, EJY, 16.0], 'Ejector Rod', [0, 0, 1], 0.07, undefined, 0.45);
   const ez = EJ_END[g.barrel];
+  yield;
   if (ez) X('ejector_housing', 'housing_screw', screwModel(`housing_screw_${g.barrel}`, k, [EJX - EJR + 0.05, EJY + 0.1, ez - 1.25], -1, 0.38, 1.0, BLUED.base, 0.2), [EJX - EJR, EJY + 0.1, ez - 1.25], 'Housing Screw', [-1, 0, 0], 0.04, undefined, 0.5);
+  yield;
   X('frame', 'cylinder', cylinderModel(g.cylinder, k), [0, YC, ZC], 'Cylinder', [-1, 0.12, 0], 0.13, 'cylinder', 0.1, true);
+  yield;
   X('frame', 'base_pin', basePinModel(k), [0, YC, 17.6], 'Base Pin', [0, 0, 1], 0.24, undefined, 0.0);
+  yield;
   X('frame', 'pin_latch', screwModel('pin_latch', k, [1.85, 12.1, 15.9], 1, 0.56, 1.5, BLUED.base, 0.9), [1.85, 12.1, 15.9], 'Base-Pin Latch', [1, 0, 0], 0.06);
+  yield;
   X('frame', 'hammer', hammerModel(k), HINGE, 'Hammer', [0, 0.92, -0.4], 0.09, undefined, 0.2, true);
+  yield;
   X('frame', 'loading_gate', gateModel(k), [-3.6, 12.2, 5.6], 'Loading Gate', [-1, -0.15, 0], 0.07, undefined, 0.3);
+  yield;
   X('frame', 'trigger', triggerModel(k), [0, 8.0, 7.8], 'Trigger', [0, -1, 0.15], 0.06, undefined, 0.35);
+  yield;
   X('frame', 'trigger_guard', guardModel(k), [0, 6.9, 8.6], 'Trigger Guard', [0, -1, 0.25], 0.12, undefined, 0.15);
+  yield;
   X('frame', 'grip_frame', gripFrameModel(k), [0, 6.2, 0.6], 'Grip Frame', [0, -0.75, -0.65], 0.08, undefined, 0.3);
   const gc = gpt(MED_S, 0);
+  yield;
   for (const side of [1, -1]) {
     const nm = side > 0 ? 'grip_l' : 'grip_r';
     X('frame', nm, gripPanel(g.grip, side, k), [side * 1.6, gc[1], gc[2]], side > 0 ? 'Grip Panel (Left)' : 'Grip Panel (Right)', [side, -0.25, -0.1], 0.08, 'grip', 0.05);
     const ml = g.grip === 'ivory' ? 'Gold Medallion' : g.grip === 'scarab' ? 'Gold Scarab' : 'Grip Escutcheon';
     X(nm, side > 0 ? 'medallion_l' : 'medallion_r', medallionModel(g.grip, side, k), [side * 2.3, gc[1], gc[2]], ml + (side > 0 ? ' (Left)' : ' (Right)'), [side, 0, 0], 0.035, 'grip', 0.5);
   }
+  yield;
   X('frame', 'screw_hammer', screwModel('screw_hammer', k, [1.75, HINGE[1], HINGE[2]], 1, 0.64, 3.5, BLUED.base, 0.4), [1.75, HINGE[1], HINGE[2]], 'Hammer Screw', [1, 0, 0], 0.09, undefined, 0.05);
+  yield;
   X('frame', 'screw_bolt', screwModel('screw_bolt', k, [1.75, 10.2, 3.2], 1, 0.56, 3.2, BLUED.base, 1.1), [1.75, 10.2, 3.2], 'Bolt Screw', [1, 0, 0], 0.08, undefined, 0.1);
+  yield;
   X('frame', 'screw_trigger', screwModel('screw_trigger', k, [1.75, 7.8, 4.3], 1, 0.56, 3.2, BLUED.base, 2.0), [1.75, 7.8, 4.3], 'Trigger Screw', [1, 0, 0], 0.08, undefined, 0.15);
+  yield;
   for (const side of [1, -1]) {
     const nm = side > 0 ? 'screw_bs_l' : 'screw_bs_r';
     X('frame', nm, screwModel(nm, k, [side * 1.22, 14.0, -0.6], side, 0.42, 1.2, BLUED.base, 0.9), [side * 1.22, 14.0, -0.6], side > 0 ? 'Backstrap Screw (Left)' : 'Backstrap Screw (Right)', [side, 0, -0.3], 0.05, undefined, 0.2);
   }
+  yield;
   if (g.sight === 'scope') {
     X('frame', 'scope', scopeModel(g.barrel, k), SCOPE_BASE, 'Brass Scope', [0, 1, 0], 0.12, 'sight', 0.6);
     X('frame', 'scope_ring_r', scopeRingModel(g.barrel, false, k), SCOPE_BASE, 'Scope Ring (Rear)', [0, 1, -0.2], 0.06, 'sight', 0.45);

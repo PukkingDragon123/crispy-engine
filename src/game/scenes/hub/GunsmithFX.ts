@@ -54,7 +54,7 @@ export function runeBand(r0: number, r1: number, words: string, seed = 1): Voxel
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2;
       if (Math.abs(Math.sin(a * 6 + seed)) < 0.035) continue; // little notches
-      m.set(Math.round(Math.cos(a) * r), 0, Math.round(Math.sin(a) * r), col, VF.GLOW);
+      m.set(Math.round(Math.cos(a) * r), 0, Math.round(Math.sin(a) * r), col, VF.EMISSIVE);
     }
   };
   ring(r1, GOLD);
@@ -64,7 +64,7 @@ export function runeBand(r0: number, r1: number, words: string, seed = 1): Voxel
   for (let i = 0; i < 24; i++) {
     const a = (i / 24) * Math.PI * 2 + seed;
     const len = i % 6 === 0 ? 3 : 1.5;
-    for (let t = 0; t <= len; t += 0.5) m.set(Math.round(Math.cos(a) * (r1 + t)), 0, Math.round(Math.sin(a) * (r1 + t)), GOLD, VF.GLOW);
+    for (let t = 0; t <= len; t += 0.5) m.set(Math.round(Math.cos(a) * (r1 + t)), 0, Math.round(Math.sin(a) * (r1 + t)), GOLD, VF.EMISSIVE);
   }
   // the letters
   const chars = words.split('');
@@ -80,7 +80,7 @@ export function runeBand(r0: number, r1: number, words: string, seed = 1): Voxel
         if (!g.at(u / Math.max(0.01, W), 1 - v / H)) continue;
         const r = mid - H / 2 + v;
         const a = a0 + (u - W / 2) / r;
-        m.set(Math.round(Math.cos(a) * r), 0, Math.round(Math.sin(a) * r), JADE, VF.GLOW);
+        m.set(Math.round(Math.cos(a) * r), 0, Math.round(Math.sin(a) * r), JADE, VF.EMISSIVE);
       }
   });
   return m;
@@ -112,7 +112,7 @@ export class RuneCircle {
   update(rdt: number, on: boolean, t: number) {
     this.k += ((on ? 1 : 0) - this.k) * (1 - Math.exp(-rdt * (on ? 2.2 : 5)));
     this.grp.visible = this.k > 0.01;
-    this.mat.opacity = this.k * (0.72 + Math.sin(t * 2.1) * 0.12);
+    this.mat.opacity = this.k * (0.82 + Math.sin(t * 2.1) * 0.1);
     this.outer.rotation.y += rdt * 0.12;
     this.inner.rotation.y -= rdt * 0.2;
     const s = 0.9 + this.k * 0.1;

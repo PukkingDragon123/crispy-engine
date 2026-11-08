@@ -13,6 +13,7 @@ import type { RigSpec } from '../../../engine/voxel/Rig';
 import { hash3 } from '../../../engine/math/rand';
 import { S, StaticModel, V3, mod, mixRGB } from './helpers';
 import { sculpt, dRBox, dCap, dEll, smin, lump, lathe, mul, IP } from './hideout';
+import { speedloaderModel } from '../characters/longguns';
 
 const FV = 1 / 48; // furniture
 const DV = 1 / 64; // small detailed things
@@ -1940,21 +1941,11 @@ export function gunHook(seed = 46): StaticModel {
   return S(m, FV);
 }
 
-/** a moon-clip speedloader — 1/64: the six-pointed steel clip holding six brass cartridges, nose up, one with a
- *  dented case. Centre-bottom pivot. */
+/** a moon-clip speedloader: the six-point stamped steel clip holding six brass rounds nose up, one case dented.
+ *  Built by the guns worker at the six-shooter's resolution (characters/longguns.ts speedloaderModel). Centre-bottom pivot. */
 export function moonClip(): StaticModel {
-  const m = new VoxelModel('moon_clip');
-  for (let x = -6; x <= 6; x++)
-    for (let z = -6; z <= 6; z++) {
-      const a = Math.atan2(z, x), r = Math.hypot(x, z);
-      const star = 4.2 + Math.cos(a * 6) * 1.2;
-      if (r < star && r > 1.2) m.set(x, 0, z, mod(Math.round(a * 3), 2) ? 0x8a8c90 : 0x6a6c70, VF.METAL);
-    }
-  for (let i = 0; i < 6; i++) {
-    const a = (i / 6) * Math.PI * 2, cx = Math.cos(a) * 3.6, cz = Math.sin(a) * 3.6;
-    lathe(m, Math.round(cx), Math.round(cz), 1, 7, (t) => (t > 0.7 ? 1.2 - (t - 0.7) * 2.2 : 1.25), (x, y, z, outer, ang, t) => (t > 0.72 ? 0x9a8a80 : outer && Math.abs(ang - 1) < 0.35 ? 0xf0d080 : i === 2 && y === 3 && ang > 2 ? 0xa07a30 : 0xd8a848), {}, VF.METAL);
-  }
-  return S(m, DV);
+  const m = speedloaderModel('hd');
+  return { model: m.model, voxelSize: m.voxelSize };
 }
 
 /** an adjustable wrench for the bench animation — 1/64, handle along +X, jaws at +X end. Centre pivot. */

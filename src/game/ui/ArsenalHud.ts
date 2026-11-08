@@ -258,7 +258,8 @@ export class ArsenalHud {
     if (this.guns.has(id)) return this.guns.get(id)!;
     let r: RigInstance | null = null;
     try {
-      const spec = id === 'revolver' ? this.revolverSpec() : buildWeaponRig(id);
+      // a ~29 px strip icon: the light in-run build is plenty (the close-up one is 100k+ triangles)
+      const spec = id === 'revolver' ? this.revolverSpec() : buildWeaponRig(id, undefined, { lod: 'lo' });
       if (spec) {
         r = new RigInstance(buildRigGeo(spec, spec.name + ':hudstrip'), { material: this.mat, castShadow: false });
         const b = new THREE.Box3().setFromObject(r.root);

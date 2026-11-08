@@ -28,7 +28,7 @@ import type { RigSpec, V3, SocketSpec } from '../../../engine/voxel/Rig';
 import { Sc, clamp, lerp, sstep, spline } from './sculpt';
 import {
   GunLod, gunK, gunVS, MET, PI, fract, fil, BLUED_L, PARK, BRASS, GOLD, LENS, LASER_RED, BORE, LEAD,
-  blued, caseHardened, walnut, brassMat, leatherMat, hullMat, lathe, ring, lz, finishPart, gunWear, once, thick, GunRigBuilder,
+  blued, caseHardened, walnut, brassMat, leatherMat, hullMat, lathe, ring, lz, finishPart, gunWear, once, thick, GunRigBuilder, runJob,
 } from './gunkit';
 
 /** HD voxel size of the long guns (kept for older imports) */
@@ -388,6 +388,10 @@ function lathe2Y(s: Sc, x: number, z: number, y0: number, y1: number, r: number,
 
 /** the coach gun: `frame` (root, grip pivot), `barrels` (hinge), `hammer_l` / `hammer_r`, `lever`, plus every component */
 export function shotgunRig(a: ShotgunAtt = SHOTGUN_DEFAULT, lod: GunLod = 'hd'): RigSpec {
+  return runJob(shotgunRigJob(a, lod));
+}
+/** the same build as a job: one component per step */
+export function* shotgunRigJob(a: ShotgunAtt = SHOTGUN_DEFAULT, lod: GunLod = 'hd'): Generator<void, RigSpec, void> {
   const k = gunK('long', lod);
   const short = a.barrel === 'sawnoff';
   const ZM = sgZM(a);
@@ -396,34 +400,55 @@ export function shotgunRig(a: ShotgunAtt = SHOTGUN_DEFAULT, lod: GunLod = 'hd'):
   const b = new GunRigBuilder(k);
   b.root('frame', sgAction(k), SG_GRIP, 'Action');
   const X = (parent: string, name: string, m: VoxelModel | null, at: V3, label: string, ex: V3, dist: number, slot?: string, delay = 0) => b.add(name, m, parent, at, { label, slot, ex, dist, delay });
+  yield;
   X('frame', 'stock', sgStock(short, k), [0, -6.0, -14], 'Walnut Stock', [0, -0.15, -1], 0.16, 'barrel', 0.1);
+  yield;
   X('stock', 'butt_plate', sgButtPlate(short, k), [0, -9.4, z0], 'Butt Plate', [0, 0, -1], 0.06, undefined, 0.4);
+  yield;
   for (const [i, y] of [[0, -6.4], [1, -12.4]] as [number, number][]) X('butt_plate', `butt_screw_${i + 1}`, screwZ(`butt_screw_${i + 1}`, k, [0, y, z0 - 0.8], 0.45, short), [0, y, z0 - 0.8], `Butt Screw ${i + 1}`, [0, 0, -1], 0.04, undefined, 0.6);
+  yield;
   for (const sx of [1, -1]) {
     X('frame', sx > 0 ? 'sidelock_l' : 'sidelock_r', sgLock(sx, k), [sx * 3.4, -2.2, -7.5], sx > 0 ? 'Side Lock (Left)' : 'Side Lock (Right)', [sx, 0, 0], 0.07, undefined, 0.2);
     X(sx > 0 ? 'sidelock_l' : 'sidelock_r', sx > 0 ? 'lock_screw_l' : 'lock_screw_r', screwX(sx > 0 ? 'lock_screw_l' : 'lock_screw_r', k, [sx * 3.85, -2.4, -7.2], sx, 0.42, 2.5), [sx * 3.85, -2.4, -7.2], sx > 0 ? 'Lock Screw (Left)' : 'Lock Screw (Right)', [sx, 0, 0], 0.04, undefined, 0.5);
     X('frame', sx > 0 ? 'hammer_l' : 'hammer_r', sgHammer(sx, k), [sx * 3.35, -1.5, -6.5], sx > 0 ? 'Hammer (Left)' : 'Hammer (Right)', [sx * 0.6, 1, -0.3], 0.08, undefined, 0.3);
   }
+  yield;
   X('frame', 'lever', sgLever(k), [0, 2.9, -6.4], 'Top Lever', [0, 1, -0.2], 0.06, undefined, 0.35);
+  yield;
   X('frame', 'safety', sgSafety(k), [0, 2.6, -9.2], 'Safety Slide', [0, 1, 0], 0.045, undefined, 0.45);
+  yield;
   X('frame', 'trigger_guard', sgGuard(k), [0, -8.0, -6.0], 'Trigger Guard', [0, -1, 0], 0.09, undefined, 0.15);
+  yield;
   X('frame', 'trigger_f', sgTrigger(true, k), [0, -6.0, -3.6], 'Front Trigger', [0, -1, 0.3], 0.05, undefined, 0.4);
+  yield;
   X('frame', 'trigger_r', sgTrigger(false, k), [0, -6.0, -5.6], 'Rear Trigger', [0, -1, -0.3], 0.05, undefined, 0.4);
+  yield;
   X('frame', 'hinge_pin', sgHinge(k), SG_HINGE, 'Hinge Pin', [1, 0, 0], 0.1, undefined, 0.5);
+  yield;
   if (!short) X('stock', 'swivel_butt', swivel('swivel_butt', k, -15.2, -36.5, 1), [0, -15.2, -36.5], 'Sling Swivel', [0, -1, 0], 0.04, undefined, 0.5);
+  yield;
   if (a.holder) {
     X('stock', 'shell_holder', sgHolder(short, k), [-3.2, -8.4, short ? -24 : -30], 'Shell Holder', [-1, 0, 0], 0.07, 'stock', 0.2);
     for (let i = 0; i < 4; i++) X('shell_holder', `shell_${i + 1}`, sgShell(short, i, k), [-3.55, -8.5, (short ? -24 : -30) - 3.9 + i * 2.6], `Shell ${i + 1}`, [-0.3, 1, 0], 0.05 + i * 0.012, 'stock', 0.45);
   }
   // the barrel group hinges open round SG_HINGE
+  yield;
   X('frame', 'barrels', sgTubes(a, k), SG_HINGE, a.barrel === 'sawnoff' ? 'Sawn-Off Barrels' : a.barrel === 'long' ? 'Long Tom Barrels' : 'Coach Barrels', [0, 0, 1], 0.2, 'barrel', 0.0);
+  yield;
   X('barrels', 'rib', sgRib(a, k), [0, 1.6, ZM / 2], 'Top Rib', [0, 1, 0], 0.05, 'barrel', 0.45);
+  yield;
   X('rib', 'bead', sgBead(a, k), [0, 3.25, ZM - 1.1], 'Brass Bead', [0, 1, 0], 0.03, 'barrel', 0.7);
+  yield;
   X('barrels', 'barrel_band', sgBand(a, k), [0, 0, a.barrel === 'long' ? 38.6 : ZM - 8.0], a.barrel === 'long' ? 'Barrel Band' : 'Hose Clamp', [0, 1, 0], 0.06, 'barrel', 0.5);
+  yield;
   X('barrels', 'forend', sgForend(short, k), [0, -3.6, 9], 'Splinter Forend', [0, -1, 0], 0.08, undefined, 0.25);
+  yield;
   X('forend', 'forend_iron', sgForendIron(short, k), [0, -5.7, 9.3], 'Forend Iron', [0, -1, 0], 0.04, undefined, 0.55);
+  yield;
   if (!short) X('barrels', 'swivel_front', swivel('swivel_front', k, -3.3, ZM - 11.5, 1), [0, -3.3, ZM - 11.5], 'Sling Swivel (Front)', [0, -1, 0], 0.04, undefined, 0.5);
+  yield;
   if (a.choke) for (const sx of [1, -1]) X('barrels', sx > 0 ? 'choke_l' : 'choke_r', sgChoke(a, sx, k), [sx * SG_BX, 0, ZM - 0.4], sx > 0 ? 'Choke (Left)' : 'Choke (Right)', [sx * 0.15, 0, 1], 0.07, 'muzzle', 0.35);
+  yield;
   if (a.laser) X('barrels', 'laser', sgLaser(a, k), [0, -2.9, Math.min(ZM - 4, 24)], 'Laser Sight', [0, -1, 0], 0.07, 'under', 0.35);
   const sockets: Record<string, SocketSpec> = {
     muzzle: b.sock('barrels', [0, 0, muzzleZ + 0.6]),
@@ -774,34 +799,59 @@ function tmLaser(k: number) {
 
 /** the tommy rig: `frame` (root, grip pivot), `drum` (hub pivot), `bolt` (cocking knob, slides on Z), plus every component */
 export function tommyRig(a: TommyAtt = TOMMY_DEFAULT, lod: GunLod = 'hd'): RigSpec {
+  return runJob(tommyRigJob(a, lod));
+}
+/** the same build as a job: one component per step */
+export function* tommyRigJob(a: TommyAtt = TOMMY_DEFAULT, lod: GunLod = 'hd'): Generator<void, RigSpec, void> {
   const k = gunK('long', lod);
   const big = a.drum === 'C100';
-  const dr = tommyDrum(big, 'drum', k);
+  const dr = drumDims(big);
   const dc = drumCentre(big);
   const b = new GunRigBuilder(k);
   b.root('frame', tmReceiver(k), TM_GRIP, 'Receiver');
   const X = (parent: string, name: string, m: VoxelModel | null, at: V3, label: string, ex: V3, dist: number, slot?: string, delay = 0, local = false) => b.add(name, m, parent, at, { label, slot, ex, dist, delay, local });
+  yield;
   X('frame', 'trigger_frame', tmTriggerFrame(k), [0, -5.1, -2.6], 'Trigger Frame', [0, -1, 0], 0.1, undefined, 0.1);
+  yield;
   X('trigger_frame', 'selector', tmLever('selector', -5.6, k), [2.6, -4.4, -5.6], 'Fire Selector', [1, 0, 0], 0.05, undefined, 0.5);
+  yield;
   X('trigger_frame', 'safety', tmLever('safety', -1.0, k), [2.6, -4.4, -1.0], 'Safety', [1, 0, 0], 0.05, undefined, 0.55);
+  yield;
   X('trigger_frame', 'trigger', tmTrigger(k), [0, -6.2, -1.7], 'Trigger', [0, -1, 0], 0.04, undefined, 0.6);
+  yield;
   X('trigger_frame', 'trigger_guard', tmGuard(k), [0, -8.0, -2.4], 'Trigger Guard', [0, -1, 0], 0.07, undefined, 0.4);
+  yield;
   X('trigger_frame', 'pistol_grip', tmPistolGrip(k), [0, -10.6, -7.0], 'Pistol Grip', [0, -1, -0.4], 0.1, undefined, 0.35);
+  yield;
   X('frame', 'stock_plate', tmStockPlate(k), [0, -2.0, -10.2], 'Stock Mount', [0, 0, -1], 0.05, undefined, 0.2);
+  yield;
   X('frame', 'stock', tmStock(k), [0, -4.0, -20], 'Walnut Buttstock', [0, -0.1, -1], 0.16, undefined, 0.0);
+  yield;
   X('stock', 'butt_plate', tmButtPlate(k), [0, -8.4, -42.5], 'Butt Plate', [0, 0, -1], 0.06, undefined, 0.4);
+  yield;
   X('butt_plate', 'trap_door', tmTrap(k), [0, -8.4, -43.0], 'Trap Door', [0, 0, -1], 0.035, undefined, 0.7);
+  yield;
   X('stock', 'swivel_butt', swivel('swivel_butt', k, -17.0, -34.5, 1), [0, -17.0, -34.5], 'Sling Swivel', [0, -1, 0], 0.04, undefined, 0.5);
+  yield;
   X('frame', 'rear_sight', tmRearSight(k), [0, 3.9, -6.6], 'Lyman Sight', [0, 1, 0], 0.06, 'optic', 0.4);
+  yield;
   X('frame', 'bolt', tmBolt(k), [0, 2.6, 9.6], 'Cocking Knob', [0, 1, 0], 0.07, undefined, 0.3);
+  yield;
   X('frame', 'barrel', tmBarrel(k), [0, 0, 14], 'Finned Barrel', [0, 0, 1], 0.14, undefined, 0.2);
+  yield;
   X('barrel', 'barrel_collar', tmCollar(k), [0, 0, 14], 'Barrel Collar', [0, 0, -1], 0.03, undefined, 0.6);
+  yield;
   X('barrel', 'front_sight', tmFrontSight(k), [0, 1.3, TM_BARREL_END - 1.4], 'Front Sight', [0, 1, 0], 0.04, undefined, 0.6);
+  yield;
   X('barrel', 'foregrip_clamp', tmClamp(k), [0, -1.9, 26.6], 'Foregrip Clamp', [0, -1, 0], 0.04, undefined, 0.45);
+  yield;
   X('foregrip_clamp', 'foregrip', tmForegrip(k), [0, -8.5, 26.4], 'Vertical Foregrip', [0, -1, 0], 0.07, undefined, 0.55);
-  X('frame', 'drum', dr.m, dc, big ? 'C-Drum (100)' : 'L-Drum (50)', [0, -1, 0.1], 0.12, 'mag', 0.1, true);
+  yield;
+  X('frame', 'drum', tommyDrum(big, 'drum', k).m, dc, big ? 'C-Drum (100)' : 'L-Drum (50)', [0, -1, 0.1], 0.12, 'mag', 0.1, true);
+  yield;
   X('drum', 'drum_key', drumKeyLocal(big, k), dc, 'Winding Key', [1, 0, 0], 0.05, 'mag', 0.5);
   let muzzleZ = TM_BARREL_END + 0.3;
+  yield;
   if (a.muzzle === 'cutts') {
     X('barrel', 'compensator', tmCutts(k), [0, 0, TM_BARREL_END + 0.2], 'Cutts Compensator', [0, 0, 1], 0.07, 'muzzle', 0.45);
     muzzleZ = TM_BARREL_END + 7.2;
@@ -809,11 +859,13 @@ export function tommyRig(a: TommyAtt = TOMMY_DEFAULT, lod: GunLod = 'hd'): RigSp
     X('barrel', 'suppressor', tmSuppressor(k), [0, 0, TM_BARREL_END - 1], 'Suppressor', [0, 0, 1], 0.09, 'muzzle', 0.45);
     muzzleZ = TM_BARREL_END + 16.4;
   }
+  yield;
   if (a.scope) {
     X('frame', 'scope_ring_r', tmScopeRing(-4.0, k), [0, 4.4, -4.0], 'Scope Ring (Rear)', [0, 1, -0.2], 0.05, 'optic', 0.35);
     X('frame', 'scope_ring_f', tmScopeRing(9.0, k), [0, 4.4, 9.0], 'Scope Ring (Front)', [0, 1, 0.2], 0.05, 'optic', 0.35);
     X('frame', 'scope', tmScope(k), [0, 6.2, 3.0], 'Brass Scope', [0, 1, 0], 0.1, 'optic', 0.55);
   }
+  yield;
   if (a.laser) X('barrel', 'laser', tmLaser(k), [-1.6, -0.6, 33.0], 'Laser Sight', [-1, 0, 0], 0.06, 'under', 0.4);
   const sockets: Record<string, SocketSpec> = {
     muzzle: b.sock('frame', [0, 0, muzzleZ + 0.4]),

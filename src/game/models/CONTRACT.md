@@ -46,7 +46,10 @@ Every old note about resolution, the pixel-art pass, ramps, outlines, textures, 
 
 **Scales** (one family look)
 - Humanoids (Sundown, all humanoid enemies/variants, merchant): **1/30 m**.
-- Pinch, revolvers, hand items/attachments: 1/48.
+- Pinch, small hand items/attachments: 1/48.
+- Guns (six-shooter, coach gun, Thompson, their attachments and hand items): sculpted in design cm, built at
+  1/512 m (six-shooter) and 1/384 m (long guns), plus a half-resolution `lo` stand-in that Weapons swaps in only
+  while an HD voxel is sub-pixel. Every component is its own rig part. See `characters/gunkit.ts`.
 - Boards: 1/32.
 - Scarabs: 1/30.
 - Camel: 1/24.
@@ -132,11 +135,17 @@ Sockets: `hand_r`, `hand_l`, `head_top`, `back`, `shoulder_l`, `shoulder_r`, `hi
   - socket `board_back` (torso, between the shoulder blades); mount a board with
     `attachBoardOnBack(rig, sandboardModel(id) | geometry | Object3D, opts?)` from `characters/index.ts`.
 - `pinchRig()` is the HD Pinch (1/72 m, sculpted in the legacy 1/48 units; same part names and sockets).
-- `revolverRig(parts: GunParts): RigSpec` — parts `frame` (root, pivot = grip center), `cylinder`
-  (pivot = cylinder axis center, can spin around Z), `hammer` (pivot hinge), optional `scope`.
-  `meta.muzzle: V3` (voxel coords in frame space), `meta.ejector`. 
+- `revolverRig(parts: GunParts, lod: 'hd' | 'lo' = 'hd'): RigSpec` — every component its own part:
+  `frame` (root, pivot = grip centre), `cylinder` (pivot = cylinder axis, spins on Z), `hammer` (pivot = hammer
+  screw; negative X rotation cocks it), `barrel` > `front_sight`, `rear_sight`, `ejector_housing` > `ejector_rod`,
+  `housing_screw`, `base_pin`, `pin_latch`, `loading_gate`, `trigger`, `trigger_guard`, `grip_frame`,
+  `grip_l` / `grip_r` (> `medallion_l` / `_r`), `screw_hammer`, `screw_bolt`, `screw_trigger`, `screw_bs_l` / `_r`,
+  optional `scope`, `scope_ring_r`, `scope_ring_f`. Sockets `muzzle`, `ejector`, `laser`, `gate`, `spur`.
+  `meta.muzzle: V3` (voxel coords in frame space), `meta.ejector`, `meta.cylinderCenter`,
+  `meta.components: { name, label, slot? }[]`, `meta.explode: { [part]: { dir, dist (m), delay } }`.
   `GunParts { barrel: 'standard'|'long'|'snub'|'serket'; cylinder: 'standard'|'venom'|'gold'|'bone'; grip: 'wood'|'bone'|'ivory'|'scarab'; sight: 'none'|'iron'|'scope' }`
-  Gun points along +Z.
+  Gun points along +Z. Long guns (`longguns.ts`: `shotgunRig`, `tommyRig`) follow the same rules; animated part
+  names stay `barrels`, `hammer_l`, `hammer_r`, `lever` (coach gun) and `drum`, `bolt` (Thompson).
 - `pinchRig(): RigSpec` — Pinch, the little scorpion companion (scorpion convention).
 - `sandboardModel(style: BoardId)` — `BoardId = 'driftwood'|'cactus'|'cyber'|'bone'|'scarab_gold'|'serket'`, ~1.45 m long along Z.
 - `dungBombModel()`, `rubberDuckModel()`, `dungBallModel()`

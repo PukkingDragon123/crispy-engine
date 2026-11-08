@@ -39,7 +39,7 @@ export const n3 = (x: number, y: number, z: number) => noise.n3(x, y, z);
 /** hot-salt blued steel: blue-black body, cool sheen, bright steel where the bluing has worn through */
 export const BLUED = { base: 0x465062, shade: 0x323a48, hi: 0x6a788e, dark: 0x121519, worn: 0x9ea6b2, wornHi: 0xc8ced6 };
 /** a darker, older bluing for the long guns' tubes */
-export const BLUED_L = { base: 0x343c4a, shade: 0x232832, hi: 0x56627a, dark: 0x0e1014, worn: 0x8c949e, wornHi: 0xb8bec6 };
+export const BLUED_L = { base: 0x424b5c, shade: 0x2e3542, hi: 0x627088, dark: 0x101318, worn: 0x949ca8, wornHi: 0xbcc2ca };
 /** parkerised / phosphate grey (suppressor) */
 export const PARK = { base: 0x4c5052, shade: 0x34373a, hi: 0x787e84, dark: 0x1c1d1f, worn: 0x8a8e92, wornHi: 0xa8acb0 };
 export const BRASS = { base: 0xc89a3a, shade: 0x9a7024, hi: 0xf0cc6a, dark: 0x5e4214 };
@@ -95,8 +95,8 @@ function grainFrame(d: V3) {
 /** oiled walnut, grain running along `dir` (design cm in; the library grain is evaluated at 4 units per cm) */
 export function walnut(o: { dir?: V3; seed?: number; figure?: number; dark?: number; ring?: number } = {}): CM {
   const f = grainFrame(o.dir ?? [0, 0, 1]);
-  const g = woodGrain({ along: 'z', species: GUNSTOCK, seed: o.seed ?? 3, ring: o.ring ?? 3.6, knots: 0, figure: o.figure ?? 0.6 });
-  const S = 2.4;
+  const g = woodGrain({ along: 'z', species: GUNSTOCK, seed: o.seed ?? 3, ring: o.ring ?? 4.2, knots: 0, figure: o.figure ?? 0.35 });
+  const S = 2.0;
   return (x, y, z) => {
     const c = g((x * f.u[0] + y * f.u[1] + z * f.u[2]) * S, (x * f.v[0] + y * f.v[1] + z * f.v[2]) * S, (x * f.w[0] + y * f.w[1] + z * f.w[2]) * S) ?? GUNSTOCK.tones[2];
     return o.dark ? mulRGB(c, 1 - o.dark) : c;
@@ -105,15 +105,15 @@ export function walnut(o: { dir?: V3; seed?: number; figure?: number; dark?: num
 /** gun brass: a warm tarnish cast, polished where it is handled (no verdigris on a cared-for gun) */
 export function brassMat(seed = 0): CM {
   return (x, y, z) => {
-    const s = n3(x * 0.6 + seed, y * 0.6, z * 0.6);
-    return s > 0.42 ? BRASS.hi : s < -0.45 ? BRASS.shade : BRASS.base;
+    const s = n3(x * 0.22 + seed, y * 0.22, z * 0.22);
+    return s > 0.55 ? BRASS.hi : s < -0.62 ? BRASS.shade : BRASS.base;
   };
 }
 /** polished gold with a soft warm sheen */
 export function goldMat(seed = 0): CM {
   return (x, y, z) => {
-    const s = n3(x * 0.5 + seed, y * 0.5, z * 0.5);
-    return s > 0.4 ? GOLD.hi : s < -0.5 ? GOLD.shade : GOLD.base;
+    const s = n3(x * 0.25 + seed, y * 0.25, z * 0.25);
+    return s > 0.5 ? GOLD.hi : s < -0.6 ? GOLD.shade : GOLD.base;
   };
 }
 /** jigged bone: cream bone with the irregular gouged pits of a stag-style grip */
@@ -278,7 +278,7 @@ export function wearEdges(m: VoxelModel, k: number, worn: (rgb: number, amt: num
     if (sum(X - R2, Y - R2, Z - R2, X + R2, Y + R2, Z + R2) / vol2 < 0.2) return;
     const rubN = n3((x / k) * 0.45 + 3.3, (y / k) * 0.45, (z / k) * 0.45) * 0.5 + 0.5;
     const amt = Math.min(1, (thr - fr) / 0.12) * (1 - rub + rub * rubN);
-    if (amt < 0.3) return;
+    if (amt < 0.42) return;
     const nc = worn(c, amt);
     if (nc !== null && nc !== c) todo.push([x, y, z, nc, f]);
   });
@@ -334,12 +334,88 @@ export const vox = (p: V3, k: number, d: V3 = [0, 0, 0]): V3 => [p[0] * k + d[0]
 /** thin features never thinner than ~1.1 voxels, so the in-run build keeps them whole */
 export const thick = (r: number, k: number) => Math.max(r, 0.56 / k);
 
-/** lazy colours, worn edges, relief, then the hidden core dropped */
+/** a dense occupancy grid over a model (one voxel of padding), for the finishing passes */
+function occGrid(m: VoxelModel, pad: number) {
+  const b = m.bounds();
+  const ox = b.minX - pad, oy = b.minY - pad, oz = b.minZ - pad;
+  const sx = b.maxX - b.minX + 1 + 2 * pad, sy = b.maxY - b.minY + 1 + 2 * pad, sz = b.maxZ - b.minZ + 1 + 2 * pad;
+  const occ = new Uint8Array(sx * sy * sz);
+  const sxy = sx * sy;
+  m.forEach((x, y, z) => (occ[x - ox + sx * (y - oy) + sxy * (z - oz)] = 1));
+  return { occ, ox, oy, oz, sx, sy, sz, sxy };
+}
+/**
+ * Lazy colours, worn edges, relief, then the hidden core dropped: one dense
+ * occupancy grid serves every pass (the same results as resolveLazy, wearEdges,
+ * relief and hollow run one after another, several times faster).
+ */
 export function finishPart(m: VoxelModel, k: number, o: { wear?: ((rgb: number, amt: number) => number | null) | false; relief?: boolean } = {}) {
-  resolveLazy(m, k);
-  if (o.wear !== false) wearEdges(m, k, o.wear ?? gunWear());
-  if (o.relief !== false) relief(m, 1.06, 0.88);
-  return hollow(m);
+  if (!m.count) return m;
+  const r = Math.max(1, Math.round(0.8 * k));
+  const R2 = r * 2 + 1;
+  const thr = r >= 2 ? 0.47 : 0.4;
+  const G = occGrid(m, R2 + 1);
+  const { occ, ox, oy, oz, sx, sy, sz, sxy } = G;
+  const at = (x: number, y: number, z: number) => x - ox + sx * (y - oy) + sxy * (z - oz);
+  // summed-volume table for the wear pass
+  const wear = o.wear === false ? null : o.wear ?? gunWear();
+  let S: Int32Array | null = null;
+  const SX = sx + 1, SY = sy + 1;
+  if (wear) {
+    S = new Int32Array(SX * SY * (sz + 1));
+    for (let z = 0; z < sz; z++)
+      for (let y = 0; y < sy; y++) {
+        let row = 0;
+        for (let x = 0; x < sx; x++) {
+          row += occ[x + sx * y + sxy * z];
+          const i = x + 1 + SX * (y + 1 + SY * (z + 1));
+          S[i] = row + S[i - SX] + S[i - SX * SY] - S[i - SX - SX * SY];
+        }
+      }
+  }
+  const id = (x: number, y: number, z: number) => x + SX * (y + SY * z);
+  const sum = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number) =>
+    S![id(x1, y1, z1)] - S![id(x0 - 1, y1, z1)] - S![id(x1, y0 - 1, z1)] - S![id(x1, y1, z0 - 1)] + S![id(x0 - 1, y0 - 1, z1)] + S![id(x0 - 1, y1, z0 - 1)] + S![id(x1, y0 - 1, z0 - 1)] - S![id(x0 - 1, y0 - 1, z0 - 1)];
+  const vol = (2 * r + 1) ** 3, vol2 = (2 * R2 + 1) ** 3;
+  const doRelief = o.relief !== false;
+  const sets: number[] = [];
+  const dels: number[] = [];
+  m.forEach((x, y, z, c, f) => {
+    const i = at(x, y, z);
+    const up = occ[i + sx], dn = occ[i - sx];
+    const hidden = occ[i + 1] && occ[i - 1] && up && dn && occ[i + sxy] && occ[i - sxy];
+    if (hidden) {
+      dels.push(x, y, z);
+      return;
+    }
+    let col = c, fl = f;
+    if (f & LZ) {
+      const fn = LAZY[c];
+      col = fn ? fn((x + 0.5) / k, (y + 0.5) / k, (z + 0.5) / k) : 0x34302c;
+      fl = f & ~LZ;
+    }
+    const lit = !(fl & (VF.EMISSIVE | VF.GLOW));
+    if (wear && lit) {
+      const X = x - ox + 1, Y = y - oy + 1, Z = z - oz + 1;
+      const fr = sum(X - r, Y - r, Z - r, X + r, Y + r, Z + r) / vol;
+      if (fr < thr && sum(X - R2, Y - R2, Z - R2, X + R2, Y + R2, Z + R2) / vol2 >= 0.2) {
+        const rubN = n3((x / k) * 0.45 + 3.3, (y / k) * 0.45, (z / k) * 0.45) * 0.5 + 0.5;
+        const amt = Math.min(1, (thr - fr) / 0.12) * (0.45 + 0.55 * rubN);
+        if (amt >= 0.42) {
+          const nc = wear(col, amt);
+          if (nc !== null) col = nc;
+        }
+      }
+    }
+    if (doRelief && lit) {
+      if (!up) col = mulRGB(col, 1.06);
+      else if (!dn) col = mulRGB(col, 0.88);
+    }
+    if (col !== c || fl !== f) sets.push(x, y, z, col, fl);
+  });
+  for (let i = 0; i < sets.length; i += 5) m.set(sets[i], sets[i + 1], sets[i + 2], sets[i + 3], sets[i + 4]);
+  for (let i = 0; i < dels.length; i += 3) m.del(dels[i], dels[i + 1], dels[i + 2]);
+  return m;
 }
 
 // ------------------------------------------------------------------ rigs made of components
@@ -398,5 +474,13 @@ export class GunRigBuilder {
   }
   sock(part: string, p: V3): SocketSpec {
     return { part, at: this.at(part, p) };
+  }
+}
+
+/** run a build job to completion */
+export function runJob<T>(job: Generator<void, T, void>): T {
+  for (;;) {
+    const r = job.next();
+    if (r.done) return r.value;
   }
 }

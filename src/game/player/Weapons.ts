@@ -33,9 +33,11 @@ import { armIK, lookQuat } from '../anim/playerAnim';
 import { buildRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { clamp, damp, rnd } from '../../engine/math/rand';
-import { shotgunRig, tommyRig, ShotgunAtt, TommyAtt, SHOTGUN_DEFAULT, TOMMY_DEFAULT, tommyDrum, shotgunShellModel, revolverLaserModel, shovelModel, LONG_VS } from '../models/characters/longguns';
+import { shotgunRig, tommyRig, shotgunRigJob, tommyRigJob, ShotgunAtt, TommyAtt, SHOTGUN_DEFAULT, TOMMY_DEFAULT, tommyDrumModel, shotgunShellModel, revolverLaserModel, shovelModel } from '../models/characters/longguns';
+import { revolverRig, revolverRigJob, type GunParts } from '../models/characters/revolver';
+import { gunVS, runJob, type GunLod, type ExplodeSpec, type GunComponent } from '../models/characters/gunkit';
 import { Blueprints, gunTune, GunId, GUNS, WeaponTune, AttachmentDef, WEAPON_UPGRADES, TUNE_DEFAULT } from '../meta/Blueprints';
-import type { LongGunId } from '../meta/Save';
+import { loadSave, type LongGunId } from '../meta/Save';
 
 const DEG = Math.PI / 180;
 const UP = new THREE.Vector3(0, 1, 0);
@@ -129,11 +131,70 @@ function staticGeo(key: string, make: () => { model: any; voxelSize: number; piv
   return g.geo;
 }
 
-/** build any gun as a display object (hideout bench, blueprint schematics, icons) */
-export function buildWeaponRig(g: GunId, fitted: AttachmentDef[] = Blueprints.fitted(g)): RigSpec | null {
-  if (g === 'shotgun') return shotgunRig(shotgunAtt(fitted));
-  if (g === 'tommy') return tommyRig(tommyAtt(fitted));
+export interface WeaponBuildOpts {
+  /** 'hd' (default; every close-up) or the half-resolution stand-in used while the gun is sub-pixel */
+  lod?: GunLod;
+  /** the six-shooter's gold parts (defaults to the save's) */
+  gun?: GunParts;
+}
+/**
+ * Build any gun as a rig spec (hideout bench, blueprint schematics, icons). Every
+ * component is its own part: spec.meta.components lists { name, label, slot? }
+ * and spec.meta.explode the exploded-view vector of each one (see explodeWeapon).
+ * The six-shooter carries its laser as a `laser` part when it is fitted.
+ */
+export function buildWeaponRig(g: GunId, fitted: AttachmentDef[] = Blueprints.fitted(g), o: WeaponBuildOpts = {}): RigSpec | null {
+  return runJob(weaponRigJob(g, fitted, o));
+}
+/** the same build as a job (one component per step) */
+export function* weaponRigJob(g: GunId, fitted: AttachmentDef[] = Blueprints.fitted(g), o: WeaponBuildOpts = {}): Generator<void, RigSpec | null, void> {
+  const lod = o.lod ?? 'hd';
+  if (g === 'shotgun') return yield* shotgunRigJob(shotgunAtt(fitted), lod);
+  if (g === 'tommy') return yield* tommyRigJob(tommyAtt(fitted), lod);
+  if (g === 'revolver') {
+    const base = yield* revolverRigJob(o.gun ?? (loadSave().gun as GunParts), lod);
+    return fitted.some((a) => a.id === 'rev_laser') ? withRevolverLaser(base, lod) : base;
+  }
   return null;
+}
+const laserSpecs = new Map<string, RigSpec>();
+/** the six-shooter with its laser as a component (a new spec; the cached one is never touched) */
+function withRevolverLaser(spec: RigSpec, lod: GunLod): RigSpec {
+  let v = laserSpecs.get(spec.name);
+  const at = spec.sockets?.laser?.at;
+  if (v || !at) return v ?? spec;
+  const lm = revolverLaserModel(lod);
+  const meta = spec.meta ?? {};
+  v = {
+    ...spec,
+    name: spec.name + '_laser',
+    parts: [...spec.parts, { name: 'laser', model: lm.model, pivot: [0, 0, 0], attach: at, parent: 'frame' }],
+    meta: {
+      ...meta,
+      explode: { ...(meta.explode ?? {}), laser: { dir: [0, -1, 0], dist: 0.07, delay: 0.35 } },
+      components: [...(meta.components ?? []), { name: 'laser', label: "Serket's Eye Laser", slot: 'under', parent: 'frame' }],
+    },
+  };
+  laserSpecs.set(spec.name, v);
+  return v;
+}
+
+/**
+ * Exploded view: t = 0 assembled, 1 fully apart. Each component flies out along its
+ * own vector (spec.meta.explode: dir in its parent's space, dist in metres, a
+ * stagger delay), eased, so the hideout can scrub t back and forth.
+ */
+export function explodeWeapon(inst: RigInstance, t: number) {
+  const ex = inst.geo.spec.meta?.explode as Record<string, ExplodeSpec> | undefined;
+  if (!ex) return;
+  for (const name in ex) {
+    const e = ex[name];
+    const node = inst.nodes[name];
+    const i = inst.geo.index[name];
+    if (!node || i === undefined) continue;
+    const k = smooth((t - e.delay) / Math.max(0.05, 1 - e.delay));
+    node.position.copy(inst.geo.parts[i].offset).addScaledVector(_v.set(e.dir[0], e.dir[1], e.dir[2]), e.dist * k);
+  }
 }
 export function shotgunAtt(fitted: AttachmentDef[]): ShotgunAtt {
   const a: ShotgunAtt = { ...SHOTGUN_DEFAULT };
@@ -157,12 +218,111 @@ export function tommyAtt(fitted: AttachmentDef[]): TommyAtt {
   }
   return a;
 }
-/** a ready-made display object for a long gun (its own RigInstance root) */
-export function buildWeaponDisplay(g: GunId, fitted?: AttachmentDef[], material?: THREE.Material): THREE.Object3D | null {
-  const spec = buildWeaponRig(g, fitted);
+/**
+ * A ready-made display object for any gun (its own RigInstance root). root.userData:
+ *  - rig: the RigInstance (nodes / meshes per component, for highlights);
+ *  - components: [{ name, label, slot?, parent? }] in build order;
+ *  - explode(t): fly the components apart (t 0..1) and back (explodeWeapon).
+ */
+export function buildWeaponDisplay(g: GunId, fitted?: AttachmentDef[], material?: THREE.Material, o: WeaponBuildOpts = {}): THREE.Object3D | null {
+  const spec = buildWeaponRig(g, fitted, o);
   if (!spec) return null;
   const inst = new RigInstance(buildRigGeo(spec), material ? { material: material as any } : {});
+  inst.root.userData.rig = inst;
+  inst.root.userData.components = (spec.meta?.components ?? []) as GunComponent[];
+  inst.root.userData.explode = (t: number) => explodeWeapon(inst, t);
   return inst.root;
+}
+
+// ------------------------------------------------------------------ in-run LOD
+// The guns are built at 1/512 (six-shooter) and 1/384 (long guns). While an HD
+// voxel would cover less than ~half a pixel on screen (riding, the camera a few
+// metres back) a half-resolution build of the same components is drawn instead:
+// the swap is invisible, and it cuts ~75% of the gun's triangles for most of a
+// run. Aiming, the bullet-cam and cinematics bring the camera close: HD again.
+interface GunLodState {
+  hd: Record<string, THREE.BufferGeometry> | null;
+  lo: Record<string, THREE.BufferGeometry> | null;
+  /** HD voxel size (m) */
+  vs: number;
+  on: 'hd' | 'lo';
+}
+const _lp = new THREE.Vector3();
+const _lc = new THREE.Vector3();
+const _ls = new THREE.Vector2();
+function geosOf(inst: RigInstance) {
+  const o: Record<string, THREE.BufferGeometry> = {};
+  for (const n in inst.meshes) o[n] = inst.meshes[n].geometry;
+  return o;
+}
+function applyLod(inst: RigInstance, st: GunLodState, which: 'hd' | 'lo') {
+  const set = which === 'hd' ? st.hd : st.lo;
+  if (!set) return;
+  for (const n in inst.meshes) {
+    const g = set[n];
+    if (g) inst.meshes[n].geometry = g;
+  }
+  st.on = which;
+}
+function installLod(inst: RigInstance, st: GunLodState) {
+  inst.root.userData.gunLod = st;
+  const m = inst.meshes['frame'];
+  if (!m) return;
+  m.onBeforeRender = (renderer, _scene, camera) => {
+    const cam = camera as THREE.PerspectiveCamera;
+    if (!cam.isPerspectiveCamera || !st.hd || !st.lo) return;
+    _lp.setFromMatrixPosition(m.matrixWorld);
+    _lc.setFromMatrixPosition(cam.matrixWorld);
+    const d = Math.max(0.05, _lp.distanceTo(_lc));
+    const h = renderer.getDrawingBufferSize(_ls).y;
+    const px = (h * st.vs * cam.zoom) / (2 * Math.tan((cam.fov * DEG) / 2) * d);
+    const want = px > 0.62 ? 'hd' : px < 0.48 ? 'lo' : st.on;
+    if (want !== st.on) applyLod(inst, st, want);
+  };
+}
+const meshCache = new Map<string, Record<string, THREE.BufferGeometry>>();
+/** mesh a spec's parts one per step (cached by spec name for the session) */
+function* meshJob(spec: RigSpec): Generator<void, Record<string, THREE.BufferGeometry>, void> {
+  const hit = meshCache.get(spec.name);
+  if (hit) return hit;
+  const out: Record<string, THREE.BufferGeometry> = {};
+  for (const p of spec.parts) {
+    out[p.name] = buildVoxelGeometry(p.model, { voxelSize: spec.voxelSize, pivot: p.pivot });
+    yield;
+  }
+  meshCache.set(spec.name, out);
+  return out;
+}
+/** idle-time job queue: one step per idle slice (a component built or meshed) */
+class IdleJobs {
+  private q: Generator<void, unknown, void>[] = [];
+  private busy = false;
+  dead = false;
+  add(job: Generator<void, unknown, void>) {
+    this.q.push(job);
+    this.kick();
+  }
+  private kick() {
+    if (this.busy || this.dead || !this.q.length) return;
+    this.busy = true;
+    const ric = (globalThis as any).requestIdleCallback as ((cb: () => void, o?: { timeout: number }) => void) | undefined;
+    const go = () => {
+      this.busy = false;
+      if (this.dead) return;
+      const t0 = performance.now();
+      while (this.q.length && performance.now() - t0 < 8) {
+        try {
+          if (this.q[0].next().done) this.q.shift();
+        } catch (err) {
+          console.warn('gun build job failed', err);
+          this.q.shift();
+        }
+      }
+      this.kick();
+    };
+    if (ric) ric(go, { timeout: 400 });
+    else setTimeout(go, 30);
+  }
 }
 
 export class Weapons {
@@ -211,12 +371,15 @@ export class Weapons {
   private aimT = new THREE.Vector3();
   private upT = new THREE.Vector3();
   private offs: (() => void)[] = [];
+  /** idle-time builds: the HD long guns, the six-shooter's sub-pixel stand-in */
+  private jobs = new IdleJobs();
   private digPhase = 0;
   private wheelCd = 0;
 
   constructor(private ctx: Ctx, private p: Player, private input: Input, private holder: THREE.Group) {
     const P = p;
     this.rigs.revolver = P.gun;
+    this.lodRevolver();
     // the loadout: the revolver, the long gun on the sling (and every gun with ?guns=all)
     const lo = Blueprints.loadout();
     const all = new URLSearchParams(location.search).get('guns') === 'all';
@@ -302,13 +465,47 @@ export class Weapons {
     }
   }
 
+  /**
+   * A long gun for this run: the half-resolution build goes in now (cheap, on the
+   * critical path); the HD build follows a component per idle slice and takes over
+   * whenever the gun is big enough on screen for it to show (installLod).
+   */
   private ensureRig(g: GunId): RigInstance {
     let r = this.rigs[g];
     if (r) return r;
-    const spec = buildWeaponRig(g, this.fitted[g])!;
+    const fitted = this.fitted[g];
+    const spec = buildWeaponRig(g, fitted, { lod: 'lo' })!;
     r = new RigInstance(buildRigGeo(spec, spec.name + ':player'), { material: this.p.material });
     this.rigs[g] = r;
+    const st: GunLodState = { hd: null, lo: geosOf(r), vs: gunVS('long', 'hd'), on: 'lo' };
+    installLod(r, st);
+    const big = this.tunes.tommy.magAdd > 0;
+    this.jobs.add(
+      (function* () {
+        const hd = yield* weaponRigJob(g, fitted, { lod: 'hd' });
+        if (!hd || hd.parts.length !== spec.parts.length) return;
+        st.hd = yield* meshJob(hd);
+        if (g === 'tommy') staticGeo(big ? 'drumC' : 'drumL', () => tommyDrumModel(big, 'hd'));
+      })()
+    );
     return r;
+  }
+
+  /** the six-shooter comes from the run already HD: add its sub-pixel stand-in in idle time */
+  private lodRevolver() {
+    const rev = this.rigs.revolver;
+    const meta = rev?.geo.spec.meta;
+    if (!rev || !meta?.parts || meta.lod !== 'hd') return;
+    const st: GunLodState = { hd: geosOf(rev), lo: null, vs: rev.geo.spec.voxelSize, on: 'hd' };
+    installLod(rev, st);
+    const names = rev.geo.spec.parts.map((p) => p.name).join();
+    this.jobs.add(
+      (function* () {
+        const lo = yield* revolverRigJob(meta.parts as GunParts, 'lo');
+        if (lo.parts.map((p) => p.name).join() !== names) return;
+        st.lo = yield* meshJob(lo);
+      })()
+    );
   }
 
   private fitRevolverLaser() {
@@ -323,9 +520,12 @@ export class Weapons {
     const spec = rev.geo.spec;
     if (!frame) return;
     const vs = spec.voxelSize, piv = spec.parts[0].pivot;
-    this.revLaser = new THREE.Mesh(staticGeo('rev_laser', revolverLaserModel), this.p.material);
-    // clamped under the barrel, just ahead of the cylinder
-    this.revLaser.position.set((0.5 - piv[0]) * vs, (0.6 - piv[1]) * vs, (10.5 - piv[2]) * vs);
+    this.revLaser = new THREE.Mesh(staticGeo('rev_laser', () => revolverLaserModel('hd')), this.p.material);
+    this.revLaser.castShadow = true;
+    // clamped round the barrel, its emitter hanging under it (the rig's `laser` socket)
+    const sk = rev.geo.sockets['laser'];
+    if (sk) this.revLaser.position.copy(sk.offset);
+    else this.revLaser.position.set((0.5 - piv[0]) * vs, (0.6 - piv[1]) * vs, (10.5 - piv[2]) * vs);
     frame.add(this.revLaser);
   }
 
@@ -637,6 +837,13 @@ export class Weapons {
     mesh.castShadow = true;
     const obj = new THREE.Group();
     obj.add(mesh);
+    // the winding key goes with it
+    const key = r.meshes['drum_key'];
+    if (key && r.nodes['drum_key']) {
+      const km = new THREE.Mesh(key.geometry, this.p.material);
+      km.position.copy(r.nodes['drum_key'].position);
+      obj.add(km);
+    }
     node.matrixWorld.decompose(obj.position, obj.quaternion, _v3);
     this.ctx.scene.add(obj);
     node.visible = false;
@@ -1196,7 +1403,7 @@ export class Weapons {
       }
       if (!this.handDrum.children.length) {
         const big = this.tunes.tommy.magAdd > 0;
-        const m = new THREE.Mesh(staticGeo(big ? 'drumC' : 'drumL', () => ({ model: tommyDrum(big).m, voxelSize: LONG_VS, pivot: [0, 0, 0] as [number, number, number] })), P.material);
+        const m = new THREE.Mesh(staticGeo(big ? 'drumC' : 'drumL', () => tommyDrumModel(big, 'hd')), P.material);
         m.position.set(0, -0.04, 0.02);
         m.rotation.set(0, 0, Math.PI / 2);
         this.handDrum.add(m);
@@ -1287,6 +1494,7 @@ export class Weapons {
   }
 
   dispose() {
+    this.jobs.dead = true;
     for (const o of this.offs) o();
     this.laserLine.removeFromParent();
     for (const d of this.dropped) d.obj.removeFromParent();
