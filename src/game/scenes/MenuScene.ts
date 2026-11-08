@@ -28,6 +28,8 @@ import { loadSave } from '../meta/Save';
 import { Ease } from '../../engine/Tween';
 import { clamp, damp, noise } from '../../engine/math/rand';
 import { nav } from '../Nav';
+import { KnowledgeSign } from './thoth/KnowledgeSign';
+import { ThothHall } from './ThothHall';
 import { resetTutor } from '../ui/TouchTutor';
 
 type Pivot = [number, number, number] | 'bottom' | 'center';
@@ -51,7 +53,9 @@ const GATE = { x: -0.45, z: -2.75, yaw: 0.05 };
 const POST = { x: 2.45, z: 0.95, yaw: -0.24 };
 const CAM_T = new THREE.Vector3(0.45, 1.5, -0.7);
 const CAM_DIST = 8.4;
-const LABELS = ['NEW RUN', 'RESUME', 'HIDEOUT', 'CODEX', 'SETTINGS'];
+const LABELS = ['NEW RUN', 'RESUME', 'HIDEOUT', 'SETTINGS'];
+/** the glowing sign of knowledge (THOTH'S HALL) floats over the dunes left of the camp */
+const KSIGN = { x: -1.95, z: 0.3, y: 1.8, yaw: 0.28 };
 const brinkZ = (x: number) => -3.1 + Math.sin(x * 0.21 + 0.6) * 0.5 + x * 0.05;
 
 const SKY_VERT = /* glsl */ `
@@ -187,6 +191,10 @@ export class MenuScene implements GameScene {
   private fireLight!: THREE.PointLight;
   private lanterns: { pivot: THREE.Group; light: THREE.PointLight; phase: number; mesh: THREE.Object3D }[] = [];
   private planks: Plank[] = [];
+  /** THOTH'S HALL: the sign, and the hall itself while it is open */
+  private ksign: KnowledgeSign | null = null;
+  private ksignHot = 0;
+  private hall: ThothHall | null = null;
   private ray = new THREE.Raycaster();
   private hot: Plank | null = null;
   private sel = -1;
@@ -461,6 +469,16 @@ export class MenuScene implements GameScene {
     };
     for (const [k, h] of gt.lanternHooks.entries()) hang(gate, h, k * 2.1);
     hang(post, sp.lanternHook, 4.2);
+    // ---- THOTH'S HALL: the sign of knowledge hanging in the air over the dunes
+    try {
+      const ks = new KnowledgeSign(this.particles);
+      ks.group.position.set(KSIGN.x, this.gy(KSIGN.x, KSIGN.z) + KSIGN.y, KSIGN.z);
+      ks.group.rotation.y = KSIGN.yaw;
+      this.scene.add(ks.group);
+      this.ksign = ks;
+    } catch (e) {
+      console.warn('[menu] knowledge sign', e);
+    }
   }
 
   private rigOf(keys: string[]): RigSpec | null {
@@ -616,6 +634,9 @@ export class MenuScene implements GameScene {
   }
 
   exit() {
+    this.hall?.dispose();
+    this.hall = null;
+    this.ksign?.dispose();
     this.msg.remove();
     this.panel?.remove();
     this.wind?.stop(0.5);
@@ -672,10 +693,32 @@ export class MenuScene implements GameScene {
         eng.audio.play('door_creak', { volume: 0.8 });
         nav.hub();
         break;
-      case 'CODEX':
-        this.say("Thoth's codex lies on the hideout table. Head to the HIDEOUT.");
-        break;
     }
+  }
+
+  /** the sign of knowledge: Thoth's Hall opens over the menu (the camp waits behind it) */
+  private openHall() {
+    if (this.hall || this.leaving) return;
+    const eng = this.engine;
+    this.ksign?.burst();
+    eng.audio.play('divine_chime', { volume: 0.6 });
+    eng.audio.play('paper_flutter', { volume: 0.5, pitch: 0.9 });
+    this.panel?.remove();
+    this.panel = null;
+    this.msg.style.opacity = '0';
+    document.body.style.cursor = 'default';
+    const hall = new ThothHall(eng, {
+      hero: this.hero?.geo.spec ?? null,
+      back: { scene: this.scene, camera: this.camera },
+      from: 'menu',
+      onClosed: () => {
+        if (this.hall === hall) this.hall = null;
+        hall.dispose();
+        eng.input.setWantLock(false);
+      },
+    });
+    this.hall = hall;
+    void hall.open();
   }
 
   private openSettings() {
@@ -746,6 +789,11 @@ export class MenuScene implements GameScene {
   // ================================================================ per frame
   update(_dt: number, rdt: number) {
     if (!this.built) return;
+    // Thoth's Hall owns the screen while it is open
+    if (this.hall) {
+      this.hall.update(rdt);
+      return;
+    }
     this.t += rdt;
     const t = this.t;
     const dt = Math.min(rdt, 0.05);
@@ -799,10 +847,13 @@ export class MenuScene implements GameScene {
     // keyboard
     const up = inp.wasPressed('ArrowUp') || inp.wasPressed('KeyW');
     const down = inp.wasPressed('ArrowDown') || inp.wasPressed('KeyS');
-    if ((up || down) && n && !this.leaving) {
+    // the sign of knowledge is the last stop of the keyboard cycle (index n)
+    const nk = n + (this.ksign ? 1 : 0);
+    if ((up || down) && nk && !this.leaving) {
       this.kb = true;
-      this.sel = this.sel < 0 ? 0 : (this.sel + (down ? 1 : -1) + n) % n;
+      this.sel = this.sel < 0 ? 0 : (this.sel + (down ? 1 : -1) + nk) % nk;
     }
+    let signHit = false;
     // mouse
     let hit: Plank | null = null;
     if (inp.ndcX !== this.lastNdc.x || inp.ndcY !== this.lastNdc.y) {
@@ -811,11 +862,26 @@ export class MenuScene implements GameScene {
     }
     if (!this.kb) {
       this.ray.setFromCamera(new THREE.Vector2(inp.ndcX, inp.ndcY), this.camera);
-      const hits = this.ray.intersectObjects(this.planks.map((p) => p.proxy), false);
+      const hits = this.ray.intersectObjects([...this.planks.map((p) => p.proxy), ...(this.ksign ? [this.ksign.proxy] : [])], false);
       if (hits.length) hit = this.planks.find((p) => p.proxy === hits[0].object) ?? null;
-      this.sel = hit ? this.planks.indexOf(hit) : -1;
-    } else hit = this.planks[this.sel] ?? null;
+      signHit = !!hits.length && !!this.ksign && hits[0].object === this.ksign.proxy;
+      this.sel = hit ? this.planks.indexOf(hit) : signHit ? n : -1;
+    } else {
+      hit = this.planks[this.sel] ?? null;
+      signHit = this.sel === n && !!this.ksign;
+    }
     if (this.leaving) hit = null;
+    if (this.leaving) signHit = false;
+    // the sign: hover lights it, a click (or Enter on it) opens the hall
+    if (this.ksign) {
+      if (signHit && this.ksignHot < 0.5) eng.audio.play('divine_whisper', { volume: 0.3, pitch: 1.2 });
+      this.ksignHot = signHit ? 1 : 0;
+      this.ksign.update(dt, this.ksignHot);
+      if (signHit && !this.leaving && ((!this.kb && inp.wasPressed('Mouse0')) || (this.kb && (inp.wasPressed('Enter') || inp.wasPressed('Space') || inp.wasPressed('NumpadEnter'))))) {
+        this.openHall();
+        return;
+      }
+    }
     if (hit !== this.hot) {
       if (hit) {
         eng.audio.play('ui_hover', { volume: 0.45 });
@@ -827,11 +893,11 @@ export class MenuScene implements GameScene {
         }
       }
       this.hot = hit;
-      document.body.style.cursor = hit && !this.kb ? 'pointer' : 'default';
     }
+    document.body.style.cursor = (hit || signHit) && !this.kb ? 'pointer' : 'default';
     if (!this.leaving) {
       if (hit && !this.kb && inp.wasPressed('Mouse0')) this.choose(hit);
-      else if (this.sel >= 0 && (inp.wasPressed('Enter') || inp.wasPressed('Space') || inp.wasPressed('NumpadEnter'))) this.choose(this.planks[this.sel]);
+      else if (this.sel >= 0 && this.sel < n && (inp.wasPressed('Enter') || inp.wasPressed('Space') || inp.wasPressed('NumpadEnter'))) this.choose(this.planks[this.sel]);
     }
     const t = this.t;
     for (const p of this.planks) {

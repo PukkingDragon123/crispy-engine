@@ -176,15 +176,6 @@ const PONCHO_ENV: Env = [
   [44.9, 5.8, 4.6, -1.4],
   [45.8, 4.2, 3.7, -1.6],
 ];
-/** the bare rib cage (bandana / sling / collar ride on it) */
-const RIB_ENV: Env = [
-  [30.0, 5.2, 4.3, -0.95],
-  [34.0, 6.0, 4.85, -0.95],
-  [37.6, 6.45, 5.1, -0.95],
-  [41.0, 6.2, 4.9, -1.0],
-  [43.4, 5.4, 4.4, -1.2],
-  [45.0, 3.9, 3.5, -1.6],
-];
 const JEANS_ENV: Env = [
   [19.8, 5.8, 3.7, -0.9],
   [21.5, 6.45, 4.15, -1.05],
@@ -773,9 +764,9 @@ function hairLocks(): { locks: HairLock[]; chains: HairChain[] } {
   return {
     locks,
     chains: [
-      { parts: ['hair_l', 'hair_l2'], lim: [-0.22, 0.95, -0.1, 0.7], phase: 0 },
-      { parts: ['hair_r', 'hair_r2'], lim: [-0.22, 0.95, -0.7, 0.1], phase: 1.7, stiff: 130 },
-      { parts: ['hair_b', 'hair_b2'], lim: [-0.06, 1.05, -0.45, 0.45], phase: 3.1, stiff: 95 },
+      { parts: ['hair_l', 'hair_l2'], lim: [-0.3, 0.95, -0.1, 0.7], phase: 0 },
+      { parts: ['hair_r', 'hair_r2'], lim: [-0.3, 0.95, -0.7, 0.1], phase: 1.7, stiff: 130 },
+      { parts: ['hair_b', 'hair_b2'], lim: [-0.28, 1.05, -0.45, 0.45], phase: 3.1, stiff: 95 },
     ],
   };
 }
@@ -945,19 +936,6 @@ function tibia(m: Sc, s: number, to = 4.6) {
   m.ell([s * 3.5, 15.4, 1.55], [0.82, 1.0, 0.5], BN.hi); // kneecap
   m.cap([s * 3.5, 14.5, 0.3], [s * 3.3, to, 0.0], 0.78, 0.62, B);
   m.cap([s * 4.6, 14.2, -0.4], [s * 4.35, to - 0.2, -0.4], 0.4, 0.38, BN.shade); // fibula
-}
-function boneFoot(m: Sc, s: number) {
-  const B = BN.base;
-  m.ell([s * 2.55, 3.6, 0], [0.6, 0.6, 0.6], B); // malleoli
-  m.ell([s * 4.55, 3.5, -0.4], [0.55, 0.55, 0.55], B);
-  m.ell([s * 3.4, 2.3, -0.4], [1.15, 0.9, 1.1], B); // talus
-  m.ell([s * 3.5, 1.4, -2.0], [1.05, 1.3, 1.35], B); // calcaneus
-  [2.3, 3.0, 3.7, 4.4, 5.0].forEach((tx, i) => {
-    const x = s * tx;
-    m.cap([s * (3.0 + i * 0.35), 2.0, 0.6], [x, 0.75, 3.5], 0.42, 0.36, B);
-    m.ell([x, 0.75, 3.6], [0.42, 0.42, 0.42], B);
-    m.cap([x, 0.7, 3.8], [x, 0.5, i === 0 ? 5.7 : 5.3 - i * 0.2], i === 0 ? 0.42 : 0.33, 0.28, B);
-  });
 }
 
 // ================================================================== THE HALF-DEAD BODY

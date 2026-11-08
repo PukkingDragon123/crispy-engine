@@ -709,10 +709,10 @@ export class BookwormAnim {
         const stride = 0.05;
         this.wave += dt * (this.speed / stride) * Math.PI * 2 * 0.25;
         for (let i = 1; i < 10; i++) this.set(SEGS[i], -Math.sin(this.wave - i * 0.85) * 0.32 * (i < 6 ? 1 : 0.5), Math.sin(this.wave * 0.5 - i * 0.4) * 0.04, 0);
-        this.add('seg6', 0.35);
-        this.add('seg7', 0.45);
-        this.add('seg8', 0.2);
-        this.set('head', -0.7, 0, 0);
+        this.add('seg6', 0.2);
+        this.add('seg7', 0.3);
+        this.add('seg8', 0.15);
+        this.set('head', 0.05, 0, 0);
         this.set('hand_l', -0.2 + Math.sin(this.wave) * 0.15);
         this.set('hand_r', -0.2 - Math.sin(this.wave) * 0.15);
         this.set('seg0', 0, Math.sin(this.wave * 0.5) * 0.04, 0);
@@ -733,7 +733,7 @@ export class BookwormAnim {
         this.set('seg7', -0.1 * tall);
         this.set('seg8', 0.06 * tall);
         this.set('seg9', 0.1 * tall);
-        this.set('head', (1.18 * tall - 0.12) * 0.62 + 0.05);
+        this.set('head', this.mode === 'look' ? 0 : 0.15);
         if (this.mode === 'surprised') {
           const k = Math.exp(-mt * 4);
           this.add('seg7', -0.4 * k);
@@ -753,7 +753,7 @@ export class BookwormAnim {
           this.add('head', -0.55 * reach);
           this.set('hand_l', -1.0 * reach, 0, -0.1 * reach);
           this.set('hand_r', -1.0 * reach, 0, 0.1 * reach);
-          this.set('book', -1.0 * reach);
+          this.set('book', 0.22 * reach);
           if (!this.shelved && mt > 1.0) {
             this.shelved = true;
             this.onShelve?.();
@@ -764,6 +764,12 @@ export class BookwormAnim {
         lookW = 0.8;
         break;
       }
+    }
+    // off the floor the head levels itself against the bend of the body, so it never ends up face-down
+    if (this.mode !== 'read' && this.mode !== 'idle') {
+      let bend = 0;
+      for (let i = 1; i < 10; i++) bend += this.tgt[SEGS[i]][0];
+      this.add('head', -bend * 0.9, 0, 0);
     }
     this.add('head', 0, this.yaw * lookW, 0);
     this.add('seg9', 0, this.yaw * 0.25 * lookW, 0);

@@ -72,6 +72,8 @@ export interface ThothShow {
   fresh?: boolean;
   /** the codex category (picks his line) */
   cat?: string;
+  /** more discoveries are waiting: a quick visit (no lap, just a gasp, a note and a bounce) */
+  quick?: boolean;
   /** builds a miniature of the thing for him to run around (null: no specimen) */
   specimen?: (() => Puppet | null) | null;
 }
@@ -368,6 +370,7 @@ export class ThothPop {
   private sparkT = 0;
   private fired = new Set<string>();
   private freezing = false;
+  private writeAng = 0;
   private speech: Speech | null = null;
   /** playback rate of the show (1 = real time; 0 holds a frame, for captures) */
   timeScale = 1;
@@ -417,9 +420,11 @@ export class ThothPop {
     const gasp = 0.12;
     const freeze0 = 0.42, freeze1 = freeze0 + fz;
     const run0 = big ? freeze1 : 0.55;
-    const run1 = run0 + 0.7;
-    const write1 = run1 + 0.55;
-    const joy1 = write1 + 0.45;
+    const quick = !!s.quick && !big;
+    const run1 = run0 + (quick ? 0 : 0.7);
+    const write1 = run1 + (quick ? 0.45 : 0.55);
+    const joy1 = write1 + (quick ? 0.3 : 0.45);
+    this.writeAng = quick ? -1.05 : -1.05 - (Math.PI * 2 - 1.8);
     this.tl = { gasp, freeze0, freeze1, run0, run1, write1, joy1, out1: joy1 + 0.3 };
     this.t = 0;
     this.fired.clear();
@@ -558,7 +563,7 @@ export class ThothPop {
       R = 0.64 + Math.sin(k * Math.PI) * 0.12;
     } else if (t < tl.write1) {
       mode = 'write';
-      this.ang = -1.05 - (Math.PI * 2 - 1.8);
+      this.ang = this.writeAng;
       // three-quarters to the camera, turned a little toward the specimen
       face = camYaw - 0.55;
       a.lookAt = null;
@@ -626,8 +631,8 @@ export class ThothPop {
     if (this.title && this.sub) {
       this.title.anchor.copy(this.textPos(_v, 1.5));
       this.sub.anchor.copy(this.textPos(_v, 1.24));
-      this.title.update(rdt, cam);
-      this.sub.update(rdt, cam);
+      this.title.update(dt, cam);
+      this.sub.update(dt, cam);
     }
     if (t >= tl.out1) this.finish();
   }

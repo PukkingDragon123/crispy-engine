@@ -1090,7 +1090,7 @@ export class ThothAnim {
         this.set('head', -0.18, 0, 0.3);
         this.set('foot_l', -0.25 * Math.max(0, Math.sin(t * 9)));
         lookW = 0.3;
-        eyeOpen = 0.78;
+        eyeOpen = 0.88;
         break;
       }
       case 'run': {
@@ -1153,7 +1153,8 @@ export class ThothAnim {
         this.set('torso', 0.08, 0, 0);
         this.add('beak', Math.sin(t * 6) * 0.04);
         jawOpen = 0.06; // concentrating, beak just parted
-        eyeOpen = 0.72;
+        eyeOpen = 0.96;
+        eyeScale = 1.04;
         lookW = 0;
         l = 20;
         break;
@@ -1193,7 +1194,8 @@ export class ThothAnim {
         this.set('torso', -0.1, Math.sin(mt * 4.5) * 0.15, 0);
         this.set('head', -0.18, 0, Math.sin(mt * 4.5) * 0.22);
         jawOpen = 0.35;
-        eyeOpen = 0.28; // ^^
+        eyeOpen = 1.08; // big shining eyes
+        eyeScale = 1.08;
         wingOut = 0.6 + 0.4 * b;
         lookW = 0.2;
         l = 26;
@@ -1228,7 +1230,7 @@ export class ThothAnim {
         this.set('arm_l', -0.15, 0, 0.1);
         this.set('head', 0, 0, Math.sin(t * 5) * 0.12);
         jawOpen = 0.2;
-        eyeOpen = 0.55;
+        eyeOpen = 1;
         wingOut = 0.25;
         lookW = 0.8;
         break;

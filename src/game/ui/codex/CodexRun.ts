@@ -99,7 +99,8 @@ export class CodexRun {
     const specimen = e.cat === 'boss' || e.cat === 'place' || e.cat === 'blueprint'
       ? null
       : () => (e.enemy ? Puppet.enemy(e.enemy, { castShadow: false }) : e.model && !e.model.startsWith('@') ? Puppet.fromKey(e.model, { castShadow: false }) : null);
-    const show: ThothShow = { name: e.name, tag, section, points: d.points, big, fresh: d.fresh, cat: e.cat, specimen };
+    // more waiting behind this one: a quick visit, so a burst of finds never keeps him on screen for long
+    const show: ThothShow = { name: e.name, tag, section, points: d.points, big, fresh: d.fresh, cat: e.cat, specimen, quick: this.queue.length > 0 };
     if (!this.pop.play(show)) {
       this.queue.unshift(d);
       return;
