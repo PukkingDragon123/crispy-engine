@@ -3,9 +3,8 @@
 //    a band of jade Alagard letters set round it (typography, as voxels);
 //  - an energy shell outlining the selected component (jade into gold, a band
 //    of light running along it, brighter at the rim);
-//  - the exploded view: the gun split into its components from its own voxels
-//    (each part slot's zone, and the rest by rig part), flying apart along
-//    their axes. A per-part layout from the guns' own API is used when present.
+//  - the schematic: a cyanotype photograph of the gun as it would be.
+// (The exploded view is the guns' own: spec.meta.explode, explodeWeapon.)
 import * as THREE from 'three';
 import { RigSpec, buildRigGeo, RigInstance } from '../../../engine/voxel/Rig';
 import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
@@ -13,7 +12,6 @@ import { buildVoxelGeometry } from '../../../engine/voxel/Mesher';
 import { makeVoxelMaterial, sharedVoxelMaterial } from '../../../engine/render/VoxelMaterial';
 import { CardStudio, Shot } from '../../ui/CardStudio';
 import { parchmentSheet } from '../../models/props/treasure';
-import { restMatrix, revolverLaserMesh } from './GunRack';
 
 export const JADE = 0x6affc0;
 export const GOLD = 0xffcf5a;
@@ -57,14 +55,15 @@ export function runeBand(r0: number, r1: number, words: string, seed = 1): Voxel
       m.set(Math.round(Math.cos(a) * r), 0, Math.round(Math.sin(a) * r), col, VF.EMISSIVE);
     }
   };
-  ring(r1, GOLD);
-  ring(r1 - 1.6, 0xffe9a0);
-  ring(r0, GOLD);
+  // (deeper than the glow colours: the circle's own light would wash the letters out)
+  ring(r1, 0xb88a2e);
+  ring(r1 - 1.6, 0xd8b060);
+  ring(r0, 0xb88a2e);
   // tick nubs on the outer ring
   for (let i = 0; i < 24; i++) {
     const a = (i / 24) * Math.PI * 2 + seed;
     const len = i % 6 === 0 ? 3 : 1.5;
-    for (let t = 0; t <= len; t += 0.5) m.set(Math.round(Math.cos(a) * (r1 + t)), 0, Math.round(Math.sin(a) * (r1 + t)), GOLD, VF.EMISSIVE);
+    for (let t = 0; t <= len; t += 0.5) m.set(Math.round(Math.cos(a) * (r1 + t)), 0, Math.round(Math.sin(a) * (r1 + t)), 0xb88a2e, VF.EMISSIVE);
   }
   // the letters
   const chars = words.split('');
@@ -80,7 +79,7 @@ export function runeBand(r0: number, r1: number, words: string, seed = 1): Voxel
         if (!g.at(u / Math.max(0.01, W), 1 - v / H)) continue;
         const r = mid - H / 2 + v;
         const a = a0 + (u - W / 2) / r;
-        m.set(Math.round(Math.cos(a) * r), 0, Math.round(Math.sin(a) * r), JADE, VF.EMISSIVE);
+        m.set(Math.round(Math.cos(a) * r), 0, Math.round(Math.sin(a) * r), 0x2fb880, VF.EMISSIVE);
       }
   });
   return m;
@@ -112,7 +111,7 @@ export class RuneCircle {
   update(rdt: number, on: boolean, t: number) {
     this.k += ((on ? 1 : 0) - this.k) * (1 - Math.exp(-rdt * (on ? 2.2 : 5)));
     this.grp.visible = this.k > 0.01;
-    this.mat.opacity = this.k * (0.82 + Math.sin(t * 2.1) * 0.1);
+    this.mat.opacity = this.k * (0.78 + Math.sin(t * 2.1) * 0.1);
     this.outer.rotation.y += rdt * 0.12;
     this.inner.rotation.y -= rdt * 0.2;
     const s = 0.9 + this.k * 0.1;
@@ -127,9 +126,9 @@ export class RuneCircle {
 
 // ======================================================================= the energy shell
 /** additive jade-into-gold glow on a slightly swollen copy of a component, brighter at the rim, a band of light running along it */
-export function shellMaterial() {
+export function shellMaterial(a = JADE, b = GOLD) {
   return new THREE.ShaderMaterial({
-    uniforms: { uT: { value: 0 }, uK: { value: 0 }, uA: { value: new THREE.Color(JADE) }, uB: { value: new THREE.Color(GOLD) } },
+    uniforms: { uT: { value: 0 }, uK: { value: 0 }, uA: { value: new THREE.Color(a) }, uB: { value: new THREE.Color(b) } },
     vertexShader: /* glsl */ `
       varying vec3 vN; varying vec3 vV; varying vec3 vW;
       void main(){
@@ -156,103 +155,19 @@ export function shellMaterial() {
   });
 }
 
-// ======================================================================= the exploded view
-export interface Component {
-  /** the part slot it belongs to (null: the gun's own body, by rig part) */
-  slot: string | null;
-  name: string;
-  /** voxels in rig space (child of the components group, which sits at the rig root) */
-  mesh: THREE.Group;
-  /** the energy shell over it (built on demand) */
-  shell: THREE.Group | null;
-  c: THREE.Vector3;
-  dir: THREE.Vector3;
-  dist: number;
-}
-/** a per-part layout from the guns' own code, when it exists: { [part or slot]: { dir: [x,y,z], dist } } */
-export type ExplodeLayout = Record<string, { dir: [number, number, number]; dist?: number }>;
-
-const key3 = (x: number, y: number, z: number) => `${x},${y},${z}`;
-/**
- * Split a gun into components: each slot's zone (the voxels that change with
- * that slot's parts) and the rest by rig part. `zones` maps slot -> part ->
- * voxel keys in this spec's own part models.
- */
-export function decompose(spec: RigSpec, zones: Map<string, Map<string, Set<string>>>, layout?: ExplodeLayout | null): Component[] {
-  const out: Component[] = [];
-  const vs = spec.voxelSize;
-  const bucket = new Map<string, { slot: string | null; name: string; parts: Map<string, VoxelModel> }>();
-  for (const p of spec.parts) {
-    p.model.forEach((x, y, z, c, f) => {
-      const k = key3(x, y, z);
-      let slot: string | null = null;
-      for (const [s, z2] of zones) if (z2.get(p.name)?.has(k)) slot = s;
-      const id = slot ? 'slot:' + slot : 'part:' + p.name;
-      let b = bucket.get(id);
-      if (!b) bucket.set(id, (b = { slot, name: slot ?? p.name, parts: new Map() }));
-      let m = b.parts.get(p.name);
-      if (!m) b.parts.set(p.name, (m = new VoxelModel(id)));
-      m.set(x, y, z, c, f);
-    });
-  }
-  for (const b of bucket.values()) {
-    const grp = new THREE.Group();
-    let n = 0;
-    for (const [pn, m] of b.parts) {
-      if (m.count < 4) continue;
-      n += m.count;
-      const part = spec.parts.find((q) => q.name === pn)!;
-      const mesh = new THREE.Mesh(buildVoxelGeometry(m, { voxelSize: vs, pivot: part.pivot }), sharedVoxelMaterial);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.applyMatrix4(restMatrix(spec, pn));
-      grp.add(mesh);
-    }
-    if (!n) continue;
-    grp.updateMatrixWorld(true);
-    const c = new THREE.Box3().setFromObject(grp).getCenter(new THREE.Vector3());
-    out.push({ slot: b.slot, name: b.name, mesh: grp, shell: null, c, dir: new THREE.Vector3(), dist: 0, ...{ n } } as Component & { n: number });
-  }
-  // directions: away from the body, stretched along the gun's length, every piece lifted a little off the flank
-  const all = new THREE.Box3();
-  for (const q of out) all.expandByPoint(q.c);
-  const C = all.getCenter(new THREE.Vector3());
-  const core = out.reduce((a, q) => ((q as Component & { n: number }).n > ((a as Component & { n: number })?.n ?? 0) && !q.slot ? q : a), null as Component | null);
-  for (const q of out) {
-    const v = q.c.clone().sub(C);
-    const d = new THREE.Vector3(v.x * 0.5, v.y * 1.1, v.z * 1.6);
-    if (q.slot === 'mag' || q.slot === 'under') d.y -= 0.05;
-    if (q.slot === 'optic' || q.slot === 'sight') d.y += 0.05;
-    if (q.slot === 'barrel' || q.slot === 'muzzle') d.z += 0.06;
-    if (q.slot === 'stock' || q.slot === 'grip') d.z -= 0.04;
-    if (q.slot === 'cylinder') d.x -= 0.05;
-    d.x -= 0.03; // off the flank, toward whoever looks down at it
-    if (d.lengthSq() < 1e-6) d.set(-1, 0, 0);
-    q.dir.copy(d.normalize());
-    q.dist = q === core ? 0 : Math.min(0.24, 0.07 + v.length() * 0.45);
-    const L = layout?.[q.slot ?? q.name];
-    if (L) {
-      q.dir.set(...L.dir).normalize();
-      if (L.dist !== undefined) q.dist = L.dist;
-    }
-  }
-  return out;
-}
-
 // ======================================================================= the schematic
 /**
  * Photograph a gun (as configured) lying on a schematic sheet, graded like a
  * cyanotype blueprint with pale ink lines: the picture in the gunsmith's
  * schematic panel (a photograph of the 3D model, never drawn).
  */
-export function gunSchematic(renderer: THREE.WebGLRenderer, spec: RigSpec, cacheKey: string, laser = false): HTMLCanvasElement | null {
+export function gunSchematic(renderer: THREE.WebGLRenderer, spec: RigSpec, cacheKey: string): HTMLCanvasElement | null {
   const mat = makeVoxelMaterial();
   const root = new THREE.Group();
   const sheet = parchmentSheet(124, 80, 11);
   const sheetMesh = new THREE.Mesh(buildVoxelGeometry(sheet.model, { voxelSize: sheet.voxelSize, pivot: sheet.pivot }), mat);
   root.add(sheetMesh);
   const inst = new RigInstance(buildRigGeo(spec, cacheKey), { material: mat });
-  if (laser) inst.nodes['frame']?.add(revolverLaserMesh(spec));
   const holder = new THREE.Group();
   holder.add(inst.root);
   holder.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(1, 0, 0)));

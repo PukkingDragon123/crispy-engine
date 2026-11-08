@@ -48,6 +48,8 @@ export interface SmithView {
   schematic: HTMLCanvasElement | null;
   exploded: boolean;
   busy: boolean;
+  /** the name of the component under the mouse, shown as a tag beside it */
+  tag: { text: string; x: number; y: number } | null;
 }
 /** the card beside the rack for the gun you are looking at */
 export interface RackInfo {
@@ -161,6 +163,24 @@ export class GunsmithUI {
     const lb = this.drawComponents(d, 16 + slideL, 100, side, a);
     if (this.H - lb > 150) this.drawSchematic(d, 16 + slideL, lb + 12, side, Math.min(this.H - lb - 70, Math.round(side * 0.66)), a);
     this.drawDetails(d, this.W - 16 - side - 24 + slideR, 100, side + 24, a);
+    if (d.tag) this.drawTag(d.tag, a);
+  }
+  /** a little jade-rimmed tag with the component's name, beside the mouse */
+  private drawTag(tg: { text: string; x: number; y: number }, a: number) {
+    const S = this.S;
+    const tw = this.tw(tg.text, 16);
+    const w = Math.ceil((tw + 22) / S), h = 12;
+    const img = sprite(`ctag:${w}`, w, h, (c) => {
+      px(c, 0, 0, w, h, '#0e3a2a');
+      px(c, 1, 1, w - 2, h - 2, '#1e4e3a');
+      px(c, 1, 1, w - 2, 1, '#6affc0');
+      px(c, 1, h - 2, w - 2, 1, '#0e2a1e');
+      for (const [x, y] of [[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1]]) px(c, x, y, 1, 1, '#ffcf5a');
+    });
+    let x = tg.x + 16, y = tg.y + 14;
+    if (x + w * S > this.W - 8) x = tg.x - w * S - 10;
+    this.blit(img, x, y, a);
+    this.ink(tg.text, x + (w * S) / 2, y + (h * S - 16) / 2 + 1, '#e8fff4', 16, 'center', false, a);
   }
 
   // ---------------------------------------------------------------- drawing helpers
@@ -339,11 +359,13 @@ export class GunsmithUI {
   private drawDetails(d: SmithView, x: number, y: number, w: number, a: number) {
     const S = this.S;
     const inner = w - 30;
-    const descL = this.wrap(d.shown.desc, inner, 16).slice(0, 5);
-    const noteL = d.notes.slice(0, 2).flatMap((n) => this.wrap(n, inner - 14, 15)).slice(0, 3);
+    // fixed-height text areas, so hovering another part never shifts the rows under the mouse
+    const DESC = 3, NOTES = 2;
+    const descL = this.wrap(d.shown.desc, inner, 16).slice(0, DESC);
+    const noteL = d.notes.slice(0, 2).flatMap((n) => this.wrap(n, inner - 14, 15)).slice(0, NOTES);
     const statH = d.stats.length * 30;
     const optH = d.options.length * 30;
-    const h = 22 + 34 + 22 + descL.length * 19 + 10 + noteL.length * 18 + (statH ? statH + 26 : 0) + 30 + optH + 18;
+    const h = 22 + 34 + 22 + DESC * 19 + 10 + NOTES * 18 + (statH ? statH + 26 : 0) + 30 + optH + 18;
     const pw = Math.ceil(w / S), ph = Math.ceil(h / S);
     this.blit(parchment(pw, ph, 17), x, y, a);
     this.rects.panels.push({ x, y, w: pw * S, h: ph * S });
@@ -354,17 +376,12 @@ export class GunsmithUI {
     ty += 22;
     // the part's name, big
     const big = this.tw(d.shown.name, 32) > inner ? 24 : 32;
-    this.ink(d.shown.name, x + 16, ty, '#2a160a', big, 'left', false, a);
-    ty += big + 6;
-    for (const l of descL) {
-      this.ink(l, x + 16, ty, '#3a2414', 16, 'left', false, a);
-      ty += 19;
-    }
-    for (const l of noteL) {
-      this.ink(l, x + 30, ty + 4, '#7a2a16', 15, 'left', false, a);
-      ty += 18;
-    }
-    ty += 10;
+    this.ink(d.shown.name, x + 16, ty + (32 - big) / 2, '#2a160a', big, 'left', false, a);
+    ty += 38;
+    descL.forEach((l, i) => this.ink(l, x + 16, ty + i * 19, '#3a2414', 16, 'left', false, a));
+    ty += DESC * 19;
+    noteL.forEach((l, i) => this.ink(l, x + 30, ty + 4 + i * 18, '#7a2a16', 15, 'left', false, a));
+    ty += NOTES * 18 + 10;
     // the stats: fitted now (wood fill), the shown part's gain in jade or loss in red
     if (d.stats.length) {
       this.ink('AGAINST WHAT IS FITTED', x + 16, ty, '#6a4a2a', 15, 'left', false, a);
@@ -447,7 +464,7 @@ export class GunsmithUI {
     const inner = w - 32;
     const desc = this.wrap(r.desc, inner, 16).slice(0, 4);
     const fit = r.fitted.length ? this.wrap('Fitted: ' + r.fitted.join(', '), inner, 15).slice(0, 3) : [];
-    const h = 20 + 36 + 24 + desc.length * 19 + (fit.length ? 8 + fit.length * 18 : 0) + 34;
+    const h = 20 + 36 + 24 + desc.length * 19 + (fit.length ? 8 + fit.length * 18 : 0) + 50;
     const pw = Math.ceil(w / S), ph = Math.ceil(h / S);
     const x = 16 - (1 - a) * (w + 30), y = Math.round(this.H * 0.22);
     this.blit(parchment(pw, ph, 27), x, y, a);

@@ -25,13 +25,13 @@ import * as WS from '../../models/props/workshop';
 import * as HX from '../../models/props/hideout';
 import { Blueprints, GUNS, ATTACHMENTS, AttachmentDef, gunTune } from '../../meta/Blueprints';
 import * as Wp from '../../player/Weapons';
-import { buildWeaponRig, LONG_FEEL } from '../../player/Weapons';
+import { buildWeaponRig, weaponRigJob, LONG_FEEL } from '../../player/Weapons';
 import { blueprintPhoto } from '../../ui/BlueprintReveal';
 import { loadSave, writeSave, owns, buy, PRICES, GUN_PARTS, GUN_PERKS, GunLoadout } from '../../meta/Save';
 import { BuildKit, HubHost, HubStation, HeroBubble, PriceLock, safe, geoOf, meshOf, reach, ease, clamp01, sstep, stepJob, nailGeo } from './HubKit';
-import { GunRack, GunKey, RACK_ORDER, REV_DEFAULT, Display, Q_FLAT, buildDisplay, poseBox, scaleOf, slotPieces, slotBoxes, diffZones, gunSpec, revolverLaserMesh, TextCard } from './GunRack';
+import { GunRack, GunKey, RACK_ORDER, REV_DEFAULT, Display, Q_FLAT, buildDisplay, displayFromSpec, poseBox, scaleOf, restMatrix, componentsOf, GunComp, TextCard } from './GunRack';
 import { GunsmithUI, SmithHit, SmithView, SmithStat, SmithOption, RackInfo } from './GunsmithUI';
-import { RuneCircle, shellMaterial, decompose, Component, ExplodeLayout, gunSchematic, JADE, GOLD } from './GunsmithFX';
+import { RuneCircle, shellMaterial, gunSchematic, JADE, GOLD } from './GunsmithFX';
 import type { Mode, Pick, View } from './HouseExtras';
 
 const IN = HX.CABIN_IN;
@@ -67,14 +67,6 @@ interface Part {
   proxy: THREE.Group | null;
   /** where it lies in the tray */
   home: THREE.Matrix4 | null;
-}
-interface Spot {
-  slot: string;
-  /** the zone in rig space */
-  c: THREE.Vector3;
-  lo: THREE.Vector3;
-  hi: THREE.Vector3;
-  pin: THREE.Mesh;
 }
 /** one choice for a slot, as the panel lists it */
 interface Opt {
@@ -134,15 +126,9 @@ export class Bench3D implements Mode {
   private parts: Part[] = [];
   private pieceJob: Generator<void, void, void> | null = null;
   private built = new Set<GunKey>();
-  // ---- the slots on the gun as it is now
-  private zones = new Map<GunKey, { key: string; map: Map<string, { c: THREE.Vector3; lo: THREE.Vector3; hi: THREE.Vector3 }>; opt: Map<string, THREE.Vector3>; comps: Component[] }>();
-  private zoneJob: { g: GunKey; key: string; job: Generator<void, void, void> } | null = null;
-  private spots: Spot[] = [];
-  private spotKey = '';
-  private pinGeo: THREE.BufferGeometry | null = null;
-  private tagSm: ReturnType<typeof WS.workTag> | null = null;
-  private tagGeo: THREE.BufferGeometry | null = null;
-  private cordGeo: THREE.BufferGeometry | null = null;
+  // ---- builds spread over frames: the gun about to be fitted, the schematic's gun
+  private prebuild: { key: string; gen: Generator<void, RigSpec | null, void>; spec: RigSpec | null; done: boolean } | null = null;
+  private schemJob: { key: string; gen: Generator<void, RigSpec | null, void> } | null = null;
   // ---- the gunsmith's screen: panels, the selected component, the exploded view, the magic
   private smith: GunsmithUI | null = null;
   private selSlot = 0;
@@ -151,10 +137,12 @@ export class Bench3D implements Mode {
   private buyArmed: { key: string; t: number } | null = null;
   private exploded = false;
   private explodeK = 0;
-  private compGrp: THREE.Group | null = null;
-  private compKey = '';
   private shellMat = shellMaterial();
-  private shell: { slot: string; obj: THREE.Group } | null = null;
+  private hoverMat = shellMaterial(GOLD, GOLD);
+  /** the energy shells on the selected slot's components, and the gold one on the component under the mouse */
+  private shell: { key: string; objs: THREE.Mesh[] } | null = null;
+  private hoverShell: { key: string; objs: THREE.Mesh[] } | null = null;
+  private hoverComp: { comp: GunComp; x: number; y: number } | null = null;
   private rune: RuneCircle | null = null;
   private aura: THREE.PointLight | null = null;
   private auraK = 0;
@@ -177,7 +165,7 @@ export class Bench3D implements Mode {
   private pending: (() => void) | null = null;
   private swallow = false;
   private listening = false;
-  private hovered: Spot | Part | null = null;
+  private hovered: Part | null = null;
   private ray = new THREE.Raycaster();
   private v = new THREE.Vector3();
   private t = 0;
@@ -238,12 +226,6 @@ export class Bench3D implements Mode {
       this.wrench.visible = false;
       this.h.scene.add(this.wrench);
     }
-    const ps = safe(() => WS.slotPin());
-    this.pinGeo = ps ? buildVoxelGeometry(ps.model, { voxelSize: ps.voxelSize, pivot: [0.5, 0, 0.5] }) : null;
-    this.tagSm = safe(() => WS.workTag());
-    this.tagGeo = geoOf(this.tagSm);
-    const tc = safe(() => WS.twineCord());
-    this.cordGeo = tc ? buildVoxelGeometry(tc.model, { voxelSize: tc.voxelSize, pivot: [0.5, 0.5, 0] }) : null;
     // ---- the six-shooter's bench cradle stays empty now (the gun lives on the rack); his idle fiddling goes to the turntable
     const host = this.h as unknown as { gunHolder?: THREE.Object3D };
     if (host.gunHolder) {
@@ -264,43 +246,26 @@ export class Bench3D implements Mode {
 
   // ======================================================================= the parts (for the tray: per gun, against the bare gun)
   private *makePieces(g: GunKey): Generator<void, void, void> {
+    // every part (owned, or for sale for the six-shooter), cut from a build with it fitted: its slot's components
+    const want: { id: string; slot: string; name: string; desc: string; key?: string; fitted: AttachmentDef[]; gun?: GunLoadout }[] = [];
     if (g === 'revolver') {
-      for (const slot of GOLD_SLOTS) {
-        const opts = GUN_PARTS[slot] as string[];
-        const specs = opts.map((o) => (CH as any).revolverRig({ ...REV_DEFAULT, [slot]: o }) as RigSpec);
-        yield;
-        const pieces = slotPieces(specs);
-        opts.forEach((o, i) => {
-          if (o === (REV_DEFAULT as unknown as Record<string, string>)[slot]) return;
-          this.addPart({ id: `${slot}:${o}`, gun: 'revolver', slot, name: `${cap(o)} ${cap(slot)}`, desc: GUN_PERKS[`${slot}:${o}`] ?? '', key: `gun:${slot}:${o}`, grp: pieces[i] });
-        });
-        yield;
-      }
-      const rs = (CH as any).revolverRig(REV_DEFAULT) as RigSpec;
-      for (const a of Blueprints.attachments('revolver')) {
-        if (!a.owned) continue;
-        const grp = new THREE.Group();
-        if (a.id === 'rev_laser') grp.add(revolverLaserMesh(rs));
-        else {
-          const cg = geoOf(safe(() => WS.moonClip()));
-          if (cg) grp.add(meshOf(cg));
+      for (const slot of GOLD_SLOTS)
+        for (const o of GUN_PARTS[slot] as string[]) {
+          if (o === (REV_DEFAULT as unknown as Record<string, string>)[slot]) continue;
+          want.push({ id: `${slot}:${o}`, slot, name: `${cap(o)} ${cap(slot)}`, desc: GUN_PERKS[`${slot}:${o}`] ?? '', key: `gun:${slot}:${o}`, fitted: [], gun: { ...REV_DEFAULT, [slot]: o } as GunLoadout });
         }
-        this.addPart({ id: a.id, gun: 'revolver', slot: a.slot, name: a.name, desc: a.desc, grp });
-      }
-      return;
     }
-    const atts = Blueprints.attachments(g);
-    for (const slot of GUNS[g].slots) {
-      const opts = atts.filter((a) => a.slot === slot);
-      if (!opts.some((a) => a.owned)) continue;
-      const specs = [buildWeaponRig(g, []), ...opts.map((a) => buildWeaponRig(g, [ATTACHMENTS[a.id]]))].filter((s): s is RigSpec => !!s);
-      yield;
-      const pieces = slotPieces(specs);
-      opts.forEach((a, i) => {
-        if (a.owned) this.addPart({ id: a.id, gun: g, slot, name: a.name, desc: a.desc, grp: pieces[i + 1] });
-        else pieces[i + 1].traverse((o) => (o as THREE.Mesh).geometry?.dispose());
-      });
-      pieces[0].traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+    for (const a of Blueprints.attachments(g)) if (a.owned) want.push({ id: a.id, slot: a.slot, name: a.name, desc: a.desc, fitted: [ATTACHMENTS[a.id]], gun: g === 'revolver' ? REV_DEFAULT : undefined });
+    for (const w of want) {
+      let grp: THREE.Group | null = null;
+      if (w.id === 'rev_speedloader') {
+        const cg = geoOf(safe(() => WS.moonClip()));
+        if (cg) (grp = new THREE.Group()).add(meshOf(cg));
+      } else {
+        const spec = yield* weaponRigJob(g, w.fitted, w.gun ? { gun: w.gun as never } : {});
+        grp = spec ? componentPiece(spec, w.slot) : null;
+      }
+      if (grp) this.addPart({ id: w.id, gun: g, slot: w.slot, name: w.name, desc: w.desc, key: w.key, grp });
       yield;
     }
   }
@@ -342,119 +307,35 @@ export class Bench3D implements Mode {
     const d = loadSave();
     return g === 'revolver' ? `${d.gun.barrel}:${d.gun.cylinder}:${d.gun.grip}:${d.gun.sight}:${Blueprints.fitted('revolver').map((a) => a.id).join(',')}` : Blueprints.fitted(g).map((a) => a.id).sort().join(',');
   }
-  private ensureZones(g: GunKey) {
-    const key = this.configKey(g);
-    if (this.zones.get(g)?.key === key || (this.zoneJob && this.zoneJob.g === g && this.zoneJob.key === key)) return;
-    this.zoneJob = { g, key, job: this.makeZones(g, key) };
-  }
-  private *makeZones(g: GunKey, key: string): Generator<void, void, void> {
-    const map = new Map<string, { c: THREE.Vector3; lo: THREE.Vector3; hi: THREE.Vector3 }>();
-    const opt = new Map<string, THREE.Vector3>();
-    const put = (slot: string, b: THREE.Box3) => {
-      if (!b.isEmpty()) map.set(slot, { c: b.getCenter(new THREE.Vector3()), lo: b.min.clone(), hi: b.max.clone() });
-    };
-    const union = (bs: THREE.Box3[]) => bs.reduce((a, b) => a.union(b), new THREE.Box3());
-    const sets = new Map<string, Map<string, Set<string>>>();
-    if (g === 'revolver') {
-      const cfg = loadSave().gun;
-      for (const slot of GOLD_SLOTS) {
-        const os = GUN_PARTS[slot] as string[];
-        const specs = os.map((o) => (CH as any).revolverRig({ ...cfg, [slot]: o }) as RigSpec);
-        yield;
-        const zs = diffZones(specs);
-        sets.set(slot, zs);
-        const bs = slotBoxes(specs, zs);
-        put(slot, union(bs));
-        os.forEach((o, i) => !bs[i].isEmpty() && opt.set(`${slot}:${o}`, bs[i].getCenter(new THREE.Vector3())));
-      }
-      const rs = (CH as any).revolverRig(cfg) as RigSpec;
-      const lm = revolverLaserMesh(rs);
-      const frame = rs.parts[0];
-      lm.position.add(new THREE.Vector3(frame.attach[0] * rs.voxelSize, frame.attach[1] * rs.voxelSize, frame.attach[2] * rs.voxelSize));
-      lm.updateMatrixWorld(true);
-      put('under', new THREE.Box3().setFromObject(lm));
-      const cyl = map.get('cylinder');
-      if (cyl) put('mag', new THREE.Box3(cyl.lo.clone().setZ(cyl.c.z - 0.01), cyl.hi.clone().setY(cyl.c.y).setZ(cyl.hi.z)));
-    } else {
-      const cfg = Blueprints.fitted(g);
-      for (const slot of GUNS[g].slots) {
-        const base = cfg.filter((a) => a.slot !== slot);
-        const opts = Object.values(ATTACHMENTS).filter((a) => a.gun === g && a.slot === slot);
-        const specs = [buildWeaponRig(g, base), ...opts.map((a) => buildWeaponRig(g, [...base, a]))];
-        yield;
-        if (specs.some((s) => !s)) continue;
-        const zs = diffZones(specs as RigSpec[]);
-        sets.set(slot, zs);
-        const bs = slotBoxes(specs as RigSpec[], zs);
-        put(slot, union(bs));
-        opts.forEach((a, i) => !bs[i + 1].isEmpty() && opt.set(a.id, bs[i + 1].getCenter(new THREE.Vector3())));
-      }
-    }
-    // the gun split into its components for the exploded view (the guns' own layout when they publish one)
-    yield;
-    const spec = gunSpec(g);
-    let comps: Component[] = [];
-    if (spec) {
-      const api = Wp as unknown as { explodedLayout?: (g: GunKey, spec: RigSpec) => ExplodeLayout | null };
-      const layout = (api.explodedLayout?.(g, spec) ?? (spec.meta?.exploded as ExplodeLayout | undefined)) || null;
-      comps = decompose(spec, sets, layout);
-      if (g === 'revolver' && Blueprints.fitted('revolver').some((a) => a.id === 'rev_laser')) {
-        const lm = revolverLaserMesh(spec);
-        const fr = spec.parts[0];
-        lm.position.add(new THREE.Vector3(fr.attach[0] * spec.voxelSize, fr.attach[1] * spec.voxelSize, fr.attach[2] * spec.voxelSize));
-        const grp = new THREE.Group();
-        grp.add(lm);
-        grp.updateMatrixWorld(true);
-        comps.push({ slot: 'under', name: 'under', mesh: grp, shell: null, c: new THREE.Box3().setFromObject(grp).getCenter(new THREE.Vector3()), dir: new THREE.Vector3(-0.2, -1, 0.3).normalize(), dist: 0.09 });
-      }
-    }
-    const old = this.zones.get(g);
-    if (old) for (const q of old.comps) q.mesh.traverse((o) => (o as THREE.Mesh).isMesh && (o as THREE.Mesh).geometry !== laserGeoRef(o) && (o as THREE.Mesh).geometry.dispose());
-    this.zones.set(g, { key, map, opt, comps });
-  }
-  /** brass pins on the gun, one per slot (rebuilt when the gun or its zones change), and the components group */
-  private refreshSpots() {
-    const d = this.work;
-    const z = d ? this.zones.get(d.g) : null;
-    const key = d && z && z.key === this.configKey(d.g) ? `${d.g}:${z.key}:${d.root.uuid}` : '';
-    if (key === this.spotKey) return;
-    this.spotKey = key;
-    this.clearSpots();
-    if (!d || !z || !key || !this.pinGeo) return;
-    for (const slot of this.slotIds(d.g)) {
-      const zn = z.map.get(slot);
-      if (!zn) continue;
-      const pin = new THREE.Mesh(this.pinGeo, sharedVoxelMaterial);
-      pin.castShadow = true;
-      // stuck into the right flank (rig -X, facing up on the turntable), needle along -X
-      pin.position.set(zn.lo.x - 0.002, zn.c.y, zn.c.z);
-      pin.rotation.z = Math.PI / 2;
-      pin.scale.setScalar(0.8 / d.hold.scale.x);
-      pin.visible = false;
-      d.root.add(pin);
-      this.spots.push({ slot, c: zn.c.clone(), lo: zn.lo.clone(), hi: zn.hi.clone(), pin });
-    }
-    // the components (hidden until the gun is exploded) ride on the gun's hold, so they turn with the platter
-    this.compGrp?.removeFromParent();
-    this.compGrp = new THREE.Group();
-    for (const q of z.comps) {
-      const holder = new THREE.Group();
-      holder.userData.comp = q;
-      holder.add(q.mesh);
-      q.mesh.visible = false;
-      this.compGrp.add(holder);
-    }
-    d.hold.add(this.compGrp);
-    this.compKey = key;
+  /** take the energy shells off */
+  private clearShell() {
+    for (const sh of [this.shell, this.hoverShell]) sh?.objs.forEach((m) => m.removeFromParent());
     this.shell = null;
+    this.hoverShell = null;
   }
-  private clearSpots() {
-    for (const s of this.spots) s.pin.removeFromParent();
-    this.spots = [];
-    this.compGrp?.removeFromParent();
-    this.compGrp = null;
-    this.shell?.obj.removeFromParent();
-    this.shell = null;
+  /** shells over components: copies of their meshes in the glow material, riding on their nodes (so they explode with them) */
+  private shellOver(d: Display, names: string[], mat: THREE.ShaderMaterial) {
+    const out: THREE.Mesh[] = [];
+    for (const n of names) {
+      const mesh = d.inst.meshes[n], node = d.inst.nodes[n];
+      if (!mesh || !node) continue;
+      const sm = new THREE.Mesh(mesh.geometry, mat);
+      sm.renderOrder = 4;
+      sm.raycast = () => undefined;
+      node.add(sm);
+      out.push(sm);
+    }
+    return out;
+  }
+  /** the component a hit landed on (walking up to its rig node) */
+  private compOf(d: Display, o: THREE.Object3D | null): GunComp | null {
+    const comps = componentsOf(d.spec);
+    for (; o && o !== d.root; o = o.parent) {
+      const name = o.name;
+      const c = comps.find((q) => q.name === name);
+      if (c) return c;
+    }
+    return null;
   }
   /** the slots of a gun, in the order the panel lists them */
   private slotIds(g: GunKey): string[] {
@@ -590,6 +471,7 @@ export class Bench3D implements Mode {
       schematic: this.schematicFor(g, slot, shown),
       exploded: this.exploded,
       busy: !!this.fly,
+      tag: this.hoverComp ? { text: this.hoverComp.comp.label + (this.hoverComp.comp.slot ? '' : '  (fixed)'), x: this.hoverComp.x, y: this.hoverComp.y } : null,
     };
   }
   /** the card beside the rack for the gun you are looking at (while you browse) */
@@ -602,28 +484,19 @@ export class Bench3D implements Mode {
     const fitted = this.slotIds(g).map((sl) => this.allOptions(g, sl).find((o) => o.state === 'fitted')).filter((o): o is Opt => !!o && (!!o.def || (!!o.gold && o.gold !== (REV_DEFAULT as unknown as Record<string, string>)[o.key.split(':')[1]]))).map((o) => o.name);
     return { name: GUNS[g].name, title: GUNS[g].title, status: g === 'revolver' ? 'On my hip' : carried ? 'On the sling' : 'Stays home', desc: GUNS[g].desc, fitted, found };
   }
-  /** the schematic photograph for what is shown (shot once a choice has held for a moment, then kept) */
+  /** the schematic photograph for what is shown (its gun is built as a job once a choice has held a moment, then kept) */
   private schematicFor(g: GunKey, slot: string, o: Opt) {
     const key = `${g}:${this.configKey(g)}:${slot}:${o.key}`;
     if (this.schem.has(key)) return (this.schemShown = this.schem.get(key) ?? this.schemShown);
     if (this.schemWant.key !== key) this.schemWant = { key, t: 0 };
-    if (this.schemWant.t > 0.22) {
-      let spec: RigSpec | null = null;
-      let laser = false;
+    if (this.schemWant.t > 0.25 && this.schemJob?.key !== key) {
       if (g === 'revolver') {
         const cfg = { ...(loadSave().gun as unknown as Record<string, string>) };
         if (o.gold) cfg[slot] = o.gold;
-        spec = (CH as any).revolverRig(cfg) as RigSpec;
-        laser = Blueprints.fitted('revolver').some((a) => a.id === 'rev_laser') || o.key === 'rev_laser';
-        const sk = `schem:rev:${cfg.barrel}:${cfg.cylinder}:${cfg.grip}:${cfg.sight}`;
-        this.schem.set(key, spec ? gunSchematic(this.h.engine.renderer, spec, sk, laser) : null);
-      } else {
-        const list = Blueprints.fitted(g).filter((a) => a.slot !== slot).concat(o.def ? [o.def] : []);
-        spec = buildWeaponRig(g, list);
-        this.schem.set(key, spec ? gunSchematic(this.h.engine.renderer, spec, spec.name + ':schem') : null);
-      }
-      if (this.schem.size > 30) this.schem.delete(this.schem.keys().next().value!);
-      this.schemShown = this.schem.get(key) ?? this.schemShown;
+        let fitted = Blueprints.fitted('revolver');
+        if (!o.gold && !GOLD_SLOTS.includes(slot as keyof GunLoadout)) fitted = fitted.filter((a) => a.slot !== slot).concat(o.def ? [o.def] : []);
+        this.schemJob = { key, gen: weaponRigJob('revolver', fitted, { gun: cfg as never }) };
+      } else this.schemJob = { key, gen: weaponRigJob(g, Blueprints.fitted(g).filter((a) => a.slot !== slot).concat(o.def ? [o.def] : [])) };
     }
     return this.schemShown;
   }
@@ -677,12 +550,10 @@ export class Bench3D implements Mode {
         const sv = loadSave();
         (sv.gun as unknown as Record<string, string>)[slot] = o.gold;
         writeSave(sv);
-        (this.h as unknown as { buildGun?(): void }).buildGun?.();
-      } else if (o.def) Blueprints.fit(d.g, o.def.id);
+        } else if (o.def) Blueprints.fit(d.g, o.def.id);
       this.rebuildWork();
-      this.ensureZones(d.g);
       this.layout();
-      this.burst(this.ttAt.clone().add(new THREE.Vector3(0, this.felt + 0.06, 0)));
+      this.burst(this.floatAt());
     }
   }
   private selectSlot(i: number) {
@@ -697,9 +568,8 @@ export class Bench3D implements Mode {
   private toggleExplode() {
     const d = this.work;
     if (!d || this.fly) return;
-    const z = this.zones.get(d.g);
-    if (!z || z.key !== this.configKey(d.g) || !this.compGrp) {
-      this.bubble.say('Give me a second with her.');
+    if (!d.spec.meta?.explode) {
+      this.bubble.say('She does not come apart, that one.');
       return;
     }
     this.exploded = !this.exploded;
@@ -709,21 +579,6 @@ export class Bench3D implements Mode {
   /** jade and gold motes, and a few sparks */
   private burst(at: THREE.Vector3, n = 16) {
     this.h.particles.emit({ pos: at, count: n, spread: 0.9, up: 0.5, life: [0.6, 1.3], size: [0.02, 0.004], sprite: 'spark', color: [JADE, GOLD, 0xc8ffe8], additive: true, gravity: -0.6, drag: 1.5 });
-  }
-  /** select the slot whose zone holds a point on the gun (rig space) */
-  private slotAt(p: THREE.Vector3) {
-    let best = -1, vol = Infinity;
-    const ids = this.work ? this.slotIds(this.work.g) : [];
-    for (const s of this.spots) {
-      const m = 0.008;
-      if (p.x < s.lo.x - m || p.y < s.lo.y - m || p.z < s.lo.z - m || p.x > s.hi.x + m || p.y > s.hi.y + m || p.z > s.hi.z + m) continue;
-      const v = (s.hi.x - s.lo.x) * (s.hi.y - s.lo.y) * (s.hi.z - s.lo.z);
-      if (v < vol) {
-        vol = v;
-        best = ids.indexOf(s.slot);
-      }
-    }
-    return best;
   }
   /** the exploded view, the energy shell on the selected component, the rune circle and the aura */
   private updateMagic(rdt: number) {
@@ -738,52 +593,31 @@ export class Bench3D implements Mode {
       this.h.particles.emit({ pos: { x: F.x + Math.cos(a) * r, y: F.y - 0.29, z: F.z - 0.04 + Math.sin(a) * r * 0.6 }, count: 1, vel: { x: 0, y: 0.07, z: 0 }, spread: 0.02, life: [1.6, 2.8], size: [0.012, 0.003], sprite: 'spark', color: [JADE, GOLD], additive: true, gravity: -0.05 });
     }
     if (this.board) this.board.grp.visible = this.state !== 'work' && this.state !== 'down';
-    // exploded view: the components fly apart along their axes (staggered), the gun itself steps aside
+    // exploded view: every component flies out along its own axis (the guns' layout), staggered, and back
     const want = this.exploded && this.state === 'work' && !this.fly ? 1 : 0;
-    this.explodeK += (want - this.explodeK) * (1 - Math.exp(-rdt * (want ? 2.6 : 4)));
+    this.explodeK += (want - this.explodeK) * (1 - Math.exp(-rdt * (want ? 2.2 : 3.4)));
     if (Math.abs(this.explodeK - want) < 0.002) this.explodeK = want;
-    const ex = this.explodeK;
-    if (d) {
-      // the whole gun (with its pins) steps aside while its components are flown apart
-      d.root.visible = ex < 0.02;
-    }
-    if (this.compGrp) {
-      this.compGrp.children.forEach((h, i) => {
-        const q = h.userData.comp as Component;
-        const k = Math.max(0, Math.min(1, (ex - i * 0.04) / Math.max(0.3, 1 - i * 0.04)));
-        const e = 1 - Math.pow(1 - k, 3);
-        h.position.copy(q.dir).multiplyScalar(q.dist * e);
-        h.position.y += Math.sin(this.t * 1.6 + i) * 0.003 * e;
-        q.mesh.visible = ex >= 0.02;
-      });
-    }
-    // the energy shell over the selected component
+    const fn = d?.root.userData.explode as ((t: number) => void) | undefined;
+    if (d && fn && (this.explodeK > 0 || this.lastEx > 0)) fn(this.explodeK);
+    this.lastEx = this.explodeK;
+    // the jade shell over the selected slot's components, a gold one over whatever the mouse is on
     const slot = d ? this.slotIds(d.g)[this.selSlot] : '';
-    if (this.compGrp && (!this.shell || this.shell.slot !== slot)) {
-      this.shell?.obj.removeFromParent();
-      this.shell = null;
-      const holder = this.compGrp.children.find((h) => (h.userData.comp as Component).slot === slot);
-      if (holder) {
-        const q = holder.userData.comp as Component;
-        const obj = new THREE.Group();
-        q.mesh.traverse((o) => {
-          const m = o as THREE.Mesh;
-          if (!m.isMesh) return;
-          const sm = new THREE.Mesh(m.geometry, this.shellMat);
-          m.updateMatrix();
-          sm.matrix.copy(m.matrix);
-          sm.matrixAutoUpdate = false;
-          sm.renderOrder = 4;
-          obj.add(sm);
-        });
-        holder.add(obj);
-        this.shell = { slot, obj };
-      }
+    const key = d && this.state === 'work' ? `${d.root.uuid}:${slot}` : '';
+    if (key !== (this.shell?.key ?? '')) {
+      this.shell?.objs.forEach((m) => m.removeFromParent());
+      this.shell = d && key ? { key, objs: this.shellOver(d, componentsOf(d.spec).filter((c) => c.slot === slot).map((c) => c.name), this.shellMat) } : null;
     }
-    const u = this.shellMat.uniforms;
-    u.uT.value += rdt;
-    u.uK.value += ((this.shell && this.state === 'work' ? 1 : 0) - u.uK.value) * (1 - Math.exp(-rdt * 6));
+    const hk = d && this.hoverComp && this.state === 'work' ? `${d.root.uuid}:${this.hoverComp.comp.name}` : '';
+    if (hk !== (this.hoverShell?.key ?? '')) {
+      this.hoverShell?.objs.forEach((m) => m.removeFromParent());
+      this.hoverShell = d && hk && this.hoverComp && this.hoverComp.comp.slot !== slot ? { key: hk, objs: this.shellOver(d, [this.hoverComp.comp.name], this.hoverMat) } : null;
+    }
+    for (const [m, k] of [[this.shellMat, this.shell?.objs.length ? 1 : 0], [this.hoverMat, this.hoverShell?.objs.length ? 0.7 : 0]] as const) {
+      m.uniforms.uT.value += rdt;
+      m.uniforms.uK.value += ((this.state === 'work' ? k : 0) - m.uniforms.uK.value) * (1 - Math.exp(-rdt * 6));
+    }
   }
+  private lastEx = 0;
   // ======================================================================= the tray
   /** lay the gun's loose parts along the tray; fitted ones ride on the gun (with a hidden hit proxy) */
   private layout() {
@@ -844,35 +678,16 @@ export class Bench3D implements Mode {
   private trayQuat() {
     return Q_FLAT.clone().premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), 0.35));
   }
-  /** invisible copies of the fitted parts on the gun, so a click on a part takes it off */
+  /** (the fitted parts are the gun's own components now: a click on one selects its slot) */
   private refreshProxies() {
     for (const p of this.parts) {
       p.proxy?.removeFromParent();
       p.proxy = null;
-      const d = this.work;
-      if (!d || this.state !== 'work' || p.gun !== d.g || !this.fittedNow(p)) continue;
-      const px = p.grp.clone();
-      px.position.copy(this.shiftOf(p)).add(p.c.clone().multiplyScalar(-0.04));
-      px.quaternion.identity();
-      px.scale.setScalar(1.04);
-      px.traverse((o) => {
-        if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).material = proxyMat;
-      });
-      px.visible = true;
-      d.root.add(px);
-      p.proxy = px;
     }
   }
-  /** a part's pieces are cut against the bare gun: this shift puts one where its slot is on the gun as it is now */
-  private shiftOf(p: Part) {
-    const z = this.zones.get(p.gun);
-    if (!z || z.key !== this.configKey(p.gun)) return new THREE.Vector3();
-    if (p.gun === 'revolver' && p.slot === 'mag') {
-      const zn = z.map.get('mag');
-      return zn ? zn.c.clone().sub(p.c) : new THREE.Vector3();
-    }
-    const c = z.opt.get(p.id);
-    return c ? c.clone().sub(p.c) : new THREE.Vector3();
+  /** pieces are cut from a build with only that part fitted; they land where the gun has its slot */
+  private shiftOf(_p: Part) {
+    return new THREE.Vector3();
   }
 
   // ======================================================================= blueprints you haven't found: pinned over the board rack
@@ -917,7 +732,6 @@ export class Bench3D implements Mode {
     this.h.engine.audio.play('rev_open', { volume: 0.45 });
     this.listen(true);
     this.ensurePieces(this.sel);
-    if (this.rack.owned(this.sel)) this.ensureZones(this.sel);
     return this;
   }
   private rackRest() {
@@ -926,7 +740,7 @@ export class Bench3D implements Mode {
     return { at, face: Math.atan2(c.x - at.x, c.z - at.y) };
   }
   private workRest() {
-    const at = new THREE.Vector2(this.ttAt.x - 1.04, this.zFront + 0.36);
+    const at = new THREE.Vector2(this.ttAt.x - 1.42, this.zFront + 0.24);
     return { at, face: Math.atan2(this.ttAt.x - at.x, this.ttAt.z - at.y) };
   }
   /** look at another bay */
@@ -943,7 +757,6 @@ export class Bench3D implements Mode {
     this.sel = RACK_ORDER[j];
     if (this.rack.owned(this.sel)) {
       this.ensurePieces(this.sel);
-      this.ensureZones(this.sel);
     }
   }
   /** the gun comes down off the rack onto the turntable */
@@ -967,7 +780,6 @@ export class Bench3D implements Mode {
     this.rack.focus = null;
     if (d.g === 'revolver') this.rack.refreshLedge();
     this.ensurePieces(d.g);
-    this.ensureZones(d.g);
   }
   /** the gun goes back up into its bay */
   private putBack() {
@@ -978,8 +790,7 @@ export class Bench3D implements Mode {
     this.exploded = false;
     this.explodeK = 0;
     d.root.visible = true;
-    this.clearSpots();
-    this.spotKey = '';
+    this.clearShell();
     for (const p of this.parts) {
       p.proxy?.removeFromParent();
       p.proxy = null;
@@ -1080,8 +891,7 @@ export class Bench3D implements Mode {
       return out;
     }
     if (this.state !== 'work' || !this.work) return out;
-    const ids = this.slotIds(this.work.g);
-    for (const s of this.spots) out.push({ obj: s.pin, lift: false, tip: () => '', click: () => (this.pending = () => this.selectSlot(ids.indexOf(s.slot))) });
+
     for (const p of this.parts) {
       if (p.gun !== this.work.g) continue;
       if (p.proxy) out.push({ obj: p.proxy, lift: false, tip: () => '', click: () => (this.pending = () => this.unfit(p)) });
@@ -1089,7 +899,6 @@ export class Bench3D implements Mode {
     }
     // the gun itself and the clipboard catch clicks without doing anything (a click on them is not a click away)
     out.push({ obj: this.work.hold, lift: false, tip: () => '', click: () => undefined });
-    if (this.compGrp) out.push({ obj: this.compGrp, lift: false, tip: () => '', click: () => undefined });
     if (this.board) out.push({ obj: this.board.grp, lift: false, tip: () => '', click: () => undefined });
     return out;
   }
@@ -1124,7 +933,7 @@ export class Bench3D implements Mode {
   private fit(p: Part) {
     if (p.lock && !p.lock.open && !p.lock.click()) return;
     this.exploded = false;
-    this.explodeK = 0;
+    this.startPrebuild(p);
     const d = this.work;
     if (!d || this.fly) return;
     const prev = this.current(p.gun, p.slot);
@@ -1174,17 +983,37 @@ export class Bench3D implements Mode {
       const d = loadSave();
       (d.gun as unknown as Record<string, string>)[slot] = on ? o : (REV_DEFAULT as unknown as Record<string, string>)[slot];
       writeSave(d);
-      (this.h as unknown as { buildGun?(): void }).buildGun?.();
     } else if (on) Blueprints.fit(p.gun, p.id);
     else Blueprints.unfit(p.gun, p.slot as 'under');
-    this.rebuildWork();
-    this.ensureZones(p.gun);
+    this.rebuildWork(on ? p.id : null);
   }
-  /** swap the gun on the turntable for a fresh build with what is fitted now */
-  private rebuildWork() {
+  /** build the gun as it will be with a part fitted, a component a frame, while the part flies and the wrench turns */
+  private startPrebuild(p: Part) {
+    const g = p.gun;
+    let fitted = Blueprints.fitted(g);
+    let gun: GunLoadout | undefined;
+    if (p.key) gun = { ...(loadSave().gun as GunLoadout), [p.slot]: p.id.split(':')[1] } as GunLoadout;
+    else fitted = fitted.filter((a) => a.slot !== p.slot).concat(ATTACHMENTS[p.id] ? [ATTACHMENTS[p.id]] : []);
+    this.prebuild = { key: p.id, gen: weaponRigJob(g, fitted, gun ? { gun: gun as never } : {}), spec: null, done: false };
+  }
+  /** swap the gun on the turntable for a fresh build with what is fitted now (the prebuilt one when it matches) */
+  private rebuildWork(prebuilt: string | null = null) {
     const old = this.work;
     if (!old) return;
-    const d = buildDisplay(old.g);
+    let d: Display | null = null;
+    const pb = this.prebuild;
+    if (prebuilt && pb && pb.key === prebuilt) {
+      while (!pb.done) {
+        const r = pb.gen.next();
+        if (r.done) {
+          pb.done = true;
+          pb.spec = r.value;
+        }
+      }
+      if (pb.spec) d = displayFromSpec(old.g, pb.spec);
+    }
+    this.prebuild = null;
+    d ??= buildDisplay(old.g);
     if (!d) return;
     const parent = old.hold.parent;
     d.hold.position.copy(old.hold.position);
@@ -1202,8 +1031,7 @@ export class Bench3D implements Mode {
     this.work = d;
     this.rack.bayOf(d.g).disp = d;
     if (this.fly?.to === old.root) this.fly.to = d.root;
-    this.spotKey = '';
-    this.clearSpots();
+    this.clearShell();
     this.dressBenchClip();
   }
   /** the moon clip, when fitted, lies on the baize beside the six-shooter */
@@ -1280,17 +1108,33 @@ export class Bench3D implements Mode {
       }
     } else this.pieceJob = stepJob(this.pieceJob, 'bench parts');
     if (this.paperDelay <= 0) this.paperJob = stepJob(this.paperJob, 'bench papers');
-    // the slot zones: right away while you are at the turntable, else in the frame's spare slot
-    const zj = this.zoneJob;
-    if (zj) {
-      if (this.state !== 'rack' && zj.g === (this.work?.g ?? this.sel)) {
-        try {
-          if (zj.job.next().done) this.zoneJob = null;
-        } catch (e) {
-          console.warn('[hub+] zones', e);
-          this.zoneJob = null;
+    // the gun about to be fitted and the schematic's gun are built a component a frame
+    const pb = this.prebuild;
+    if (pb && !pb.done) {
+      try {
+        const r = pb.gen.next();
+        if (r.done) {
+          pb.done = true;
+          pb.spec = r.value;
         }
-      } else if (!stepJob(zj.job, 'bench zones')) this.zoneJob = null;
+      } catch (e) {
+        console.warn('[hub+] prebuild', e);
+        this.prebuild = null;
+      }
+    }
+    const sj = this.schemJob;
+    if (sj) {
+      try {
+        const r = sj.gen.next();
+        if (r.done) {
+          this.schemJob = null;
+          this.schem.set(sj.key, r.value ? gunSchematic(this.h.engine.renderer, r.value, r.value.name) : null);
+          if (this.schem.size > 30) this.schem.delete(this.schem.keys().next().value!);
+        }
+      } catch (e) {
+        console.warn('[hub+] schematic', e);
+        this.schemJob = null;
+      }
     }
     for (const p of this.parts) p.lock?.update(rdt);
     this.rack.tick(rdt);
@@ -1324,15 +1168,12 @@ export class Bench3D implements Mode {
     // ---- a click on the gun picks the component under it; a click on nothing puts the gun back (decided on release)
     if (this.state === 'work' && !this.fly && inp.wasPressed('Mouse0') && this.work && !ui) {
       this.ray.setFromCamera(new THREE.Vector2(inp.ndcX, inp.ndcY), this.h.camera);
-      const gunHit = this.ray.intersectObjects(this.explodeK > 0.5 && this.compGrp ? [this.compGrp] : [this.work.root], true)[0];
+      const gunHit = this.ray.intersectObjects([this.work.root], true)[0];
       if (gunHit) {
-        let slot = -1;
-        for (let o: THREE.Object3D | null = gunHit.object; o && slot < 0; o = o.parent) {
-          const q = o.userData.comp as Component | undefined;
-          if (q?.slot) slot = this.slotIds(this.work.g).indexOf(q.slot);
-        }
-        if (slot < 0) slot = this.slotAt(this.work.root.worldToLocal(gunHit.point.clone()));
+        const c = this.compOf(this.work, gunHit.object);
+        const slot = c?.slot ? this.slotIds(this.work.g).indexOf(c.slot) : -1;
         if (slot >= 0) this.pending = () => this.selectSlot(slot);
+        else if (c) this.pending = () => this.bubble.say(`The ${c.label.toLowerCase()} stays as she is.`);
       } else {
         const hits = this.ray.intersectObjects(this.picks().map((p) => p.obj), true);
         if (!hits.length) this.pending = () => this.putBack();
@@ -1408,10 +1249,8 @@ export class Bench3D implements Mode {
     const T = this.ttAt;
     this.rack.spotOverride = this.state === 'work' || this.state === 'down' ? { pos: _sp.set(T.x + 0.3, T.y + 1.25, T.z + 0.85), target: _st.copy(this.floatAt()) } : null;
     // ---- pins, the hover, the work order, the panels and the magic
-    if (this.state === 'work') {
-      this.refreshSpots();
-      this.hover();
-    }
+    if (this.state === 'work') this.hover();
+    else this.hoverComp = null;
     this.writeBoard();
     this.updateMagic(rdt);
     this.smith?.frame(rdt, this.smithView(), this.uiHover, this.rackInfo());
@@ -1477,17 +1316,21 @@ export class Bench3D implements Mode {
   private hover() {
     const inp = this.h.engine.input;
     this.hovered = null;
-    if (this.fly) return;
+    this.hoverComp = null;
+    const d = this.work;
+    if (this.fly || !d || this.uiHover) return;
     this.ray.setFromCamera(new THREE.Vector2(inp.ndcX, inp.ndcY), this.h.camera);
+    const g = this.ray.intersectObject(d.root, true)[0];
+    const c = g ? this.compOf(d, g.object) : null;
+    if (c) {
+      this.hoverComp = { comp: c, x: inp.mouseX, y: inp.mouseY };
+      return;
+    }
     const objs: THREE.Object3D[] = [];
-    for (const s of this.spots) objs.push(s.pin);
-    for (const p of this.parts) if (p.gun === this.work?.g && (p.proxy || p.grp.visible)) objs.push(p.proxy ?? p.grp);
+    for (const p of this.parts) if (p.gun === d.g && p.grp.visible) objs.push(p.grp);
     const hit = this.ray.intersectObjects(objs, true)[0];
-    if (!hit) return;
-    for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) {
-      const s = this.spots.find((q) => q.pin === o);
-      if (s) return void (this.hovered = s);
-      const p = this.parts.find((q) => q.proxy === o || q.grp === o);
+    for (let o: THREE.Object3D | null = hit?.object ?? null; o; o = o.parent) {
+      const p = this.parts.find((q) => q.grp === o);
       if (p) return void (this.hovered = p);
     }
   }
@@ -1500,14 +1343,7 @@ export class Bench3D implements Mode {
     const L: Parameters<TextCard['set']>[0] = [{ t: 'WORK ORDER', size: 0.055, color: '#8a2a14' }];
     const hv = this.hovered;
     if (!own) L.push({ t: 'Nothing on the bench', size: 0.06 });
-    else if (hv && 'pin' in hv) {
-      const opts = this.options(g, hv.slot);
-      const cur = this.current(g, hv.slot);
-      const i = Math.max(0, opts.findIndex((o) => o.part === cur));
-      const nx = opts[(i + 1) % opts.length];
-      L.push({ t: GUNS[g].name, size: 0.05, color: '#5a4228' }, { t: opts[i].name, size: 0.075 }, { t: opts[i].desc, size: 0.046, wrap: true });
-      L.push({ t: opts.length > 1 ? `Click: ${nx.name}` : 'Nothing else to fit here yet', size: 0.046, color: '#8a2a14', wrap: true });
-    } else if (hv) {
+    else if (hv) {
       const p = hv as Part;
       L.push({ t: p.proxy ? 'On the gun' : 'In the tray', size: 0.05, color: '#5a4228' }, { t: p.name, size: 0.072, wrap: true }, { t: p.desc, size: 0.046, wrap: true });
       L.push({ t: p.lock && !p.lock.open ? p.lock.tip(p.name).replace(p.name + ': ', '').replace(`${p.name} `, '') : p.proxy ? 'Click: take it off' : 'Click: fit it', size: 0.046, color: '#8a2a14', wrap: true });
@@ -1542,12 +1378,13 @@ export class Bench3D implements Mode {
     this.listen(false);
     for (const p of this.parts) p.lock?.dispose();
     for (const pp of this.papers) (pp.mesh.material as THREE.Material).dispose();
-    this.clearSpots();
+    this.clearShell();
     this.board?.card.dispose();
     this.rack.dispose();
     this.smith?.dispose();
     this.rune?.dispose();
     this.shellMat.dispose();
+    this.hoverMat.dispose();
   }
 }
 
@@ -1571,4 +1408,18 @@ function cap(s: string) {
 /** the shared laser geometry is not the component's to dispose */
 function laserGeoRef(o: THREE.Object3D) {
   return (o as THREE.Mesh).isMesh && (o as THREE.Mesh).geometry.userData?.shared ? (o as THREE.Mesh).geometry : null;
+}
+
+/** a part's piece for the tray: its slot's components from a build with it fitted, meshed in rig space */
+function componentPiece(spec: RigSpec, slot: string): THREE.Group | null {
+  const names = new Set(componentsOf(spec).filter((c) => c.slot === slot).map((c) => c.name));
+  if (!names.size) return null;
+  const grp = new THREE.Group();
+  for (const p of spec.parts) {
+    if (!names.has(p.name)) continue;
+    const mesh = meshOf(buildVoxelGeometry(p.model, { voxelSize: spec.voxelSize, pivot: p.pivot }), sharedVoxelMaterial);
+    mesh.applyMatrix4(restMatrix(spec, p.name));
+    grp.add(mesh);
+  }
+  return grp.children.length ? grp : null;
 }

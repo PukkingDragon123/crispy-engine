@@ -833,7 +833,7 @@ export class HubScene implements GameScene {
       spot.target.position.copy(lp).add(new THREE.Vector3(-0.15, -1, 0.2));
       s.add(spot, spot.target);
       this.flick.push({ l: spot, base: spot.intensity, k: 0.015 });
-      put(B(() => HX.barStool(2, 'ok')), -2.2, -1.92, 0.9);
+      put(B(() => HX.barStool(2, 'ok')), -1.95, -1.62, 0.9);
       const bst = new THREE.Vector2(gp.x - 0.36, gp.z + 0.6);
       station({
         id: 'bench', label: 'Weapon Bench', title: 'THE WORKBENCH', short: 'WORKBENCH', sub: 'the gun rack and the bench', verb: 'Open the gun rack',
@@ -1266,6 +1266,8 @@ export class HubScene implements GameScene {
   }
 
   private buildGun() {
+    // the six-shooter lives on the gun rack now (hub/GunRack.ts); the bench cradle stays empty
+    if (this.extras) return;
     const d = loadSave();
     this.gun?.root.removeFromParent();
     let spec: RigSpec | null = null;

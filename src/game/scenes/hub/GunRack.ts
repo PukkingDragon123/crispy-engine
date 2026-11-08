@@ -18,9 +18,9 @@ import { sharedVoxelMaterial } from '../../../engine/render/VoxelMaterial';
 import { damp } from '../../../engine/math/rand';
 import * as CH from '../../models/characters';
 import * as WS from '../../models/props/workshop';
-import { revolverLaserModel, cartridgeTrio } from '../../models/characters/longguns';
+import { cartridgeTrio } from '../../models/characters/longguns';
 import { Blueprints, GUNS } from '../../meta/Blueprints';
-import { buildWeaponRig } from '../../player/Weapons';
+import { buildWeaponRig, explodeWeapon } from '../../player/Weapons';
 import { loadSave, GunLoadout } from '../../meta/Save';
 import { BuildKit, HubHost, safe, geoOf, meshOf } from './HubKit';
 
@@ -68,6 +68,8 @@ export function diffZones(specs: RigSpec[]): Map<string, Set<string>> {
   for (const n of names) {
     const z = new Set<string>();
     const models = specs.map((s) => s.parts.find((p) => p.name === n)?.model ?? null);
+    // an unchanged component is the very same model object in every option: nothing differs there
+    if (models.every((m) => m === models[0])) continue;
     const all = new Set<string>();
     for (const m of models) m?.forEach((x, y, zz) => all.add(key3(x, y, zz)));
     for (const k of all) {
@@ -139,35 +141,34 @@ export interface Display {
   inst: RigInstance;
   spec: RigSpec;
 }
-let laserGeo: THREE.BufferGeometry | null = null;
-/** the six-shooter's laser, clamped under the barrel just ahead of the cylinder (where Weapons puts it in a run) */
-export function revolverLaserMesh(spec: RigSpec) {
-  if (!laserGeo) {
-    const sm = revolverLaserModel();
-    laserGeo = buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot });
-    laserGeo.userData.shared = true;
-  }
-  const vs = spec.voxelSize, piv = spec.parts[0].pivot;
-  const m = meshOf(laserGeo);
-  m.position.set((0.5 - piv[0]) * vs, (0.6 - piv[1]) * vs, (10.5 - piv[2]) * vs);
-  return m;
+/** a gun's components (rig part name, UI label, the slot that swaps it) */
+export interface GunComp {
+  name: string;
+  label: string;
+  slot?: string;
+  parent?: string;
 }
+export const componentsOf = (spec: RigSpec | null | undefined) => ((spec?.meta?.components ?? []) as GunComp[]);
+/** a gun as configured now (the six-shooter's gold parts from the save; bare: nothing fitted) */
 export function gunSpec(g: GunKey, bare = false): RigSpec | null {
-  if (g === 'revolver') return (CH as any).revolverRig(bare ? REV_DEFAULT : loadSave().gun) as RigSpec;
+  if (g === 'revolver') return buildWeaponRig('revolver', bare ? [] : undefined, bare ? { gun: REV_DEFAULT as never } : {});
   return buildWeaponRig(g, bare ? [] : undefined);
 }
-/** build a gun with everything fitted to it (rig geometry is cached by its config, so nothing here is disposed) */
-export function buildDisplay(g: GunKey): Display | null {
-  const spec = safe(() => gunSpec(g));
-  if (!spec) return null;
-  const d = loadSave().gun;
-  const key = g === 'revolver' ? `rack:gun:${d.barrel}:${d.cylinder}:${d.grip}:${d.sight}` : undefined;
-  const inst = new RigInstance(buildRigGeo(spec, key), { material: sharedVoxelMaterial, castShadow: true });
-  if (g === 'revolver' && Blueprints.fitted('revolver').some((a) => a.id === 'rev_laser')) inst.nodes['frame']?.add(revolverLaserMesh(spec));
+/** a display from a built spec (rig geometry is cached by its config name, so nothing here is disposed) */
+export function displayFromSpec(g: GunKey, spec: RigSpec): Display {
+  const inst = new RigInstance(buildRigGeo(spec), { material: sharedVoxelMaterial, castShadow: true });
+  inst.root.userData.rig = inst;
+  inst.root.userData.components = componentsOf(spec);
+  inst.root.userData.explode = (t: number) => explodeWeapon(inst, t);
   const hold = new THREE.Group();
   hold.add(inst.root);
   hold.userData.gun = g;
   return { g, hold, root: inst.root, inst, spec };
+}
+/** build a gun with everything fitted to it */
+export function buildDisplay(g: GunKey): Display | null {
+  const spec = safe(() => gunSpec(g));
+  return spec ? displayFromSpec(g, spec) : null;
 }
 /** the gun's box in its hold's frame for an orientation and scale (both rotations are axis-aligned, so it is exact) */
 export function poseBox(d: Display, q: THREE.Quaternion, s: number): THREE.Box3 {
