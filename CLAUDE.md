@@ -15,6 +15,7 @@
      bloom, grade, paper).
    - If something truly cannot come from 3D, it must be beautiful, detailed and polished 2D art, never a mess.
    - Typography (Alagard text) is the only thing drawn directly.
+   - Exception, from the user's latest note: game UI is stylized 2D pixel art (see art direction below).
 3. **No 2D eyes.** Eyes are modelled, realistic eyes.
 4. **Beautiful, detailed, polished, alive.** If a piece looks lazy, cheap or messy, it is wrong: redo it.
 5. **No churn — credits are precious.**
@@ -30,6 +31,11 @@
 - Not cartoony. Sundown matches the user's skeleton reference exactly.
 - Very high voxel counts everywhere. Fluid, procedural animation.
 - Enemy skill names reference Rolling Stones / Guns N' Roses / Beatles songs.
+- UI (latest note): detailed, stylized 2D pixel-art UI that reads as UI, not as photographed 3D or texture.
+  Moderate pixel resolution (not high-res), hand-authored pixel sprites for frames, icons, bars and badges are allowed
+  here and must be polished and consistent. Not everything 3D: "more 2D but stylized".
+- World: near terrain, ruins and buildings read as big blocks with crisp pixel-art textures; pixel-art foliage sprites.
+- Guns: very high resolution models.
 - Model details: `src/game/models/CONTRACT.md`.
 
 ## Workflow
