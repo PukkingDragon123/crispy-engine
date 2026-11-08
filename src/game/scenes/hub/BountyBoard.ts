@@ -406,8 +406,11 @@ export class BountyBoard implements Mode {
     }
     const ankh = safe(() => ankhFragment());
     if (ankh) {
-      const am = add(buildVoxelGeometry(ankh.model, { voxelSize: ankh.voxelSize, pivot: 'center' }), -0.69, 0.41, FACE + 0.03);
-      if (am) am.rotation.set(Math.PI / 2 - 0.15, 0, -0.3);
+      const am = add(buildVoxelGeometry(ankh.model, { voxelSize: ankh.voxelSize, pivot: 'center' }), -0.62, 0.39, FACE + 0.025);
+      if (am) {
+        am.rotation.set(0.15, 0.2, -0.35);
+        am.scale.setScalar(0.45);
+      }
     }
     const codex = this.card(-0.02, 0.12, 0.36, 0.27, 62, FACE + 0.005, () => `Codex: ${j.codex.pts} points (${j.codex.title})`);
     codex.print.set([
@@ -420,7 +423,7 @@ export class BountyBoard implements Mode {
     note.print.set([['NEXT UP', 0.12, '#7a1a10'], ...j.next.map((t): [string, number, string, boolean] => [t, 0.075, '#2a1a0e', true])]);
     // ---- the views: the whole board, the route, the note
     const cam = (x: number, y: number, d: number, fov: number): View => ({ pos: this.W(x, y, d), look: this.W(x, y, 0), fov });
-    this.views = [cam(0, 0.62, 1.55, 46), cam(0, 0.72, 0.95, 42), cam(0.46, 0.3, 0.8, 42)];
+    this.views = [cam(0, 0.68, 1.72, 46), cam(0, 0.72, 0.95, 42), cam(0.46, 0.3, 0.8, 42)];
     // ---- the station: he stands back by the garage post, looking it over
     const stand = new THREE.Vector2(-2.62, 1.95);
     this.st = k.station({

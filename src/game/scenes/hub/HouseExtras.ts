@@ -17,6 +17,7 @@ import { Garage3D } from './Garage3D';
 import { ShootingRange } from './ShootingRange';
 import { TwentyOne } from './TwentyOne';
 import { Jukebox } from './Jukebox';
+import { installBountyBoard } from './BountyBoard';
 
 export interface View {
   pos: THREE.Vector3;
@@ -94,6 +95,7 @@ export class HouseExtras {
     this.range = new ShootingRange(h, this.bubble);
     this.cards = new TwentyOne(h, this.bubble);
     this.juke = new Jukebox(h);
+    installBountyBoard(this, h);
     resetJobs();
     this.tip.style.cssText = HUD_CSS + ';display:none;font-size:17px;z-index:9';
     this.hintEl.style.cssText = HUD_CSS + ';left:50%;bottom:24px;transform:translateX(-50%);font-size:16px;opacity:0;transition:opacity .4s';

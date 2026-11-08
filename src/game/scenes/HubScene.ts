@@ -129,7 +129,7 @@ const WALK = { x0: IN.left + 0.25, x1: IN.right - 0.28, z0: IN.back + 0.32, z1: 
 const HERO_R = 0.26;
 
 /** the carousel, left to right */
-const ORDER = ['ride', 'bench', 'garage', 'wardrobe', 'range', 'trophies', 'book', 'gramophone', 'cards', 'hearth'];
+const ORDER = ['ride', 'bench', 'garage', 'bounty', 'wardrobe', 'range', 'trophies', 'book', 'gramophone', 'cards', 'hearth'];
 /** the open strip of floor Sundown walks along between stations */
 const LANE_Z = 0.25;
 const UP = new THREE.Vector3(0, 1, 0);

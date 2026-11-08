@@ -39,6 +39,7 @@ import { Interactions, Chest, DumbScarab } from '../run/Interact';
 import { Missions } from '../run/Missions';
 import { Choice } from '../ui/Choice';
 import { Shop } from '../ui/Shop';
+import { ProgressLadder } from '../ui/ProgressLadder';
 import type { ZoneDef } from '../world/RegionGen';
 import { SUBAREAS } from '../world/RegionGen';
 import { AnubisTrial } from './AnubisTrial';
@@ -155,6 +156,8 @@ export class RunScene implements GameScene {
   shop!: Shop;
   missions!: Missions;
   ledger!: Ledger;
+  /** the trail ledger: next rank, next boss, next zone, finds (plus the shop compass and first-time tips) */
+  progress: ProgressLadder | null = null;
   touch: TouchControls | null = null;
   trailEvents!: TrailEvents;
   chests: Chest[] = [];
@@ -416,6 +419,7 @@ export class RunScene implements GameScene {
     this.pickups.onBounty = (v) => this.addBounty(v);
     this.director = new WaveDirector(this.ctx, this.enemies, () => this.player);
     this.wireEvents();
+    this.progress = new ProgressLadder({ engine: e, ctx: this.ctx, hud: this.hud, director: this.director, world: this.world, shop: this.shop, camera: this.camera });
     new Barks(this.ctx, this.player); // Sundown's voiced quips; tears itself down with the scene
     this.codexRun = new CodexRun(this.ctx, this);
 
@@ -472,6 +476,7 @@ export class RunScene implements GameScene {
     this.oasis?.dispose();
     this.bountyRip?.dispose();
     this.codexRun?.dispose();
+    this.progress?.dispose();
     this.engine.paused = false;
     this.engine.post.u.uDesat.value = 0;
     this.qte.dispose();
