@@ -43,6 +43,10 @@ export interface ReapHost {
   qte: Qte;
   /** hide / show the run HUD */
   hud?: (on: boolean) => void;
+  /** hand off into the realm of the dead instead of fading out: the camera dives into the vortex after the soul */
+  handoff?: boolean;
+  /** with handoff: the lens stays buried in the sand until this resolves (the realm below is built) */
+  ready?: Promise<unknown>;
 }
 
 type V3 = THREE.Vector3;
@@ -82,7 +86,9 @@ export class SoulReaping {
   private timeK = 1;
   private kissT = 0;
   private waits: { at: number; res: () => void }[] = [];
-  private phase: 'heart' | 'tear' | 'rise' | 'parry' | 'grab' | 'drag' | 'end' = 'heart';
+  private phase: 'heart' | 'tear' | 'rise' | 'parry' | 'grab' | 'drag' | 'dive' | 'end' = 'heart';
+  private skipHold = 0;
+  private diveT = 0;
   private skipping = false;
   private fx = new Particles();
   private objs: THREE.Object3D[] = [];
@@ -335,7 +341,19 @@ export class SoulReaping {
     this.sfx('quake_rumble', 0.9, 0.7);
     this.sfx('soul_leave', 0.8, 0.6);
     await this.wait(1.05);
-    await (this.skipping ? eng.fadeOut(0.25) : eng.fadeOut(0.55));
+    if (this.h.handoff) {
+      // after it: the camera dives into the closing vortex and the sand swallows the lens
+      this.phase = 'dive';
+      this.diveT = 0;
+      this.setShot(this.shotDive, 0.12);
+      this.sfx('whoosh_big', 1, 0.42);
+      this.sfx('sand_rise', 1, 0.45);
+      this.sfx('divine_whisper', 0.5, 0.55);
+      await this.wait(1.1);
+      // buried: hold here until the realm below is ready, then through
+      if (this.h.ready) await this.h.ready;
+      eng.flash(0x3a2c1e, 0.92, 0.9);
+    } else await (this.skipping ? eng.fadeOut(0.25) : eng.fadeOut(0.55));
     this.phase = 'end';
   }
 
@@ -578,10 +596,16 @@ export class SoulReaping {
   // =========================================================================== frame
   private update(rdt: number) {
     const eng = this.ctx.engine;
-    if (!this.skipping && eng.input.wasPressed('Enter')) {
+    // hold SPACE / ENTER to skip (a tap is never enough: a stray press must not throw the scene away)
+    const held = eng.input.isDown('Space') || eng.input.isDown('Enter');
+    this.skipHold = held && !this.skipping ? this.skipHold + rdt : 0;
+    this.h.qte.hold = this.skipHold > 0.08 ? { label: 'HOLD TO SKIP', k: Math.min(1, this.skipHold / 0.9) } : null;
+    if (!this.skipping && this.skipHold >= 0.9) {
       this.skipping = true;
+      this.h.qte.hold = null;
       for (const w of this.waits.splice(0)) w.res();
     }
+    if (this.phase === 'dive') this.updateDive(rdt);
     // the slow-motion kiss after a parry
     this.kissT = Math.max(0, this.kissT - rdt);
     this.timeK = damp(this.timeK, this.kissT > 0 ? 0.12 : 1, this.kissT > 0 ? 30 : 6, rdt);
@@ -1033,15 +1057,17 @@ export class SoulReaping {
     const sh = this.shake * this.shake;
     const t = this.t;
     const hand = V(Math.sin(t * 0.71) * 0.03 + Math.sin(t * 31) * sh * 0.12, Math.sin(t * 0.53) * 0.025 + Math.sin(t * 27 + 1) * sh * 0.12, Math.sin(t * 29 + 2) * sh * 0.06);
-    // never inside a dune
-    const g = this.ctx.world.groundAt(p.x, p.z) + 0.25;
+    // never inside a dune (the dive goes right down to the sand)
+    const g = this.ctx.world.groundAt(p.x, p.z) + (this.phase === 'dive' ? 0.12 : 0.25);
     if (p.y < g) p = p.clone().setY(g);
     this.cam.p.copy(p);
     this.cam.l.copy(l);
     this.cam.fov = fov;
     const cam = this.ctx.camera;
     cam.position.copy(p).add(hand);
-    cam.up.set(0, 1, 0);
+    // looking straight down into the hole, the top of the frame points toward the arm
+    if (this.phase === 'dive') cam.up.copy(this.away).lerp(UP, 1 - sstep(0, 0.4, this.diveT)).normalize();
+    else cam.up.set(0, 1, 0);
     cam.lookAt(l);
     if (this.phase === 'rise' || this.phase === 'drag') cam.rotateZ(Math.sin(t * 0.4) * 0.02 + (this.phase === 'rise' ? 0.05 : -0.04)); // a little dutch
     cam.fov = fov;
@@ -1090,6 +1116,32 @@ export class SoulReaping {
     const p = c.clone().addScaledVector(this.side, 6.4).addScaledVector(this.away, -1.6).add(V(0, 1.6 + t * 0.05, 0));
     return { p, l: c.add(V(0, 2.2, 0)), fov: 54 };
   };
+  /** down into the hole after the fist: the camera drops onto the vortex, turning to look straight down */
+  private shotDive = (t: number) => {
+    const e = this.armEntry(V());
+    e.y = this.ctx.world.groundAt(e.x, e.z);
+    const k = sstep(0, 1.1, t);
+    const p = this.cam.p.clone().lerp(e.clone().add(V(0, 0.1, 0)), k * k);
+    const l = e.clone().add(V(0, -3, 0)).addScaledVector(this.away, 0.6 * (1 - k));
+    return { p, l, fov: lerp(52, 88, k) };
+  };
+  /** sand streaming up past the lens and closing over it */
+  private updateDive(rdt: number) {
+    this.diveT += rdt;
+    const k = sstep(0, 1.1, this.diveT);
+    const cam = this.ctx.camera;
+    const fwd = cam.getWorldDirection(this.v2);
+    const n = Math.floor(rdt * (60 + 260 * k)) + 1;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, r = 0.3 + Math.random() * (1.6 - k);
+      const d = 0.4 + Math.random() * 1.6;
+      const right = V(1, 0, 0).applyQuaternion(cam.quaternion), up = V(0, 1, 0).applyQuaternion(cam.quaternion);
+      const at = cam.position.clone().addScaledVector(fwd, d).addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r);
+      const big = Math.random() < 0.35 * k;
+      this.fx.emit({ pos: at, vel: { x: -fwd.x * 6, y: -fwd.y * 6 + 1, z: -fwd.z * 6 }, count: 1, life: [0.25, 0.6], size: big ? [0.6, 1.4] : [0.03, 0.06], sprite: big ? ['puff0', 'puff1', 'puff2'] : ['dot3', 'grain1', 'streak'], color: big ? [0x5a4630, 0x4a3826, 0x6a5238] : SAND, alpha: big ? 0.85 : 1, stretch: big ? 0 : 0.08, drag: 1 });
+    }
+  }
+
   /** high over the fist and down into the hole as the sand takes it */
   private shotDrag = (t: number) => {
     const fwd = this.away.clone().negate();
@@ -1137,7 +1189,8 @@ export class SoulReaping {
     }
     if (this.savedSky) this.ctx.world.env.apply(this.savedSky);
     eng.audio.setMuffle(0, 0.2);
-    eng.letterbox(false, 0.01);
+    this.h.qte.hold = null;
+    if (!this.h.handoff) eng.letterbox(false, 0.01);
     if ((window as any).__reaping === this) delete (window as any).__reaping;
   }
 }

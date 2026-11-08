@@ -872,25 +872,27 @@ export class RunScene implements GameScene {
 
   private async onPlayerDeath() {
     const eng = this.engine;
-    // the first death plays out in the world (heart, soul, Anubis' arm); the last one gets the plain verdict
-    if (this.run.revived) this.hud.toast('YOU DIED', '#ff5a3a', 'The desert keeps your bones…', true);
+    // every death: the heart stops, the soul tears loose, Anubis' arm drags it down through the sand
+    // into the Duat. The first death is weighed (worthy: back to the hunt); after that the resurrection
+    // is spent and the god only gives his final word before the desert takes the body (DeathCine).
+    const final = this.run.revived;
+    this.run.revived = true;
     this.ctx.sfx('sting_negative', null, 0.8);
     this.ctx.sfx('soul_leave', null, 0.9);
     eng.slowMo(0.15, 6);
     const pu = eng.post.u;
     void eng.tweens.tween(1.4, (k) => (pu.uDesat.value = k * 0.85), Ease.inOutQuad, true);
-    if (this.run.revived) return this.endRun(false);
-    // once per run: the Weighing of the Heart
-    this.run.revived = true;
-    await new SoulReaping({ ctx: this.ctx, player: this.player, qte: this.qte, hud: (on) => this.hud.setVisible(on) }).run();
+    // the realm builds below while the reaping plays above; the camera dives through the sand into it
     const trial = new AnubisTrial(eng, this.qte, this.player.rig.geo);
+    const realm = trial.prepare().catch((e) => console.warn('[death] realm', e));
+    await new SoulReaping({ ctx: this.ctx, player: this.player, qte: this.qte, hud: (on) => this.hud.setVisible(on), handoff: true, ready: realm }).run();
     this.trial = trial;
     eng.post.setSceneCamera(trial.scene, trial.camera);
     (window as any).__music?.setMood('underworld');
     eng.slowMo(1, 50);
     eng.paused = true;
     this.hud.setVisible(false);
-    const ok = await trial.run({ kills: this.run.kills, wave: this.run.wave });
+    const ok = await trial.run({ kills: this.run.kills, wave: this.run.wave, final, fromReaping: true });
     eng.post.setSceneCamera(this.scene, this.camera);
     this.trial = null;
     trial.dispose();

@@ -240,6 +240,7 @@ export class Qte {
     this.time += rdt;
     this.updateQuick(rdt, W, H);
     this.drawSparks(rdt);
+    this.drawHold(W, H);
     const a = this.active;
     if (!a) {
       this.anchor = null;
@@ -352,6 +353,19 @@ export class Qte {
   }
 
   // ------------------------------------------------------------------ the quick lane
+  /**
+   * Hold-to-skip for cinematics: set `hold` each frame while the skip key is held
+   * (k = 0..1 filled); a small ink-framed gauge with an Alagard line fills in the lower right.
+   */
+  hold: { label: string; k: number } | null = null;
+  private drawHold(W: number, H: number) {
+    const h = this.hold;
+    if (!h) return;
+    const w = 64, x = W - w - 14, y = H - 22;
+    this.text(h.label, x + w / 2, y - 21, BONE, 16);
+    this.gauge(x, y, w, 4, h.k, h.k >= 1 ? GOLD_H : GOLD);
+  }
+
   private updateQuick(rdt: number, W: number, H: number) {
     const q = this.quickActive;
     if (!q) return;

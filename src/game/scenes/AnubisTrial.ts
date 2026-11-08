@@ -20,8 +20,13 @@
 //   6. VERDICT  worthy: he raises the was-sceptre and the soul rises in a blaze
 //               of light. Unworthy: the fires gutter, his eyes burn red, hands
 //               rise from the floor and his open hand takes the soul.
-// SPACE / ESC / ENTER skips the arrival and goes straight to the judgement.
-// API (RunScene): new AnubisTrial(engine, qte, playerGeo); await trial.run({ kills, wave }) → worthy?
+//   0. THE FALL  (from the reaping) the god's fist drags the soul down a roaring tunnel of
+//               sand, darkness and spirit motes; it opens over the abyss and lets go.
+// Every death comes here. The first is weighed; after that (`final`) Anubis gives his last
+// word without a weighing and takes the soul.
+// HOLD SPACE / ESC / ENTER to skip the arrival (a tap never skips).
+// API (RunScene): const t = new AnubisTrial(engine, qte, playerGeo); t.prepare() builds it ahead;
+// await t.run({ kills, wave, final?, fromReaping? }) → worthy?
 import * as THREE from 'three';
 import type { Engine } from '../../engine/Engine';
 import { Qte } from '../ui/Qte';
@@ -33,6 +38,7 @@ import { FloatText3D, FloatTextOpts } from '../fx/FloatText3D';
 import { Voice } from '../audio/Voice';
 import { rnd } from '../../engine/math/rand';
 import { REALM_MODELS, StaticModel, spiritNormals } from '../models/anubis/realm';
+import { anubisArmRig } from '../models/anubis/arm';
 
 // ----------------------------------------------------------------------------- layout (metres)
 const GATE_Z = 28;
@@ -195,6 +201,8 @@ interface Brazier {
   lit: number;
   target: number;
   acc: number;
+  /** the flare of being lit in sequence (decays) */
+  flare: number;
 }
 interface Shaft {
   mesh: THREE.Mesh;
@@ -213,7 +221,10 @@ interface Line {
 }
 type Gest = { present: number; point: number; reach: number; grant: number; raise: number };
 type ShotFn = (t: number) => { p: THREE.Vector3; l: THREE.Vector3; fov: number };
-type Phase = 'build' | 'descent' | 'gate' | 'hall' | 'throne' | 'judge' | 'grant' | 'take';
+type Phase = 'build' | 'tunnel' | 'descent' | 'gate' | 'hall' | 'throne' | 'judge' | 'grant' | 'take';
+/** the fall through the sand: from (0, TUN_Y0) to (0, TUN_Y1) over TUN_T seconds; the god lets go at TUN_RELEASE */
+const TUN_Y0 = 64, TUN_Y1 = 30.5, TUN_T = 3.4, TUN_RELEASE = 2.1;
+const TSAND = [0x5a4630, 0x6a5238, 0x8a6a48, 0x3a2c1e, 0x9a7a54];
 
 const TEXT: Record<Line['who'], FloatTextOpts> = {
   anubis: { size: 0.4, color: '#ffe6ad', glow: '#ff9d3a', cps: 34, wrap: 30, hdr: 1.7, px: 72 },
@@ -268,7 +279,22 @@ export class AnubisTrial {
   private spirits: Spirit[] = [];
   // performance state
   private soulPos = LAND.clone();
-  private soulMode: 'fall' | 'walk' | 'kneel' | 'rise' | 'dissolve' = 'fall';
+  private soulMode: 'fall' | 'walk' | 'kneel' | 'rise' | 'dissolve' | 'held' = 'fall';
+  // the fall through the sand (from the reaping)
+  private building: Promise<void> | null = null;
+  private arm: RigInstance | null = null;
+  private armShell: SpiritMat | null = null;
+  private armLet = 0;
+  private armDrop = 0;
+  private tunnelLight: THREE.PointLight | null = null;
+  private tunnelLoop: { stop(t?: number): void } | null = null;
+  private heldQ = new THREE.Quaternion();
+  private heldM = new THREE.Matrix4();
+  // cinematography
+  private skipHold = 0;
+  private rack = 0;
+  private fireSeq = false;
+  private final = false;
   private walkT = 0;
   private soulFade = 1;
   private wake = 0;
@@ -297,6 +323,9 @@ export class AnubisTrial {
   private lines: Line[] = [];
   private v1 = new THREE.Vector3();
   private v2 = new THREE.Vector3();
+  private cf = new THREE.Vector3();
+  private cr = new THREE.Vector3();
+  private cu = new THREE.Vector3();
 
   constructor(private engine: Engine, private qte: Qte, private playerGeo: RigGeo) {
     const s = this.scene;
@@ -492,7 +521,7 @@ export class AnubisTrial {
       const light = new THREE.PointLight(0x5ab8ff, 0, k > 1 ? 20 : 15, 1.6);
       light.position.set(x, fireY * k + 0.6, z);
       s.add(light);
-      this.braziers.push({ pos: V(x, 0, z), fire: V(x, fireY * k, z), scale: k, light, lit: 0, target: 0, acc: 0 });
+      this.braziers.push({ pos: V(x, 0, z), fire: V(x, fireY * k, z), scale: k, light, lit: 0, target: 0, acc: 0, flare: 0 });
     }
     await this.tick();
 
@@ -578,9 +607,9 @@ export class AnubisTrial {
         this.spirits.push({ kind, rig, mat, seed: i + rnd.next() * 0.5, pos: V(0, -50, 0), prev: V(0, -50, 0), vis: 0, rise: 0, home: V(0, 0, 0) });
       }
     };
-    add('wraith', wg, 10, 0x0c4a70, 0xc8f4ff, { inflate: 0.01, power: 2.2, core: 0.3, gain: 0.5, vein: 0.4 });
+    add('wraith', wg, 16, 0x0c4a70, 0xc8f4ff, { inflate: 0.01, power: 2.2, core: 0.3, gain: 0.5, vein: 0.4 });
     add('hand', hg, 8, 0x0c4a70, 0xd8f8ff, { inflate: 0.008, power: 2.2, core: 0.4, gain: 0.6, vein: 0.35 });
-    add('wisp', pg, 18, 0x1a6aa0, 0xe8fcff, { inflate: 0.006, power: 1.8, core: 0.8, gain: 0.8, vein: 0.3 });
+    add('wisp', pg, 28, 0x1a6aa0, 0xe8fcff, { inflate: 0.006, power: 1.8, core: 0.8, gain: 0.8, vein: 0.3 });
     // hands claw over the terrace edges and the gate's foot
     const homes = [V(-12.4, 0, 34), V(12.6, 0, 36.5), V(-11.8, 0, 40.5), V(12, 0, 42.5), V(-6, 0, 45.2), V(5.5, 0, 45.6), V(-9.5, 0, 30.6), V(9.2, 0, 30.6)];
     this.spirits.filter((q) => q.kind === 'hand').forEach((q, i) => q.home.copy(homes[i]));
@@ -593,7 +622,40 @@ export class AnubisTrial {
       r.renderOrder = 0;
       this.mirror.add(r);
     }
+    // the god's arm, for the fall through the sand (its geometry is shared with the reaping above)
+    try {
+      const spec = anubisArmRig();
+      const ag = buildRigGeo(spec, 'anubis_arm:reap');
+      for (const p of ag.parts) if (!p.geo.getAttribute('snormal')) spiritNormals(p.geo, p.model, p.pivot, spec.voxelSize, 2);
+      const am = makeVoxelMaterial({ emissiveStrength: 1.6 });
+      this.mats.push(am);
+      this.armShell = spiritMaterial(0x0a4a7a, 0xa8f4ff, { inflate: 0.03, power: 3.6, core: 0, lumRim: 0, gain: 0.22, vein: 0.25 });
+      this.mats.push(this.armShell);
+      const a = new RigInstance(ag, { material: am, castShadow: false });
+      ag.parts.forEach((p) => a.nodes[p.name].add(new THREE.Mesh(p.geo, this.armShell!)));
+      a.root.visible = false;
+      s.add(a.root);
+      this.arm = a;
+    } catch (e) {
+      console.warn('[trial] arm', e);
+    }
+    this.tunnelLight = new THREE.PointLight(0x7fe8ff, 0, 11, 1.5);
+    s.add(this.tunnelLight);
+    // the moonlight comes in shaft by shaft as the soul enters the hall
+    for (let i = 0; i < 3; i++) this.shafts[i].k = this.shafts[i].target = 0;
     this.ready = true;
+  }
+
+  /** build the realm ahead (in slices, while the reaping plays above); run() awaits the same build */
+  prepare() {
+    if (!this.building) {
+      this.camera.aspect = this.engine.width / this.engine.height;
+      this.camera.updateProjectionMatrix();
+      this.building = this.build().then(() => {
+        void this.engine.renderer.compileAsync?.(this.scene, this.camera)?.catch?.(() => {});
+      });
+    }
+    return this.building;
   }
 
   private addShaft(O: THREE.Vector3, U: THREE.Vector3, Vv: THREE.Vector3, L: THREE.Vector3, color: number, density: number) {
@@ -664,21 +726,23 @@ export class AnubisTrial {
   }
 
   /** the whole trial; resolves true when the soul is judged worthy */
-  async run(stats: { kills: number; wave: number }): Promise<boolean> {
+  async run(stats: { kills: number; wave: number; final?: boolean; fromReaping?: boolean }): Promise<boolean> {
     const eng = this.engine;
-    this.camera.aspect = eng.width / eng.height;
-    this.camera.updateProjectionMatrix();
-    await this.build();
+    this.final = !!stats.final;
+    await this.prepare();
     this.grade(true);
     this.loop = eng.audio.loop('underworld_loop', 0.7);
     eng.letterbox(true, 0.01);
     await this.arrival(stats);
     if (this.skipping) this.snapToJudgement();
     this.skipping = false;
+    this.qte.hold = null;
     for (const l of this.lines) {
       l.ft.show(false);
       l.dying = true;
     }
+    // weighed once already: no scales, only the god's last word
+    if (this.final) return this.verdict(false, '"No feather this time. Lie down, cowboy. The desert keeps you."');
 
     // ---------------------------------------------------------------- the weighing
     this.setPhase('judge');
@@ -725,13 +789,36 @@ export class AnubisTrial {
     this.fx.emit({ pos: from, count: r === 'perfect' ? 30 : 16, spread: 1.6, life: [0.4, 0.8], size: [0.12, 0.02], sprite: 'glow8', color: [0xffe6a0, 0x9ff8ff], additive: true, drag: 2 });
   }
 
-  private async arrival(stats: { kills: number; wave: number }) {
+  private async arrival(stats: { kills: number; wave: number; fromReaping?: boolean }) {
     const eng = this.engine;
+    // ---------------------------------------------------------------- 0. the fall through the sand
+    if (stats.fromReaping && this.arm) {
+      this.setPhase('tunnel');
+      this.soulMode = 'held';
+      this.armLet = 0;
+      this.armDrop = 0;
+      this.arm.root.visible = true;
+      this.setShot(this.shotTunnel, 0);
+      this.tunnelLoop = eng.audio.loop('storm_loop', 0.55);
+      this.sfx('sand_rise', 0.9, 0.55);
+      this.sfx('whoosh_big', 0.8, 0.45);
+      this.sfx('heartbeat', 0.5, 0.7);
+      if (await this.hold(TUN_RELEASE)) return;
+      // the fist opens over the abyss: let go
+      this.armLet = 1;
+      this.sfx('anubis_roar', 0.5, 0.6);
+      this.sfx('divine_whisper', 0.6, 0.7);
+      if (await this.hold(TUN_T - TUN_RELEASE)) return;
+      this.tunnelLoop?.stop(1.2);
+      this.tunnelLoop = null;
+      this.sfx('thunder', 0.55, 0.55);
+      this.rack = 0.8;
+    }
     // ---------------------------------------------------------------- 1. descent
     this.setPhase('descent');
     this.soulMode = 'fall';
-    this.setShot(this.shotDescent, 0);
-    void eng.fadeIn(1.8);
+    this.setShot(this.shotDescent, stats.fromReaping ? 1.3 : 0);
+    if (!stats.fromReaping) void eng.fadeIn(1.8);
     this.sfx('soul_leave', 0.6, 0.7);
     void this.say('…the sand gives way. Cold. Quiet. Falling.', 'narr', 1.4);
     if (await this.hold(5.6)) return;
@@ -749,13 +836,36 @@ export class AnubisTrial {
     this.sfx('rock_crumble', 0.7, 0.7);
     this.sfx('door_creak', 0.7, 0.55);
     this.shake = 0.5;
-    if (await this.hold(3.8)) return;
+    // down at the soul's heels, looking up the doors as they part and the cold light spills out
+    this.setShot(this.shotGateHero, 0.9);
+    this.rack = 1;
+    if (await this.hold(1.4)) return;
+    this.sfx('divine_power', 0.55, 0.45);
+    this.sfx('jackal_howl', 0.35, 0.55);
+    if (await this.hold(2.4)) return;
     // ---------------------------------------------------------------- 3. into the hall
     this.setPhase('hall');
-    this.setShot(this.shotFollow, 1.6);
+    this.fireSeq = true;
+    this.setShot(this.shotHallFires, 1.2);
+    this.rack = 0.9;
     this.sfx('whoosh_big', 0.5, 0.6);
-    if (await this.hold(5.4)) return;
+    // the spirit fires wake pair by pair down the hall, then the moon comes through the roof slits
+    for (let i = 0; i < 2; i++) {
+      if (await this.hold(i ? 0.6 : 0.8)) return;
+      this.ignite(i * 2, 0.75 + i * 0.15);
+      this.ignite(i * 2 + 1, 0.8 + i * 0.15);
+    }
+    for (let i = 0; i < 3; i++) {
+      if (await this.hold(0.45)) return;
+      this.shafts[i].target = 0.075;
+      this.sfx('divine_chime', 0.35, 0.6 + i * 0.12);
+    }
+    if (await this.hold(0.5)) return;
+    this.setShot(this.shotFollow, 1.4);
+    if (await this.hold(2.6)) return;
     this.setShot(this.shotCrane, 0);
+    this.rack = 0.7;
+    this.sfx('divine_whisper', 0.4, 0.8);
     void this.say('THE HALL OF TWO TRUTHS', 'title', 1.6);
     if (await this.hold(4.6)) return;
     // ---------------------------------------------------------------- 4. Anubis wakes
@@ -772,7 +882,16 @@ export class AnubisTrial {
     this.shake = 0.35;
     if (await this.hold(2.0)) return;
     this.setShot(this.shotSpeech, 1.6);
+    this.rack = 0.6;
     this.gwT.present = 1;
+    if (this.final) {
+      await this.say('"Bones of the West. Again."', 'anubis', 1.0);
+      if (this.skipping) return;
+      this.gwT.present = 0;
+      this.gwT.point = 1;
+      await this.say('"Your heart was weighed once already. The desert keeps you."', 'anubis', 1.4);
+      return;
+    }
     await this.say('"Bones of the West. You died with your boots on."', 'anubis', 1.2);
     if (this.skipping) return;
     this.gwT.present = 0;
@@ -780,8 +899,25 @@ export class AnubisTrial {
     await this.say(`"${stats.kills} souls sent ahead of you. Let us weigh your heart against the feather."`, 'anubis', 1.4);
   }
 
+  /** a spirit fire flares awake: a pillar of cold sparks, a flash on its light, a rising whoosh */
+  private ignite(i: number, pitch: number) {
+    const b = this.braziers[i];
+    if (!b) return;
+    b.target = 1;
+    b.lit = Math.max(b.lit, 0.06);
+    b.flare = 1;
+    this.sfx('whoosh', 0.6, pitch);
+    this.fx.emit({ pos: { x: b.fire.x, y: b.fire.y + 0.3, z: b.fire.z }, vel: { x: 0, y: 7, z: 0 }, count: 40, spread: 1.4, life: [0.5, 1.1], size: [0.14, 0.02], sprite: ['spark', 'glow8', 'dot4'], color: [0x6fd0ff, 0xd8f8ff, 0xffffff], additive: true, drag: 1.4, gravity: -1, stretch: 0.06 });
+  }
+
   /** skipping the arrival: everything stands where the judgement expects it */
   private snapToJudgement() {
+    if (this.arm) this.arm.root.visible = false;
+    this.tunnelLoop?.stop(0.3);
+    this.tunnelLoop = null;
+    if (this.tunnelLight) this.tunnelLight.intensity = 0;
+    for (let i = 0; i < 3; i++) this.shafts[i].target = this.shafts[i].k = 0.075;
+    this.rack = 0;
     this.gateOpen = this.gateTarget = 1;
     for (const b of this.braziers) b.lit = b.target = 1;
     this.wake = this.wakeTarget = 1;
@@ -792,7 +928,7 @@ export class AnubisTrial {
     for (const l of this.lines) l.ft.skipTyping();
   }
 
-  private async verdict(ok: boolean) {
+  private async verdict(ok: boolean, line?: string) {
     const eng = this.engine;
     if (ok) {
       this.setPhase('grant');
@@ -821,7 +957,7 @@ export class AnubisTrial {
       eng.audio.play('anubis_roar', { volume: 0.7, pitch: 0.75 });
       this.fireTintTarget.set(0x5a2a8a);
       eng.flash(0xff2a1a, 0.3, 0.6);
-      void this.say('"Heavy. So heavy. Ammit is hungry tonight."', 'anubis', 0.8, false);
+      void this.say(line ?? '"Heavy. So heavy. Ammit is hungry tonight."', 'anubis', 0.8, false);
       await this.hold(1.6, false);
       this.soulMode = 'dissolve';
       eng.audio.play('soul_leave', { volume: 0.9, pitch: 0.7 });
@@ -856,6 +992,7 @@ export class AnubisTrial {
       bl.radius = 0.4;
       bl.threshold = 1.05;
     } else if (this.saved.bloom) {
+      u.uRadial.value = 0;
       const sv = this.saved;
       u.uSpirit.value = 0;
       u.uDesat.value = sv.desat;
@@ -875,6 +1012,113 @@ export class AnubisTrial {
     const k = Math.min(1, t / 5.6);
     return mixN(30, LAND.y, 1 - Math.pow(1 - k, 2.4));
   }
+  // ---------------------------------------------------------------- the fall through the sand
+  private tunnelY(tt: number) {
+    return mixN(TUN_Y0, TUN_Y1, Math.pow(Math.min(1, tt / TUN_T), 1.15));
+  }
+  /** above the god's fist, looking down the forearm into the dark as the sand spirals past */
+  private shotTunnel: ShotFn = (t) => {
+    const c = V(0, this.tunnelY(t), LAND.z);
+    const sp = t * 0.8 + 0.6;
+    const r = 2.4 + sstep(1.6, TUN_T, t) * 1.6;
+    return { p: c.clone().add(V(Math.cos(sp) * r, 3.6 + t * 0.3, Math.sin(sp) * r)), l: c.clone().add(V(0, -2.6 + sstep(1.8, TUN_T, t) * 1.6, 0)), fov: mixN(84, 64, sstep(0, 1.4, t)) };
+  };
+  /** the arm, the sand walls, the motes; after the release the fist drops away into the abyss */
+  private updateTunnel(dt: number, t: number) {
+    const a = this.arm;
+    const L = this.tunnelLight;
+    if (a?.root.visible) {
+      const n = a.nodes;
+      const k = this.armLet;
+      if (this.phase === 'tunnel' && k === 0) {
+        // carry: the fist (with the soul in it) holds the centre of the shaft, turning slowly
+        a.root.position.set(0, 0, 0);
+        a.root.rotation.set(0, t * 0.6, 0);
+        a.root.updateMatrixWorld(true);
+        a.sockets['grip'].getWorldPosition(this.v1);
+        a.root.position.set(-this.v1.x, this.tunnelY(this.phaseT) - this.v1.y, LAND.z - this.v1.z);
+      } else {
+        // let go: the hand springs open and the arm drops away into the dark
+        this.armDrop += dt;
+        a.root.position.y -= (5 + this.armDrop * 34) * dt;
+        if (this.armDrop > 2.5) a.root.visible = false;
+      }
+      const curl = k ? -0.25 : 1.12, thumb = k ? -0.2 : 0.95;
+      n['palm']?.rotation.set(damp(n['palm'].rotation.x, k ? -0.45 : 0.2, 8, dt), 0, 0);
+      for (let f = 1; f <= 4; f++)
+        for (let j = 1; j <= 3; j++) {
+          const q = n[`f${f}_${j}`];
+          if (!q) continue;
+          const rest = a.geo.parts[a.geo.index[`f${f}_${j}`]].rest;
+          q.rotation.set(damp(q.rotation.x, rest.x + curl * (j === 1 ? 0.9 : 1.1), 10, dt), rest.y, rest.z);
+        }
+      for (let j = 1; j <= 3; j++) {
+        const q = n[`t_${j}`];
+        if (!q) continue;
+        const rest = a.geo.parts[a.geo.index[`t_${j}`]].rest;
+        q.rotation.set(damp(q.rotation.x, rest.x + thumb * (j === 1 ? 0.5 : 0.8), 10, dt), rest.y - thumb * (j === 1 ? 0.6 : 0), rest.z - (j === 1 ? thumb * 0.7 : 0));
+      }
+      if (this.armShell) this.armShell.uniforms.uGain.value = 0.22 * (1 - sstep(0.6, 2.2, this.armDrop));
+    }
+    if (this.phase !== 'tunnel') {
+      if (L) L.intensity = damp(L.intensity, 0, 2, dt);
+      return;
+    }
+    const tt = this.phaseT;
+    const k = tt / TUN_T;
+    const cy = this.camera.position.y;
+    const dens = 1 - sstep(0.62, 1, k);
+    if (L) {
+      L.position.set(0, this.soulPos.y + 1.2, LAND.z);
+      L.intensity = 9 * (0.6 + 0.4 * Math.sin(t * 7)) * (1 - sstep(0.8, 1, k) * 0.7);
+    }
+    // the first moments: the same buried, brown dark the reaping dived into
+    if (tt < 0.5) {
+      const f = this.cf;
+      for (let i = 0; i < Math.floor(dt * 160 * (1 - tt * 2)) + 1; i++) {
+        const q = this.v1.copy(this.camera.position).addScaledVector(f, 0.6 + rnd.next() * 1.4).addScaledVector(this.cr, (rnd.next() - 0.5) * 2).addScaledVector(this.cu, (rnd.next() - 0.5) * 1.4);
+        this.fx.emit({ pos: q, vel: { x: 0, y: 8, z: 0 }, count: 1, life: [0.2, 0.45], size: [0.7, 1.5], sprite: ['puff0', 'puff1', 'puff2'], color: [0x5a4630, 0x4a3826, 0x3a2c1e], alpha: 0.85, drag: 1 });
+      }
+    }
+    // the walls: grains spiralling up past us as we fall, widening and thinning as the shaft opens
+    const n = Math.floor(dt * 420 * dens) + (rnd.next() < (dt * 420 * dens) % 1 ? 1 : 0);
+    for (let i = 0; i < n; i++) {
+      const ang = rnd.next() * Math.PI * 2, r = 2 + rnd.next() * 2.6 + k * 5;
+      const y = cy - 1 - rnd.next() * 15;
+      const tx = -Math.sin(ang), tz = Math.cos(ang);
+      this.fx.emit({ pos: { x: Math.cos(ang) * r, y, z: LAND.z + Math.sin(ang) * r }, vel: { x: tx * 5, y: 15, z: tz * 5 }, count: 1, life: [0.35, 0.8], size: [0.05, 0.09], sprite: ['streak', 'dot3', 'grain1'], color: TSAND, stretch: 0.05, drag: 0.3 });
+    }
+    if (rnd.next() < dt * 26 * dens) {
+      const ang = rnd.next() * Math.PI * 2, r = 3.2 + rnd.next() * 3 + k * 5;
+      this.fx.emit({ pos: { x: Math.cos(ang) * r, y: cy - 4 - rnd.next() * 10, z: LAND.z + Math.sin(ang) * r }, vel: { x: -Math.sin(ang) * 3, y: 11, z: Math.cos(ang) * 3 }, count: 1, life: [0.8, 1.4], size: [1.6, 3.4], sprite: ['puff0', 'puff2', 'cloud1'], color: [0x2a2018, 0x3a2c1e, 0x4a3826], alpha: 0.55, rot: 3, rotSpeed: 1.2 });
+    }
+    // spirit motes, more of them the deeper we go
+    if (rnd.next() < dt * (12 + 40 * k)) {
+      const ang = rnd.next() * Math.PI * 2, r = 1 + rnd.next() * 4;
+      this.fx.emit({ pos: { x: Math.cos(ang) * r, y: cy - 2 - rnd.next() * 10, z: LAND.z + Math.sin(ang) * r }, vel: { x: 0, y: 6 + rnd.next() * 4, z: 0 }, count: 1, life: [0.8, 1.6], size: [0.1, 0.02], sprite: ['glow8', 'dot3'], color: [0x6fd8ff, 0xc8f8ff, 0x7ff0e0], additive: true, drag: 0.4 });
+    }
+    // breaking out of the sand into the open dark: the walls burst outward
+    if (k > 0.7 && k - dt / TUN_T <= 0.7) {
+      for (let i = 0; i < 60; i++) {
+        const ang = (i / 60) * Math.PI * 2;
+        this.fx.emit({ pos: { x: Math.cos(ang) * 4, y: cy - 3, z: LAND.z + Math.sin(ang) * 4 }, vel: { x: Math.cos(ang) * 9, y: 4, z: Math.sin(ang) * 9 }, count: 2, life: [0.8, 1.5], size: [0.06, 0.1], sprite: ['dot3', 'grain0'], color: TSAND, drag: 1.2, gravity: 4 });
+      }
+      this.shake = Math.max(this.shake, 0.3);
+    }
+  }
+
+  /** at the soul's heels, low, looking up the doors as they part; a slow push in */
+  private shotGateHero: ShotFn = (t) => {
+    const u = sstep(0, 1, t / 4.4);
+    const z = this.soulPos.z;
+    return { p: V(1.05 - 0.3 * u, 0.3 + 0.12 * u, z + 2.5 - 0.7 * u), l: V(-0.2, 6.6 + 0.8 * u, GATE_Z), fov: mixN(66, 55, u) };
+  };
+  /** low in the aisle as the spirit fires wake down the hall, the soul walking past us into it */
+  private shotHallFires: ShotFn = (t) => {
+    const u = sstep(0, 1, t / 3.4);
+    return { p: V(0.9, 1.0, 23.8).lerp(V(0.6, 1.3, 21.6), u), l: V(0, 2.5 + u * 0.4, -6), fov: mixN(52, 47, u) };
+  };
+
   private shotDescent: ShotFn = (t) => {
     const k = Math.min(1, t / 5.6);
     const y = this.soulY(t);
@@ -944,12 +1188,21 @@ export class AnubisTrial {
     }
     if (!this.ready) return;
     const eng = this.engine;
-    const intro = this.phase === 'descent' || this.phase === 'gate' || this.phase === 'hall' || this.phase === 'throne';
-    if (intro && !this.skipping && (eng.input.wasPressed('Space') || eng.input.wasPressed('Escape') || eng.input.wasPressed('Enter'))) {
+    const intro = this.phase === 'tunnel' || this.phase === 'descent' || this.phase === 'gate' || this.phase === 'hall' || this.phase === 'throne';
+    // HOLD to skip: a stray tap never throws the arrival away
+    const held = eng.input.isDown('Space') || eng.input.isDown('Escape') || eng.input.isDown('Enter');
+    this.skipHold = intro && held && !this.skipping ? this.skipHold + rdt : 0;
+    this.qte.hold = this.skipHold > 0.08 ? { label: 'HOLD TO SKIP', k: Math.min(1, this.skipHold / 0.9) } : null;
+    if (intro && !this.skipping && this.skipHold >= 0.9) {
       this.skipping = true;
+      this.qte.hold = null;
       for (const w of this.waits.splice(0)) w.res();
     }
+    // a rack-focus pull on the big cuts: the frame swims in toward its subject
+    this.rack = damp(this.rack, 0, 1.5, rdt);
+    eng.post.u.uRadial.value = this.rack * 0.55;
     const t = this.t;
+    this.updateTunnel(dt, t);
     this.updateGate(dt);
     this.updateFire(dt, t);
     this.updateSoul(dt, t);
@@ -982,7 +1235,7 @@ export class AnubisTrial {
 
   private updateFire(dt: number, t: number) {
     // braziers light as the soul passes them
-    if (this.phase === 'hall' || this.phase === 'gate')
+    if ((this.phase === 'hall' || this.phase === 'gate') && !this.fireSeq)
       for (let i = 0; i < 4; i++) if (this.soulPos.z < this.braziers[i].pos.z + 7.5 && this.braziers[i].target === 0) {
         this.braziers[i].target = 1;
         this.sfx('whoosh', 0.55, 0.6 + i * 0.05);
@@ -997,7 +1250,8 @@ export class AnubisTrial {
         this.fx.emit({ pos: { x: b.fire.x, y: b.fire.y + 0.2, z: b.fire.z }, count: 30, spread: 1.6 * b.scale, up: 2, life: [0.4, 0.9], size: [0.3 * b.scale, 0.04], sprite: ['dot6', 'glow16'], color: [0x6fd0ff, 0xd8f8ff], additive: true, drag: 2.4, gravity: -1.5 });
       const fl = 1 + Math.sin(t * 11 + b.pos.x * 3) * 0.08 + Math.sin(t * 23 + b.pos.z) * 0.05;
       b.light.color.copy(tint);
-      b.light.intensity = b.lit * (b.scale > 1 ? 34 : 18) * fl * fade * (1 + this.blaze * 0.4);
+      b.flare = damp(b.flare, 0, 2.5, dt);
+      b.light.intensity = b.lit * (b.scale > 1 ? 34 : 18) * fl * fade * (1 + this.blaze * 0.4) * (1 + b.flare * 2.5);
       if (b.lit < 0.02) continue;
       const s = b.scale;
       b.acc += dt * 34 * b.lit * s * fade;
@@ -1023,6 +1277,9 @@ export class AnubisTrial {
   private updateSoul(dt: number, t: number) {
     const p = this.soulPos;
     switch (this.phase) {
+      case 'tunnel':
+        p.set(0, this.tunnelY(this.phaseT), LAND.z);
+        break;
       case 'descent':
         p.set(Math.sin(t * 0.7) * 0.3, this.soulY(this.phaseT), LAND.z);
         break;
@@ -1051,9 +1308,25 @@ export class AnubisTrial {
         break;
     }
     const r = this.soul.root;
-    r.position.copy(p);
-    r.rotation.y = this.phase === 'descent' ? Math.sin(t * 0.4) * 0.6 : Math.PI;
-    r.rotation.x = this.phase === 'descent' ? Math.sin(t * 0.9) * 0.15 : 0;
+    if (this.phase === 'tunnel' && this.soulMode === 'held' && this.arm) {
+      // across the god's palm, head out of the thumb side
+      this.arm.root.updateMatrixWorld(true);
+      this.heldM.compose(V(-0.86, 0, 0.05), this.heldQ.setFromEuler(new THREE.Euler(0.15, 0.2, -Math.PI / 2)), V(1, 1, 1));
+      this.heldM.premultiply(this.arm.sockets['grip'].matrixWorld);
+      this.heldM.decompose(r.position, r.quaternion, this.v2);
+      r.scale.setScalar(1);
+      if (this.armLet > 0) this.soulMode = 'fall';
+    } else if (this.phase === 'tunnel' || (this.phase === 'descent' && this.phaseT < 1.2)) {
+      // let go: tumble upright into the fall (easing out of the grip, no pop)
+      r.position.lerp(p, 1 - Math.exp(-6 * dt));
+      this.heldQ.setFromEuler(new THREE.Euler(Math.sin(t * 0.9) * 0.15, Math.sin(t * 0.4) * 0.6, 0));
+      r.quaternion.slerp(this.heldQ, 1 - Math.exp(-3 * dt));
+    } else {
+      r.position.copy(p);
+      r.rotation.y = this.phase === 'descent' ? Math.sin(t * 0.4) * 0.6 : Math.PI;
+      r.rotation.x = this.phase === 'descent' ? Math.sin(t * 0.9) * 0.15 : 0;
+      r.rotation.z = 0;
+    }
     const n = this.soul.nodes;
     const set = (k: string, x: number, y = 0, z = 0, l = 5) => {
       const q = n[k];
@@ -1061,7 +1334,18 @@ export class AnubisTrial {
       q.rotation.set(damp(q.rotation.x, x, l, dt), damp(q.rotation.y, y, l, dt), damp(q.rotation.z, z, l, dt));
     };
     const m = this.soulMode;
-    if (m === 'fall') {
+    if (m === 'held') {
+      // thrashing in the grip
+      const ph = t * 9;
+      set('arm_l', -2.7 + Math.sin(ph) * 0.45, 0, 0.45 + Math.sin(ph * 0.7) * 0.3, 9);
+      set('arm_r', -2.3 + Math.sin(ph + 1.3) * 0.45, 0, -0.65 - Math.sin(ph * 0.8) * 0.3, 9);
+      set('thigh_l', -0.35 + Math.sin(ph + 2) * 0.5, 0, 0, 9);
+      set('thigh_r', 0.25 - Math.sin(ph + 2.4) * 0.5, 0, 0, 9);
+      set('shin_l', 0.65, 0, 0, 9);
+      set('shin_r', 0.35, 0, 0, 9);
+      set('head', -0.55 + Math.sin(ph * 0.6) * 0.15, 0, 0, 9);
+      set('torso', -0.25, 0, 0, 9);
+    } else if (m === 'fall') {
       set('arm_l', -0.4, 0, 2.3 + Math.sin(t * 2) * 0.15);
       set('arm_r', -0.4, 0, -2.3 - Math.sin(t * 2.1) * 0.15);
       set('fore_l', -0.5);
@@ -1125,7 +1409,7 @@ export class AnubisTrial {
     this.soulCore.opacity = 0.32 * this.soulFade;
     this.soul.root.visible = this.soulFade > 0.01;
     copyPose(this.soul, this.soulMirror);
-    this.soulMirror.root.visible = this.soul.root.visible && this.soulPos.z < 25.5;
+    this.soulMirror.root.visible = this.soul.root.visible && this.soulPos.z < 25.5 && this.phase !== 'tunnel';
     // motes shed by the soul
     if (rnd.next() < dt * (this.soulMode === 'dissolve' ? 90 : 10)) {
       const dis = this.soulMode === 'dissolve';
@@ -1254,6 +1538,9 @@ export class AnubisTrial {
     const ph = this.phase;
     const atGate = ph === 'descent' || ph === 'gate';
     const cam = this.camera.position;
+    this.camera.getWorldDirection(this.cf);
+    this.cr.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
+    this.cu.set(0, 1, 0).applyQuaternion(this.camera.quaternion);
     for (const s of this.spirits) {
       const q = s.seed;
       const p = s.pos;
@@ -1275,6 +1562,19 @@ export class AnubisTrial {
         } else {
           p.set(Math.cos(a) * 6.5, 8.5 + 3 * Math.sin(t * 0.3 + q * 2), (ph === 'judge' ? -14 : 4) + Math.sin(a) * (ph === 'judge' ? 9 : 15));
           want = ph === 'hall' ? sstep(0, 3, this.phaseT) : 1;
+        }
+        const qi = Math.floor(q);
+        if ((ph === 'gate' || ph === 'hall') && qi < 3) {
+          // a few of the dead sweep right past the lens, close enough to feel the cold
+          const u = ((t * 0.19 + q * 0.37) % 1) * 2 - 1;
+          p.copy(this.camera.position).addScaledVector(this.cf, 4.5 + qi * 1.2).addScaledVector(this.cr, u * 10 * (qi & 1 ? 1 : -1)).addScaledVector(this.cu, 0.4 + (1 - u * u) * 1.6 - qi * 0.4);
+          want = 1;
+        } else if (ph === 'tunnel' && qi >= 3 && qi < 10) {
+          // spirits swirling down the shaft with him
+          const ta = q * 2.1 + t * (1.6 + (q % 0.5));
+          const tr = 3.6 + (q % 3) * 1.1;
+          p.set(Math.cos(ta) * tr, this.soulPos.y + 8 - ((t * 5 + q * 4.3) % 16), LAND.z + Math.sin(ta) * tr);
+          want = 1;
         }
         const n = s.rig.nodes;
         n['head']?.rotation.set(Math.sin(t * 1.3 + q) * 0.25, Math.sin(t * 0.9 + q) * 0.35, 0);
@@ -1369,6 +1669,13 @@ export class AnubisTrial {
       const sh = this.shafts[Math.floor(rnd.next() * 3)];
       const q = this.v1.copy(sh.O).addScaledVector(sh.U, 0.1 + rnd.next() * 0.8).addScaledVector(sh.V, 0.1 + rnd.next() * 0.8).addScaledVector(sh.L, 0.25 + rnd.next() * 0.7);
       if (q.y > 0.2 && q.y < 12) this.fx.emit({ pos: q, count: 1, spread: 0.04, up: 0.03, life: [4, 8], size: [0.022, 0.022], sprite: 'dot3', color: 0xd8ecff, additive: true, alpha: 0.9, drag: 0.3, jitter: 0.05, fadeIn: 1 });
+    }
+    // mist drifting right in front of the lens: the foreground the focus pulls through
+    if ((ph === 'gate' || ph === 'hall' || ph === 'throne') && rnd.next() < dt * 4) {
+      const c = this.camera.position;
+      const d = 2.4 + rnd.next() * 2.2;
+      const q = this.v1.copy(c).addScaledVector(this.cf, d).addScaledVector(this.cr, (rnd.next() - 0.5) * 4).addScaledVector(this.cu, (rnd.next() - 0.7) * 1.6);
+      this.fx.emit({ pos: q, vel: { x: this.cr.x * 0.35, y: 0.04, z: this.cr.z * 0.35 }, count: 1, life: [3, 5], size: [1.3, 2.4], sprite: ['cloud0', 'cloud1', 'cloud2'], color: 0x2a4a66, alpha: 0.07, additive: true, rot: 3, rotSpeed: 0.1, fadeIn: 1 });
     }
     // low cold mist creeping over the floor and the terrace
     if (rnd.next() < dt * 5) {
