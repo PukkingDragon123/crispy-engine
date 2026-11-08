@@ -660,7 +660,7 @@ export class Bench3D implements Mode {
     return { at, face: Math.atan2(c.x - at.x, c.z - at.y) };
   }
   private workRest() {
-    const at = new THREE.Vector2(this.ttAt.x - 1.25, this.zFront + 0.28);
+    const at = new THREE.Vector2(this.ttAt.x - 1.04, this.zFront + 0.36);
     return { at, face: Math.atan2(this.ttAt.x - at.x, this.ttAt.z - at.y) };
   }
   /** look at another bay */

@@ -2907,7 +2907,7 @@ export class Shop {
       shelf.forEach((w, i) => {
         const { tier, x } = slotOf(i);
         const tag = new PriceTag(tagMat);
-        tag.root.position.set(x, tier.tackY, tier.tackZ);
+        tag.root.position.set(x, tier.tackY, tier.tackZ - 0.012); // clear of the lip and the kilim's fold
         g.add(tag.root);
         this.tags.push(tag);
         this.inkTag(tag, w);
@@ -3040,8 +3040,9 @@ export class Shop {
             t.framingTop(new THREE.Vector3()).add(_a.set(0, 0.14, 0)),
             g.localToWorld(new THREE.Vector3(-S.halfX, S.tiers[1].top + 0.3, S.tiers[1].slotZ)),
             g.localToWorld(new THREE.Vector3(S.halfX, S.tiers[1].top + 0.3, S.tiers[1].slotZ)),
-            g.localToWorld(new THREE.Vector3(-S.halfX * 0.92, S.tiers[0].tackY - 0.11, S.tiers[0].tackZ)),
-            g.localToWorld(new THREE.Vector3(S.halfX * 0.92, S.tiers[0].tackY - 0.11, S.tiers[0].tackZ)),
+            // (with room under the tags for the line of type at the foot of the frame)
+            g.localToWorld(new THREE.Vector3(-S.halfX * 0.92, S.tiers[0].tackY - 0.22, S.tiers[0].tackZ)),
+            g.localToWorld(new THREE.Vector3(S.halfX * 0.92, S.tiers[0].tackY - 0.22, S.tiers[0].tackZ)),
           ]
         : [
             t.framingTop(new THREE.Vector3()).add(_a.set(0, 0.18, 0)),
@@ -3168,10 +3169,10 @@ export class Shop {
 
   private updateBar() {
     const bk = this.book, n = this.bodies.length;
-    const keys = n > 1 ? `click a ware or press 1-${n} &nbsp;·&nbsp; click / Enter to buy` : 'click to buy';
+    const keys = n > 1 ? `click a ware or 1-${n} &nbsp;·&nbsp; click / Enter buys` : 'click to buy';
     const off = bk.haggle === 'won' ? ' &nbsp;<span style="color:#b8f07a">fifteen off today</span>' : '';
-    const restock = this.stall ? `<div style="font-size:15px;color:#c9a97c;margin-top:4px">fresh stock after the wave ${bk.nextRestock} boss</div>` : '';
-    this.bar.innerHTML = `<span style="color:#ffd36b">${Math.floor(this.ctx.run.gold)} gold</span>${off} &nbsp;·&nbsp; ${keys} &nbsp;·&nbsp; right-click to shoot &nbsp;·&nbsp; ESC / T to leave${restock}`;
+    const restock = this.stall ? `<div style="font-size:15px;color:#c9a97c;margin-top:4px">fresh stock after the wave ${bk.nextRestock} boss &nbsp;·&nbsp; right-click shoots</div>` : '<div style="font-size:15px;color:#c9a97c;margin-top:4px">right-click shoots</div>';
+    this.bar.innerHTML = `<span style="color:#ffd36b">${Math.floor(this.ctx.run.gold)} gold</span>${off} &nbsp;·&nbsp; ${keys} &nbsp;·&nbsp; ESC leaves${restock}`;
   }
 
   dispose() {
@@ -3621,7 +3622,7 @@ export class Shop {
     const w = b.ware;
     const cam = this.ctx.camera;
     const at = this.group.localToWorld(_l.copy(b.rest));
-    const sz = clamp(at.distanceTo(cam.position) * 0.024, 0.03, 0.08);
+    const sz = clamp(at.distanceTo(cam.position) * 0.043, 0.05, 0.12);
     const price = this.book.price(w), gold = Math.floor(this.ctx.run.gold);
     const note = this.noteOf(w);
     let pl = `${price} gold`;
@@ -3643,7 +3644,8 @@ export class Shop {
     b.state = this.stall ? 'fly' : 'free';
     b.obj.visible = true;
     const start = this.packPoint(_v, (rnd.next() - 0.5) * 0.3);
-    this.ctx.fx.dust({ x: start.x, y: start.y, z: start.z }, 0.22, P.sand1, 2);
+    if (this.stall) this.ctx.particles.emit({ pos: { x: start.x, y: start.y, z: start.z }, count: 4, spread: 0.6, up: 0.6, life: [0.3, 0.6], size: [0.012, 0.008], sprite: ['grain0', 'grain1', 'grain2'], color: [P.sand0, P.sand1], gravity: 9 });
+    else this.ctx.fx.dust({ x: start.x, y: start.y, z: start.z }, 0.22, P.sand1, 2);
     this.group.worldToLocal(start);
     b.p.copy(start);
     b.arc0.copy(start);
@@ -3803,7 +3805,8 @@ export class Shop {
     if (b.sound === 'metal') this.ctx.sfx('shell_casing', wp, 0.32, 0.8);
     else if (b.sound === 'glass') this.ctx.sfx('shell_casing', wp, 0.26, 1.3);
     else this.ctx.sfx('board_land', wp, 0.2, 1.6);
-    this.ctx.fx.dust({ x: wp.x, y: wp.y + 0.02, z: wp.z }, 0.16, P.sand0, 2);
+    // a few grains of desert jump off the boards
+    this.ctx.particles.emit({ pos: { x: wp.x, y: wp.y + 0.02, z: wp.z }, count: 5, spread: 0.7, up: 0.8, life: [0.3, 0.6], size: [0.012, 0.008], sprite: ['grain0', 'grain1', 'grain2'], color: [P.sand0, P.sand1], gravity: 9 });
   }
 
   private step(b: Body, h: number) {

@@ -145,7 +145,7 @@ export interface VoxelMaterialOptions {
   /**
    * Pixel-art material skin: geometry carrying a `pxl` attribute (texture layer + 1, grain
    * swap) gets that layer of `tex` laid on its faces in object space. `glsl` provides
-   * pxUV(p, n) and pxSample(uv, layer) (see game/world/PixelTex); fades out with distance.
+   * pxUV(p, n) and pxSampleG(uv, gx, gy, layer) (see game/world/PixelTex); fades out with distance.
    */
   pixel?: { tex: THREE.Texture; glsl: string; near?: number; far?: number };
 }
@@ -294,11 +294,12 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
         diffuseColor.rgb *= uTint;
         ${
           px
-            ? `if (vPxl.x > 0.5) {
-          vec2 puv = pxUV(vOP, vON);
-          if (vPxl.y > 0.5) puv = puv.yx;
+            ? `vec3 pxDX = dFdx(vOP), pxDY = dFdy(vOP);
+        if (vPxl.x > 0.5) {
+          vec2 puv = pxUV(vOP, vON), pgx = pxUV(pxDX, vON), pgy = pxUV(pxDY, vON);
+          if (vPxl.y > 0.5) { puv = puv.yx; pgx = pgx.yx; pgy = pgy.yx; }
           float pk = 1.0 - smoothstep(${(px.near ?? 48).toFixed(1)}, ${(px.far ?? 86).toFixed(1)}, length(vViewPosition));
-          diffuseColor.rgb *= mix(vec3(1.0), pxSample(puv, vPxl.x - 1.0), pk);
+          diffuseColor.rgb *= mix(vec3(1.0), pxSampleG(puv, pgx, pgy, vPxl.x - 1.0), pk);
         }`
             : ''
         }

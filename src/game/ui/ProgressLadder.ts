@@ -61,7 +61,8 @@ export interface LadderDeps {
 }
 
 const V2 = 2; // voxels per HUD px
-const geoOf = (m: ReturnType<typeof sculpt>, vph: number) => buildVoxelGeometry(m, { voxelSize: 1 / vph, pivot: [0, 0, 0] });
+// (models are built a quarter of a HUD px per unit: the photo studio's lens keeps them well inside its far plane)
+const geoOf = (m: ReturnType<typeof sculpt>, vph: number) => buildVoxelGeometry(m, { voxelSize: 1 / (vph * 4), pivot: [0, 0, 0] });
 const lit = (s: Surf) => s.nx * -0.45 + s.ny * 0.6 + s.nz * 0.66;
 
 // ================================================================== the models (only ever photographed)
@@ -540,10 +541,10 @@ export class ProgressLadder {
         const nd = new THREE.Group();
         nd.name = 'needle';
         const nm = new THREE.Mesh(geoOf(needleModel(), 3), this.bank.material());
-        nm.position.z = 2.3;
+        nm.position.z = 2.3 / 4;
         nd.add(nm);
         body.add(nd);
-        body.add(framingBox([-12, -12, 0], [12, 16, 5]));
+        body.add(framingBox([-3, -3, 0], [3, 4, 1.25]));
         return body;
       });
       const nd = g.getObjectByName('needle');
@@ -629,12 +630,14 @@ export class ProgressLadder {
     if (brk && !this.wasBreak) this.hold = Math.max(this.hold, 3);
     this.wasBreak = brk;
     this.hold = Math.max(0, this.hold - dt);
-    const open = brk || this.hold > 0;
+    // a first-time tip takes the tags' place beside the strap while it shows
+    const tipOn = !!this.tip || (this.tipQ.length > 0 && this.show > 0.9);
+    const open = (brk || this.hold > 0) && !tipOn;
     const k = 1;
     const x0 = Math.round(-30 * (1 - this.show)) + 4;
     const top = Math.max(58, Math.round(this.h * 0.17));
     this.paintLedger(c, dt, x0, top, open, S, k);
-    this.paintTip(c, dt, x0, top + STRAP_L + 22);
+    this.paintTip(c, dt, x0 + 52, top + 10); // right of the badges and their figures
     this.paintCompass(c, dt, shop, brk);
     this.paintSparks(c, dt);
   }
@@ -744,10 +747,12 @@ export class ProgressLadder {
     const cx = W / 2, cy = H / 2;
     const v = _cv.set(shop.pos.x, shop.pos.y + 3, shop.pos.z).applyMatrix4(this.d.camera.matrixWorldInverse);
     const ang = Math.atan2(v.x, -v.z); // 0 = up, clockwise
-    const mx = W / 2 - 26, my = H / 2 - 34;
-    const t = Math.min(mx / Math.max(1e-3, Math.abs(Math.sin(ang))), my / Math.max(1e-3, Math.abs(Math.cos(ang))));
-    x = cx + Math.sin(ang) * t;
-    y = cy - Math.cos(ang) * t;
+    // clamped to a frame inside the screen edge that keeps clear of the ledger (left) and the HUD's bottom bar
+    const sx = Math.sin(ang), sy = -Math.cos(ang);
+    const L = 64, R = W - 30, T = 40, B = H - 86;
+    const t = Math.min(sx < 0 ? (L - cx) / sx : sx > 0 ? (R - cx) / sx : 1e9, sy < 0 ? (T - cy) / sy : sy > 0 ? (B - cy) / sy : 1e9);
+    x = cx + sx * t;
+    y = cy + sy * t;
     C.ang += Math.atan2(Math.sin(ang - C.ang), Math.cos(ang - C.ang)) * Math.min(1, dt * 8);
     const frame = ((Math.round((C.ang / TAU) * 16) % 16) + 16) % 16;
     const cmp = this.compass(frame);
@@ -793,15 +798,21 @@ export class ProgressLadder {
     if (!pp) return;
     const inK = clamp01(T.t / 0.45), outK = clamp01((T.t - (DUR - 0.5)) / 0.5);
     const e = 1 - Math.pow(1 - inK, 3) - outK * outK;
-    const x = Math.round(x0 - (W + 12) * (1 - e)) + 2;
-    const yy = Math.min(y, this.h - H - 96);
+    const x = Math.round(x0 - (W + 30) * (1 - e));
+    const yy = y;
     const sway = Math.sin(T.t * 2.4) * Math.max(0, 1 - T.t * 0.6) * 2;
+    // it slides out from behind the ledger's figures
+    c.save();
+    c.beginPath();
+    c.rect(x0 - 6, yy - 12, this.w, H + 30);
+    c.clip();
     blitObj(c, pp, x + pp.w / 2, yy + H / 2 + Math.round(sway), 3, this.show);
     c.globalAlpha = this.show * clamp01(e * 1.5);
     pixelText(c, lines[0], x + 10, yy + 7, { size: 16, color: '#8a2016', lip: '#f6e8c4' });
     pixelText(c, lines[1], x + 10, yy + 22, { size: 16, color: '#3a1c0a' });
     pixelText(c, lines[2], x + 10, yy + 35, { size: 16, color: '#3a1c0a' });
     c.globalAlpha = 1;
+    c.restore();
   }
 
   // ---------------------------------------------------------------- pixel sparks

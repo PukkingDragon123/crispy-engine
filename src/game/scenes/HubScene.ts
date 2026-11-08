@@ -827,7 +827,7 @@ export class HubScene implements GameScene {
       spot.target.position.copy(lp).add(new THREE.Vector3(-0.15, -1, 0.2));
       s.add(spot, spot.target);
       this.flick.push({ l: spot, base: spot.intensity, k: 0.015 });
-      put(B(() => HX.barStool(2, 'ok')), -2.05, -2.18, 0.9);
+      put(B(() => HX.barStool(2, 'ok')), -2.2, -1.92, 0.9);
       const bst = new THREE.Vector2(gp.x - 0.36, gp.z + 0.6);
       station({
         id: 'bench', label: 'Weapon Bench', title: 'THE WORKBENCH', short: 'WORKBENCH', sub: 'the gun rack and the bench', verb: 'Open the gun rack',

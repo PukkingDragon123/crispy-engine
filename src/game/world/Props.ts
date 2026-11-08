@@ -279,11 +279,15 @@ const SKIN: Record<string, SkinHint | ((v: number) => SkinHint)> = {
   ruinWall: 'adobe',
   hieroglyphWall: 'stone', stoneGate: 'stone', sphinx: 'stone', obelisk: 'stone', obeliskBroken: 'stone', column: 'stone', shrine: 'stone',
   rockArch: 'rock', colossusLegs: 'rock', colossusHead: 'rock', rimStone: 'rock', rimGate: 'rock', boulder: 'rock',
-  cactus: 'cactus',
+  cactus: 'cactus', palm: 'bark',
 };
 let skinMat: ReturnType<typeof makeVoxelMaterial> | null = null;
-/** the voxel material with the pixel-art material atlas on skinned faces */
-const skinMaterial = () => (skinMat ??= makeVoxelMaterial({ pixel: { tex: pixelAtlas(), glsl: PIXEL_GLSL } }));
+let skinSwayMat: ReturnType<typeof makeVoxelMaterial> | null = null;
+/** the voxel material with the pixel-art material atlas on skinned faces (+ the foliage sway for plants) */
+const skinMaterial = (sway = false) =>
+  sway
+    ? (skinSwayMat ??= makeVoxelMaterial({ sway: 0.05, pixel: { tex: pixelAtlas(), glsl: PIXEL_GLSL } }))
+    : (skinMat ??= makeVoxelMaterial({ pixel: { tex: pixelAtlas(), glsl: PIXEL_GLSL } }));
 /** snap colours to a coarse grid so a far LOD merges into big quads (its colour detail is sub-pixel) */
 function quantize(m: VoxelModel, step = 12): VoxelModel {
   const q = (c: number) => Math.min(255, Math.round(c / step) * step);
@@ -421,7 +425,7 @@ export class Props {
   /** unique mesh with automatic distance LOD; culled past `hide` m (the storm and the haze hide it anyway) */
   private lodMesh(v: Variant, foliage: boolean, nearDist = 60, hide = v.height > 6 ? 560 : 320) {
     const lod = new THREE.LOD();
-    const mat = v.skin ? skinMaterial() : foliage ? sharedFoliageMaterial : sharedVoxelMaterial;
+    const mat = v.skin ? skinMaterial(foliage) : foliage ? sharedFoliageMaterial : sharedVoxelMaterial;
     const a = new THREE.Mesh(v.geo, mat);
     a.castShadow = true;
     a.receiveShadow = true;
@@ -584,7 +588,7 @@ export class Props {
         const bkey = z.index + ':' + kind + ':' + this.variantKey(v);
         let b = zoneBatches.get(bkey);
         if (!b) {
-          const mat = v.skin ? skinMaterial() : def.foliage ? sharedFoliageMaterial : sharedVoxelMaterial;
+          const mat = v.skin ? skinMaterial(!!def.foliage) : def.foliage ? sharedFoliageMaterial : sharedVoxelMaterial;
           const cap = plan.filter((q) => q.v === v).length + 1;
           const near = new THREE.InstancedMesh(v.geo, mat, cap);
           const far = new THREE.InstancedMesh(this.lod(v), mat, cap);

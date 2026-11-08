@@ -149,7 +149,7 @@ function photograph(model: VoxelModel, vs: number, skip?: (x: number, y: number,
         }
       const above = bAxis !== 1 && at(bx, by + 1, bz) >= 0 ? 0.9 : 1;
       // kept a little dark: the planes are lit again in game by the sun from straight above
-      const k = (0.52 + 0.4 * ndl) * (1 - occ * 0.05) * above;
+      const k = (0.6 + 0.42 * ndl) * (1 - occ * 0.05) * above;
       const o = (px + py * W) * 3;
       col[o] = s2l((bc >> 16) & 255) * k;
       col[o + 1] = s2l((bc >> 8) & 255) * k;
@@ -294,7 +294,8 @@ function makeMaterial(tex: THREE.Texture, uFocus: { value: THREE.Vector3 }, uRad
         uniform float uTime, uRad;
         uniform vec3 uFocus;
         uniform vec2 uWind;
-        varying vec3 vSpr;`
+        varying vec3 vSpr;
+        varying float vNear;`
       )
       .replace('#include <beginnormal_vertex>', 'vec3 objectNormal = vec3(0.0, 1.0, 0.0);')
       .replace(
@@ -306,26 +307,32 @@ function makeMaterial(tex: THREE.Texture, uFocus: { value: THREE.Vector3 }, uRad
         float fade = 1.0 - smoothstep(uRad * 0.78, uRad, distance(iPos.xz, uFocus.xz));
         lp.y *= fade;
         lp.xz *= mix(0.4, 1.0, fade);
-        // wind: a slow lean with gusts and a quick flutter, stronger toward the tips
-        float k = position.y * position.y;
+        // wind: a slow lean with gusts and a quick flutter, growing with height above the ground (m)
+        float hm = position.y * iSpr.z;
         float ph = uTime * (1.4 + iSpr.w * 0.8) + iPos.x * 0.29 + iPos.z * 0.21;
         float gust = 0.55 + 0.45 * sin(uTime * 0.6 + iPos.x * 0.05 - iPos.z * 0.04);
         vec2 wd = normalize(uWind + vec2(1e-4));
         float sw = (0.5 + sin(ph) * 0.7 + sin(ph * 2.7 + iSpr.w * 6.0) * 0.25) * gust;
-        lp.xz += wd * sw * k * (0.05 + 0.08 * iSpr.z);
+        lp.xz += wd * sw * (hm * 0.1 + hm * hm * 0.04);
         vec3 transformed = iPos.xyz + lp;
-        vSpr = vec3(sUV, iSpr.x);`
+        vSpr = vec3(sUV, iSpr.x);
+        // plants right in front of the camera dissolve instead of filling the view
+        vNear = smoothstep(1.3, 3.2, distance(iPos.xyz + vec3(0.0, iSpr.z * 0.3, 0.0), cameraPosition));`
       );
     sh.fragmentShader = sh.fragmentShader
       .replace(
         '#include <common>',
         `#include <common>
         uniform highp sampler2DArray uSpr;
-        varying vec3 vSpr;`
+        varying vec3 vSpr;
+        varying float vNear;`
       )
+      // both faces of a plane are lit as ground cover (the back face must not turn its normal down)
+      .replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''))
       .replace(
         '#include <map_fragment>',
-        `vec4 spr = texture(uSpr, vSpr);
+        `if (vNear < 0.999 && fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) > vNear) discard;
+        vec4 spr = texture(uSpr, vSpr);
         if (spr.a < 0.5) discard;
         diffuseColor.rgb *= spr.rgb;`
       )
@@ -336,7 +343,7 @@ function makeMaterial(tex: THREE.Texture, uFocus: { value: THREE.Vector3 }, uRad
       );
     celify(sh);
   };
-  m.customProgramCacheKey = () => 'foliage-spr-v1';
+  m.customProgramCacheKey = () => 'foliage-spr-v3';
   return m;
 }
 
@@ -360,6 +367,7 @@ const FOOT: Record<string, number> = { shack: 4, saloonFacade: 4.5, sheriffFacad
 
 interface Ctx {
   oasis: { x: number; z: number; r: number; level: number } | null;
+  arenas: { x: number; z: number; r: number }[];
   ruins: { x: number; z: number; foot: number }[];
   rims: { cx: number; cz: number; r: number }[];
 }
@@ -379,6 +387,8 @@ export class Foliage {
   private size: Float32Array;
   private ruins: { x: number; z: number; foot: number }[] = [];
   private oases: { x: number; z: number; r: number; level: number }[] = [];
+  /** boss arenas: the cover is kept low there so nothing hides in it */
+  private arenas: { x: number; z: number; r: number }[] = [];
   /** radius (m) the scatter reaches */
   radius = 62;
 
@@ -400,7 +410,10 @@ export class Foliage {
     this.mesh.matrixAutoUpdate = false;
     for (const z of world.sa.zones) {
       for (const p of z.pois) if (p.kind === 'oasis') this.oases.push({ x: p.x, z: p.z, r: p.r / 1.6, level: p.data?.level ?? world.sa.waterLevel });
-      for (const a of z.anchors) if (OVERGROWN.has(a.kind)) this.ruins.push({ x: a.x, z: a.z, foot: FOOT[a.kind] ?? 2.5 });
+      for (const a of z.anchors) {
+        if (OVERGROWN.has(a.kind)) this.ruins.push({ x: a.x, z: a.z, foot: FOOT[a.kind] ?? 2.5 });
+        else if (a.kind === 'bossArena') this.arenas.push({ x: a.x, z: a.z, r: a.data?.r ?? 20 });
+      }
     }
     // terrain edits (craters, rising temples, collapsing walls) regrow the cells they touch
     world.field.onDirty.push((x0, z0, x1, z1) => {
@@ -431,7 +444,8 @@ export class Foliage {
       const d = Math.hypot(zn.cx - x, zn.cz - z);
       if (Math.abs(d - (zn.r + 3.5)) < 8 + CELL) rims.push({ cx: zn.cx, cz: zn.cz, r: zn.r + 3.5 });
     }
-    return { oasis, ruins, rims };
+    const arenas = this.arenas.filter((r) => Math.hypot(r.x - x, r.z - z) < r.r + CELL);
+    return { oasis, ruins, rims, arenas };
   }
 
   /** deterministic scatter for one 8 m cell */
@@ -470,14 +484,14 @@ export class Foliage {
       if (o && h < o.level + 0.05) {
         // in the pool: reeds stand in the shallows along the bank only
         if (m === MAT.MUD && h > o.level - 0.32) {
-          dens = 1.4;
+          dens = 0.55;
           grp = 'reed';
         }
       } else if (m === MAT.GRASS) {
         dens = 3.4;
         grp = pick < 0.82 ? 'turf' : pick < 0.9 ? 'wild' : pick < 0.94 ? 'flower' : 'dry';
       } else if (m === MAT.MUD) {
-        dens = 0.8;
+        dens = 0.4;
         grp = pick < 0.6 ? 'reed' : 'turf';
       } else if (m === MAT.SAND_DARK) {
         dens = o ? 0.9 : 0.14;
@@ -519,6 +533,7 @@ export class Foliage {
           grp = pick < 0.7 ? 'dry' : pick < 0.9 ? 'dead' : 'scrub';
         }
       }
+      for (const ar of ctx.arenas) if (Math.hypot(ar.x - x, ar.z - z) < ar.r) dens *= 0.25;
       if (H(i, 4) * candD >= dens) continue;
       const [l0, n, sc] = GROUP[grp];
       const layer = l0 + Math.floor(H(i, 5) * n);

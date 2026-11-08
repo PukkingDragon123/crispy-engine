@@ -158,14 +158,17 @@ const SAND_T = [0xd4a76c, 0xdfb478, 0xe8c086, 0xf0cc95, 0xf8dcab];
 const PEB_SAND = [[0x8f7356, 0xa88a68, 0xc8ad8a], [0x9a5c3e, 0xb4724c, 0xcf9268], [0xc8bca8, 0xe0d6c4, 0xf6efe2], [0x6e6458, 0x887c6c, 0xa69a88]];
 
 function sandTop(x: number, y: number) {
+  // wind-sorted sand: broad tonal drifts, clusters of light quartz and darker grains, a few pebbles
   const n = fbm(x, y, 11, 32, 3);
-  let i = n < 0.36 ? 1 : n < 0.64 ? 2 : 3;
+  let i = n < 0.4 ? 1 : n < 0.62 ? 2 : 3;
+  const g = cell(x, y, 4, 17);
+  const gk = ih(g.id, 1, 17);
+  if (g.f1 < 1.05) i += gk < 0.34 ? 1 : gk < 0.58 ? -1 : 0;
   const h = ih(x, y, 21);
-  if (h > 0.982) i = Math.min(4, i + 1);
-  else if (h < 0.03) i = Math.max(0, i - 1);
+  i = Math.max(0, Math.min(4, i));
   let c = SAND_T[i];
-  if (h > 0.998) c = 0xfff4dc; // quartz glint
-  else if (h < 0.004) c = 0x9a7a58; // heavy mineral
+  if (h > 0.997) c = 0xfff4dc; // quartz glint
+  else if (h < 0.005) c = 0x9a7a58; // heavy mineral
   const p = pebble(x, y, 16, 31, 0.6, 1.3, PEB_SAND, 0xc89c62, 0.28);
   return p >= 0 ? p : c;
 }
@@ -589,4 +592,13 @@ vec2 pxUV(vec3 p, vec3 n) {
   return uv * ${(PX_PER_M / PX_SIZE).toFixed(5)};
 }
 vec3 pxSample(vec2 uv, float layer) { return texture(uPxTex, vec3(uv, layer)).rgb * 4.0; }
+// grazing views (the ground seen from a riding camera): pick the mip from the minor axis of the
+// texel footprint (up to 4:1, a one-tap stand-in for anisotropic filtering) so the pixel art
+// stays crisp instead of melting into the average. gx / gy: screen derivatives of uv.
+vec3 pxSampleG(vec2 uv, vec2 gx, vec2 gy, float layer) {
+  float lx = length(gx), ly = length(gy);
+  float k = min(1.0, 4.0 * min(lx, ly) / max(max(lx, ly), 1e-8));
+  if (lx > ly) gx *= k; else gy *= k;
+  return textureGrad(uPxTex, vec3(uv, layer), gx, gy).rgb * 4.0;
+}
 `;

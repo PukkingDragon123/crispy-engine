@@ -1,6 +1,9 @@
-// Voxel-column terrain renderer: 32 m chunks with 4 LODs, quantized column
+// Voxel-column terrain renderer: 32 m chunks with 6 LODs, quantized column
 // heights, per-corner AO, strata-painted cliffs and a texel-detail shader
-// (wind ripples, sand sparkle, tile grout, rock strata lines).
+// (wind ripples, sand sparkle, tile grout, rock strata lines). In the near
+// rings hard ground (rock, flagstones, turf, dirt, mud) is built of big 1 m
+// blocks and every material wears a pixel-art texture (PixelTex) that fades to
+// the painted look with distance; physics keeps sampling the smooth field.
 import * as THREE from 'three';
 import { Heightfield, MAT } from './Heightfield';
 import { noise, hash2, clamp, Noise, smoothstep } from '../../engine/math/rand';
@@ -182,6 +185,8 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
         '#include <color_fragment>',
         `#include <color_fragment>
         float sparkle = 0.0;
+        // screen derivatives for the pixel textures (taken in uniform control flow)
+        vec3 pxDX = dFdx(vWP), pxDY = dFdy(vWP);
         {
           float dC = distance(vWP.xz, uShC.xy);
           tMapW = uShC.w > 0.5 ? 1.0 - smoothstep(uShC.z * 0.6, uShC.z * 0.92, dC) : 1.0;
@@ -281,17 +286,17 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
           }
           if (pxK > 0.001) {
             // the face's true orientation (sand sides carry the dune normal for lighting)
-            vec3 gn = normalize(cross(dFdx(vWP), dFdy(vWP)));
+            vec3 gn = normalize(cross(pxDX, pxDY));
             bool gTop = abs(gn.y) > 0.6;
-            vec2 puv = pxUV(vWP, gn);
+            vec2 puv = pxUV(vWP, gn), pgx = pxUV(pxDX, gn), pgy = pxUV(pxDY, gn);
             float layer = ${PX.MUD}.0, amt = 1.0;
-            if (m == 0.0 || m == 2.0) { layer = gTop ? ${PX.SAND}.0 : ${PX.SAND_SIDE}.0; amt = 0.72; }
+            if (m == 0.0 || m == 2.0) { layer = gTop ? ${PX.SAND}.0 : ${PX.SAND_SIDE}.0; amt = 0.9; }
             else if (m == 1.0) { layer = gTop ? ${PX.PACKED}.0 : ${PX.SAND_SIDE}.0; amt = 0.85; }
             else if (m == 3.0 || m == 4.0) layer = gTop ? ${PX.ROCK_TOP}.0 : ${PX.ROCK_SIDE}.0;
             else if (m == 5.0) layer = gTop ? ${PX.TILE_TOP}.0 : ${PX.TILE_SIDE}.0;
             else if (m == 6.0) layer = gTop ? ${PX.DIRT_TOP}.0 : ${PX.DIRT_SIDE}.0;
             else if (m == 7.0) layer = gTop ? ${PX.GRASS_TOP}.0 : ${PX.GRASS_SIDE}.0;
-            diffuseColor.rgb *= mix(vec3(1.0), pxSample(puv, layer), pxK * amt);
+            diffuseColor.rgb *= mix(vec3(1.0), pxSampleG(puv, pgx, pgy, layer), pxK * amt);
             if (m == 7.0 && !gTop) {
               // turf hanging over the block edge: a ragged pixel fringe, the blade tips a shade darker
               float tx = floor(puv.x * 128.0);
@@ -299,7 +304,7 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
               float dT = vTM.y / 64.0;
               if (dT < fl) {
                 float shd = dot(vColor.rgb, vec3(0.3, 0.59, 0.11)) / 0.1695;
-                vec3 turf = vec3(0.223, 0.391, 0.0685) * pxSample(puv, ${PX.GRASS_TOP}.0) * shd * (dT > fl - 0.0625 ? 0.72 : 1.0);
+                vec3 turf = vec3(0.223, 0.391, 0.0685) * pxSampleG(puv, pgx, pgy, ${PX.GRASS_TOP}.0) * shd * (dT > fl - 0.0625 ? 0.72 : 1.0);
                 diffuseColor.rgb = mix(diffuseColor.rgb, turf, pxK);
               }
             }
@@ -865,6 +870,13 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
   };
   const sameRun = (r: SideRun | null, a: number, yb: number, yt: number, hex: number, m: number, sm: boolean) =>
     !!r && r.a1 === a && r.yb === yb && r.yt === yt && r.hex === hex && r.m === m && r.sm === sm && r.a1 - r.a0 < maxCells;
+  /** a smooth side run along x (row line) or z (column line) may grow to a + 1 */
+  const sideFlat = (r: SideRun, alongX: boolean, a: number) =>
+    !r.sm || (alongX ? flatS(r.a0, r.line, a + 1, r.line) && flatS(r.a0, r.line + 1, a + 1, r.line + 1) : flatS(r.line, r.a0, r.line, a + 1) && flatS(r.line + 1, r.a0, r.line + 1, a + 1));
+  const flatS = (ci: number, cj: number, di: number, dj: number) => {
+    const p = (ci + cj * NC) * 3, q = (di + dj * NC) * 3;
+    return CN[p] * CN[q] + CN[p + 1] * CN[q + 1] + CN[p + 2] * CN[q + 2] > 0.9997;
+  };
   const tHex = new Uint32Array(N * N);
   const tB = new Float32Array(N * N);
   const tAO = new Uint8Array(N * N);
@@ -943,7 +955,7 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
           if (dj !== 0) {
             const d = dj === 1 ? 0 : 1;
             const r = zRuns[d];
-            if (sameRun(r, i, bottom, h, sideHex, m, sm)) r!.a1 = i + 1;
+            if (sameRun(r, i, bottom, h, sideHex, m, sm) && sideFlat(r!, true, i)) r!.a1 = i + 1;
             else {
               if (r) emitSide(0, dj, r);
               zRuns[d] = { a0: i, a1: i + 1, line: j, yb: bottom, yt: h, hex: sideHex, m, sm, h };
@@ -951,7 +963,7 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
           } else {
             const d = di === 1 ? 0 : 1;
             const r = xRuns[d][i];
-            if (sameRun(r, j, bottom, h, sideHex, m, sm)) r!.a1 = j + 1;
+            if (sameRun(r, j, bottom, h, sideHex, m, sm) && sideFlat(r!, false, j)) r!.a1 = j + 1;
             else {
               if (r) emitSide(di, 0, r);
               xRuns[d][i] = { a0: j, a1: j + 1, line: i, yb: bottom, yt: h, hex: sideHex, m, sm, h };
@@ -1016,6 +1028,12 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
   // corner AO; a rectangle only grows along an axis the AO does not change along, so the
   // interpolated shading is exactly the per-cell one
   const done = new Uint8Array(N * N);
+  // smooth (dune-lit) ground only merges where the surface normal barely turns, so the
+  // interpolated cel light shows no facets
+  const flatN = (ci: number, cj: number, di: number, dj: number) => {
+    const a = (ci + cj * NC) * 3, b = (di + dj * NC) * 3;
+    return CN[a] * CN[b] + CN[a + 1] * CN[b + 1] + CN[a + 2] * CN[b + 2] > 0.9997;
+  };
   const same = (c: number, d: number, kc: number, kd: number) => H[kc] === H[kd] && M[kc] === M[kd] && B[kc] === B[kd] && tHex[c] === tHex[d] && tB[c] === tB[d] && tAO[c] === tAO[d];
   for (let j = 0; j < N; j++) {
     if ((j & 15) === 15) yield;
@@ -1026,9 +1044,11 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
       const ao = tAO[c];
       const a00 = ao & 3, a10 = (ao >> 2) & 3, a11 = (ao >> 4) & 3, a01 = (ao >> 6) & 3;
       let w = 1, hgt = 1;
-      if (a00 === a10 && a01 === a11) while (i + w < N && w < maxCells && !done[c + w] && same(c, c + w, kc, kc + w)) w++;
+      const smooth = soft(M[kc]) && !B[kc];
+      if (a00 === a10 && a01 === a11) while (i + w < N && w < maxCells && !done[c + w] && same(c, c + w, kc, kc + w) && (!smooth || (flatN(i, j, i + w + 1, j) && flatN(i, j, i + w + 1, j + 1)))) w++;
       if (a00 === a01 && a10 === a11)
         grow: while (j + hgt < N && hgt < maxCells) {
+          if (smooth && !(flatN(i, j, i, j + hgt + 1) && flatN(i, j, i + w, j + hgt + 1))) break;
           for (let t = 0; t < w; t++) {
             const d = c + t + hgt * N;
             if (done[d] || !same(c, d, kc, kc + t + hgt * W)) break grow;

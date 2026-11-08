@@ -176,7 +176,17 @@ function headerModel() {
         m.set(x, y, z, wood(x, y, z) ?? 0xb88250);
       }
     }
-  engrave(m, 'THE LONG RIDE', 0, 0, 3, X * 2 - 22, Y * 2 - 4, 0x3a2412);
+  const INK = 0x3a2412;
+  engrave(m, 'THE LONG RIDE', 0, 0, 3, X * 2 - 22, Y * 2 - 4, INK);
+  // cut the letters in: the face layer goes, the floor of each cut is the dark of the groove
+  const cut: [number, number][] = [];
+  m.forEach((x, y, z, c) => {
+    if (z === 3 && c === INK) cut.push([x, y]);
+  });
+  for (const [x, y] of cut) {
+    m.del(x, y, 3);
+    m.set(x, y, 2, 0x2a180c);
+  }
   return m;
 }
 
@@ -417,7 +427,8 @@ export class BountyBoard implements Mode {
       id: 'bounty', label: 'The Long Ride', title: 'THE LONG RIDE', short: 'LONG RIDE', sub: this.subline(), verb: 'Read the board',
       stand, face: Math.atan2(AT.x - stand.x, AT.z - stand.y), at: this.W(0, 0.62, 0), r: 0.9, objs: [this.root], pose: 'range',
       via: [new THREE.Vector2(-2.62, 0.25)], slot: [-0.86, 0.84, 'left'],
-      shot: { pos: new THREE.Vector3(-1.7, 1.62, 0.2), look: new THREE.Vector3(), fov: 50, subject: this.W(0.15, 0.62, 0), ndc: [-0.18, 0.02] },
+      // from back by the rope coil: the board to the left of frame, him just clear of its right edge
+      shot: { pos: new THREE.Vector3(-3.25, 1.62, -0.25), look: new THREE.Vector3(), fov: 42, subject: this.W(0, 0.62, 0), ndc: [-0.12, 0.05] },
     });
   }
 
