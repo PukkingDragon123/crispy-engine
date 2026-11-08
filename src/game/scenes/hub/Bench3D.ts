@@ -730,9 +730,8 @@ export class Bench3D implements Mode {
     if (Math.abs(this.explodeK - want) < 0.002) this.explodeK = want;
     const ex = this.explodeK;
     if (d) {
-      d.root.children.forEach((c) => (c.visible = (c as THREE.Mesh).isMesh || c.type === 'Group' ? ex < 0.02 : c.visible));
-      for (const n of Object.values(d.inst.meshes)) n.visible = ex < 0.02;
-      for (const s of this.spots) s.pin.visible = ex < 0.02;
+      // the whole gun (with its pins) steps aside while its components are flown apart
+      d.root.visible = ex < 0.02;
     }
     if (this.compGrp) {
       this.compGrp.children.forEach((h, i) => {
@@ -964,7 +963,7 @@ export class Bench3D implements Mode {
     this.state = 'up';
     this.exploded = false;
     this.explodeK = 0;
-    for (const n of Object.values(d.inst.meshes)) n.visible = true;
+    d.root.visible = true;
     this.clearSpots();
     this.spotKey = '';
     for (const p of this.parts) {
@@ -1104,7 +1103,6 @@ export class Bench3D implements Mode {
     this.h.engine.audio.play(carried ? 'rev_close' : 'shotgun_pump', { volume: 0.6 });
     this.bubble.say(carried ? 'Stays home today.' : `${GUNS[d.g].name} rides with me.`);
     this.rack.refreshTags();
-    this.writeTags();
   }
   private fit(p: Part) {
     if (p.lock && !p.lock.open && !p.lock.click()) return;
@@ -1484,20 +1482,17 @@ export class Bench3D implements Mode {
     const L: Parameters<TextCard['set']>[0] = [{ t: 'WORK ORDER', size: 0.055, color: '#8a2a14' }];
     const hv = this.hovered;
     if (!own) L.push({ t: 'Nothing on the bench', size: 0.06 });
-    else if (hv && hv !== 'carry' && 'pin' in hv) {
+    else if (hv && 'pin' in hv) {
       const opts = this.options(g, hv.slot);
       const cur = this.current(g, hv.slot);
       const i = Math.max(0, opts.findIndex((o) => o.part === cur));
       const nx = opts[(i + 1) % opts.length];
       L.push({ t: GUNS[g].name, size: 0.05, color: '#5a4228' }, { t: opts[i].name, size: 0.075 }, { t: opts[i].desc, size: 0.046, wrap: true });
       L.push({ t: opts.length > 1 ? `Click: ${nx.name}` : 'Nothing else to fit here yet', size: 0.046, color: '#8a2a14', wrap: true });
-    } else if (hv && hv !== 'carry') {
+    } else if (hv) {
       const p = hv as Part;
       L.push({ t: p.proxy ? 'On the gun' : 'In the tray', size: 0.05, color: '#5a4228' }, { t: p.name, size: 0.072, wrap: true }, { t: p.desc, size: 0.046, wrap: true });
       L.push({ t: p.lock && !p.lock.open ? p.lock.tip(p.name).replace(p.name + ': ', '').replace(`${p.name} `, '') : p.proxy ? 'Click: take it off' : 'Click: fit it', size: 0.046, color: '#8a2a14', wrap: true });
-    } else if (hv === 'carry') {
-      const carried = Blueprints.guns().find((q) => q.id === g)?.carried;
-      L.push({ t: 'The sling', size: 0.075 }, { t: 'One long gun rides on my back into the dunes, beside the six-shooter.', size: 0.046, wrap: true }, { t: carried ? `The ${GUNS[g].name} is on it.` : 'Click: sling this one.', size: 0.046, color: '#8a2a14', wrap: true });
     } else {
       L.push({ t: GUNS[g].name, size: 0.08 }, { t: GUNS[g].title, size: 0.05, color: '#5a4228' }, { t: GUNS[g].desc, size: 0.044, wrap: true });
       const ups = Blueprints.upgrades().filter((u) => u.owned && (!u.gun || u.gun === g));

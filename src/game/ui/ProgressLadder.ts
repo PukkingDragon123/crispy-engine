@@ -530,7 +530,10 @@ export class ProgressLadder {
     const ang = Math.atan2(v.x, -v.z); // 0 = up, clockwise
     // clamped to a frame inside the screen edge that keeps clear of the ledger (left) and the HUD's bottom bar
     const sx = Math.sin(ang), sy = -Math.cos(ang);
-    const L = 64, R = W - 30, T = 40, B = H - 86;
+    // the top edge sits below the mission notes hanging top-right, so the compass never lands on a note
+    const hp = this.d.hud as unknown as { paperBottom?: number; scale?: number };
+    const paperB = ((hp.paperBottom ?? 0) * (hp.scale ?? s)) / s;
+    const L = 64, R = W - 30, T = Math.max(40, paperB + 30), B = H - 86;
     const t = Math.min(sx < 0 ? (L - cx) / sx : sx > 0 ? (R - cx) / sx : 1e9, sy < 0 ? (T - cy) / sy : sy > 0 ? (B - cy) / sy : 1e9);
     x = cx + sx * t;
     y = cy + sy * t;

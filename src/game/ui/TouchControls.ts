@@ -255,10 +255,11 @@ export class TouchControls {
     // the soul jar with Pinch on the stopper, and the heart under it
     const so = A.soul;
     if (so) {
-      // the pixel jar is one size: its stopper with Pinch above the shoulder, the jar below
+      // the 3D jar: its stopper with Pinch above the shoulder, the jar below
       const J = SOUL_JAR_HIT;
-      if (Math.abs(hx - so.x) < J.halfW - 2 && hy < so.y - J.body && hy > so.y - J.top) return { kind: 'pinch' };
-      if (Math.abs(hx - so.x) < J.halfW + 2 && hy <= so.y + 4 && hy >= so.y - J.body) return { kind: 'ult' };
+      const k = so.k * J.scale;
+      if (Math.abs(hx - so.x) < J.pinchHalfW * k + 3 && hy < so.y - J.body * k && hy > so.y - J.top * k) return { kind: 'pinch' };
+      if (Math.abs(hx - so.x) < J.halfW * k + 2 && hy <= so.y + 4 && hy >= so.y - J.body * k) return { kind: 'ult' };
     }
     if (near(A.heart.x, A.heart.y - 3, 19)) return { kind: 'ult' };
     for (let i = 0; i < A.items.length; i++) if (near(A.items[i].x, A.items[i].y, 15)) return { kind: 'item', i };

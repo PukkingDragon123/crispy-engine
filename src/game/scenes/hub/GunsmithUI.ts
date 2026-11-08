@@ -274,7 +274,7 @@ export class GunsmithUI {
       this.rects[kind] = { x: bx, y: ry + 4, w: bw * S, h: bh * S };
       ry += 40;
     };
-    if (d.sling) button(d.sling === 'Rides with me' ? 'ON THE SLING' : 'STAYS HOME', 'S', d.sling === 'Rides with me', this.hov('sling'), 'sling');
+    if (d.sling) button(d.sling === 'Rides with me' ? 'ON THE SLING' : 'STAYS HOME', 'C', d.sling === 'Rides with me', this.hov('sling'), 'sling');
     button(d.exploded ? 'ASSEMBLE' : 'EXPLODE', 'X', d.exploded, this.hov('explode'), 'explode');
     return y + ph * S;
   }

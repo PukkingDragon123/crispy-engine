@@ -145,6 +145,7 @@ export function revolverLaserMesh(spec: RigSpec) {
   if (!laserGeo) {
     const sm = revolverLaserModel();
     laserGeo = buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot });
+    laserGeo.userData.shared = true;
   }
   const vs = spec.voxelSize, piv = spec.parts[0].pivot;
   const m = meshOf(laserGeo);

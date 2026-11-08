@@ -1,14 +1,12 @@
-// The ability bar: tarot cards fanned at the bottom right of the HUD — the three
-// active skills (I Magician, XVI Tower, XIX Sun) and the big XIII Death ultimate — as
-// stylized pixel art on the HUD grid. Each card is an authored pixel frame (HudArt.ts:
-// a gilt border on ivory card stock with numeral and title plates; the back oxblood
-// with a gilt lattice round Serket's lapis medallion), its art window carrying the
-// CardStudio painting of the card's diorama shrunk to the window's pixels. Faces are
-// painted progressively (time-sliced; the cards are dealt face down and turn over as
-// their art is ready). Cooldown is sand pouring back into the art from the bottom (the
-// sleeping part greyed, a glowing sand line); a ready card shines; the mouse lifts the
-// card under it; on use a card pops, turns over to show its back (a 2D squash turn)
-// and throws skill-themed 2D pixel-art particles.
+// The ability bar: tarot cards floating at the bottom right of the HUD — the
+// three active skills (I Magician, XVI Tower, XIX Sun) and the big XIII Death ultimate.
+// Each card is a real 3D object in the HUD scene — the sculpted gilded relief
+// frame (props/tarot.ts) lit by the HUD lights and a little jeweller's studio
+// reflection, the art window carrying a CardStudio photograph of the card's
+// diorama, the numeral and title in Alagard on the frame's plaques. Faces are
+// photographed progressively (time-sliced, the cards are dealt face-down and
+// flip as their art is ready). On use a card pops, spins to show its sculpted
+// back and throws skill-themed 2D pixel-art particles.
 // A hunt starts with the three skill cards SEALED: they lie face down, dimmed,
 // with no key cap, until the skill is learned from a rank-up card; then the
 // card leaps, turns over in a full flourish and bursts with its own particles.
@@ -18,14 +16,11 @@ import * as THREE from 'three';
 import type { Hud } from './Hud';
 import type { RigSpec } from '../../engine/voxel/Rig';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
+import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { CardStudio } from './CardStudio';
 import { Kit, TAROT_BAR, TarotDef, TarotFx } from './TarotCards';
 import { CARD, tarotFrame } from '../models/props/tarot';
 import { isSkillLearned } from '../player/Skills';
-import { blitC, blitSquash, blitShear, shadowOffset, variant, palNearest } from './HudSprites';
-import { HUD_ART as ART, HUD_ART_META } from './HudArt';
-import { UI, keycap, text, px, sprite, SWAP_DIM } from './PixelUI';
-import { isTouchDevice } from './TouchControls';
 
 /** photo size of the 66×88-voxel art window */
 export const TAROT_ART: [number, number] = [168, 224];
@@ -149,6 +144,38 @@ class PixelSparks {
   }
 }
 
+// ------------------------------------------------------------------ the art window shader
+
+const ART_VS = /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+const ART_FS = /* glsl */ `
+uniform sampler2D map;
+uniform float uHas, uCd, uReady, uFlash, uT, uSeed;
+varying vec2 vUv;
+float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+void main(){
+  vec3 c = texture2D(map, vUv).rgb;
+  // still being photographed: the deck's oxblood undercoat
+  c = mix(vec3(0.24, 0.07, 0.06), c, uHas);
+  // cooldown: sand pours back in from the bottom; the unrecovered part sleeps
+  float fill = 1.0 - uCd;
+  float wave = sin(vUv.x * 38.0 + uT * 3.0) * 0.004 + sin(vUv.x * 91.0 - uT * 5.0) * 0.002;
+  float e = vUv.y - fill - wave;
+  float on = step(0.0005, uCd);
+  float sleep = smoothstep(-0.006, 0.006, e) * on;
+  float l = dot(c, vec3(0.299, 0.587, 0.114));
+  vec3 dim = mix(vec3(l), c, 0.22) * vec3(0.36, 0.33, 0.38);
+  vec3 col = mix(c, dim, sleep);
+  // the glowing sand line, grainy
+  float g = h21(floor(vUv * vec2(66.0, 88.0)) + floor(uT * 12.0));
+  col += vec3(1.0, 0.78, 0.42) * exp(-abs(e) * 160.0) * on * (0.55 + 0.45 * g);
+  // ready: a slow sheen of light sweeps across the varnish
+  float sw = fract(uT * 0.18 + uSeed);
+  float band = exp(-pow((vUv.x * 0.8 + vUv.y * 0.5 - sw * 2.4 + 0.5) * 7.0, 2.0));
+  col += vec3(1.0, 0.93, 0.78) * band * 0.2 * uReady;
+  col = mix(col, vec3(1.0, 0.97, 0.88), uFlash * 0.75);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
 // ------------------------------------------------------------------ typography (the only thing drawn in 2D)
 
 const PPV = 12; // canvas pixels per voxel for the plaque text
@@ -187,25 +214,57 @@ export function plaqueText(text: string, wVox: number, hVox: number, capFrac: nu
   return t;
 }
 
+/** a warm jeweller's studio for the gilt to reflect (soft key up-left, warm bounce, cool rim) */
+function giltEnv(renderer: THREE.WebGLRenderer) {
+  const s = new THREE.Scene();
+  const geo = new THREE.SphereGeometry(10, 32, 16);
+  const pos = geo.getAttribute('position');
+  const col: number[] = [];
+  const c = new THREE.Color(), top = new THREE.Color(0x6a5a50), mid = new THREE.Color(0x2a1c16), low = new THREE.Color(0x8a5a30);
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i) / 10;
+    if (y > 0) c.copy(mid).lerp(top, y);
+    else c.copy(mid).lerp(low, Math.min(1, -y * 1.6));
+    col.push(c.r, c.g, c.b);
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  s.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+  const panel = (w: number, h: number, colr: number, k: number, p: [number, number, number]) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(colr).multiplyScalar(k), side: THREE.DoubleSide }));
+    m.position.set(...p);
+    m.lookAt(0, 0, 0);
+    s.add(m);
+  };
+  panel(7, 5, 0xfff0d8, 3.2, [-5, 5.5, 5]);
+  panel(3, 6, 0xbfd8ff, 1.6, [6.5, 2, -3]);
+  panel(9, 2, 0xffc070, 1.4, [0, -6, 4]);
+  const pm = new THREE.PMREMGenerator(renderer);
+  const rt = pm.fromScene(s, 0.03);
+  pm.dispose();
+  geo.dispose();
+  return rt;
+}
+
 // ------------------------------------------------------------------ cards
 
 interface CardObj {
   def: TarotDef;
-  /** the CardStudio photograph of the card's diorama (null while it is being taken) */
-  art: HTMLCanvasElement | null;
-  /** the face composed at the current size: frame photograph + art; the art also slept (cooldown) */
-  face: { key: string; cv: HTMLCanvasElement; art: HTMLCanvasElement; dim: HTMLCanvasElement; win: [number, number, number, number] } | null;
-  /** the face as drawn this frame (cooldown sand, sheen) */
-  live: HTMLCanvasElement;
+  group: THREE.Group;
+  tilt: THREE.Group;
+  frame: THREE.Mesh;
+  frameMat: VoxelMaterial;
+  art: THREE.Mesh;
+  artMat: THREE.ShaderMaterial;
+  texts: THREE.Mesh[];
   pop: number;
   flip: number; // 1 = face down (dealing), eases to 0 when the art lands
+  hasArt: boolean;
   lastCd: number;
   lastCharges: number;
   ready: number;
   wasReady: boolean;
   flash: number;
   seed: number;
-  hover: number;
   // screen placement (css px, y down) for effects
   sx: number;
   sy: number;
@@ -220,44 +279,8 @@ interface CardObj {
 
 const FW = CARD.W, FH = CARD.H;
 const WIN = CARD.win;
-/** art window in frame-local voxel units (pivot at the card centre, y up) */
+/** art window in frame-local voxel units (pivot at the card centre) */
 const ART_RECT = { x: (WIN.x0 + WIN.x1 + 1) / 2 - FW / 2, y: (WIN.y0 + WIN.y1 + 1) / 2 - FH / 2, w: WIN.x1 - WIN.x0 + 1, h: WIN.y1 - WIN.y0 + 1 };
-
-/** area-average a photograph down to w×h, then posterise it onto the HUD palette */
-function shrinkArt(src: HTMLCanvasElement, w: number, h: number) {
-  const sc = src.getContext('2d', { willReadFrequently: true })!;
-  const sd = sc.getImageData(0, 0, src.width, src.height).data;
-  const cv = document.createElement('canvas');
-  cv.width = w;
-  cv.height = h;
-  const c = cv.getContext('2d')!;
-  const img = c.createImageData(w, h);
-  const d = img.data;
-  const fx = src.width / w, fy = src.height / h;
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) {
-      let r = 0, g = 0, b = 0, n = 0;
-      const x0 = Math.floor(x * fx), x1 = Math.max(x0 + 1, Math.floor((x + 1) * fx)), y0 = Math.floor(y * fy), y1 = Math.max(y0 + 1, Math.floor((y + 1) * fy));
-      for (let yy = y0; yy < y1; yy++)
-        for (let xx = x0; xx < x1; xx++) {
-          const k = (yy * src.width + xx) * 4;
-          r += sd[k];
-          g += sd[k + 1];
-          b += sd[k + 2];
-          n++;
-        }
-      // a light ordered dither keeps the painted skies from banding
-      const t = ([0, 2, 3, 1][(y & 1) * 2 + (x & 1)] - 1.5) * 6;
-      const p = palNearest(Math.max(0, Math.min(255, r / n + t)), Math.max(0, Math.min(255, g / n + t)), Math.max(0, Math.min(255, b / n + t)));
-      const k = (y * w + x) * 4;
-      d[k] = p[0];
-      d[k + 1] = p[1];
-      d[k + 2] = p[2];
-      d[k + 3] = 255;
-    }
-  c.putImageData(img, 0, 0);
-  return cv;
-}
 
 export class TarotBar {
   /** the live bar (the unlock cinematic flies cards into it) */
@@ -269,17 +292,15 @@ export class TarotBar {
   cardK = 1;
   private job: Generator<void, void, void> | null = null;
   private started = false;
+  private frameGeo: THREE.BufferGeometry | null = null;
+  private coreMat: THREE.MeshStandardMaterial | null = null;
+  private coreGeo: THREE.PlaneGeometry | null = null;
+  private env: THREE.WebGLRenderTarget | null = null;
   private add = new PixelSparks(700, true, 61);
   private norm = new PixelSparks(500, false, 60);
   private t = 0;
   private lastUlt = 0;
   private pr = 1;
-  private touch = isTouchDevice();
-  private mouse = { x: -1, y: -1 };
-  private onMouse = (e: MouseEvent) => {
-    this.mouse.x = e.clientX;
-    this.mouse.y = e.clientY;
-  };
   /** diagnostics: total ms spent building, the longest single step, frames used */
   buildMs = 0;
   maxStepMs = 0;
@@ -289,11 +310,6 @@ export class TarotBar {
   constructor(private scene: THREE.Scene, private hud: Hud) {
     scene.add(this.norm.points, this.add.points);
     TarotBar.current = this;
-    this.cards = TAROT_BAR.map((def, i) => ({
-      def, art: null, face: null, live: document.createElement('canvas'), pop: 0, flip: 1, lastCd: 0, lastCharges: -1, ready: 0, wasReady: true, flash: 0, seed: i * 1.7, hover: 0,
-      sx: 0, sy: 0, sk: 1, glint: Math.random(), trickle: 0, locked: !isSkillLearned(def.key), unlock: 0,
-    }));
-    window.addEventListener('mousemove', this.onMouse);
   }
 
   /** where a card sits on screen, normalised (x, y from the top-left; h its height), null if the bar isn't dealt yet */
@@ -315,7 +331,7 @@ export class TarotBar {
     for (let i = 0; i < 30; i++) this.add.add({ x: c.sx + (Math.random() - 0.5) * w, y: c.sy - h * 0.5, vx: (Math.random() - 0.5) * 30, vy: -40 - Math.random() * 80, ay: 60, drag: 1, life: 0.8 + Math.random() * 0.6, size: 1, flick: 0.4 }, color, 0xffd36b);
   }
 
-  /** start / continue the time-sliced art photography; call once per frame from the HUD render */
+  /** start / continue the time-sliced build; call once per frame from the HUD render */
   build(renderer: THREE.WebGLRenderer, hero: RigSpec | null, heroKey: string, gun: RigSpec | null, budgetMs = 7) {
     this.pr = renderer.getPixelRatio();
     if (!this.started) {
@@ -346,6 +362,12 @@ export class TarotBar {
   }
 
   private *makeJob(renderer: THREE.WebGLRenderer, hero: RigSpec, heroKey: string, gun: RigSpec | null): Generator<void, void, void> {
+    const fr = tarotFrame();
+    yield;
+    this.frameGeo = buildVoxelGeometry(fr.model, { voxelSize: 1, pivot: fr.pivot });
+    yield;
+    this.env = giltEnv(renderer);
+    TAROT_BAR.forEach((d, i) => this.cards.push(this.makeCard(d, i)));
     yield;
     const studio = new CardStudio(renderer);
     const kit = new Kit(hero, heroKey, gun);
@@ -359,8 +381,14 @@ export class TarotBar {
             r = it.next();
           }
           yield;
-          c.art = studio.shoot(r.value, TAROT_ART[0], TAROT_ART[1], 2);
-          c.face = null;
+          const cv = studio.shoot(r.value, TAROT_ART[0], TAROT_ART[1], 2);
+          const tex = new THREE.CanvasTexture(cv);
+          tex.colorSpace = THREE.NoColorSpace; // display values, written straight out
+          tex.anisotropy = 4;
+          tex.minFilter = THREE.LinearMipmapLinearFilter;
+          tex.magFilter = THREE.LinearFilter;
+          c.artMat.uniforms.map.value = tex;
+          c.hasArt = true;
         } catch (e) {
           console.warn('[tarot] card art failed', c.def.title, e);
         }
@@ -373,214 +401,141 @@ export class TarotBar {
     }
   }
 
-  // ---------------------------------------------------------------- pictures
-  /** the authored card frame for this size: face (with its art window) or back */
-  private frameSprite(back: boolean, big: boolean, ck: number) {
-    const size = ck < 0.75 ? (big ? '29x47' : '24x39') : big ? '56x92' : '46x75';
-    const def = ART[`card_${back ? 'back' : 'face'}_${size}`];
-    const win = (HUD_ART_META as Record<string, unknown>)[`card_win_${size}`] as [number, number, number, number];
-    return { cv: sprite(def), w: def.w, h: def.h, win, key: size };
+  private makeCard(def: TarotDef, i: number): CardObj {
+    const group = new THREE.Group();
+    const tilt = new THREE.Group();
+    group.add(tilt);
+    const frameMat = makeVoxelMaterial({ fog: false });
+    frameMat.envMap = this.env?.texture ?? null;
+    frameMat.envMapIntensity = 1.15;
+    const frame = new THREE.Mesh(this.frameGeo!, frameMat);
+    tilt.add(frame);
+    // card-stock core inside the slab so sub-pixel cracks in the relief never show the game behind
+    this.coreMat ??= new THREE.MeshStandardMaterial({ color: 0xb8a078, roughness: 0.9, side: THREE.DoubleSide });
+    const core = new THREE.Mesh((this.coreGeo ??= new THREE.PlaneGeometry(FW - 0.6, FH - 0.6)), this.coreMat);
+    core.position.z = -0.5;
+    tilt.add(core);
+    const artMat = new THREE.ShaderMaterial({
+      uniforms: { map: { value: null }, uHas: { value: 0 }, uCd: { value: 0 }, uReady: { value: 0 }, uFlash: { value: 0 }, uT: { value: 0 }, uSeed: { value: i * 0.37 } },
+      vertexShader: ART_VS,
+      fragmentShader: ART_FS,
+    });
+    const art = new THREE.Mesh(new THREE.PlaneGeometry(ART_RECT.w, ART_RECT.h), artMat);
+    art.position.set(ART_RECT.x, ART_RECT.y, 1.02);
+    tilt.add(art);
+    const texts: THREE.Mesh[] = [];
+    const plaque = (text: string, cx: number, cy: number, w: number, h: number, cap: number) => {
+      const tex = plaqueText(text, w, h, cap);
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false }));
+      m.position.set(cx + 0.5 - FW / 2, cy + 0.5 - FH / 2, 3.04);
+      tilt.add(m);
+      texts.push(m);
+    };
+    plaque(def.num, CARD.numeral.cx, CARD.numeral.cy, 20, 7, 0.78);
+    plaque(def.title, CARD.title.cx, CARD.title.cy + 0.5, 54, 8, 0.7);
+    for (const o of [frame, art, ...texts]) o.frustumCulled = false;
+    this.scene.add(group);
+    return { def, group, tilt, frame, frameMat, art, artMat, texts, pop: 0, flip: 1, hasArt: false, lastCd: 0, lastCharges: -1, ready: 0, wasReady: true, flash: 0, seed: i * 1.7, sx: 0, sy: 0, sk: 1, glint: Math.random(), trickle: 0, locked: !isSkillLearned(def.key), unlock: 0 };
   }
 
-  /** the face at this size: the authored frame with the diorama shrunk into its window */
-  private faceOf(c: CardObj, fr: { cv: HTMLCanvasElement; w: number; h: number; win: [number, number, number, number]; key: string }) {
-    if (!c.art) return null;
-    if (c.face?.key === fr.key) return c.face;
-    const [wx, wy, ww, wh] = fr.win;
-    const art = shrinkArt(c.art, ww, wh);
-    const dim = variant(variant(art, 'grey'), 'dim');
-    const cv = document.createElement('canvas');
-    cv.width = fr.w;
-    cv.height = fr.h;
-    const g = cv.getContext('2d')!;
-    g.drawImage(fr.cv, 0, 0);
-    g.drawImage(art, wx, wy);
-    c.face = { key: fr.key, cv, art, dim, win: [wx, wy, ww, wh] };
-    return c.face;
-  }
-
-  /** this frame's face: the sleeping part of the art greyed, the glowing sand line, the ready sheen */
-  private liveFace(c: CardObj, f: NonNullable<CardObj['face']>, frac: number) {
-    const cv = c.live;
-    if (cv.width !== f.cv.width || cv.height !== f.cv.height) {
-      cv.width = f.cv.width;
-      cv.height = f.cv.height;
-    }
-    const g = cv.getContext('2d')!;
-    g.clearRect(0, 0, cv.width, cv.height);
-    g.drawImage(f.cv, 0, 0);
-    const [wx, wy, ww, wh] = f.win;
-    if (frac > 0.001) {
-      // cooldown: sand pours back in from the bottom; the unrecovered part sleeps
-      const line = Math.round(wh * frac);
-      if (line > 0) g.drawImage(f.dim, 0, 0, ww, line, wx, wy, ww, line);
-      if (frac < 0.999) {
-        for (let x = 0; x < ww; x++) {
-          const wave = Math.round(Math.sin(x * 0.7 + this.t * 3) * 0.6);
-          const grain = Math.sin(x * 12.9898 + Math.floor(this.t * 12) * 78.233) * 43758.5453;
-          const lit = grain - Math.floor(grain) > 0.45;
-          px(g, wx + x, wy + line - 1 + wave, 1, 1, lit ? '#ffe6a8' : UI.brass.l);
-          if (lit) px(g, wx + x, wy + line + wave, 1, 1, UI.brass.m);
-        }
-      }
-    } else if (c.ready > 0) {
-      // ready: a slow sheen of light sweeps across the varnish
-      const sw = (this.t * 0.18 + c.seed * 0.21) % 1;
-      const band = sw * 2.4 - 0.5;
-      g.save();
-      g.globalCompositeOperation = 'lighter';
-      g.fillStyle = `rgba(255,236,200,${0.22 * c.ready})`;
-      for (let y = 0; y < wh; y++) {
-        const cx = ((band - (y / wh) * 0.5) / 0.8) * ww;
-        g.fillRect(wx + Math.max(0, Math.round(cx - 3)), wy + y, Math.max(0, Math.min(ww, Math.round(cx + 3)) - Math.max(0, Math.round(cx - 3))), 1);
-      }
-      g.restore();
-    }
-    return cv;
-  }
-
-  fx(dt: number, W: number, H: number, visible: boolean) {
-    const s = this.hud.scale;
-    this.vw = Math.max(1, W);
-    this.vh = Math.max(1, H);
-    this.add.points.visible = this.norm.points.visible = visible;
-    this.add.update(dt, s, this.pr);
-    this.norm.update(dt, s, this.pr);
-  }
-
-  paint(c: CanvasRenderingContext2D, dt: number) {
+  update(dt: number, W: number, H: number) {
     this.t += dt;
     const hud = this.hud;
     const s = hud.scale;
     const st = hud.last;
-    const W = window.innerWidth / s, H = window.innerHeight / s;
-    hud.cardAnchors.length = 0;
+    this.add.update(dt, s, this.pr);
+    this.norm.update(dt, s, this.pr);
+    this.vw = Math.max(1, W);
+    this.vh = Math.max(1, H);
     if (!st || !this.cards.length) return;
+    const visible = hud.visible && hud.anchors.slide < 0.98;
     // on small screens (a landscape phone) the whole fan shrinks so it stays out of the way;
     // the cardAnchors below follow, so the touch layer's hit-tests stay in sync
-    const ck = Math.max(0.48, Math.min(1, W / 620, H / 340));
+    const ck = Math.max(0.48, Math.min(1, W / s / 620, H / s / 340));
     this.cardK = ck;
-    // the authored card sizes: full from ck 0.75 up, the small cut on a phone
-    const smallCards = ck < 0.75;
-    const cw = smallCards ? 24 : 46, ch = smallCards ? 39 : 75;
+    const cw = 46 * s * ck, ch = 74.75 * s * ck;
     const n = this.cards.length;
-    const locked = !!document.pointerLockElement;
-    const draws: (() => void)[] = [];
-    this.cards.forEach((card, i) => {
-      const ult = card.def.key === 'Z';
-      const sk = st.skills.find((k) => k.key === card.def.key);
+    hud.cardAnchors.length = 0;
+    this.cards.forEach((c, i) => {
+      const ult = c.def.key === 'Z';
+      const sk = st.skills.find((k) => k.key === c.def.key);
       const frac = ult ? 1 - Math.min(1, st.ult) : sk && sk.max > 0 ? Math.min(1, sk.cd / sk.max) : 0;
       const cdNow = ult ? (st.ult >= 1 ? 0 : 99) : sk?.cd ?? 0;
       // used? cooldown jumped up, a charge was spent, or the ultimate fired
       const charges = sk?.charges ?? -1;
-      const used = ult ? this.lastUlt >= 1 && st.ult < 0.5 : cdNow > card.lastCd + 0.4 || (charges >= 0 && card.lastCharges >= 0 && charges < card.lastCharges);
-      card.lastCd = cdNow;
-      card.lastCharges = charges;
+      const used = ult ? this.lastUlt >= 1 && st.ult < 0.5 : cdNow > c.lastCd + 0.4 || (charges >= 0 && c.lastCharges >= 0 && charges < c.lastCharges);
+      c.lastCd = cdNow;
+      c.lastCharges = charges;
       // sealed until learned; learning it turns the card over with a flourish
-      const sealed = !isSkillLearned(card.def.key);
-      const big = ult ? (smallCards ? 47 / 39 : 92 / 75) : 1;
-      const front = this.frameSprite(false, ult, ck);
-      const back = this.frameSprite(true, ult, ck);
-      const face = this.faceOf(card, front);
-      if (card.locked && !sealed) {
-        card.unlock = 1;
-        card.pop = 1;
-        card.flash = 1;
-        this.useFx(card);
-        this.readyFx(card);
+      const locked = !isSkillLearned(c.def.key);
+      if (c.locked && !locked) {
+        c.unlock = 1;
+        c.pop = 1;
+        c.flash = 1;
+        if (visible) {
+          this.useFx(c);
+          this.readyFx(c);
+        }
       }
-      card.locked = sealed;
-      card.unlock = Math.max(0, card.unlock - dt * 0.8);
-      const readyNow = frac <= 0.001 && !sealed;
-      if (used && !sealed) {
-        card.pop = 1;
-        card.flash = 1;
+      c.locked = locked;
+      c.unlock = Math.max(0, c.unlock - dt * 0.8);
+      const readyNow = frac <= 0.001 && !locked;
+      if (used && visible && !locked) {
+        c.pop = 1;
+        c.flash = 1;
       }
-      if (readyNow && !card.wasReady && !used) {
-        card.flash = Math.max(card.flash, 0.6);
-        this.readyFx(card);
+      if (readyNow && !c.wasReady && !used && visible) {
+        c.flash = Math.max(c.flash, 0.6);
+        this.readyFx(c);
       }
-      card.wasReady = readyNow;
-      card.pop = Math.max(0, card.pop - dt * 1.15);
-      card.flash = Math.max(0, card.flash - dt * 3.2);
-      card.ready = readyNow ? Math.min(1, card.ready + dt * 3) : 0;
-      if (card.locked) card.flip = Math.min(1, card.flip + dt * 3);
-      else if (face) card.flip = Math.max(0, card.flip - dt * (card.unlock > 0 ? 1.15 : 2.2));
+      c.wasReady = readyNow;
+      c.pop = Math.max(0, c.pop - dt * 1.15);
+      c.flash = Math.max(0, c.flash - dt * 3.2);
+      c.ready = readyNow ? Math.min(1, c.ready + dt * 3) : 0;
+      if (c.locked) c.flip = Math.min(1, c.flip + dt * 3);
+      else if (c.hasArt) c.flip = Math.max(0, c.flip - dt * (c.unlock > 0 ? 1.15 : 2.2));
       // fan along the bottom-right, the ultimate largest at the end
+      const big = ult ? 1.22 : 1;
       const slot = n - 1 - i;
-      const x = W - (16 + 22) * ck - slot * cw * 0.98 - (ult ? 0 : cw * 0.2);
+      const x = W - (16 + 22) * s * ck - slot * cw * 0.98 - (ult ? 0 : cw * 0.2);
       const fan = (slot - (n - 1) / 2) * 0.045;
-      const bob = Math.sin(this.t * 1.4 + i * 1.3) * 2.2 * ck;
-      // the mouse lifts the card under it (when the pointer is free)
-      const mx = this.mouse.x / s, my = this.mouse.y / s;
-      const over = !locked && Math.abs(mx - x) < (cw * big) / 2 && Math.abs(my - (H - 14 * ck - (ch * big) / 2)) < (ch * big) / 2;
-      card.hover += ((over ? 1 : 0) - card.hover) * Math.min(1, dt * 12);
+      const bob = Math.sin(this.t * 1.4 + i * 1.3) * 2.2 * s * ck;
       // pop: a quick lift and swell, one full turn showing the sculpted back, settle with a bounce
-      const k = card.pop;
+      const k = c.pop;
       const u = 1 - k;
       const lift = k > 0 ? Math.sin(Math.min(1, u * 1.25) * Math.PI) : 0;
       const swell = k > 0 ? Math.sin(Math.min(1, u * 1.6) * Math.PI) * 0.55 + Math.max(0, Math.sin(u * Math.PI * 3)) * 0.04 * k : 0;
       const spin = k > 0 ? smooth(Math.min(1, Math.max(0, (u - 0.12) / 0.62))) * Math.PI * 2 : 0;
-      const y = H - 14 * ck - (ch * big) / 2 - bob - (lift * 46 + Math.sin(card.unlock * Math.PI) * 30 - (card.locked ? 6 : 0) + card.hover * 7) * ck;
-      const sc = ((ch * big * s) / FH) * (1 + swell);
-      card.sx = x * s;
-      card.sy = y * s;
-      card.sk = sc;
-      if (used) this.useFx(card);
-      if (!card.locked) this.ambientFx(card, dt, frac, readyNow, ult);
-      if (!card.locked) hud.cardAnchors.push({ key: card.def.key, x, y, h: ch * big, cd: ult ? 0 : cdNow });
-      // the side up: dealt face down until the photo lands, a full turn on use
-      const turn = smooth(card.flip) * Math.PI + spin;
-      const cs = Math.cos(turn);
-      const showFace = cs >= 0 && !!face && !card.locked;
-      draws.push(() => {
-        let pic: HTMLCanvasElement | null = null;
-        if (showFace && face) pic = this.liveFace(card, face, frac);
-        else pic = card.locked ? sprite(ART[`card_back_${back.key}`], SWAP_DIM, 'dim') : back.cv;
-        if (!pic) return;
-        const sx = Math.max(0.08, Math.abs(cs)) * (1 + swell);
-        const tilt = fan + Math.sin(this.t * 0.9 + i) * 0.02;
-        // real card stock: a shadow that falls further the higher the card rises, and its edge (thickness)
-        const solid = showFace && face ? face.cv : back ? back.cv : pic;
-        const rise = 3 + lift * 14 + card.hover * 6 + Math.sin(card.unlock * Math.PI) * 9;
-        const [ox, oy] = shadowOffset(rise);
-        const sh = variant(solid, 'shadow'), stock = variant(solid, 'stock');
-        if (Math.abs(cs) > 0.995 && swell < 0.01) {
-          // at rest: the fan is a shear about the card's centre (crisp rows)
-          const left = x - pic.width / 2, top = y - pic.height / 2;
-          const shear = (r: number) => (r - pic!.height / 2) * -Math.tan(tilt);
-          blitShear(c, sh, left + ox + 1, top + oy + 1, shear, 0.14);
-          blitShear(c, sh, left + ox, top + oy, shear, 0.34);
-          blitShear(c, stock, left + 1, top + 1, shear);
-          blitShear(c, pic, left, top, shear);
-          if (!showFace && card.locked) return;
-          if (showFace && !readyNow) blitShear(c, variant(pic === card.live ? face!.cv : pic, 'dim'), left, top, shear, 0.22);
-        } else {
-          blitSquash(c, sh, x + ox + 1, y + oy + 1, sx, 0.14, 1 + swell);
-          blitSquash(c, sh, x + ox, y + oy, sx, 0.34, 1 + swell);
-          // mid-turn the card's edge shows as its thickness
-          blitSquash(c, stock, x + (cs >= 0 ? 1 : -1), y + 1, sx, 1, 1 + swell);
-          blitSquash(c, pic, x, y, sx, 1, 1 + swell);
-        }
-        if (card.flash > 0.02) blitSquash(c, variant(showFace && face ? face.cv : pic, 'flash'), x, y, sx, card.flash * 0.75, 1 + swell);
-      });
+      const y = H - 14 * s * ck - (ch * big) / 2 - bob - (lift * 46 + Math.sin(c.unlock * Math.PI) * 30 - (c.locked ? 6 : 0)) * s * ck;
+      const sc = ((ch * big) / FH) * (1 + swell);
+      c.group.visible = visible;
+      c.group.position.set(x, -y, 700 + i * 40 + (k > 0 ? 500 : 0));
+      c.group.scale.setScalar(sc);
+      // a slow float in 3D so the relief catches the light; dealt face down until the photo lands
+      const deal = smooth(c.flip) * Math.PI;
+      c.tilt.rotation.set(-0.1 + Math.sin(this.t * 0.8 + c.seed) * 0.07, Math.sin(this.t * 0.6 + c.seed * 1.3) * 0.16 + spin + deal, fan + Math.sin(this.t * 0.9 + i) * 0.02);
+      // the art window: cooldown sand, ready sheen, flash
+      const am = c.artMat.uniforms;
+      am.uHas.value = c.hasArt ? 1 : 0;
+      am.uCd.value = frac;
+      am.uReady.value = c.ready;
+      am.uFlash.value = c.flash;
+      am.uT.value = this.t;
+      // the gilt breathes when ready; the gems glow for the ultimate
+      const breathe = c.ready * (ult ? 0.5 + 0.5 * Math.sin(this.t * 5) : 0.5 + 0.5 * Math.sin(this.t * 2.2 + i));
+      const tint = c.frameMat.userData.tint.value;
+      const lvl = c.locked ? 0.5 : readyNow ? 1 + breathe * 0.06 + c.flash * 0.3 : 0.74 + c.flash * 0.3;
+      tint.setRGB(lvl, lvl, lvl * (readyNow ? 1 : 1.04));
+      c.frameMat.userData.fx.value.z = breathe * (ult ? 2.5 : 1.2) + c.flash * 2;
+      for (const m of c.texts) (m.material as THREE.MeshBasicMaterial).color.setScalar(readyNow ? 1 : 0.8);
+      c.sx = x;
+      c.sy = y;
+      c.sk = sc;
+      if (used && visible) this.useFx(c);
+      if (visible && !c.locked) this.ambientFx(c, dt, frac, readyNow, ult);
+      if (!c.locked) hud.cardAnchors.push({ key: c.def.key, x: x / s, y: y / s, h: (ch * big) / s, cd: ult ? 0 : cdNow });
     });
-    // the later card sits in front
-    for (const d of draws) d();
-    // key caps under the cards, cooldown figures over the art
-    for (const a of hud.cardAnchors) {
-      if (!this.touch) {
-        const kc = keycap(a.key);
-        const kx = Math.round(a.x - kc.width / 2), ky = Math.round(a.y + a.h / 2 + 2);
-        c.globalAlpha = 0.3;
-        c.drawImage(variant(kc, 'shadow'), kx + 1, ky + 2);
-        c.globalAlpha = 1;
-        c.drawImage(kc, kx, ky);
-      }
-      if (a.cd > 0.05 && a.cd < 99) text(c, a.cd < 1 ? a.cd.toFixed(1) : String(Math.ceil(a.cd)), a.x, a.y - 8, UI.text, 16, 'center');
-    }
     this.lastUlt = st.ult;
-    void blitC;
   }
 
   // ---------------------------------------------------------------- particles
@@ -598,6 +553,7 @@ export class TarotBar {
   }
 
   private ambientFx(c: CardObj, dt: number, frac: number, ready: boolean, ult: boolean) {
+    const s = this.hud.scale;
     if (ready) {
       // glints run around the gilt
       c.glint += dt * (ult ? 5 : 1.6);
@@ -620,6 +576,7 @@ export class TarotBar {
         this.norm.add({ x, y: lineY, vy: 6, ay: 90, life: 0.25 + Math.random() * 0.25, size: 1 }, Math.random() < 0.5 ? 0xf6dcac : 0xe0b070, 0xb0844e);
       }
     }
+    void s;
   }
 
   private readyFx(c: CardObj) {
@@ -629,6 +586,7 @@ export class TarotBar {
       this.add.add({ x, y, vx: Math.cos(a) * 40, vy: Math.sin(a) * 40 - 10, drag: 3, life: 0.45 + Math.random() * 0.3, size: i % 4 ? 1 : 2, flick: 0.3 }, 0xfffbe8, c.def.key === 'Z' ? 0x9dff3a : 0xffc040);
     }
   }
+
   private useFx(c: CardObj) {
     const cx = c.sx, cy = c.sy, k = c.sk;
     const w = FW * k, h = FH * k;
@@ -708,14 +666,29 @@ export class TarotBar {
 
   dispose() {
     this.job = null;
-    window.removeEventListener('mousemove', this.onMouse);
     if (TarotBar.current === this) TarotBar.current = null;
+    for (const c of this.cards) {
+      c.group.removeFromParent();
+      c.frameMat.dispose();
+      (c.artMat.uniforms.map.value as THREE.Texture | null)?.dispose();
+      c.artMat.dispose();
+      c.art.geometry.dispose();
+      for (const m of c.texts) {
+        const mm = m.material as THREE.MeshBasicMaterial;
+        mm.map?.dispose();
+        mm.dispose();
+        m.geometry.dispose();
+      }
+    }
     this.cards = [];
+    this.frameGeo?.dispose();
+    this.coreGeo?.dispose();
+    this.coreMat?.dispose();
+    this.env?.dispose();
     this.add.points.removeFromParent();
     this.norm.points.removeFromParent();
     this.add.dispose();
     this.norm.dispose();
-    void this.scene;
   }
 }
 

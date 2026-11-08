@@ -723,8 +723,16 @@ export class Hud {
     }
 
     // ---------------------------------------------------------- skills + ultimate (bottom right)
-    // (2D-sprite cards draw their own key caps and cooldown figures: TarotBar.paint)
-    if (!this.use3D) {
+    if (this.use3D) {
+      // key caps under the 3D tarot cards and their cooldown figures (cards: TarotBar)
+      for (const a of this.cardAnchors) {
+        if (!this.touch) {
+          const kc = keycap(a.key);
+          this.lt(() => this.blit(kc, a.x - kc.width / 2, a.y + a.h / 2 + 2, 1));
+        }
+        if (a.cd > 0.05 && a.cd < 99) this.tl(c, a.cd < 1 ? a.cd.toFixed(1) : String(Math.ceil(a.cd)), a.x, a.y - 8, UI.text, 16, 'center');
+      }
+    } else {
       const ux = W - 26 + slide * 200, uy = H - 30;
       // ultimate ring
       const R = 19;
