@@ -407,8 +407,10 @@ class Note {
   private shadeKey = '';
   /** the picture sunk a little into shadow (a note further down the stack) */
   shaded(depth: number) {
-    const pic = this.picture();
-    const key = this.ver + ':' + depth;
+    // notes further down the stack show their paper only: their writing peeking out
+    // from under the top note just read as overlapping clutter
+    const pic = this.paperCv ?? this.picture();
+    const key = this.ver + ':' + depth + ':' + (this.paperCv ? 'paper' : 'ink');
     if (this.shadeCv && this.shadeKey === key) return this.shadeCv;
     const cv = this.shadeCv && this.shadeCv.width === pic.width && this.shadeCv.height === pic.height ? this.shadeCv : document.createElement('canvas');
     cv.width = pic.width;

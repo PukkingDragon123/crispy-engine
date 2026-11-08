@@ -861,7 +861,8 @@ export class Bench3D implements Mode {
     this.layout();
     // he steps up beside the turntable to set it
     const j = this.v.copy(p.c).add(shift).applyMatrix4(d.root.matrixWorld);
-    const at = new THREE.Vector2(Math.min(j.x - 0.36, this.ttAt.x - 0.42), this.zFront + 0.28);
+    // (always from the left of the turntable, so he never stands between you and the gun)
+    const at = new THREE.Vector2(Math.min(j.x - 0.42, this.ttAt.x - 0.66), this.zFront + 0.3);
     this.goTo({ at, face: Math.atan2(j.x - at.x, j.z - at.y) });
   }
   /** take a part off: saved now, it flies from the gun back into the tray */

@@ -7,6 +7,7 @@ import { noise, hash2, clamp, Noise, smoothstep } from '../../engine/math/rand';
 import { globalUniforms, celify } from '../../engine/render/VoxelMaterial';
 import type { HeightTex } from './Env';
 import { SandWaves, SAND_GLSL, SAND_MAX } from './SandWaves';
+import { pixelAtlas, PIXEL_GLSL, PX } from './PixelTex';
 
 const CHUNK = 32;
 /** GPU heightfield texel (m) */
@@ -15,6 +16,9 @@ const HF_CELL = 2;
 const LOD_CELL = [0.125, 0.25, 0.5, 1, 2, 4];
 const LOD_STEP = [0.0625, 0.125, 0.25, 0.5, 1, 2];
 const LOD_DIST = [32, 64, 110, 172, 262, 384];
+/** hard ground (rock, flagstones, turf, dirt, mud) is built of big blocks this wide in the near rings */
+const BLOCK_M = 0.5;
+const BLOCK_MATS = new Set<number>([MAT.ROCK, MAT.DARK_ROCK, MAT.TILE, MAT.DIRT, MAT.GRASS, MAT.MUD]);
 
 // sRGB palette per material: [top A, top B, side]
 const MATCOL: Record<number, [number, number, number]> = {
@@ -116,13 +120,14 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
     sh.uniforms.uShC = uShC;
     sh.uniforms.uSunDirW = globalUniforms.uSunDirW;
     sh.uniforms.uLook = globalUniforms.uLook;
+    sh.uniforms.uPxTex = { value: pixelAtlas() };
     sandVertex(sh, sand, true);
     sh.vertexShader = sh.vertexShader
       .replace(
         '#include <common>',
         `#include <common>
-        attribute float tm;
-        varying float vTM;
+        attribute vec2 tm;
+        varying vec2 vTM;
         varying vec3 vWP;
         varying vec3 vWN;`
       )
@@ -144,9 +149,10 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
         uniform sampler2D uHF;
         uniform vec4 uHFInfo, uShC, uLook;
         uniform vec3 uSunDirW;
-        varying float vTM;
+        varying vec2 vTM;
         varying vec3 vWP;
         varying vec3 vWN;
+        ${PIXEL_GLSL}
         vec3 sandBump = vec3(0.0);
         // far field: the heightfield casts the dune shadows the shadow map cannot reach
         float tFarSh = 1.0;
@@ -186,9 +192,11 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
           bool top = an.y > 0.6;
           vec2 tp = top ? vWP.xz : (an.x > an.z ? vWP.zy : vWP.xy);
           vec2 px = floor(tp * 16.0);
-          float h1 = th(px + vec2(vTM * 17.0, 3.0));
-          float jit = (h1 - 0.5) * 0.11;
-          float m = floor(vTM + 0.5);
+          float h1 = th(px + vec2(vTM.x * 17.0, 3.0));
+          float m = floor(vTM.x + 0.5);
+          // near field: big blocks with pixel-art material textures (fade to the painted far look)
+          float pxK = (1.0 - smoothstep(42.0, 74.0, distance(vWP, cameraPosition))) * step(m, 8.5);
+          float jit = (h1 - 0.5) * 0.11 * (1.0 - 0.75 * pxK);
           if (m <= 2.0 || m == 6.0) {
             if (top) {
               float camD = distance(vWP, cameraPosition);
@@ -251,7 +259,7 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
             float band = fract(vWP.y * 0.9 + th(floor(vWP.xz * 0.2)) * 0.3);
             jit += band < 0.08 ? -0.12 : (band > 0.92 ? 0.06 : 0.0);
             if (!top) { float cr = th(floor(vec2(tp.x * 2.0, vWP.y * 0.5))); jit += cr > 0.93 ? -0.15 : 0.0; }
-          } else if (m == 5.0) {
+          } else if (m == 5.0 && pxK < 0.99) {
             vec2 g = fract(vWP.xz * 0.5 + 0.02);
             vec2 g2 = fract(vec2(vWP.x * 0.5 + floor(vWP.z * 0.5) * 0.5, vWP.z * 0.5));
             if (top && (g.y < 0.05 || g2.x < 0.04)) jit -= 0.2;
@@ -270,6 +278,31 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
             float wc = vn(xz * 0.0045 + 3.7) * 0.65 + vn(xz * 0.013 - 1.3) * 0.35;
             tint *= mix(vec3(0.97, 0.985, 1.03), vec3(1.035, 0.99, 0.94), smoothstep(0.3, 0.7, wc));
             diffuseColor.rgb *= tint;
+          }
+          if (pxK > 0.001) {
+            // the face's true orientation (sand sides carry the dune normal for lighting)
+            vec3 gn = normalize(cross(dFdx(vWP), dFdy(vWP)));
+            bool gTop = abs(gn.y) > 0.6;
+            vec2 puv = pxUV(vWP, gn);
+            float layer = ${PX.MUD}.0, amt = 1.0;
+            if (m == 0.0 || m == 2.0) { layer = gTop ? ${PX.SAND}.0 : ${PX.SAND_SIDE}.0; amt = 0.72; }
+            else if (m == 1.0) { layer = gTop ? ${PX.PACKED}.0 : ${PX.SAND_SIDE}.0; amt = 0.85; }
+            else if (m == 3.0 || m == 4.0) layer = gTop ? ${PX.ROCK_TOP}.0 : ${PX.ROCK_SIDE}.0;
+            else if (m == 5.0) layer = gTop ? ${PX.TILE_TOP}.0 : ${PX.TILE_SIDE}.0;
+            else if (m == 6.0) layer = gTop ? ${PX.DIRT_TOP}.0 : ${PX.DIRT_SIDE}.0;
+            else if (m == 7.0) layer = gTop ? ${PX.GRASS_TOP}.0 : ${PX.GRASS_SIDE}.0;
+            diffuseColor.rgb *= mix(vec3(1.0), pxSample(puv, layer), pxK * amt);
+            if (m == 7.0 && !gTop) {
+              // turf hanging over the block edge: a ragged pixel fringe, the blade tips a shade darker
+              float tx = floor(puv.x * 128.0);
+              float fl = (2.0 + floor(th(vec2(tx, 3.0)) * 3.0) + step(0.82, th(vec2(tx, 9.0))) * 3.0) / 32.0;
+              float dT = vTM.y / 64.0;
+              if (dT < fl) {
+                float shd = dot(vColor.rgb, vec3(0.3, 0.59, 0.11)) / 0.1695;
+                vec3 turf = vec3(0.223, 0.391, 0.0685) * pxSample(puv, ${PX.GRASS_TOP}.0) * shd * (dT > fl - 0.04 ? 0.72 : 1.0);
+                diffuseColor.rgb = mix(diffuseColor.rgb, turf, pxK);
+              }
+            }
           }
           diffuseColor.rgb *= 1.0 + jit;
           // ground marks: board tracks, scorch, blood, venom (timestamps -> fade by age)
@@ -318,7 +351,7 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
       );
     celify(sh);
   };
-  m.customProgramCacheKey = () => 'terrain-v7atmo';
+  m.customProgramCacheKey = () => 'terrain-v8px';
   (m as any).userData = { uWind, uMarks, uMarkArea, uMarkClock, uHF, uHFInfo, uShC };
   return m;
 }
@@ -673,14 +706,46 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
   const H = new Float32Array(W * W);
   const R = new Float32Array(W * W); // raw (unquantized) heights for smooth sand normals
   const M = new Uint8Array(W * W);
+  /** 1 = the cell belongs to a big pixel-textured block (hard ground: rock, flagstones, turf, dirt, mud) */
+  const B = new Uint8Array(W * W);
+  // near rings: hard ground snaps to 0.5 m blocks (one height per block, coarser steps on cliffs)
+  // so it reads as big textured blocks; sand keeps its fine rideable columns
+  const blocky = cs <= BLOCK_M;
+  const nb = Math.ceil((N + 2) * cs / BLOCK_M) + 2;
+  const bh = blocky ? new Float32Array(nb * nb).fill(NaN) : null;
+  const bm = blocky ? new Uint8Array(nb * nb) : null;
+  const bx0 = Math.floor((ox - cs) / BLOCK_M), bz0 = Math.floor((oz - cs) / BLOCK_M);
   for (let j = -1; j <= N; j++) {
     for (let i = -1; i <= N; i++) {
       const x = ox + (i + 0.5) * cs,
         z = oz + (j + 0.5) * cs;
+      const k = i + 1 + (j + 1) * W;
+      if (bh) {
+        const bi = Math.floor(x / BLOCK_M), bj = Math.floor(z / BLOCK_M);
+        const bk = bi - bx0 + (bj - bz0) * nb;
+        if (Number.isNaN(bh[bk])) {
+          const cx = (bi + 0.5) * BLOCK_M, cz = (bj + 0.5) * BLOCK_M;
+          const m = f.matAt(cx, cz);
+          bm![bk] = m;
+          if (BLOCK_MATS.has(m)) {
+            const hb = f.heightAt(cx, cz);
+            const q = (m === MAT.ROCK || m === MAT.DARK_ROCK) && f.slopeAt(cx, cz) > 0.7 ? 0.25 : 0.125;
+            bh[bk] = Math.round(hb / q) * q;
+          } else bh[bk] = -1e9;
+        }
+        if (bh[bk] > -1e8) {
+          // raw height kept for the smooth normals of the sand cells around the block
+          R[k] = f.heightAt(x, z);
+          H[k] = bh[bk];
+          M[k] = bm![bk];
+          B[k] = 1;
+          continue;
+        }
+      }
       const h = f.heightAt(x, z);
-      R[i + 1 + (j + 1) * W] = h;
-      H[i + 1 + (j + 1) * W] = Math.round(h / step) * step;
-      M[i + 1 + (j + 1) * W] = f.matAt(x, z);
+      R[k] = h;
+      H[k] = Math.round(h / step) * step;
+      M[k] = f.matAt(x, z);
     }
     if ((j & 31) === 31) yield;
   }
@@ -707,6 +772,8 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
     out[o + 2] = CN[k + 2];
   };
   const qn = new Array(12).fill(0);
+  /** per-vertex depth below the column top (m), for the turf fringe on block sides */
+  const dTop = [0, 0, 0, 0];
   // merged strips stay short so living-sand displacement bends them without cracks
   const MAXRUN = Math.max(cs, 1);
   const pos: number[] = [];
@@ -728,7 +795,7 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
     for (let k = 0; k < 4; k++) {
       if (vn) nrm.push(vn[k * 3], vn[k * 3 + 1], vn[k * 3 + 2]);
       else nrm.push(nx, ny, nz);
-      tms.push(tm);
+      tms.push(tm, ny > 0.5 ? 0 : Math.min(255, Math.round(dTop[k] * 64)));
     }
     for (let k = 0; k < 12; k++) col.push(cols[k]);
     if (!flip) idx.push(vi, vi + 1, vi + 2, vi, vi + 2, vi + 3);
@@ -737,7 +804,7 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
   };
   const quadCols = new Array(12).fill(0);
   const AO = [0.62, 0.78, 0.9, 1.0];
-  let run: { x0: number; x1: number; z0: number; z1: number; h: number; m: number; hex: number; b: number; ci0: number; ci1: number; cj: number } | null = null;
+  let run: { x0: number; x1: number; z0: number; z1: number; h: number; m: number; hex: number; b: number; ci0: number; ci1: number; cj: number; blk: number } | null = null;
   const flushRun = () => {
     if (!run) return;
     toLin(run.hex, run.b, quadCols, 0);
@@ -745,7 +812,7 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
     toLin(run.hex, run.b, quadCols, 6);
     toLin(run.hex, run.b, quadCols, 9);
     let vn: number[] | null = null;
-    if (soft(run.m)) {
+    if (soft(run.m) && !run.blk) {
       cn(run.ci0, run.cj, qn, 0);
       cn(run.ci0, run.cj + 1, qn, 3);
       cn(run.ci1, run.cj + 1, qn, 6);
@@ -795,13 +862,14 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
         a01 = ao(w_, s_, sw);
       // vertices: (x0,z0) (x0,z1) (x1,z1) (x1,z0)  -> CCW from above
       const open = a00 === 3 && a01 === 3 && a11 === 3 && a10 === 3;
-      const sm = soft(m);
-      if (open && run && run.h === h && run.m === m && run.hex === topHex && run.b === bright && run.z0 === z0 && run.x1 - run.x0 < MAXRUN - 1e-6) {
+      const blk = B[k];
+      const sm = soft(m) && !blk;
+      if (open && run && run.h === h && run.m === m && run.hex === topHex && run.b === bright && run.blk === blk && run.z0 === z0 && run.x1 - run.x0 < MAXRUN - 1e-6) {
         run.x1 = x1; // extend the merged strip
         run.ci1 = i + 1;
       } else {
         flushRun();
-        if (open) run = { x0, x1, z0, z1, h, m, hex: topHex, b: bright, ci0: i, ci1: i + 1, cj: j };
+        if (open) run = { x0, x1, z0, z1, h, m, hex: topHex, b: bright, ci0: i, ci1: i + 1, cj: j, blk };
         else {
           toLin(topHex, bright * AO[a00], quadCols, 0);
           toLin(topHex, bright * AO[a01], quadCols, 3);
@@ -870,6 +938,8 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
             cn(aci, acj, qn, 9);
             vn = qn;
           }
+          dTop[0] = dTop[1] = h - yb;
+          dTop[2] = dTop[3] = h - yt;
           // a(bottom) b(bottom) b(top) a(top)
           pushQuad(ax!, yb, az!, bx!, yb, bz!, bx!, yt, bz!, ax!, yt, az!, nx, 0, nz, quadCols, m, false, vn);
         }
@@ -886,7 +956,7 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
   const c8 = new Uint8Array(col.length);
   for (let k = 0; k < col.length; k++) c8[k] = Math.round(col[k] * 255);
   geo.setAttribute('color', new THREE.BufferAttribute(c8, 3, true));
-  geo.setAttribute('tm', new THREE.BufferAttribute(new Uint8Array(tms), 1));
+  geo.setAttribute('tm', new THREE.BufferAttribute(new Uint8Array(tms), 2));
   geo.setIndex(vi > 65535 ? new THREE.Uint32BufferAttribute(idx, 1) : new THREE.Uint16BufferAttribute(idx, 1));
   geo.computeBoundingSphere();
   geo.computeBoundingBox();

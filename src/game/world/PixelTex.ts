@@ -204,7 +204,9 @@ function rockTop(x: number, y: number) {
   if (lx === 0 || ly === 0) return ih(x, y, 66) < 0.15 ? ROCK_T[1] : ROCK_T[0];
   // chipped corners
   if ((lx <= 2 && ly <= 2 && lx + ly <= 3 - Math.floor(k * 2)) || (lx >= 14 && ly >= 14 && lx + ly >= 28 + Math.floor(k * 2))) return ROCK_T[0];
-  const cb = Math.abs(((Math.hypot(lx - 16 * k, ly - 16 * (1 - k)) * 0.8 + vn(x, y, 8, 8, 62) * 2) % 4) - 2) < 0.35 && vn(x, y, 16, 16, 65) > 0.5;
+  // slanted cross-bedding laminae, a different set angle per stone
+  const sl = 0.3 + k * 0.9;
+  const cb = ((ly - lx * sl + vn(x, y, 8, 8, 62) * 2.5 + 64) % 4) < 0.7 && vn(x, y, 16, 16, 65) > 0.45;
   const n = fbm(x, y, 63, 16, 3);
   let i = 2 + Math.floor(k * 2) + (n > 0.64 ? 1 : 0);
   if (cb) i -= 1;
@@ -253,7 +255,7 @@ function rockSide(x: number, y: number) {
   if (c.lx === c.L - 1) i -= 1;
   // desert varnish drips from the joint above
   const drip = ih(x, c.course, 74);
-  if (drip < 0.09 && c.ly < 2 + drip * 60) return 0x7a5238;
+  if (drip < 0.025 && c.ly < 2 + drip * 160) return 0x8a5e40;
   const pit = cell(x, y, 6, 75);
   if (pit.f1 < 0.7 && ih(pit.id, 1, 75) < 0.45) return ROCK_T[0];
   return ROCK_T[Math.max(0, Math.min(5, i))];
@@ -372,7 +374,7 @@ function mud(x: number, y: number) {
   let i = n < 0.38 ? 1 : n < 0.6 ? 2 : 3;
   // wet sheen catches the lit side of the ridges
   const gx = f(x + 1, y) - f(x - 1, y), gy = f(x, y + 1) - f(x, y - 1);
-  if (gx + gy < -0.035 && n > 0.5 && ih(x, y, 132) < 0.5) return 0x9a8262;
+  if (gx + gy < -0.05 && n > 0.55 && ih(x, y, 132) < 0.35) return 0x8a7456;
   // shallow puddles: dark water with a lit far rim
   const w = cell(x, y, 32, 133);
   const pr = 3 + ih(w.id, 1, 133) * 4;
@@ -409,9 +411,10 @@ function wood(x: number, y: number): RGB {
     if (d < 1.1) return M(0.5, 0.08);
     if (d < 2.3) v *= 0.82;
   }
-  // nail pair below each butt joint
-  if ((ly === 3 || ly === segL - 4) && (lx === 2 || lx === 5)) return M(0.42, -0.04);
-  if ((ly === 4 || ly === segL - 3) && (lx === 2 || lx === 5) && ih(p, seg, 149) < 0.6) return [v * 1.0, v * 0.82, v * 0.7];
+  // one nail at each plank end, rust bleeding below it
+  const nx = 3 + (p & 1);
+  if (lx === nx && (ly === 3 || ly === segL - 4)) return M(0.42, -0.04);
+  if (lx === nx && (ly === 4 || ly === segL - 3) && ih(p, seg, 149) < 0.6) return [v * 1.0, v * 0.82, v * 0.7];
   // bleached, silvered patches
   const b = fbm(x, y, 150, 32, 3);
   if (b > 0.64) return [v * 1.06, v * 1.06, v * 1.1];
