@@ -11,8 +11,8 @@ const ramp = (base: number, shade: number, hi: number, dark: number): Ramp => ({
 
 // ================================================================== PALETTE
 /** the living half: sun-dark, weathered skin */
-export const SKIN = ramp(0xbf8763, 0x9c6748, 0xd6a27e, 0x6a3f2c);
-export const STUB = 0x8d6450; // five-o'clock shadow
+export const SKIN = ramp(0xb8876a, 0x94664f, 0xcfa285, 0x623f2f);
+export const STUB = 0x8e6853; // five-o'clock shadow
 export const STUB_DOT = 0x553c30;
 export const SCAR = 0xd8ab95;
 export const LIP = 0x96574a;
@@ -49,6 +49,9 @@ export function rng(seed: number) {
 /** per-voxel hash in 0..1 (stubble, mottling) */
 export const vhash = (i: number, j: number, l: number) => (((Math.imul(i, 73856093) ^ Math.imul(j, 19349663) ^ Math.imul(l, 83492791)) >>> 0) % 1000) / 1000;
 
+/** smooth, low-frequency blotches in about -1.3..1.3 (necrosis patches, not per-voxel noise) */
+export const blotch = (x: number, y: number, z: number) => Math.sin(x * 1.9 + y * 0.8 + 0.3) * Math.sin(z * 1.7 - y * 1.25 + 0.5) + 0.35 * Math.sin(x * 3.7 - z * 2.9 + y * 0.6);
+
 /** delete from `a` every cell that `b` also fills: two meshes sharing a cell would z-fight */
 export function dedupe(a: VoxelModel, b: VoxelModel | null | undefined) {
   if (!b) return a;
@@ -77,11 +80,11 @@ export function skinOver(src: VoxelModel, dst: VoxelModel, col: number) {
  * lip, necrotic grey-green, a mottled bruise ring, then the healthy colour.
  */
 export function rotEdgeCol(d: number, x: number, y: number, z: number, healthy: number): number {
-  const w = 0.24 * Math.sin(x * 1.7 + y * 2.3) + 0.18 * Math.sin(z * 2.9 - y * 1.1);
-  if (d < 0.3) return MEAT.base;
-  if (d < 0.72 + w * 0.5) return ROT.dark;
-  if (d < 1.2 + w) return ROT.base;
-  if (d < 1.75 + w) return Math.sin(x * 3.1 + z * 2.3 + y * 1.7) > 0.25 ? BRUISE : ROT.hi;
+  const w = 0.12 * Math.sin(x * 1.7 + y * 2.3) + 0.1 * Math.sin(z * 2.9 - y * 1.1);
+  if (d < 0.28) return MEAT.base;
+  if (d < 0.62 + w) return ROT.dark;
+  if (d < 1.0 + w) return ROT.base;
+  if (d < 1.38 + w) return ROT.hi;
   return healthy;
 }
 const BONEISH = new Set<number>();
@@ -91,8 +94,8 @@ export function markBone(...c: number[]) {
 /** bone just inside a rot edge: tissue still clinging, then a dirty stain */
 export function boneEdgeCol(c: number, d: number): number {
   if (!BONEISH.has(c & 0xffffff)) return c;
-  if (d > -0.42) return MEAT.dark;
-  if (d > -0.95) return STAIN;
+  if (d > -0.3) return MEAT.dark;
+  if (d > -0.68) return STAIN;
   return c;
 }
 

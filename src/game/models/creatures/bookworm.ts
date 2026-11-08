@@ -80,7 +80,7 @@ const SEG_R = [0.03, 0.04, 0.048, 0.054, 0.058, 0.061, 0.062, 0.061, 0.059, 0.05
 const HEAD_C: V3 = [0, 0.3, 0.086];
 const HEAD_R: V3 = [0.074, 0.068, 0.068];
 const EYE: V3 = [0.03, 0.309, 0.141];
-const EYE_R = 0.0205;
+const EYE_R = 0.0225;
 const LID_REST = -1.1;
 const LID_CLOSE = 1.7;
 /** the open book: spine axis (x 0, z BOOK_Z), half opening angle */
@@ -240,14 +240,14 @@ function build(v: BookwormVariant): RigSpec {
           if (d < lo || d > hi || Math.abs(px) > R * 1.05) continue;
           const th = Math.atan2(py, pz);
           if (th < -0.02 || th > 1.95) continue;
-          lid.set(i, j, k, th < 0.22 ? 0x2a1c18 : L.face, VF.SOFTAO);
+          lid.set(i, j, k, th < 0.1 ? 0x2a1c18 : L.face, VF.SOFTAO);
         }
     rig.mirror('lid_l', 'lid_r');
   }
   // the elder's bushy white brows and drooping whiskers
   if (L.elder) {
     for (const sd of [1, -1]) {
-      blob(head, [{ a: P(0.012 * sd, 0.338, 0.146), b: P(0.05 * sd, 0.333, 0.126), r0: U(0.007), r1: U(0.0045) }], (i, j, k) => (h01(i, j, k, 3) < 0.3 ? 0xd8d4e0 : 0xf4f2f8), { k: U(0.003), disp: (x, y, z) => (n01(x, y, z, 0.8, 4) - 0.5) * 0.9 });
+      blob(head, [{ a: P(0.014 * sd, 0.349, 0.147), b: P(0.054 * sd, 0.344, 0.124), r0: U(0.0075), r1: U(0.005) }], (i, j, k) => (h01(i, j, k, 3) < 0.3 ? 0xd8d4e0 : 0xf4f2f8), { k: U(0.003), disp: (x, y, z) => (n01(x, y, z, 0.8, 4) - 0.5) * 0.9 });
       for (let w = 0; w < 3; w++) line(head, [P(0.012 * sd, 0.276 - w * 0.002, 0.152), P(0.03 * sd, 0.268 - w * 0.003, 0.154), P((0.05 + w * 0.004) * sd, 0.252 - w * 0.006, 0.148)], w === 1 ? 0xe8e4f0 : 0xfafafe);
     }
   }
@@ -256,7 +256,7 @@ function build(v: BookwormVariant): RigSpec {
   {
     const specs = rig.part('specs', 'head', P(0, 0.312, 0.16));
     const wire = L.specs === 'thick' ? (i: number, j: number, k: number) => (n01(i, j, k, 0.6, 5) > 0.55 ? 0x8a4a1c : n01(i, j, k, 0.6, 5) < 0.35 ? 0x3a1a0c : 0x6a3416) : (i: number, j: number, k: number) => (h01(i, j, k, 1) < 0.2 ? GOLD.l : GOLD.g);
-    const rimR = L.specs === 'thick' ? 0.028 : 0.025;
+    const rimR = L.specs === 'thick' ? 0.03 : 0.027;
     const wireT = L.specs === 'thick' ? 0.0062 : 0.0034;
     const lensY = L.specs === 'half' ? EYE[1] - 0.009 : EYE[1];
     const sides = L.specs === 'monocle' ? [-1] : [1, -1];
@@ -405,9 +405,9 @@ function build(v: BookwormVariant): RigSpec {
   if (L.carry === 'stack') {
     const books: [number, number, number, number, number][] = [
       // y centre, half width, half height (thickness), half depth, colour
-      [0.168, 0.05, 0.012, 0.036, L.cover],
-      [0.194, 0.044, 0.011, 0.033, 0x8a3a2a],
-      [0.217, 0.047, 0.009, 0.031, 0x34507e],
+      [0.164, 0.05, 0.016, 0.036, L.cover],
+      [0.196, 0.045, 0.015, 0.033, 0x8a3a2a],
+      [0.226, 0.047, 0.013, 0.031, 0x34507e],
     ];
     books.forEach(([y, bw, bh, bd, col], bi) => {
       const c: V3 = [0.002 * (bi - 1), y, 0.18];
@@ -419,17 +419,18 @@ function build(v: BookwormVariant): RigSpec {
         return Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qy, qz), 0) - 0.003;
       }, (i, j, k) => {
         const q = loc(D(i), D(j), D(k));
-        const coverY = Math.abs(q[1]) > bh - 0.0035;
+        const coverY = Math.abs(q[1]) > bh - 0.0066;
         const spine = q[2] > bd - 0.004;
-        if (!coverY && !spine) return Math.abs(q[1]) % 0.003 < 0.0012 ? PAPER.s : PAPER.p; // the page edges
+        if (!coverY && !spine) return Math.abs(q[1]) % 0.0128 < 0.0064 ? PAPER.s : PAPER.p; // the page edges
         if (spine && Math.abs(Math.abs(q[0]) - bw * 0.5) < 0.003) return GOLD.g; // raised bands, gilt
-        if (coverY && Math.abs(Math.abs(q[0]) - (bw - 0.007)) < 0.0018 && Math.abs(q[2]) < bd - 0.006) return GOLD.g;
+        if (coverY && Math.abs(Math.abs(q[0]) - (bw - 0.009)) < 0.0035 && Math.abs(q[2]) < bd - 0.006) return GOLD.g;
         return n01(i, j, k, 0.5, bi) > 0.62 ? mixc(col, 0xffffff, 0.12) : col;
       });
     });
   } else {
     const H = (L.carry === 'tome' ? 0.1 : 0.078) / 2;
-    const bt = L.carry === 'tome' ? 0.014 : 0.0105;
+    const bt = L.carry === 'tome' ? 0.024 : 0.02;
+    const ct = 0.0068; // the cover board: a full voxel
     const yC = 0.21;
     const cov = L.cover;
     const half = (m: VoxelModel, sd: number, pageOnly = false) => {
@@ -442,7 +443,7 @@ function build(v: BookwormVariant): RigSpec {
         const q = sub3([x, y, z], sp);
         const u = dot3(q, dirU), h = dot3(q, nOut), w = q[1];
         // the loose page is one sheet on the face of the block (hidden there until it turns)
-        const th0 = -bt, th1 = pageOnly ? -bt + 0.0034 : 0;
+        const th0 = -bt, th1 = pageOnly ? -bt + 0.0068 : 0;
         if (u < 0.0 || u > hw - (pageOnly ? 0.004 : 0)) return 1;
         if (Math.abs(w) > H - (pageOnly ? 0.004 : 0)) return 1;
         if (h < th0 || h > th1) return 1;
@@ -450,20 +451,20 @@ function build(v: BookwormVariant): RigSpec {
       }, (i, j, k) => {
         const q = sub3([D(i), D(j), D(k)], sp);
         const u = dot3(q, dirU), h = dot3(q, nOut), w = q[1];
-        if (pageOnly || h < -0.0026) {
+        if (pageOnly || h < -ct) {
           // pages: text lines on the face, fine page edges on the sides
-          if (h < -bt + 0.0016 || pageOnly) {
+          if (h < -bt + 0.0034 || pageOnly) {
             const row = Math.floor((w + H) / 0.0052);
             const ln = ((w + H) % 0.0052) < 0.0018 && u > 0.008 && u < hw - 0.01 && h01(row, Math.floor(u / 0.012), sd, 4) > 0.15;
             return ln ? PAPER.line : PAPER.p;
           }
-          return (Math.floor(h / 0.0013) & 1) ? PAPER.s : PAPER.p;
+          return (Math.floor(h / 0.0064) & 1) ? PAPER.s : PAPER.p;
         }
         // the cover: leather, a gilt frame, gilt corners, a little gilt eye in the middle
         const fu = u / hw, fw = Math.abs(w) / H;
-        if (Math.abs(fu - 0.9) < 0.03 && fw < 0.9 || fw > 0.87 && fw < 0.93 && fu < 0.9) return GOLD.g;
-        if (fu > 0.86 && fw > 0.82) return GOLD.l;
-        const em = Math.hypot((u - hw * 0.5) / 0.012, w / 0.008);
+        if ((Math.abs(fu - 0.86) < 0.07 && fw < 0.9) || (fw > 0.8 && fw < 0.92 && fu < 0.86)) return GOLD.g;
+        if (fu > 0.9 && fw > 0.86) return GOLD.l;
+        const em = Math.hypot((u - hw * 0.45) / 0.014, w / 0.011);
         if (em < 1 && em > 0.55) return GOLD.g;
         if (em <= 0.35) return GOLD.l;
         if (L.carry === 'ledger' && Math.abs(fw - 0.5) < 0.05 && fu < 0.3) return 0xa83a2a; // a cloth label strip
@@ -472,9 +473,9 @@ function build(v: BookwormVariant): RigSpec {
     };
     half(book, 1);
     // the spine: rounded leather with raised gilt bands
-    sdf(book, [-0.012, yC - H - 0.004, BOOK_Z - 0.004], [0.012, yC + H + 0.004, BOOK_Z + 0.012], (x, y, z) => {
+    sdf(book, [-0.016, yC - H - 0.004, BOOK_Z - 0.008], [0.016, yC + H + 0.004, BOOK_Z + 0.014], (x, y, z) => {
       if (Math.abs(y - yC) > H) return 1;
-      return Math.hypot(x, (z - BOOK_Z - 0.001) * 1.4) - 0.0062;
+      return Math.hypot(x, (z - BOOK_Z + 0.002) * 1.3) - 0.0095;
     }, (i, j) => (Math.abs(((D(j) - yC + H) % (H * 0.5)) - H * 0.25) < 0.0025 ? GOLD.g : mixc(cov, 0x000000, 0.15)));
     // the right half and the loose page hinge at the gutter, where the two page faces meet, so a
     // turn about it lays the right face onto the left one (and closing folds the book shut)

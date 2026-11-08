@@ -54,8 +54,8 @@ export const HALL = {
 // ======================================================================= palette
 const SAND = [0xa98353, 0xbb9462, 0xcaa36f, 0xd8b47e, 0xe6c590];
 const MORTAR = 0x7c6040;
-const LAPIS = [0x0e1a44, 0x152660, 0x1d3478, 0x284594, 0x3a5cb4];
-const NIGHT = [0x0a1336, 0x0f1a46, 0x142252];
+const LAPIS = [0x16246a, 0x1e3282, 0x26409a, 0x3254b4, 0x4a6ed0];
+const NIGHT = [0x18286e, 0x1e307e, 0x24398c];
 const GOLD = TOON.gold;
 const OCHRE = [0x8a3a1e, 0xa84a26, 0xc0603a];
 const PGREEN = [0x2a5a3e, 0x3a7650, 0x52966a];
@@ -125,9 +125,12 @@ export function hallFloor(): Built {
       const ju = ((sx % sw) + sw) % sw, jv = ((z % sw) + sw) % sw;
       const joint = ju === 0 || jv === 0;
       const slab = hash3(Math.floor(sx / sw), row, 3);
-      // worn path down the middle and into every bay
-      const wear = Math.max(0, 1 - Math.abs(x) / (nx * 0.55)) * 0.35 + (Math.abs(x) > nx ? 0.1 : 0);
-      let c = joint ? MORTAR : pick(SAND, clamp01(0.25 + slab * 0.55 + wear + noise.n2(x * 0.08, z * 0.08) * 0.12));
+      // worn path down the middle and into every bay (one tone per slab: the slab is the brush stroke)
+      const scx = Math.floor(sx / sw) * sw + sw / 2 - (row % 2 ? sw / 2 : 0);
+      const wear = Math.max(0, 1 - Math.abs(scx) / (nx * 0.55)) * 0.35 + (Math.abs(scx) > nx ? 0.1 : 0);
+      let c = joint ? MORTAR : pick(SAND, clamp01(0.2 + slab * 0.5 + wear));
+      // a hairline crack across the odd slab
+      if (!joint && slab > 0.86 && Math.abs(ju - jv * 0.7 - 1) < 0.5) c = mixRGB(c, MORTAR, 0.5);
       // the apse step: one course higher
       const y = inApse ? 0 : -1;
       if (inApse && z === Math.round(apseZ) - 1) c = mixRGB(c, 0xfff0c8, 0.2);
@@ -204,12 +207,35 @@ export function hallVault(): Built {
         const rr = R + k;
         const x = Math.round(Math.cos(t) * rr), y = Math.round(y0 + Math.sin(t) * rr);
         if (z < apseZ && Math.abs(x) > R) continue;
-        let c = pick(NIGHT, hash3(x, y, z) * 0.6 + 0.2), f = 0;
+        let c = pick(NIGHT, hash3(Math.floor(z / 7), Math.floor(a / 14), 2) * 0.7 + 0.15), f = 0;
         if (k === 0 && onRib(z)) (c = (z % 2 ? GOLD.shade : GOLD.base)), (f = VF.METAL);
         else if (k === 0 && star(x, y, z)) (c = GOLD.hi), (f = VF.EMISSIVE);
         m.set(x, y, z, c, f);
       }
     }
+  // the tympana closing both ends of the vault: lapis with stars; a gold winged sun over the apse
+  for (const [zz, sun] of [[Z0 - 1, true], [Z1 + 1, false]] as const)
+    for (let x = -R - 1; x <= R + 1; x++)
+      for (let y = y0; y <= y0 + R + 1; y++) {
+        const d = Math.hypot(x, y - y0);
+        if (d > R + 1.5) continue;
+        let c = d > R + 0.5 ? GOLD.shade : pick(NIGHT, hash3(Math.floor(x / 6), Math.floor(y / 6), 4) * 0.7 + 0.15);
+        let f = d > R + 0.5 ? VF.METAL : 0;
+        if (d <= R && star(x, y, zz * 3)) (c = GOLD.hi), (f = VF.EMISSIVE);
+        if (sun) {
+          const sy = y - (y0 + 9), dd = Math.hypot(x, sy);
+          if (dd < 3.2) (c = dd < 2.2 ? 0xffd25a : GOLD.base), (f = VF.EMISSIVE);
+          // the wings: feathered bands sweeping out and down from the disc
+          const wx = Math.abs(x) - 3;
+          if (wx > 0 && wx < 15 && Math.abs(sy + wx * 0.12) < 2.2 - wx * 0.08) {
+            const band = Math.floor((sy + wx * 0.12 + 2.2) / 1.1);
+            c = band % 2 ? GOLD.base : LAPIS[3];
+            f = band % 2 ? VF.EMISSIVE : 0;
+            if (wx % 3 === 0) (c = GOLD.shade), (f = VF.METAL);
+          }
+        }
+        m.set(x, y, zz, c, f);
+      }
   // the flat coffered ceilings over the bays and the apse wings
   const X1 = Math.round((H.NX + H.BAY_D) / vs) + 1;
   for (let x = -X1; x <= X1; x++)
@@ -275,9 +301,16 @@ export function hallVault(): Built {
 // ======================================================================= the walls (1/12)
 /** the outer walls (mostly hidden behind the shelves), the entrance wall with its great door,
  *  the apse wall with the moon niche, the gallery walkway with its balustrade and brass rail */
-export function hallWalls(): Built {
+export function hallWalls(): Built[] {
   const vs = 1 / 12;
-  const m = new VoxelModel('hall_walls');
+  // separate pieces, so each mesh's working volume stays small
+  const pieces = new Map<string, VoxelModel>();
+  let m = new VoxelModel('');
+  const use = (k: string) => {
+    let v = pieces.get(k);
+    if (!v) pieces.set(k, (v = new VoxelModel('hall_walls_' + k)));
+    m = v;
+  };
   const H = HALL;
   const X1 = Math.round((H.NX + H.BAY_D) / vs) + 1;
   const top = Math.round(H.CEIL / vs) + 1;
@@ -285,10 +318,13 @@ export function hallWalls(): Built {
   const apseZ = Math.round(H.APSE_START / vs), ax = Math.round(H.APSE_X / vs);
   const plaster = (x: number, y: number, z: number) => pick([0x4a3624, 0x5a4230, 0x6a4e38], hash3(x >> 2, y >> 2, z >> 2) * 0.8 + (y < 12 ? 0 : 0.15));
   // side walls behind the bays
-  for (const s of [-1, 1])
+  for (const s of [-1, 1]) {
+    use('side' + s);
     for (let z = apseZ; z <= Z1; z++) for (let y = 0; y <= top; y++) m.set(s * X1, y, z, plaster(X1, y, z));
+  }
   // the entrance wall with the great door (dark beyond, a gilded frame, a lintel with a winged sun)
   const doorW = Math.round(1.3 / vs), doorH = Math.round(4.2 / vs);
+  use('front');
   for (let x = -X1; x <= X1; x++)
     for (let y = 0; y <= top; y++) {
       const inDoor = Math.abs(x) < doorW && y < doorH;
@@ -302,14 +338,16 @@ export function hallWalls(): Built {
     }
   for (let y = 0; y < doorH; y++) for (const s of [-1, 1]) for (let k = 1; k < 4; k++) m.set(s * doorW, y, Z1 + k, 0x2a1e14);
   // the apse: the back wall and its chamfered corners; the moon niche is a separate model
+  use('apse');
   for (let x = -ax; x <= ax; x++) for (let y = -1; y <= top; y++) m.set(x, y, Z0 - 1, plaster(x, y, Z0));
-  for (const s of [-1, 1])
-    for (let z = Z0; z <= apseZ; z++) {
-      for (let y = -1; y <= top; y++) m.set(s * (ax + 1), y, z, plaster(ax, y, z));
-    }
+  for (const s of [-1, 1]) {
+    use('apse' + s);
+    for (let z = Z0; z <= apseZ; z++) for (let y = -1; y <= top; y++) m.set(s * (ax + 1), y, z, plaster(ax, y, z));
+  }
   // the gallery: a walkway along both sides of the nave at GALLERY height, over the bay mouths
   const gy = Math.round(H.GALLERY / vs), nx = Math.round(H.NX / vs);
-  for (const s of [-1, 1])
+  for (const s of [-1, 1]) {
+    use('gallery' + s);
     for (let z = apseZ; z <= Z1 - 1; z++) {
       // the deck (cedar planks), a moulded fascia
       for (let k = 0; k < 8; k++) {
@@ -335,7 +373,8 @@ export function hallWalls(): Built {
       }
       m.set(bx - s * 2, gy + 6, z, BRONZE[3], VF.METAL);
     }
-  return { model: m, voxelSize: vs, pivot: [0, 0, 0] };
+  }
+  return [...pieces.values()].map((model) => ({ model, voxelSize: vs, pivot: [0, 0, 0] as V3 }));
 }
 
 // ======================================================================= papyrus columns (1/16)
@@ -472,6 +511,7 @@ export function bookcase(wm: number, hm: number, seed = 0, o: { scrolls?: boolea
     }
     let x = x0 + 3;
     const xe = x1 - 3;
+    let runDep = D - 1;
     while (x <= xe) {
       const roll = r.next();
       if (roll < 0.05 && xe - x > 6) {
@@ -499,7 +539,8 @@ export function bookcase(wm: number, hm: number, seed = 0, o: { scrolls?: boolea
       const bw = r.chance(0.6) ? 2 : r.chance(0.5) ? 1 : 3;
       const bh = Math.max(3, Math.round(h * (0.62 + r.next() * 0.33)));
       const col = LEATHERS[r.int(0, LEATHERS.length - 1)];
-      const dep = D - 1 - r.int(0, 1);
+      if (r.chance(0.12)) runDep = D - 1 - r.int(0, 1);
+      const dep = runDep;
       const lean = roll > 0.96 && x > x0 + 6 ? 1 : 0;
       for (let xx = 0; xx < bw; xx++)
         for (let y = 0; y < bh; y++) {
@@ -508,10 +549,8 @@ export function bookcase(wm: number, hm: number, seed = 0, o: { scrolls?: boolea
           for (let z = 2; z <= dep; z++) {
             let c = col;
             if (z === dep) {
-              if (y === 1 || y === bh - 2) c = GOLD.base;
-              else if (bh > 6 && y >= Math.floor(bh * 0.55) && y <= Math.floor(bh * 0.55) + 1 && bw > 1) c = mixRGB(col, 0xf0e0b0, 0.55);
-              else if (y === bh - 1 || y === 0) c = mixRGB(col, 0x000000, 0.25);
-              else c = mixRGB(col, 0xffffff, xx === 0 ? 0.08 : 0);
+              if (y === 1 || (y === bh - 2 && bh > 5)) c = GOLD.base;
+              else if (bh > 8 && bw > 1 && y >= Math.floor(bh * 0.55) && y <= Math.floor(bh * 0.55) + 1) c = mixRGB(col, 0xf0e0b0, 0.55);
             }
             m.set(sx, ya + 1 + y, z, c, c === GOLD.base ? VF.METAL : 0);
           }
@@ -653,9 +692,10 @@ export function dustSheet(seed = 0): Built {
         const fold = (Math.sin(a * 7 + seed + t * 1.5) * 0.7 + Math.sin(a * 3 - seed) * 0.4) * (1 - t) * 1.1;
         const d = Math.hypot(x, z);
         if (d > R + fold + 0.3 || d < R + fold - 1.4) continue;
-        const shoulder = t > 0.6;
-        let c = pick([0x8a7c6a, 0x9e8f7a, 0xb2a28a, 0xc4b498], clamp01(0.55 + Math.sin(a * 7 + seed + t * 1.5) * 0.3 + (shoulder ? 0.2 : 0) - (1 - t) * 0.15));
-        if (shoulder && hash3(x, y, z + seed) > 0.6) c = mixRGB(c, 0xd8d0c4, 0.5); // dust
+        const shoulder = t > 0.62;
+        const tn = Math.sin(a * 7 + seed + t * 1.5);
+        let c = tn < -0.45 ? 0x8a7c6a : tn < 0.1 ? 0x9e8f7a : tn < 0.6 ? 0xb2a28a : 0xc4b498;
+        if (shoulder) c = tn < -0.2 ? 0xb8ad9a : 0xd2c8b6; // a grey bloom of dust on the shoulders
         m.set(x, y, z, c, VF.SOFTAO);
       }
   }
@@ -760,7 +800,7 @@ export function moonRoundel(): Built {
       const cr = Math.hypot(x + 9, y - 4);
       const lit = Math.hypot(x - 11, y - 3) > R - 2;
       const maria = noise.n2(x * 0.09 + 3, y * 0.09) > 0.25;
-      let c = lit ? (maria ? 0xb8c0cc : 0xdde2ea) : maria ? 0x8a94a6 : 0xaab2c0;
+      let c = lit ? (maria ? 0x8e98ac : 0xc4ccd8) : maria ? 0x6a7488 : 0x8a94a6;
       let depth = 1;
       for (const [cx, cy, rr] of [[-12, 8, 5], [6, -14, 4], [14, 12, 3], [-4, -6, 3], [-18, -8, 2.5], [20, -4, 2]] as const) {
         const dd = Math.hypot(x - cx, y - cy);
@@ -768,8 +808,10 @@ export function moonRoundel(): Built {
         else if (dd < rr + 1) c = mixRGB(c, 0xffffff, 0.25);
       }
       if (cr < 0) depth = 1;
-      if (!lit && d > R - 3) c = GOLD.hi;
-      for (let z = 0; z <= depth + 1; z++) m.set(x, y, z, z === depth + 1 ? c : 0x6a7280, z === depth + 1 ? (c === GOLD.hi ? VF.EMISSIVE : VF.EMISSIVE) : 0);
+      const rim = !lit && d > R - 3;
+      if (rim) c = GOLD.hi;
+      const limb = lit && Math.hypot(x - 11, y - 3) < R + 1.5;
+      for (let z = 0; z <= depth + 1; z++) m.set(x, y, z, z === depth + 1 ? (limb ? 0xeef2f8 : c) : 0x5a6274, z === depth + 1 ? (rim || limb ? VF.GLOW : VF.EMISSIVE) : 0);
     }
   return { model: m, voxelSize: vs, pivot: [0, 0, 0] };
 }
