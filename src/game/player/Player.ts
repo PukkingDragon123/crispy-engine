@@ -20,6 +20,7 @@ import { Input } from '../../engine/Input';
 import { PlayerAnim } from '../anim/playerAnim';
 import { CastAnim } from '../anim/castAnim';
 import { Weapons } from './Weapons';
+import { installHairSway } from '../models/characters/hairSway';
 
 export interface PlayerVisuals {
   rig: RigSpec;
@@ -226,6 +227,8 @@ export class Player {
     this.stats = new StatSheet({ vit: 5, def: 3, phys: 5, magic: 6, mob: 5, luck: 1 });
     this.material = makeVoxelMaterial();
     this.rig = new RigInstance(buildRigGeo(vis.rig, vis.rig.name + ':player'), { material: this.material });
+    // his hair locks swing with speed and wind (no-op on rigs without hair)
+    installHairSway(this.rig);
     this.gun = new RigInstance(buildRigGeo(vis.gun, vis.gun.name + ':player'), { material: this.material });
     this.boardMesh = voxelMesh(vis.board.model, vis.board.voxelSize, 'center', this.material);
     this.boardMesh.position.y = 0.06;

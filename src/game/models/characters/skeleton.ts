@@ -1,4 +1,6 @@
-// "Sundown" — the skeleton cowboy, chosen of Serket.
+// The legacy 1/36 skeleton cowboy: the base every humanoid enemy is cut from
+// (skeletonFigure), plus the shared look types (CowboyLook, HatId, OutfitId).
+// The player, Sundown, is the half-dead HD build in sundown.ts.
 // Built to match the user's skeleton reference EXACTLY: a big rounded-dome
 // cream skull (12 wide x 17 tall), two big square sockets that are deep
 // dark-brown recesses (his eyes — no 2D overlay), a small nose notch, a wide

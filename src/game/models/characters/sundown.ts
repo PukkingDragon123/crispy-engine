@@ -385,7 +385,7 @@ const keyAt = (k: [number, number][], v: number) => {
   return k[k.length - 1][1];
 };
 /** x of the torn edge across the face at height y (front view): the right half has rotted away */
-const HEAD_EDGE: [number, number][] = [[42, -1.5], [45.5, -1.6], [47.4, -2.15], [49.4, -1.95], [50.6, -1.6], [52.4, -1.4], [54.2, -1.05], [56.2, -0.75], [57.6, 0.0], [59.0, 1.1], [61, 1.0], [64, 0.8]];
+const HEAD_EDGE: [number, number][] = [[42, -1.5], [45.5, -1.6], [47.4, -2.15], [49.4, -1.95], [50.6, -1.6], [52.4, -1.4], [54.2, -1.05], [56.2, -0.75], [57.6, 0.0], [59.0, -0.1], [60.5, -1.5], [64, -2.2]];
 /** signed distance (u, approx.) to the rot on the head: < 0 eaten to the bone, > 0 living skin.
  *  The edge runs down beside the nose, bites into the right cheek, climbs over the forehead and
  *  wraps back round the right temple (the back of the head keeps its skin and hair). */

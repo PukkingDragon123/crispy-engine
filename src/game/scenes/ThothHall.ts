@@ -74,6 +74,9 @@ function geo(key: string, make: () => HM.Built) {
 let WALLS: THREE.BufferGeometry[] | null = null;
 const HM_WALLS = () => (WALLS ??= HM.hallWalls().map((b) => buildVoxelGeometry(b.model, { voxelSize: b.voxelSize, pivot: b.pivot })));
 let STAND_SLOTS: HM.V3[] = [];
+/** the book pile Thoth stands on to say hello */
+const PILE = { x: 0.95, z: 2.95 };
+let PILE_TOP = 0.56;
 let PED_TOP = 0.9;
 let DESK_META: ReturnType<typeof HM.thothDesk>['meta'] | null = null;
 
@@ -121,8 +124,10 @@ interface Walker {
   gest: { mode: ThothMode | BookwormMode; t: number } | null;
   job?: string;
   t: number;
-  /** standing on something (the stool): its height over the floor */
+  /** standing on something (the stool, the book pile): its height over the floor */
   perch: number;
+  /** where he climbed up from (he hops back down there) */
+  perchBase: THREE.Vector3 | null;
 }
 interface Book {
   rig: RigInstance;
@@ -268,6 +273,10 @@ export class ThothHall {
     } catch (e) {
       console.warn('[hall] statue', e);
     }
+    // Thoth's book pile in the nave (where he says hello)
+    const pile = HM.bookPile();
+    PILE_TOP = pile.top;
+    place(geo('pile', () => pile), PILE.x, 0, PILE.z, 0.4);
     // rugs in the bays and before the desk
     const rugG = geo('rug', () => HM.rug(2.4, 3.0, 4));
     for (const sd of [-1, 1]) for (const zc of H.BAYS) place(rugG, sd * 4.55, 0.002, zc, Math.PI / 2, false);
@@ -311,7 +320,7 @@ export class ThothHall {
       const yaw = wp.side === 0 ? 0 : -wp.side * Math.PI / 2;
       const stand = place(standG, standPos.x, standPos.y, standPos.z, yaw);
       const pedPos = standPos.clone().addScaledVector(fwd, -1.3).addScaledVector(right, -1.2);
-      if (wp.side === 0) pedPos.set(-2.55, floor, -8.7);
+      if (wp.side === 0) pedPos.set(-2.15, floor, -8.75);
       const ped = place(pedG, pedPos.x, pedPos.y, pedPos.z, yaw);
       const arch = new THREE.Mesh(new THREE.BoxGeometry(wp.side === 0 ? 7.5 : 0.3, 3.2, wp.side === 0 ? 0.3 : 3.8), this.silMat);
       arch.position.set(wp.side === 0 ? 0 : wp.side * 3.2, 1.6, wp.side === 0 ? -6.6 : wp.z);
@@ -422,6 +431,7 @@ export class ThothHall {
       gest: null,
       t: Math.random() * 10,
       perch: 0,
+      perchBase: null,
     };
   }
 
@@ -681,18 +691,18 @@ export class ThothHall {
     const usable = this.view === 'nave' ? 1 : clamp01((this.ui?.panelLeft() ?? this.engine.width * 0.62) / this.engine.width - 0.02);
     if (this.view === 'nave') {
       this.goalPos.set(0, 1.75, 8.25);
-      this.goalLook.set(0, 2.7, -6);
+      this.goalLook.set(0, 2.25, -6);
       return;
     }
     if (this.view === 'desk') {
       const d = this.deskGroup;
       const f = new THREE.Vector3(Math.sin(d.rotation.y), 0, Math.cos(d.rotation.y));
       const r = new THREE.Vector3().crossVectors(f, UP).negate();
-      const look = d.position.clone().add(new THREE.Vector3(0, 0.95, 0));
-      const dist = 2.9 / Math.max(0.35, usable);
-      look.addScaledVector(r, -(0.5 - usable / 2) * 2 * dist * Math.tan(hf / 2));
+      const look = d.position.clone().add(new THREE.Vector3(0, 1.0, 0)).addScaledVector(f, 0.2);
+      const dist = Math.max(2.4, 2.7 / Math.max(0.35, usable) / (2 * Math.tan(hf / 2)));
+      look.addScaledVector(r, (0.5 - usable / 2) * 2 * dist * Math.tan(hf / 2));
       this.goalLook.copy(look);
-      this.goalPos.copy(look).addScaledVector(f, dist).add(new THREE.Vector3(0, 0.55, 0));
+      this.goalPos.copy(look).addScaledVector(f, dist).add(new THREE.Vector3(0, 0.45, 0));
       return;
     }
     const w = this.wings[this.wing];
@@ -703,9 +713,10 @@ export class ThothHall {
     d = Math.max(3.8, Math.min(w.side === 0 ? 7.4 : 6.9, d));
     const visW = 2 * d * Math.tan(hf / 2), visH = 2 * d * Math.tan(fov / 2);
     const shift = (0.5 - usable / 2) * visW;
-    const look = c.add(new THREE.Vector3(0, 1.05 - visH * 0.1, 0)).addScaledVector(w.right, shift);
+    const look = c.add(new THREE.Vector3(0, 1.2, 0)).addScaledVector(w.right, shift);
+    void visH;
     this.goalLook.copy(look);
-    this.goalPos.copy(look).addScaledVector(w.fwd, -d).add(new THREE.Vector3(0, 0.5, 0));
+    this.goalPos.copy(look).addScaledVector(w.fwd, -d).add(new THREE.Vector3(0, 0.3, 0));
   }
 
   private updateCamera(rdt: number) {
@@ -825,7 +836,7 @@ export class ThothHall {
     const atDesk = (p: THREE.Vector3) => p.z < HM.HALL.APSE_START + 0.4 && p.x > 0.9;
     const floorAt = (z: number) => (z < HM.HALL.APSE_START ? APSE_Y : 0);
     const P = (x: number, z: number) => new THREE.Vector3(x, floorAt(z), z);
-    if (w.perch > 0) path.push(w.pos.clone().setY(w.pos.y - w.perch));
+    if (w.perch > 0) path.push(w.perchBase?.clone() ?? w.pos.clone().setY(w.pos.y - w.perch));
     if (inBay(w.pos)) path.push(P(Math.sign(w.pos.x) * 1.9, w.pos.z));
     if (atDesk(w.pos) && !atDesk(goal)) path.push(P(0.9, -6.9));
     if (atDesk(goal) && !atDesk(w.pos)) path.push(P(0.9, -6.9));
@@ -888,6 +899,18 @@ export class ThothHall {
     return !moving;
   }
 
+  /** walk to `stand`, then hop up onto `top` (a stool, the book pile) and stay there */
+  private perchAt(w: Walker, stand: THREE.Vector3, top: THREE.Vector3, height: number, key: string) {
+    this.goTo(w, stand, key);
+    if (w.goalKey === key && !w.path.length && w.perch === 0) {
+      w.perch = height;
+      w.perchBase = stand.clone();
+      w.path = [top];
+      this.gesture(w, 'hop', 0.5);
+      this.engine.audio.play('board_jump', { volume: 0.12, pitch: 1.8 });
+    }
+  }
+
   private gesture(w: Walker | null, mode: ThothMode | BookwormMode, t = 1.6) {
     if (w) w.gest = { mode, t };
   }
@@ -898,27 +921,23 @@ export class ThothHall {
     const cam = this.camera.position;
     if (this.view === 'wing') {
       const w = this.wings[this.wing];
-      const goal = w.pedPos.clone().addScaledVector(w.right, -0.85).addScaledVector(w.fwd, -0.55);
+      const goal = w.pedPos.clone().addScaledVector(w.right, 0.8).addScaledVector(w.fwd, -0.35);
       goal.y = w.floor;
       this.goTo(th, goal, 'wing' + this.wing);
       th.face = Math.atan2(cam.x - goal.x, cam.z - goal.z);
-    } else if (this.view === 'desk' || (this.view === 'nave' && this.t > 10)) {
+    } else if (this.view === 'desk' || (this.view === 'nave' && this.t > 16)) {
+      // up the steps of his stool to write (and to show you the gifts)
       const st = DESK_META?.stool ?? [0, 0.6, 0.47];
       const stand = this.deskGroup.localToWorld(new THREE.Vector3(st[0], 0, st[2] + 0.42));
-      this.goTo(th, stand, 'desk');
-      th.face = this.deskGroup.rotation.y + Math.PI;
-      // at the stool he hops up onto the top step and writes
-      if (th.goalKey === 'desk' && !th.path.length && th.perch === 0) {
-        const top = this.deskGroup.localToWorld(new THREE.Vector3(st[0], st[1], st[2] + 0.05));
-        th.perch = st[1];
-        th.path = [top];
-        this.gesture(th, 'hop', 0.4);
-      }
-      if (this.view === 'desk' && th.perch > 0 && !th.path.length) th.face = this.deskGroup.rotation.y + Math.PI + 0.9;
+      const top = this.deskGroup.localToWorld(new THREE.Vector3(st[0], st[1], st[2] + 0.05));
+      this.perchAt(th, stand, top, st[1], 'desk');
+      th.face = this.view === 'desk' && th.perch > 0 && !th.path.length ? Math.atan2(cam.x - th.pos.x, cam.z - th.pos.z) : this.deskGroup.rotation.y + Math.PI;
     } else {
-      const goal = new THREE.Vector3(0.55, 0, 2.5);
-      this.goTo(th, goal, 'hello');
-      th.face = Math.atan2(cam.x - goal.x, cam.z - goal.z);
+      // on top of his pile of books in the nave, to say hello (he is not small)
+      const stand = new THREE.Vector3(PILE.x - 0.05, 0, PILE.z + 0.62);
+      const top = new THREE.Vector3(PILE.x, PILE_TOP, PILE.z);
+      this.perchAt(th, stand, top, PILE_TOP, 'hello');
+      th.face = Math.atan2(cam.x - th.pos.x, cam.z - th.pos.z);
     }
     this.stepWalker(th, dt);
   }
@@ -1290,6 +1309,11 @@ export class ThothHall {
         markers.push({ x: (v.x * 0.5 + 0.5) * this.engine.width, y: (-v.y * 0.5 + 0.5) * this.engine.height, kind });
       });
     }
+    let talkAt: HallUIState['talkAt'] = null;
+    if (this.thoth) {
+      const v = this.thoth.rig.root.position.clone().add(new THREE.Vector3(0, 0.98, 0)).project(this.camera);
+      if (v.z < 1 && Math.abs(v.x) < 0.98 && Math.abs(v.y) < 0.98) talkAt = { x: (v.x * 0.5 + 0.5) * this.engine.width, y: (-v.y * 0.5 + 0.5) * this.engine.height };
+    }
     const sat = Research.satchel();
     const state: HallUIState = {
       view: this.view,
@@ -1301,6 +1325,7 @@ export class ThothHall {
       page: this.view === 'wing' ? { cur: this.wings[this.wing].page, total: this.pages(this.wings[this.wing]) } : null,
       panel: this.view === 'wing' ? this.panelData(this.wings[this.wing]) : null,
       talk: this.state === 'open' || this.state === 'closing' ? this.talkText : null,
+      talkAt,
       errand: this.view === 'nave' ? this.errandSlip() : null,
       gifts: this.view === 'desk' ? GIFTS.map((g, i) => ({ name: giftName(g), at: g.at, given: i < Research.given() })) : null,
       satchel: sat.length ? sat.map((s) => `${s.n} ${s.n > 1 ? 'x ' : ''}${giftName({ at: 0, kind: 'item', id: s.id, say: '' }).replace(/ x\d+$/, '')}`).join(', ') : null,

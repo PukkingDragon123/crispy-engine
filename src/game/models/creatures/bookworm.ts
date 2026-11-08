@@ -1,33 +1,39 @@
-// The bookworms: the librarians of Thoth's Hall. Plump, segmented larvae with
-// soft banded bodies, pale bellies, spiracle dots and a fuzz of fine setae, who
-// read with their whole length curled up off the floor.
+// The bookworms: the librarians of Thoth's Hall, who are EARTHWORMS. Long, soft,
+// moist and eyeless, they read by touch and carry the books about in their mouths.
 //
-//   - every body segment is its own sculpt and its own joint, so the worm can
-//     inch along in a travelling wave, rear up tall to shelve a book, or curl;
-//   - stubby prolegs with dark crochet soles under the belly, tiny jointed true
-//     legs on the thorax, and two little arms with three-fingered paws;
-//   - a big round head with chubby cheeks, a mouth with its own lower lip, and
-//     glossy modelled eyes behind real wire spectacles (with upper lids that blink);
-//   - a tiny cap, a quill tucked in somewhere, and something to read.
+// The body (sculpted, one part per physics segment):
+//   - a ringed body of annuli (three real grooves per segment) in dusky pink-brown,
+//     darker along the back with the dorsal blood vessel showing, paler below;
+//   - the saddle (clitellum): a smooth, swollen, orange-pink band a third of the
+//     way back, with no rings;
+//   - a moist sheen (glossy glints along the back), fine pale bristles (setae) in
+//     pairs on every annulus, a tail that tapers to a blunt, slightly flat end;
+//   - a blunt, eyeless head: a rounded prostomium lobe overhanging a small mouth
+//     with its own lower lip. No eyes, no spectacles.
+// The props stay: a tiny cap on the head, a quill tucked into a fold of the saddle,
+// and something to read (an open book that lies on the floor while it reads and is
+// carried shut in the mouth when it moves; the apprentice balances a stack of books
+// on its saddle).
 //
 // Variants (bookwormRig(v)):
-//   0 bookworm             "Inkwell"   sage green, round gold spectacles, maroon fez and tassel, an open book
-//   1 bookworm_elder       "Old Vellum" lavender grey, half-moon spectacles on a chain, a lapis skullcap,
-//                                       white brows and whiskers, a big open tome
-//   2 bookworm_apprentice  "Dog-Ear"   peach, thick tortoiseshell glasses, a floppy linen cap, a stack of books
-//   3 bookworm_archivist   "Ledger"    ochre, a monocle on a chain, a green eyeshade with two quills, an open ledger
+//   0 bookworm             "Inkwell"    dusky pink-brown, a maroon fez with a tassel, an open book
+//   1 bookworm_elder       "Old Vellum"  long and pale mauve, a lapis skullcap, a big old tome
+//   2 bookworm_apprentice  "Dog-Ear"    small and bright pink, a floppy linen cap, a stack of books on its saddle
+//   3 bookworm_archivist   "Ledger"     deep red-brown, a green eyeshade (it has no eyes, it likes the look), a ledger
 //
-// RIG (faces +Z, LEFT = +X, origin on the ground under the tail end, 1/160 m):
-//   seg0 (root, tail end on the ground) → seg1 → … → seg9 (thorax, upright in the rest pose) → head
-//   head → jaw (lower lip), eye_l / eye_r, lid_l / lid_r (blink: rotate +X by meta.blink.close),
-//          specs, cap (→ tassel on the fez)
-//   seg9 → hand_l, hand_r (arms), book (spine + left half; or the stack)
-//   book → cover_r (the right half: close = rotate Y by meta.bookClose), page (flip = rotate Y by meta.pageFlip)
-// Rest pose = reading: the rear six segments flat on the floor, the front four curving up,
-// the book held open under the chin. Animate with BookwormAnim (bottom of this file).
+// RIG (faces +Z, LEFT = +X, origin on the floor under the head joint, 1/160 m). The
+// hierarchy is FLAT so the physics can place every segment:
+//   body (root, empty) → head (→ jaw, cap → tassel), seg1 … seg12 (head to tail), book (→ cover_r, page)
+// meta.restPts: the physics particles at rest (root-local metres; 0 = head joint, 12 = tail tip),
+// meta.radii: their radii. Each seg{i} spans particles i-1 (front) … i (rear).
+// BookwormAnim (bottom of this file) runs a position-based physics chain: length and
+// bending constraints, gravity, ground contact with bristle friction (they slide
+// forward, grip backward), peristaltic contraction waves that push the body along,
+// muscles that lift the front to rear up (and sag under their own weight), and a
+// wobbly settle. The caller moves rig.root (the head goes where the root is).
 import * as THREE from 'three';
 import type { RigInstance } from '../../../engine/voxel/Rig';
-import { CRig, VoxelModel, VF, blob, ell, cap, tube, line, paint, exposed, thicken, splitInto, finish, mixc, mulc, n01, h01, wetEye, add3, sub3, scl3, norm3, cross3, dot3, sstep, clamp01, rotXYZ, invXYZ } from './ckit';
+import { CRig, VoxelModel, VF, blob, ell, cap, line, paint, exposed, thicken, splitInto, finish, mixc, n01, h01, add3, sub3, scl3, norm3, cross3, dot3, sstep, clamp01, rotXYZ, invXYZ } from './ckit';
 import type { V3, RigSpec, Col } from './ckit';
 
 const VS = 1 / 160;
@@ -37,55 +43,36 @@ export type BookwormVariant = 0 | 1 | 2 | 3;
 interface WormLook {
   name: string;
   scale: number;
-  body: number;
-  bodyL: number;
-  bodyS: number;
-  spot: number;
+  base: number;
+  back: number;
   belly: number;
-  face: number;
-  blush: number;
-  iris: number;
-  specs: 'round' | 'half' | 'thick' | 'monocle';
+  saddle: number;
+  groove: number;
+  glint: number;
   cap: 'fez' | 'skullcap' | 'slouch' | 'visor';
   carry: 'book' | 'tome' | 'stack' | 'ledger';
   cover: number;
-  elder?: boolean;
 }
 export const BOOKWORMS: WormLook[] = [
-  { name: 'Inkwell', scale: 1, body: 0x9cbf7e, bodyL: 0xbdd89a, bodyS: 0x7a9c62, spot: 0x5e7e4c, belly: 0xdfe6b4, face: 0xb6d292, blush: 0xe8a890, iris: 0x5a3a1c, specs: 'round', cap: 'fez', carry: 'book', cover: 0x7a2a26 },
-  { name: 'Old Vellum', scale: 1.12, body: 0xa79cc0, bodyL: 0xc6bedb, bodyS: 0x857aa0, spot: 0x6a5e86, belly: 0xe4deee, face: 0xbdb3d4, blush: 0xd8a0b0, iris: 0x3a4a6a, specs: 'half', cap: 'skullcap', carry: 'tome', cover: 0x24427e, elder: true },
-  { name: 'Dog-Ear', scale: 0.82, body: 0xeba98a, bodyL: 0xf6c6aa, bodyS: 0xc98868, spot: 0xb06a50, belly: 0xfbe4cf, face: 0xf3bb9c, blush: 0xe88874, iris: 0x4a2c18, specs: 'thick', cap: 'slouch', carry: 'stack', cover: 0x2e6a52 },
-  { name: 'Ledger', scale: 1.04, body: 0xd6b052, bodyL: 0xead07a, bodyS: 0xb08a38, spot: 0x8a6a2a, belly: 0xf3e4ac, face: 0xe4c46c, blush: 0xe09a6a, iris: 0x2e4a2a, specs: 'monocle', cap: 'visor', carry: 'ledger', cover: 0x2f5e3a },
+  { name: 'Inkwell', scale: 1, base: 0xc27a6a, back: 0x9a524a, belly: 0xe2ab98, saddle: 0xdc8a62, groove: 0x7e403a, glint: 0xf6ccbc, cap: 'fez', carry: 'book', cover: 0x7a2a26 },
+  { name: 'Old Vellum', scale: 1.15, base: 0xb48a8a, back: 0x8a6264, belly: 0xdcbcb6, saddle: 0xc89480, groove: 0x6e4c4e, glint: 0xf0dad4, cap: 'skullcap', carry: 'tome', cover: 0x24427e },
+  { name: 'Dog-Ear', scale: 0.8, base: 0xe0868a, back: 0xbc5e66, belly: 0xf6b8b4, saddle: 0xf09a78, groove: 0x9a4650, glint: 0xffdcda, cap: 'slouch', carry: 'stack', cover: 0x2e6a52 },
+  { name: 'Ledger', scale: 1.05, base: 0xa45a4c, back: 0x7a3a34, belly: 0xcc8a78, saddle: 0xc8704c, groove: 0x5e2a26, glint: 0xeab0a0, cap: 'visor', carry: 'ledger', cover: 0x2f5e3a },
 ];
 const GOLD = { g: 0xe2b24a, l: 0xffe08a, s: 0xa8782a };
-const INK = 0x2a1c14;
 const PAPER = { p: 0xf0e4c4, s: 0xd8c8a0, line: 0xa8987a };
 
-/** the spine (design metres, rest pose): joints J0 (tail tip) … J10 (base of the head) */
-const SPINE: V3[] = [
-  [0, 0.03, -0.39],
-  [0, 0.04, -0.33],
-  [0, 0.05, -0.27],
-  [0, 0.056, -0.21],
-  [0, 0.06, -0.15],
-  [0, 0.062, -0.09],
-  [0, 0.063, -0.03],
-  [0, 0.082, 0.024],
-  [0, 0.126, 0.058],
-  [0, 0.18, 0.074],
-  [0, 0.236, 0.078],
-];
-/** body radius of each segment (seg0 … seg9) */
-const SEG_R = [0.03, 0.04, 0.048, 0.054, 0.058, 0.061, 0.062, 0.061, 0.059, 0.056];
-const HEAD_C: V3 = [0, 0.3, 0.086];
-const HEAD_R: V3 = [0.074, 0.068, 0.068];
-const EYE: V3 = [0.03, 0.309, 0.141];
-const EYE_R = 0.0225;
-const LID_REST = -1.1;
-const LID_CLOSE = 1.7;
-/** the open book: spine axis (x 0, z BOOK_Z), half opening angle */
-const BOOK_Z = 0.206;
-const BOOK_TH = 0.38;
+// ---------------------------------------------------------------- body plan (design metres, unscaled)
+const NS = 12;
+const SEG_L = 0.058;
+/** segment radii, head to tail; seg3 and seg4 are the swollen saddle */
+const SEG_R = [0.034, 0.036, 0.042, 0.043, 0.037, 0.036, 0.035, 0.034, 0.032, 0.029, 0.025, 0.02];
+const SADDLE = [3, 4];
+/** particle radii (0 = head joint … NS = tail tip) */
+const PART_R = Array.from({ length: NS + 1 }, (_, i) => (i === 0 ? 0.034 : i === NS ? 0.017 : (SEG_R[i - 1] + SEG_R[i]) / 2));
+/** the book: half opening angle, and where it lies open on the floor while being read (spine point) */
+const BOOK_TH = 0.22;
+const BOOK_AT: V3 = [0, 0.004, 0.088];
 
 function build(v: BookwormVariant): RigSpec {
   const L = BOOKWORMS[v];
@@ -93,12 +80,9 @@ function build(v: BookwormVariant): RigSpec {
   const U = (m: number) => m * s * K;
   const P = (x: number, y: number, z: number): V3 => [x * s * K, y * s * K, z * s * K];
   const Pv = (q: V3): V3 => [q[0] * s * K, q[1] * s * K, q[2] * s * K];
-  /** voxel index -> design metres (unscaled) */
   const D = (i: number) => (i + 0.5) / (s * K);
   const rig = new CRig(['bookworm', 'bookworm_elder', 'bookworm_apprentice', 'bookworm_archivist'][v], VS);
   const seed = 11 + v * 7;
-
-  /** fill every cell whose centre (design metres) has f <= 0 */
   const sdf = (m: VoxelModel, lo: V3, hi: V3, f: (x: number, y: number, z: number) => number, col: Col, fl?: number) => {
     for (let i = Math.floor(U(lo[0])); i <= Math.ceil(U(hi[0])); i++)
       for (let j = Math.floor(U(lo[1])); j <= Math.ceil(U(hi[1])); j++)
@@ -108,391 +92,293 @@ function build(v: BookwormVariant): RigSpec {
           if (c !== null) m.set(i, j, k, c, fl);
         }
   };
+  const pts: V3[] = PART_R.map((r, i) => [0, r, -i * SEG_L]);
 
-  // ================================================================ body segments
-  const bodyCol = (i: number, j: number, k: number, axis: V3, dir: V3, len: number, segI: number) => {
+  rig.part('body', undefined, [0, 0, 0]);
+
+  // ================================================================ the ringed body
+  /** colour of the skin at a point, given the segment axis */
+  const skin = (i: number, j: number, k: number, a: V3, dir: V3, len: number, saddle: boolean) => {
     const p: V3 = [D(i), D(j), D(k)];
-    const rel = sub3(p, axis);
-    const t = dot3(rel, dir) / len; // 0 at the rear joint, 1 at the front joint
-    const radial = sub3(rel, scl3(dir, t * len));
-    // the body's "up" is perpendicular to the spine, toward the back
+    const rel = sub3(p, a);
+    const t = dot3(rel, dir) / len;
+    const rad = sub3(rel, scl3(dir, t * len));
     const up = norm3(cross3([1, 0, 0], dir));
-    const back = dot3(norm3(radial), up); // +1 along the back, -1 the belly
-    const side = Math.abs(radial[0]) / (Math.hypot(radial[0], radial[1], radial[2]) || 1);
-    let c = L.body;
-    const n = n01(i, j, k, 0.22, seed);
-    if (back < -0.45) c = mixc(L.body, L.belly, sstep(-0.45, -0.75, back));
-    else if (back > 0.55 && n > 0.56) c = mixc(c, L.bodyL, 0.5);
-    // a soft saddle spot on each segment's back, and a darker crease ring at each joint
-    if (back > 0.3 && t > 0.3 && t < 0.72 && Math.abs(radial[0]) < 0.02 * s) c = mixc(c, L.spot, 0.5 * sstep(0.3, 0.75, back));
-    if (t < 0.08 || t > 0.94) c = mixc(c, L.bodyS, 0.7);
-    // a spiracle: a dark dot with a pale rim on each flank
-    if (side > 0.86 && Math.abs(back) < 0.35 && segI > 0 && segI < 9) {
-      const d = Math.hypot(t - 0.5, back * 0.3) * len;
-      if (d < 0.0055) c = d < 0.0035 ? 0x2a2420 : L.bodyL;
-    }
-    if (h01(i, j, k, seed) < 0.03) c = mixc(c, L.bodyL, 0.4);
+    const rl = Math.hypot(rad[0], rad[1], rad[2]) || 1;
+    const back = dot3(rad, up) / rl; // +1 along the back, -1 the belly
+    const n = n01(i, j, k, 0.3, seed);
+    let c = L.base;
+    if (back > 0.25) c = mixc(L.base, L.back, sstep(0.25, 0.85, back) * 0.85);
+    else if (back < -0.3) c = mixc(L.base, L.belly, sstep(-0.3, -0.8, back));
+    if (saddle) c = mixc(c, L.saddle, 0.8);
+    // the dorsal blood vessel along the spine
+    if (!saddle && back > 0.93 && Math.abs(rad[0]) < 0.0045) c = mixc(L.back, 0x7a2424, 0.5);
+    if (n > 0.68) c = mixc(c, L.glint, 0.18);
+    else if (n < 0.28) c = mixc(c, L.groove, 0.12);
     return c;
   };
-  for (let si = 0; si < 10; si++) {
-    const a = SPINE[si], b = SPINE[si + 1];
+  for (let si = 1; si <= NS; si++) {
+    const a = pts[si], b = pts[si - 1]; // rear, front
     const dir = norm3(sub3(b, a));
     const len = Math.hypot(b[1] - a[1], b[2] - a[2]);
-    const r = SEG_R[si];
-    const rPrev = si ? SEG_R[si - 1] : r * 0.7;
-    const seg = rig.part('seg' + si, si ? 'seg' + (si - 1) : undefined, Pv(a));
-    const mid = scl3(add3(a, b), 0.5);
+    const R = SEG_R[si - 1];
+    const saddle = SADDLE.includes(si);
+    const c = scl3(add3(a, b), 0.5);
+    const seg = rig.part('seg' + si, 'body', Pv(c));
     const pitch = -Math.atan2(dir[1], dir[2]);
+    const tail = si === NS;
     blob(seg, [
-      { a: Pv(sub3(a, scl3(dir, len * 0.12))), b: Pv(add3(b, scl3(dir, len * 0.05))), r0: U((r + rPrev) * 0.47), r1: U(r * 0.9) },
-      { c: Pv(mid), r: [U(r * 1.05), U(r * 1.03), U(len * 0.45)], rot: [pitch, 0, 0] },
-      ...(si === 0 ? [{ c: Pv(add3(a, scl3(dir, -0.008))), r: [U(r * 0.75), U(r * 0.7), U(0.022)] as V3, rot: [pitch, 0, 0] as V3 }] : []),
-    ], (i, j, k) => bodyCol(i, j, k, a, dir, len, si), {
-      k: U(0.012),
-      disp: (x, y, z) => (n01(x, y, z, 0.4, seed + si) - 0.5) * 0.35,
-      keep: (_x, y) => y >= 0,
-    });
-    // prolegs under the abdomen (and the claspers under the tail), each with a dark crochet sole
-    if (si === 0 || (si >= 2 && si <= 5)) {
-      for (const sd of [1, -1]) {
-        const c: V3 = [sd * r * 0.55, 0.012, mid[2]];
-        ell(seg, Pv(c), [U(0.012), U(0.013), U(0.014)], (i, j, k) => (j <= 0 ? 0x3a2a22 : mixc(L.belly, L.bodyS, 0.25 + h01(i, j, k, 2) * 0.2)), { keep: (_a, _b, _c, _x, y) => y >= 0 });
-      }
-    }
-    // tiny jointed true legs on the thorax
-    if (si === 7 || si === 8) {
-      for (const sd of [1, -1]) {
-        const root: V3 = add3(mid, [sd * r * 0.6, -r * 0.4, r * 0.55]);
-        const knee: V3 = add3(root, [sd * 0.012, -0.01, 0.014]);
-        const tip: V3 = add3(knee, [sd * 0.002, -0.012, 0.01]);
-        tube(seg, [Pv(root), Pv(knee), Pv(tip)], [U(0.007), U(0.0055), U(0.0035)], (i, j, k) => (D(j) < tip[1] + 0.004 ? 0x3a2a22 : L.bodyS));
-      }
-    }
-    // a fuzz of fine setae along the back
-    for (const sd of [1, -1, 0]) {
-      if (h01(si, sd, 3, seed) < 0.35) continue;
-      const up = norm3(cross3([1, 0, 0], dir));
-      const base = add3(mid, add3(scl3(up, r * 0.95), [sd * r * 0.45, 0, 0]));
-      const tip = add3(base, add3(scl3(up, 0.012), [sd * 0.004, 0, -dir[2] * 0.006]));
-      line(seg, [Pv(base), Pv(tip)], mixc(L.bodyL, 0xffffff, 0.3));
-    }
-  }
-
-  // ================================================================ head
-  const head = rig.part('head', 'seg9', Pv(SPINE[10]));
-  const faceCol = (i: number, j: number, k: number) => {
-    const X = D(i), Y = D(j), Z = D(k);
-    const n = n01(i, j, k, 0.25, seed + 40);
-    let c = Z > HEAD_C[2] + 0.02 ? L.face : L.body;
-    if (Z > HEAD_C[2] && Z < HEAD_C[2] + 0.03) c = mixc(L.body, L.face, (Z - HEAD_C[2]) / 0.03);
-    if (Y > 0.345) c = mixc(c, L.spot, 0.25);
-    if (n > 0.66) c = mixc(c, L.bodyL, 0.4);
-    for (const sd of [1, -1]) {
-      const d = Math.hypot(X - 0.042 * sd, Y - 0.282, (Z - 0.128) * 1.2);
-      if (d < 0.018) c = mixc(c, L.blush, 0.6 * (1 - sstep(0.008, 0.018, d)));
-    }
-    return c;
-  };
-  blob(head, [
-    { c: Pv(HEAD_C), r: Pv(HEAD_R) },
-    { c: P(0.04, 0.279, 0.124), r: P(0.032, 0.028, 0.027) },
-    { c: P(-0.04, 0.279, 0.124), r: P(0.032, 0.028, 0.027) },
-    { c: P(0, 0.268, 0.135), r: P(0.028, 0.02, 0.022) },
-    { a: Pv(SPINE[10]), b: P(0, 0.28, 0.084), r0: U(0.05), r1: U(0.058) },
-  ], faceCol, { k: U(0.016), disp: (x, y, z) => (n01(x, y, z, 0.4, seed + 41) - 0.5) * 0.3 });
-  // the mouth: a small smile; the lower lip is its own part
-  const mouthY = (X: number) => 0.2705 + 9 * X * X;
-  const jaw = rig.part('jaw', 'head', P(0, 0.27, 0.118));
-  {
-    const tmp = new VoxelModel('h');
-    head.forEach((x, y, z, c, f) => tmp.set(x, y, z, c, f));
-    head.map.clear();
-    splitInto(tmp, head, jaw, (x, y, z) => D(z) > 0.122 && D(y) < mouthY(D(x)) && D(y) > 0.248 && Math.abs(D(x)) < 0.034);
-    const empty = (x: number, y: number, z: number) => !head.has(x, y, z) && !jaw.has(x, y, z);
-    jaw.forEach((x, y, z) => {
-      if (!jaw.has(x, y + 1, z)) jaw.set(x, y, z, empty(x, y, z + 1) || empty(x + 1, y, z) || empty(x - 1, y, z) ? 0x3a1e1a : 0xb0565a);
-    });
-    head.forEach((x, y, z) => {
-      if (jaw.has(x, y - 1, z) && (empty(x, y, z + 1) || empty(x + 1, y, z) || empty(x - 1, y, z))) head.set(x, y, z, 0x3a1e1a);
-    });
-  }
-  // eyes behind the spectacles
-  const eyeC = Pv(EYE);
-  const eyeM: V3 = [-eyeC[0], eyeC[1], eyeC[2]];
-  for (const e of [eyeC, eyeM]) ell(head, e, [U(EYE_R) * 1.04, U(EYE_R) * 1.04, U(EYE_R) * 1.04], 0, { carve: true });
-  for (const e of [eyeC, eyeM])
-    paint(head, (x, y, z) => {
-      if (!exposed(head, x, y, z)) return false;
-      const d = Math.hypot(x + 0.5 - e[0], y + 0.5 - e[1], z + 0.5 - e[2]);
-      return d < U(EYE_R) + 1.2;
-    }, mulc(L.face, 0.72));
-  const eyeL = rig.part('eye_l', 'head', eyeC);
-  wetEye(eyeL, eyeC, U(EYE_R), [0.18, 0.05, 1], { sclera: 0x1c130e, iris: L.iris, pupil: 0x070405, irisR: 0.9, pupilR: 0.55, bigGlint: 2 });
-  rig.mirror('eye_l', 'eye_r');
-  {
-    const lid = rig.part('lid_l', 'head', eyeC, [LID_REST, 0, 0]);
-    const R = U(EYE_R), lo = R + 0.4, hi = R + 1.6;
-    for (let i = Math.floor(eyeC[0] - hi - 1); i <= Math.ceil(eyeC[0] + hi + 1); i++)
-      for (let j = Math.floor(eyeC[1] - hi - 1); j <= Math.ceil(eyeC[1] + hi + 1); j++)
-        for (let k = Math.floor(eyeC[2] - hi - 1); k <= Math.ceil(eyeC[2] + hi + 1); k++) {
-          const px = i + 0.5 - eyeC[0], py = j + 0.5 - eyeC[1], pz = k + 0.5 - eyeC[2];
-          const d = Math.hypot(px, py, pz);
-          if (d < lo || d > hi || Math.abs(px) > R * 1.05) continue;
-          const th = Math.atan2(py, pz);
-          if (th < -0.02 || th > 1.95) continue;
-          lid.set(i, j, k, th < 0.1 ? 0x2a1c18 : L.face, VF.SOFTAO);
+      { a: Pv(sub3(a, scl3(dir, tail ? 0 : len * 0.1))), b: Pv(add3(b, scl3(dir, len * 0.1))), r0: U(tail ? R * 0.7 : R * 0.9), r1: U(R * 0.92) },
+      { c: Pv(c), r: [U(R * (saddle ? 1.06 : 1.02)), U(R * (saddle ? 1.04 : 1.0)), U(len * 0.5)], rot: [pitch, 0, 0] },
+      ...(tail ? [{ c: Pv(add3(a, scl3(dir, -0.006))), r: [U(R * 0.9), U(R * 0.62), U(0.016)] as V3, rot: [pitch, 0, 0] as V3 }] : []),
+    ], (i, j, k) => skin(i, j, k, a, dir, len, saddle), { k: U(0.01), keep: (_x, y) => D(y) > c[1] - R * 0.92 - 0.002 });
+    // annuli: three real grooves per segment (the saddle is smooth), with paired bristles on each ring
+    if (!saddle) {
+      const aV = Pv(a), lenV = U(len), RV = U(R);
+      for (const f of [0.17, 0.5, 0.83]) {
+        const del: V3[] = [];
+        seg.forEach((x, y, z) => {
+          const rel = sub3([x + 0.5, y + 0.5, z + 0.5], aV);
+          const t = dot3(rel, dir) / lenV;
+          if (Math.abs(t - f) * lenV > 0.55 || !exposed(seg, x, y, z)) return;
+          const rad = sub3(rel, scl3(dir, t * lenV));
+          if (Math.hypot(rad[0], rad[1], rad[2]) > RV * 0.8) del.push([x, y, z]);
+        });
+        for (const [x, y, z] of del) seg.del(x, y, z);
+        // the groove floor goes dark
+        for (const [x, y, z] of del)
+          for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] as V3[])
+            if (seg.has(x + dx, y + dy, z + dz)) seg.set(x + dx, y + dy, z + dz, L.groove);
+        // bristles: two pairs low on each flank, a pale voxel standing out of the ring between the grooves
+        if (f < 0.8) {
+          const mid = add3(a, scl3(dir, (f + 0.17) * len));
+          const up = norm3(cross3([1, 0, 0], dir));
+          for (const ang of [2.2, -2.2]) {
+            const o = add3(scl3(up, Math.cos(ang)), [Math.sin(ang), 0, 0]);
+            const vq = Pv(add3(mid, scl3(o, R * 1.06)));
+            seg.set(Math.floor(vq[0]), Math.floor(vq[1]), Math.floor(vq[2]), mixc(L.belly, 0xfff4ea, 0.35));
+          }
         }
-    rig.mirror('lid_l', 'lid_r');
-  }
-  // the elder's bushy white brows and drooping whiskers
-  if (L.elder) {
-    for (const sd of [1, -1]) {
-      blob(head, [{ a: P(0.014 * sd, 0.349, 0.147), b: P(0.054 * sd, 0.344, 0.124), r0: U(0.0075), r1: U(0.005) }], (i, j, k) => (h01(i, j, k, 3) < 0.3 ? 0xd8d4e0 : 0xf4f2f8), { k: U(0.003), disp: (x, y, z) => (n01(x, y, z, 0.8, 4) - 0.5) * 0.9 });
-      for (let w = 0; w < 3; w++) line(head, [P(0.012 * sd, 0.276 - w * 0.002, 0.152), P(0.03 * sd, 0.268 - w * 0.003, 0.154), P((0.05 + w * 0.004) * sd, 0.252 - w * 0.006, 0.148)], w === 1 ? 0xe8e4f0 : 0xfafafe);
-    }
-  }
-
-  // ================================================================ spectacles
-  {
-    const specs = rig.part('specs', 'head', P(0, 0.312, 0.16));
-    const wire = L.specs === 'thick' ? (i: number, j: number, k: number) => (n01(i, j, k, 0.6, 5) > 0.55 ? 0x8a4a1c : n01(i, j, k, 0.6, 5) < 0.35 ? 0x3a1a0c : 0x6a3416) : (i: number, j: number, k: number) => (h01(i, j, k, 1) < 0.2 ? GOLD.l : GOLD.g);
-    const rimR = L.specs === 'thick' ? 0.03 : 0.027;
-    const wireT = L.specs === 'thick' ? 0.0062 : 0.0034;
-    const lensY = L.specs === 'half' ? EYE[1] - 0.009 : EYE[1];
-    const sides = L.specs === 'monocle' ? [-1] : [1, -1];
-    for (const sd of sides) {
-      const c: V3 = [EYE[0] * sd, lensY, EYE[2] + 0.02];
-      const nrm = norm3([0.22 * sd, 0.02, 1]);
-      const ax = norm3(cross3([0, 1, 0], nrm));
-      const ay = cross3(nrm, ax);
-      sdf(specs, sub3(c, [0.04, 0.04, 0.02]), add3(c, [0.04, 0.04, 0.02]), (x, y, z) => {
-        const q = sub3([x, y, z], c);
-        const u = dot3(q, ax), w = dot3(q, ay), h = dot3(q, nrm);
-        if (L.specs === 'half' && w > 0.004) return 1; // half-moons: the lower half and a flat top bar
-        const ringD = Math.hypot(Math.hypot(u, w) - rimR, h);
-        const bar = L.specs === 'half' ? Math.hypot(Math.max(Math.abs(u) - rimR, 0), w - 0.002, h) : 1;
-        return Math.min(ringD, bar) - wireT * 0.5;
-      }, wire, VF.METAL);
-      // a glint on the glass edge
-      const g = add3(c, add3(scl3(ax, -rimR * 0.5 * sd), scl3(ay, rimR * 0.55)));
-      if (L.specs !== 'half') specs.set(Math.floor(U(g[0])), Math.floor(U(g[1])), Math.floor(U(g[2])), 0xf4fbff, VF.SOFTAO);
-      // the temple arm back to the side of the head
-      const out = add3(c, scl3(ax, (rimR + 0.002) * sd));
-      line(specs, [Pv(out), P(0.066 * sd, lensY + 0.004, 0.11), P(0.074 * sd, lensY + 0.002, 0.085)], wire);
-    }
-    if (L.specs !== 'monocle') {
-      // the bridge over the nose
-      line(specs, [P(0.008, lensY + (L.specs === 'half' ? 0.0 : 0.006), EYE[2] + 0.024), P(0, lensY + 0.009, EYE[2] + 0.027), P(-0.008, lensY + (L.specs === 'half' ? 0.0 : 0.006), EYE[2] + 0.024)], wire);
-    }
-    if (L.specs === 'half' || L.specs === 'monocle') {
-      // a fine chain looping down from the frames
-      const sd = L.specs === 'monocle' ? -1 : 1;
-      const pts: V3[] = [];
-      for (let q = 0; q <= 10; q++) {
-        const t = q / 10;
-        pts.push(P((0.055 - t * 0.012) * sd, lensY - 0.02 - Math.sin(t * Math.PI) * 0.05, 0.15 - t * 0.02));
       }
-      line(specs, pts, (i, j, k) => ((i + j + k) & 1 ? GOLD.g : GOLD.s), VF.METAL);
+    }
+    // the moist sheen: wet glints along the back
+    paint(seg, (x, y, z) => !seg.has(x, y + 1, z) && h01(x, y, z, seed + si) < 0.12, L.glint, VF.METAL);
+    if (si === 3) {
+      // a quill tucked into a fold of the saddle
+      const R3 = SEG_R[2];
+      quill(seg, add3(c, [0.012, R3 * 0.95, 0.014]), add3(c, [0.042, R3 + 0.052, -0.04]), 0xf4ecdc, L.carry === 'ledger' ? 0x3f6a8a : 0xa04a3a, s);
     }
   }
-
-  // ================================================================ caps
-  const hatTop = HEAD_C[1] + HEAD_R[1];
-  if (L.cap === 'fez') {
-    const capP = rig.part('cap', 'head', P(0.006, hatTop - 0.012, HEAD_C[2] - 0.006));
-    const base: V3 = [0.006, hatTop - 0.016, HEAD_C[2] - 0.006];
-    const rot: V3 = [-0.14, 0, -0.16];
-    const H = 0.056;
-    sdf(capP, sub3(base, [0.06, 0.02, 0.06]), add3(base, [0.06, 0.09, 0.06]), (x, y, z) => {
-      const q = invXYZ(sub3([x, y, z], base), rot);
-      const t = clamp01(q[1] / H);
-      const r = 0.043 - 0.009 * t;
-      const dr = Math.hypot(q[0], q[2]) - r, dy = Math.max(q[1] - H, -q[1]);
-      return Math.hypot(Math.max(dr + 0.004, 0), Math.max(dy + 0.004, 0)) + Math.min(Math.max(dr, dy), 0) - 0.004;
-    }, (i, j, k) => {
-      const q = invXYZ(sub3([D(i), D(j), D(k)], base), rot);
-      const n = n01(i, j, k, 0.35, 7);
-      let c = n > 0.62 ? 0xa83a3a : n < 0.3 ? 0x7a2228 : 0x922e30;
-      if (q[1] < 0.008) c = 0x6a1c20;
-      if (q[1] > H - 0.003 && Math.hypot(q[0], q[2]) < 0.006) c = 0x1a1414;
-      return c;
-    }, VF.SOFTAO);
-    // the black silk tassel on its cord
-    const top = add3(base, rotXYZ([0, H, 0], rot));
-    const tassel = rig.part('tassel', 'cap', Pv(top));
-    const knot = add3(top, rotXYZ([-0.03, -0.004, 0.004], rot));
-    line(tassel, [Pv(top), Pv(knot)], 0x221a1a);
-    ell(tassel, Pv(knot), P(0.0042, 0.0042, 0.0042), GOLD.g, { fl: VF.METAL });
-    for (let q = 0; q < 7; q++) {
-      const a = (q / 7) * Math.PI * 2;
-      const o: V3 = [Math.cos(a) * 0.004, 0, Math.sin(a) * 0.004];
-      line(tassel, [Pv(add3(knot, o)), Pv(add3(knot, add3(scl3(o, 1.6), [0, -0.032 - (q & 1) * 0.004, 0])))], q & 1 ? 0x2a2020 : 0x141010);
-    }
-    quill(capP, add3(base, rotXYZ([-0.036, 0.012, 0.006], rot)), add3(base, rotXYZ([-0.07, 0.085, -0.03], rot)), 0xf2eee2, 0x6a8ab0, s);
-  } else if (L.cap === 'skullcap') {
-    const capP = rig.part('cap', 'head', P(0, hatTop - 0.01, HEAD_C[2] - 0.01));
-    const zone = (x: number, y: number, z: number) => D(y) - HEAD_C[1] > 0.038 - (D(z) - HEAD_C[2] < -0.02 ? 0.01 : 0);
-    const colAt = (x: number, y: number, z: number) => {
-      const X = D(x), Y = D(y) - HEAD_C[1], Z = D(z) - HEAD_C[2];
-      const a = Math.atan2(X, Z);
-      if (Y < 0.044) return GOLD.g;
-      if (Math.abs(((a / (Math.PI / 3)) % 1 + 1) % 1 - 0.5) > 0.46) return 0x3a5aa0; // gore seams
-      return n01(x, y, z, 0.4, 3) > 0.6 ? 0x2c4c94 : 0x22407e;
-    };
-    head.forEach((x, y, z) => {
-      if (zone(x, y, z) && exposed(head, x, y, z)) capP.set(x, y, z, colAt(x, y, z), VF.SOFTAO);
-    });
-    thicken(capP, () => true, (x, y, z) => (head.has(x, y, z) ? null : colAt(x, y, z)), [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1]], VF.SOFTAO);
-    paint(capP, (x, y, z) => D(y) - HEAD_C[1] < 0.044, GOLD.g, VF.METAL);
-    ell(capP, P(0, hatTop + 0.006, HEAD_C[2] - 0.006), P(0.006, 0.005, 0.006), GOLD.l, { fl: VF.METAL });
-    quill(head, [-0.062, 0.318, 0.1], [-0.088, 0.392, 0.046], 0xf6f2ea, 0x8a7aa8, s);
-  } else if (L.cap === 'slouch') {
-    const capP = rig.part('cap', 'head', P(0, hatTop - 0.01, HEAD_C[2]));
-    blob(capP, [
-      { c: P(-0.006, hatTop - 0.004, HEAD_C[2] - 0.004), r: P(0.068, 0.028, 0.066), rot: [0, 0, 0.18] },
-      { c: P(-0.058, hatTop - 0.018, HEAD_C[2] - 0.006), r: P(0.034, 0.024, 0.048), rot: [0, 0, 0.5] },
-    ], (i, j, k) => {
-      const n = n01(i, j, k, 0.3, 9);
-      return n > 0.6 ? 0xf0e6cc : n < 0.32 ? 0xcfc2a2 : 0xe2d6b8;
-    }, { k: U(0.014), keep: (x, y, z) => !head.has(x, y, z) && D(y) > hatTop - 0.032 - (D(x) < -0.03 ? 0.016 : 0) });
-    // a stitched band and a little stalk on top
-    paint(capP, (x, y, z) => {
-      const below = !capP.has(x, y - 1, z) && !head.has(x, y - 1, z);
-      return below || (capP.has(x, y - 1, z) && !capP.has(x, y - 2, z) && !head.has(x, y - 2, z));
-    }, (i, j, k) => ((i + k) % 3 === 0 ? 0x8a6a4a : 0xc4b28c));
-    cap(capP, P(-0.004, hatTop + 0.02, HEAD_C[2] - 0.004), P(-0.002, hatTop + 0.032, HEAD_C[2] - 0.006), U(0.004), U(0.003), 0xb8a47c);
-    quill(capP, [0.04, hatTop - 0.006, HEAD_C[2] - 0.02], [0.08, hatTop + 0.06, HEAD_C[2] - 0.05], 0xf4f0e6, 0xd07a4a, s);
-  } else {
-    // the archivist's green eyeshade: a band round the head and a curved translucent brim
-    const capP = rig.part('cap', 'head', P(0, 0.338, HEAD_C[2]));
-    const bandY0 = 0.334, bandY1 = 0.346;
-    head.forEach((x, y, z) => {
-      if (D(y) >= bandY0 && D(y) <= bandY1 && exposed(head, x, y, z)) capP.set(x, y, z, 0x2a5a36);
-    });
-    thicken(capP, () => true, (x, y, z) => (head.has(x, y, z) ? null : D(y) > bandY1 - 0.003 || D(y) < bandY0 + 0.003 ? 0x1e3e26 : 0x2f6a3e), [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]]);
-    for (let a = -1.05; a <= 1.05; a += 0.012)
-      for (let r = 0.07; r <= 0.118; r += 0.003) {
-        const t = (r - 0.07) / 0.048;
-        const X = Math.sin(a) * r * 1.02, Z = HEAD_C[2] + Math.cos(a) * r;
-        const Y = bandY0 + 0.004 - t * 0.014 - (Math.abs(a) > 0.8 ? (Math.abs(a) - 0.8) * 0.02 : 0);
-        const edge = t > 0.88 || Math.abs(a) > 1.0;
-        for (const dy of [0, -1]) capP.set(Math.floor(U(X)), Math.floor(U(Y)) + dy, Math.floor(U(Z)), edge ? 0x1e4a2c : dy ? 0x3f8a58 : 0x5eaa76, VF.SOFTAO);
-      }
-    quill(capP, [0.064, 0.34, 0.07], [0.098, 0.418, 0.02], 0xf6f2e8, 0x3f6a8a, s);
-    quill(capP, [0.066, 0.338, 0.08], [0.108, 0.405, 0.05], 0xece4d4, 0xa04a3a, s);
-  }
-
-  // ================================================================ arms
-  const big = L.carry === 'tome' ? 1.24 : 1;
-  const hw = 0.055 * big;
-  {
-    const sh = P(0.046, 0.226, 0.108);
-    const arm = rig.part('hand_l', 'seg9', sh);
-    const paw: V3 = L.carry === 'stack' ? [0.05, 0.205, 0.165] : [hw * Math.cos(BOOK_TH) - 0.004, 0.198, BOOK_Z - hw * Math.sin(BOOK_TH) - 0.004];
-    const armCol = (i: number, j: number, k: number) => (h01(i, j, k, 6) < 0.1 ? L.bodyL : mixc(L.body, L.belly, 0.35));
-    tube(arm, [sh, P(0.06, 0.208, 0.135), Pv(paw)], [U(0.012), U(0.0105), U(0.0095)], armCol);
-    ell(arm, Pv(paw), P(0.012, 0.013, 0.012), armCol);
-    for (let f = 0; f < 3; f++) {
-      const o: V3 = [-0.004 + f * 0.0045, 0.008 - f * 0.006, 0.008];
-      cap(arm, Pv(add3(paw, [o[0], o[1], 0.004])), Pv(add3(paw, [o[0] - 0.006, o[1], o[2] + 0.002])), U(0.0042), U(0.0036), armCol);
-    }
-    rig.mirror('hand_l', 'hand_r');
-  }
-
-  // ================================================================ something to read
-  const bookPiv = P(0, 0.21, BOOK_Z);
-  const book = rig.part('book', 'seg9', bookPiv);
+  // the apprentice balances a stack of books on its saddle (part of seg3, so it rides along)
   if (L.carry === 'stack') {
+    const seg = rig.m('seg3');
+    const c = scl3(add3(pts[2], pts[3]), 0.5);
+    const top = c[1] + SEG_R[2] * 0.95;
     const books: [number, number, number, number, number][] = [
-      // y centre, half width, half height (thickness), half depth, colour
-      [0.164, 0.05, 0.016, 0.036, L.cover],
-      [0.196, 0.045, 0.015, 0.033, 0x8a3a2a],
-      [0.226, 0.047, 0.013, 0.031, 0x34507e],
+      [top + 0.012, 0.034, 0.012, 0.046, L.cover],
+      [top + 0.035, 0.03, 0.011, 0.042, 0x8a3a2a],
+      [top + 0.056, 0.032, 0.01, 0.04, 0x34507e],
     ];
     books.forEach(([y, bw, bh, bd, col], bi) => {
-      const c: V3 = [0.002 * (bi - 1), y, 0.18];
-      const rot = (bi - 1) * 0.12;
-      const loc = (x: number, yy: number, z: number): V3 => invXYZ(sub3([x, yy, z], c), [0, rot, 0]);
-      sdf(book, sub3(c, [0.07, 0.03, 0.07]), add3(c, [0.07, 0.03, 0.07]), (x, yy, z) => {
+      const cc: V3 = [0.002 * (bi - 1), y, c[2]];
+      const rot = (bi - 1) * 0.16;
+      const loc = (x: number, yy: number, z: number): V3 => invXYZ(sub3([x, yy, z], cc), [0, rot, 0]);
+      sdf(seg, sub3(cc, [0.06, 0.02, 0.06]), add3(cc, [0.06, 0.02, 0.06]), (x, yy, z) => {
         const q = loc(x, yy, z);
         const qx = Math.abs(q[0]) - bw + 0.003, qy = Math.abs(q[1]) - bh + 0.003, qz = Math.abs(q[2]) - bd + 0.003;
         return Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qy, qz), 0) - 0.003;
       }, (i, j, k) => {
         const q = loc(D(i), D(j), D(k));
         const coverY = Math.abs(q[1]) > bh - 0.0066;
-        const spine = q[2] > bd - 0.004;
-        if (!coverY && !spine) return Math.abs(q[1]) % 0.0128 < 0.0064 ? PAPER.s : PAPER.p; // the page edges
-        if (spine && Math.abs(Math.abs(q[0]) - bw * 0.5) < 0.003) return GOLD.g; // raised bands, gilt
-        if (coverY && Math.abs(Math.abs(q[0]) - (bw - 0.009)) < 0.0035 && Math.abs(q[2]) < bd - 0.006) return GOLD.g;
+        const spine = q[0] > bw - 0.0066;
+        if (!coverY && !spine) return Math.abs(q[1]) % 0.0128 < 0.0064 ? PAPER.s : PAPER.p;
+        if (spine && Math.abs(Math.abs(q[2]) - bd * 0.5) < 0.004) return GOLD.g;
+        if (coverY && Math.abs(Math.abs(q[2]) - (bd - 0.009)) < 0.0035 && Math.abs(q[0]) < bw - 0.006) return GOLD.g;
         return n01(i, j, k, 0.5, bi) > 0.62 ? mixc(col, 0xffffff, 0.12) : col;
       });
     });
+  }
+
+  // ================================================================ the head: blunt, eyeless, a small mouth
+  const r0 = PART_R[0];
+  const head = rig.part('head', 'body', Pv(pts[0]));
+  const headCol = (i: number, j: number, k: number) => {
+    const Y = D(j), Z = D(k);
+    const n = n01(i, j, k, 0.3, seed + 40);
+    let c = Y > r0 + 0.012 ? mixc(L.base, L.back, 0.7) : Y < r0 - 0.014 ? mixc(L.base, L.belly, 0.7) : L.base;
+    if (Z > 0.04) c = mixc(c, L.glint, 0.25); // the soft pink tip of the prostomium
+    if (n > 0.66) c = mixc(c, L.glint, 0.2);
+    return c;
+  };
+  blob(head, [
+    { a: P(0, r0, -0.024), b: P(0, r0 + 0.002, 0.028), r0: U(0.034), r1: U(0.03) },
+    { c: P(0, r0 + 0.006, 0.048), r: P(0.023, 0.021, 0.025) }, // the prostomium lobe
+    { c: P(0, r0 - 0.012, 0.04), r: P(0.024, 0.016, 0.021) }, // the chin under the mouth
+  ], headCol, { k: U(0.012), keep: (_x, y) => D(y) > 0.001 });
+  // two rings on the head too
+  for (const z0 of [-0.006, 0.013]) {
+    const del: V3[] = [];
+    head.forEach((x, y, z) => {
+      if (Math.abs(D(z) - z0) * s * K < 0.55 && exposed(head, x, y, z) && Math.hypot(D(x), D(y) - r0) > 0.026) del.push([x, y, z]);
+    });
+    for (const [x, y, z] of del) head.del(x, y, z);
+  }
+  paint(head, (x, y, z) => !head.has(x, y + 1, z) && h01(x, y, z, seed + 50) < 0.16, L.glint, VF.METAL);
+  // the mouth: a small curved smile under the lobe; the lower lip is its own part
+  const mouthY = (X: number) => r0 - 0.005 + 40 * X * X;
+  const jaw = rig.part('jaw', 'head', P(0, r0 - 0.01, 0.022));
+  {
+    const tmp = new VoxelModel('h');
+    head.forEach((x, y, z, c, f) => tmp.set(x, y, z, c, f));
+    head.map.clear();
+    splitInto(tmp, head, jaw, (x, y, z) => D(z) > 0.024 && D(y) < mouthY(D(x)) && Math.abs(D(x)) < 0.02);
+    const empty = (x: number, y: number, z: number) => !head.has(x, y, z) && !jaw.has(x, y, z);
+    jaw.forEach((x, y, z) => {
+      if (!jaw.has(x, y + 1, z)) jaw.set(x, y, z, empty(x, y, z + 1) || empty(x + 1, y, z) || empty(x - 1, y, z) ? 0x4a1e1e : 0xc0606a);
+    });
+    head.forEach((x, y, z) => {
+      if (jaw.has(x, y - 1, z) && (empty(x, y, z + 1) || empty(x + 1, y, z) || empty(x - 1, y, z))) head.set(x, y, z, 0x4a1e1e);
+    });
+  }
+
+  // ================================================================ caps
+  const hatTop = r0 + 0.031;
+  if (L.cap === 'fez') {
+    const capP = rig.part('cap', 'head', P(0, hatTop - 0.006, 0.01));
+    const base: V3 = [0, hatTop - 0.01, 0.01];
+    const rot: V3 = [-0.16, 0, -0.14];
+    const H = 0.042;
+    sdf(capP, sub3(base, [0.05, 0.02, 0.05]), add3(base, [0.05, 0.07, 0.05]), (x, y, z) => {
+      const q = invXYZ(sub3([x, y, z], base), rot);
+      const t = clamp01(q[1] / H);
+      const r = 0.031 - 0.007 * t;
+      const dr = Math.hypot(q[0], q[2]) - r, dy = Math.max(q[1] - H, -q[1]);
+      return Math.hypot(Math.max(dr + 0.004, 0), Math.max(dy + 0.004, 0)) + Math.min(Math.max(dr, dy), 0) - 0.004;
+    }, (i, j, k) => {
+      const q = invXYZ(sub3([D(i), D(j), D(k)], base), rot);
+      const n = n01(i, j, k, 0.35, 7);
+      let c = n > 0.62 ? 0xa83a3a : n < 0.3 ? 0x7a2228 : 0x922e30;
+      if (q[1] < 0.007) c = 0x6a1c20;
+      if (q[1] > H - 0.003 && Math.hypot(q[0], q[2]) < 0.006) c = 0x1a1414;
+      return c;
+    }, VF.SOFTAO);
+    const top = add3(base, rotXYZ([0, H, 0], rot));
+    const tassel = rig.part('tassel', 'cap', Pv(top));
+    const knot = add3(top, rotXYZ([-0.024, -0.004, 0.004], rot));
+    line(tassel, [Pv(top), Pv(knot)], 0x221a1a);
+    ell(tassel, Pv(knot), P(0.004, 0.004, 0.004), GOLD.g, { fl: VF.METAL });
+    for (let q = 0; q < 7; q++) {
+      const a = (q / 7) * Math.PI * 2;
+      const o: V3 = [Math.cos(a) * 0.0036, 0, Math.sin(a) * 0.0036];
+      line(tassel, [Pv(add3(knot, o)), Pv(add3(knot, add3(scl3(o, 1.6), [0, -0.028 - (q & 1) * 0.004, 0])))], q & 1 ? 0x2a2020 : 0x141010);
+    }
+  } else if (L.cap === 'skullcap') {
+    const capP = rig.part('cap', 'head', P(0, hatTop - 0.004, 0.004));
+    const colAt = (x: number, y: number, z: number) => {
+      const X = D(x), Y = D(y), Z = D(z) - 0.004;
+      if (Y < r0 + 0.021) return GOLD.g;
+      const a = Math.atan2(X, Z);
+      if (Math.abs((((a / (Math.PI / 3)) % 1) + 1) % 1 - 0.5) > 0.44) return 0x3a5aa0;
+      return n01(x, y, z, 0.4, 3) > 0.6 ? 0x2c4c94 : 0x22407e;
+    };
+    head.forEach((x, y, z) => {
+      if (D(y) > r0 + 0.017 && exposed(head, x, y, z) && D(z) < 0.034) capP.set(x, y, z, colAt(x, y, z), VF.SOFTAO);
+    });
+    thicken(capP, () => true, (x, y, z) => (head.has(x, y, z) ? null : colAt(x, y, z)), [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1]], VF.SOFTAO);
+    paint(capP, (_x, y) => D(y) < r0 + 0.021, GOLD.g, VF.METAL);
+    ell(capP, P(0, hatTop + 0.006, 0.006), P(0.005, 0.0045, 0.005), GOLD.l, { fl: VF.METAL });
+  } else if (L.cap === 'slouch') {
+    const capP = rig.part('cap', 'head', P(0, hatTop - 0.006, 0.006));
+    blob(capP, [
+      { c: P(-0.004, hatTop - 0.002, 0.006), r: P(0.044, 0.02, 0.044), rot: [0, 0, 0.2] },
+      { c: P(-0.038, hatTop - 0.012, 0.004), r: P(0.022, 0.017, 0.032), rot: [0, 0, 0.55] },
+    ], (i, j, k) => {
+      const n = n01(i, j, k, 0.3, 9);
+      return n > 0.6 ? 0xf0e6cc : n < 0.32 ? 0xcfc2a2 : 0xe2d6b8;
+    }, { k: U(0.01), keep: (x, y, z) => !head.has(x, y, z) && D(y) > hatTop - 0.022 - (D(x) < -0.02 ? 0.012 : 0) });
+    paint(capP, (x, y, z) => !capP.has(x, y - 1, z) && !head.has(x, y - 1, z), (i, _j, k) => ((i + k) % 3 === 0 ? 0x8a6a4a : 0xc4b28c));
+    cap(capP, P(-0.003, hatTop + 0.014, 0.004), P(-0.002, hatTop + 0.024, 0.003), U(0.0035), U(0.0028), 0xb8a47c);
   } else {
-    const H = (L.carry === 'tome' ? 0.1 : 0.078) / 2;
-    const bt = L.carry === 'tome' ? 0.024 : 0.02;
-    const ct = 0.0068; // the cover board: a full voxel
-    const yC = 0.21;
+    // the green eyeshade: a band round the head and a curved translucent brim (no eyes to shade; it likes the look)
+    const capP = rig.part('cap', 'head', P(0, r0 + 0.016, 0.006));
+    const bandY0 = r0 + 0.012, bandY1 = r0 + 0.021;
+    head.forEach((x, y, z) => {
+      if (D(y) >= bandY0 && D(y) <= bandY1 && exposed(head, x, y, z)) capP.set(x, y, z, 0x2a5a36);
+    });
+    thicken(capP, () => true, (x, y, z) => (head.has(x, y, z) ? null : 0x2f6a3e), [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]]);
+    for (let a = -1.0; a <= 1.0; a += 0.015)
+      for (let r = 0.03; r <= 0.062; r += 0.003) {
+        const t = (r - 0.03) / 0.032;
+        const X = Math.sin(a) * r, Z = 0.012 + Math.cos(a) * r;
+        const Y = bandY0 + 0.004 - t * 0.01;
+        const edge = t > 0.86 || Math.abs(a) > 0.94;
+        for (const dy of [0, -1]) capP.set(Math.floor(U(X)), Math.floor(U(Y)) + dy, Math.floor(U(Z)), edge ? 0x1e4a2c : dy ? 0x3f8a58 : 0x5eaa76, VF.SOFTAO);
+      }
+    quill(capP, [0.026, r0 + 0.016, 0.0], [0.05, r0 + 0.075, -0.03], 0xf6f2e8, 0xa04a3a, s);
+  }
+
+  // ================================================================ the book (opens flat on the floor, shuts to be carried)
+  let bookInfo: { pageFlip: number; bookClose: number } | null = null;
+  if (L.carry !== 'stack') {
+    const hw = L.carry === 'tome' ? 0.062 : 0.05;
+    const H = (L.carry === 'tome' ? 0.088 : 0.07) / 2;
+    const bt = L.carry === 'tome' ? 0.022 : 0.018;
+    const ct = 0.0068;
+    const S = BOOK_AT;
     const cov = L.cover;
+    const book = rig.part('book', 'body', Pv(S));
     const half = (m: VoxelModel, sd: number, pageOnly = false) => {
-      // a half of the book in the frame of its own leaf: u along the leaf from the spine,
-      // h out through its cover (the pages lie on the inner side, toward the reader)
-      const dirU: V3 = [Math.cos(BOOK_TH) * sd, 0, -Math.sin(BOOK_TH)];
-      const nOut: V3 = [Math.sin(BOOK_TH) * sd, 0, Math.cos(BOOK_TH)];
-      const sp: V3 = [0, yC, BOOK_Z];
-      sdf(m, [-hw - 0.02, yC - H - 0.01, BOOK_Z - hw - 0.03], [hw + 0.02, yC + H + 0.01, BOOK_Z + 0.03], (x, y, z) => {
-        const q = sub3([x, y, z], sp);
-        const u = dot3(q, dirU), h = dot3(q, nOut), w = q[1];
-        // the loose page is one sheet on the face of the block (hidden there until it turns)
-        const th0 = -bt, th1 = pageOnly ? -bt + 0.0068 : 0;
-        if (u < 0.0 || u > hw - (pageOnly ? 0.004 : 0)) return 1;
+      // leaf frame: u from the spine along the leaf, h out through the cover (the pages face up)
+      const dirU: V3 = [Math.cos(BOOK_TH) * sd, Math.sin(BOOK_TH), 0];
+      const nOut: V3 = [Math.sin(BOOK_TH) * sd, -Math.cos(BOOK_TH), 0];
+      sdf(m, [S[0] - hw - 0.02, S[1] - 0.02, S[2] - H - 0.01], [S[0] + hw + 0.02, S[1] + 0.05, S[2] + H + 0.01], (x, y, z) => {
+        const q = sub3([x, y, z], S);
+        const u = dot3(q, dirU), h = dot3(q, nOut), w = q[2];
+        const th1 = pageOnly ? -bt + 0.0068 : 0;
+        if (u < 0 || u > hw - (pageOnly ? 0.004 : 0)) return 1;
         if (Math.abs(w) > H - (pageOnly ? 0.004 : 0)) return 1;
-        if (h < th0 || h > th1) return 1;
+        if (h < -bt || h > th1) return 1;
         return -1;
       }, (i, j, k) => {
-        const q = sub3([D(i), D(j), D(k)], sp);
-        const u = dot3(q, dirU), h = dot3(q, nOut), w = q[1];
+        const q = sub3([D(i), D(j), D(k)], S);
+        const u = dot3(q, dirU), h = dot3(q, nOut), w = q[2];
         if (pageOnly || h < -ct) {
-          // pages: text lines on the face, fine page edges on the sides
           if (h < -bt + 0.0034 || pageOnly) {
-            const row = Math.floor((w + H) / 0.0052);
-            const ln = ((w + H) % 0.0052) < 0.0018 && u > 0.008 && u < hw - 0.01 && h01(row, Math.floor(u / 0.012), sd, 4) > 0.15;
+            const row = Math.floor((w + H) / 0.0064);
+            const ln = (w + H) % 0.0064 < 0.0024 && u > 0.008 && u < hw - 0.01 && h01(row, Math.floor(u / 0.012), sd, 4) > 0.15;
             return ln ? PAPER.line : PAPER.p;
           }
-          return (Math.floor(h / 0.0064) & 1) ? PAPER.s : PAPER.p;
+          return Math.floor(h / 0.0064) & 1 ? PAPER.s : PAPER.p;
         }
-        // the cover: leather, a gilt frame, gilt corners, a little gilt eye in the middle
         const fu = u / hw, fw = Math.abs(w) / H;
         if ((Math.abs(fu - 0.86) < 0.07 && fw < 0.9) || (fw > 0.8 && fw < 0.92 && fu < 0.86)) return GOLD.g;
         if (fu > 0.9 && fw > 0.86) return GOLD.l;
         const em = Math.hypot((u - hw * 0.45) / 0.014, w / 0.011);
         if (em < 1 && em > 0.55) return GOLD.g;
         if (em <= 0.35) return GOLD.l;
-        if (L.carry === 'ledger' && Math.abs(fw - 0.5) < 0.05 && fu < 0.3) return 0xa83a2a; // a cloth label strip
-        return n01(i, j, k, 0.45, 2) > 0.62 ? mixc(cov, 0xffffff, 0.12) : n01(i, j, k, 0.45, 2) < 0.3 ? mixc(cov, 0x000000, 0.2) : cov;
+        if (L.carry === 'ledger' && Math.abs(fw - 0.5) < 0.06 && fu < 0.3) return 0xa83a2a;
+        const n = n01(i, j, k, 0.45, 2);
+        return n > 0.62 ? mixc(cov, 0xffffff, 0.12) : n < 0.3 ? mixc(cov, 0x000000, 0.2) : cov;
       });
     };
     half(book, 1);
-    // the spine: rounded leather with raised gilt bands
-    sdf(book, [-0.016, yC - H - 0.004, BOOK_Z - 0.008], [0.016, yC + H + 0.004, BOOK_Z + 0.014], (x, y, z) => {
-      if (Math.abs(y - yC) > H) return 1;
-      return Math.hypot(x, (z - BOOK_Z + 0.002) * 1.3) - 0.0095;
-    }, (i, j) => (Math.abs(((D(j) - yC + H) % (H * 0.5)) - H * 0.25) < 0.0025 ? GOLD.g : mixc(cov, 0x000000, 0.15)));
-    // the right half and the loose page hinge at the gutter, where the two page faces meet, so a
-    // turn about it lays the right face onto the left one (and closing folds the book shut)
-    const gutter = P(0, 0.21, BOOK_Z - bt / Math.cos(BOOK_TH));
-    const coverR = rig.part('cover_r', 'book', gutter);
-    half(coverR, -1);
-    const page = rig.part('page', 'book', gutter);
-    half(page, -1, true);
-    if (L.carry === 'ledger' || L.carry === 'tome') {
-      // a ribbon bookmark trailing from the spine
-      line(book, [P(0, yC - H + 0.004, BOOK_Z - 0.006), P(0.004, yC - H - 0.02, BOOK_Z - 0.004), P(-0.002, yC - H - 0.036, BOOK_Z - 0.008)], L.carry === 'ledger' ? 0xb83a2a : 0xd8b040);
-    }
+    // the spine: rounded leather with gilt bands
+    sdf(book, [S[0] - 0.014, S[1] - 0.01, S[2] - H - 0.004], [S[0] + 0.014, S[1] + 0.02, S[2] + H + 0.004], (x, y, z) => {
+      if (Math.abs(z - S[2]) > H) return 1;
+      return Math.hypot(x - S[0], (y - S[1] - 0.003) * 1.3) - 0.009;
+    }, (_i, _j, k) => (Math.abs(((D(k) - S[2] + H) % (H * 0.5)) - H * 0.25) < 0.0028 ? GOLD.g : mixc(cov, 0x000000, 0.15)));
+    // the right half and the loose page hinge at the gutter, where the two page faces meet
+    const gutter = P(S[0], S[1] + bt / Math.cos(BOOK_TH), S[2]);
+    half(rig.part('cover_r', 'book', gutter), -1);
+    half(rig.part('page', 'book', gutter), -1, true);
+    if (L.carry !== 'book') line(book, [P(S[0], S[1] + 0.006, S[2] - H + 0.004), P(S[0] + 0.004, S[1] + 0.004, S[2] - H - 0.02), P(S[0] - 0.002, S[1] + 0.002, S[2] - H - 0.034)], L.carry === 'ledger' ? 0xb83a2a : 0xd8b040);
+    const flip = 2 * BOOK_TH - Math.PI;
+    bookInfo = { pageFlip: flip, bookClose: flip * 0.97 };
   }
 
-  // overlapping parts never share an exposed cell
+  // overlapping parts never share an exposed cell (seams stay clean)
   for (const p of rig.parts) {
-    if (!p.parent || p.name.startsWith('eye_')) continue;
+    if (!p.parent || p.parent === 'body') continue;
     const par = rig.m(p.parent);
     const del: V3[] = [];
     p.model.forEach((x, y, z) => {
@@ -500,30 +386,30 @@ function build(v: BookwormVariant): RigSpec {
     });
     for (const [x, y, z] of del) p.model.del(x, y, z);
   }
-  for (const p of rig.parts) if (!p.name.startsWith('eye_') && p.name !== 'specs') finish(p.model, { top: 1.03, under: 0.92 });
+  for (const p of rig.parts) if (p.name !== 'body') finish(p.model, { top: 1.03, under: 0.9 });
 
-  rig.socket('head_top', 'head', P(0, HEAD_C[1] + HEAD_R[1] + 0.03, HEAD_C[2]));
-  rig.socket('book', 'book', bookPiv);
-  rig.socket('mouth', 'head', P(0, 0.27, 0.155));
-  // the rest pose height (head top) and the full length lying flat
-  const pageFlip = 2 * BOOK_TH - Math.PI;
+  rig.socket('head_top', 'head', P(0, hatTop + 0.02, 0.01));
+  rig.socket('mouth', 'head', P(0, r0 - 0.012, 0.06));
   return rig.build({
     kind: 'bookworm',
     variant: v,
     name: L.name,
     carry: L.carry,
-    height: (HEAD_C[1] + HEAD_R[1]) * s,
-    length: 0.8 * s,
-    segLength: 0.06 * s,
-    radius: 0.06 * s,
+    height: (r0 * 2 + 0.03) * s,
+    length: (NS * SEG_L + 0.075) * s,
+    segLength: SEG_L * s,
+    radius: 0.04 * s,
     scale: s,
-    blink: { close: LID_CLOSE, rest: LID_REST },
-    pageFlip,
-    bookClose: pageFlip * 0.97,
+    segments: NS,
+    restPts: pts.map((q) => scl3(q, s)),
+    radii: PART_R.map((r) => r * s),
+    bookAt: scl3(BOOK_AT, s),
+    pageFlip: bookInfo?.pageFlip ?? 0,
+    bookClose: bookInfo?.bookClose ?? 0,
   });
 }
 
-/** a feather quill: a pale shaft with a tapering vane and coloured tip (design metres, unscaled points) */
+/** a feather quill: a pale shaft, a tapering vane with barbs and a coloured tip (design metres, unscaled) */
 function quill(m: VoxelModel, base: V3, tip: V3, vane: number, tipCol: number, sc: number) {
   const toV = (q: V3): V3 => [q[0] * sc * K, q[1] * sc * K, q[2] * sc * K];
   const d = norm3(sub3(tip, base));
@@ -535,7 +421,6 @@ function quill(m: VoxelModel, base: V3, tip: V3, vane: number, tipCol: number, s
     const v = toV(p);
     m.set(Math.floor(v[0]), Math.floor(v[1]), Math.floor(v[2]), 0xf4ecd8);
     if (t < 0.25) continue;
-    // the vane: wider in the middle, barbs angled toward the tip, a coloured tip
     const w = Math.sin(((t - 0.25) / 0.75) * Math.PI) * 0.0075 + 0.001;
     for (let q = -1; q <= 1; q += 2)
       for (let k = 1; k <= Math.ceil(w * sc * K); k++) {
@@ -550,293 +435,407 @@ function quill(m: VoxelModel, base: V3, tip: V3, vane: number, tipCol: number, s
 const cache = new Map<number, RigSpec>();
 /** a bookworm librarian (0 Inkwell, 1 Old Vellum the elder, 2 Dog-Ear the apprentice, 3 Ledger the archivist) */
 export function bookwormRig(variant: number = 0): RigSpec {
-  const v = (((variant | 0) % 4) + 4) % 4 as BookwormVariant;
+  const v = ((((variant | 0) % 4) + 4) % 4) as BookwormVariant;
   let r = cache.get(v);
   if (!r) cache.set(v, (r = build(v)));
   return r;
 }
 
 // =====================================================================================================
-// ANIMATION
+// PHYSICS + ANIMATION
 // =====================================================================================================
 export type BookwormMode = 'idle' | 'read' | 'inch' | 'rear' | 'shelve' | 'look' | 'surprised';
 
-const damp = (a: number, b: number, l: number, dt: number) => a + (b - a) * (1 - Math.exp(-l * dt));
 const clamp = (v: number, a: number, b: number) => (v < a ? a : v > b ? b : v);
-const _v = new THREE.Vector3();
+const damp = (a: number, b: number, l: number, dt: number) => a + (b - a) * (1 - Math.exp(-l * dt));
+const UP = new THREE.Vector3(0, 1, 0);
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+const _c = new THREE.Vector3();
+const _d = new THREE.Vector3();
+const _e = new THREE.Vector3();
+const _m = new THREE.Matrix4();
+const _q = new THREE.Quaternion();
+const _qi = new THREE.Quaternion();
+const _inv = new THREE.Matrix4();
 
-class Spring {
-  x = 0;
-  v = 0;
-  constructor(public k = 120, public c = 10) {}
-  step(target: number, dt: number) {
-    const h = Math.min(dt, 1 / 30);
-    this.v += (this.k * (target - this.x) - this.c * this.v) * h;
-    this.x += this.v * h;
-    return this.x;
-  }
+/** the rotation of an orthonormal frame looking along `fwd` with its up kept as close to world up as it can */
+function frame(fwd: THREE.Vector3, prevSide: THREE.Vector3, out: THREE.Quaternion) {
+  const side = _c.crossVectors(UP, fwd);
+  if (side.lengthSq() < 1e-6) side.copy(prevSide);
+  side.normalize();
+  prevSide.copy(side);
+  const up = _d.crossVectors(fwd, side).normalize();
+  _m.makeBasis(side, up, fwd);
+  return out.setFromRotationMatrix(_m);
 }
-const SEGS = ['seg0', 'seg1', 'seg2', 'seg3', 'seg4', 'seg5', 'seg6', 'seg7', 'seg8', 'seg9'];
-const BW_JOINTS = [...SEGS, 'head', 'jaw', 'hand_l', 'hand_r', 'book', 'specs', 'cap'];
 
 /**
- * Bookworm procedural animation: a damped pose per mode on the segment chain, a
- * travelling peristaltic wave for inching, breathing swell, page turns, blinks,
- * spectacle nudges and a springy tassel.
+ * The earthworm's body is a position-based physics chain (world space, fixed
+ * 120 Hz sub-steps): Verlet integration with gravity, link-length constraints
+ * whose rest lengths pulse in peristaltic waves running head to tail, soft bending
+ * constraints, ground contact with bristle friction (forward slides, backward
+ * grips: the waves ratchet the body along), a head that seeks the rig root, and
+ * muscles that lift the front end to rear up (it sags under its own weight and
+ * wobbles as it settles). The segment parts are then placed on the chain,
+ * swelling as they contract and thinning as they stretch.
  *
  *   const anim = new BookwormAnim(rig);
- *   anim.mode = 'inch'; anim.speed = 0.25;   // move rig.root forward by anim.speed * dt yourself
- *   anim.mode = 'shelve'; anim.onShelve = () => rig.setPartVisible('book', false);
+ *   anim.mode = 'inch'; anim.speed = 0.22;   // move rig.root yourself: the head follows it, the body crawls after
+ *   anim.mode = 'shelve'; anim.onShelve = () => ...;
  *   anim.flipPage();                          // turn one page now ('read' turns them on its own)
  */
 export class BookwormAnim {
   t = 0;
   mode: BookwormMode = 'read';
-  /** crawl speed for 'inch' (m/s): the caller moves the root */
+  /** crawl speed for 'inch' (m/s): the caller moves the root, this paces the contraction waves */
   speed = 0.22;
+  /** world point to look toward ('look', 'rear', 'idle', 'surprised') */
   lookAt: THREE.Vector3 | null = null;
-  /** called once at the top of the shelving push (hide the book / place it on the shelf) */
+  /** called once at the top of the shelving push */
   onShelve: (() => void) | null = null;
   /** seconds into the current mode */
   modeT = 0;
-  private cur: Record<string, [number, number, number]> = {};
-  private tgt: Record<string, [number, number, number]> = {};
-  private base: Record<string, THREE.Euler> = {};
-  private wave = 0;
+  private n: number;
+  private p: THREE.Vector3[] = [];
+  private q: THREE.Vector3[] = [];
+  private rest: THREE.Vector3[] = [];
+  private rad: number[];
+  private len0: number[] = [];
+  private len: number[] = [];
+  private restQ: THREE.Quaternion[] = [];
+  private sides: THREE.Vector3[] = [];
+  private headSide = new THREE.Vector3(1, 0, 0);
+  private segN: (THREE.Object3D | undefined)[] = [];
+  private inited = false;
+  private lastRoot = new THREE.Vector3();
+  private phase = 0;
+  private amp = 0.03;
+  private rearH = 0;
+  private rearM = 4;
+  private push = 0;
+  private nod = 0;
+  private turn = 0;
+  private carry = 0;
   private pageT = -1;
   private nextPage = 2;
-  private closeK = 0;
-  private closeTgt = 0;
-  private blink = 0;
-  private nextBlink = 2;
-  private tassel = [new Spring(90, 4), new Spring(90, 4)];
-  private specsS = new Spring(200, 12);
-  private yaw = 0;
-  private tYaw = 0;
-  private nextLook = 1;
   private prevMode: BookwormMode = 'read';
   private shelved = false;
+  private tassel = { x: 0, v: 0 };
   private rnd: () => number;
+  private scale: number;
+  private bookAt: THREE.Vector3;
   private flipA: number;
   private closeA: number;
-  private lidClose: number;
-  private specsBase: THREE.Vector3 | null = null;
+  private acc = 0;
 
   constructor(public rig: RigInstance, seed = 5) {
-    for (const p of rig.geo.parts) this.base[p.name] = p.rest.clone();
-    const si = rig.geo.index.specs;
-    if (si !== undefined) this.specsBase = rig.geo.parts[si].offset.clone();
-    for (const n of BW_JOINTS) {
-      this.cur[n] = [0, 0, 0];
-      this.tgt[n] = [0, 0, 0];
+    const m = rig.geo.spec.meta ?? {};
+    const pts: V3[] = m.restPts ?? [];
+    this.n = pts.length;
+    this.rad = m.radii ?? pts.map(() => 0.03);
+    this.scale = m.scale ?? 1;
+    this.bookAt = new THREE.Vector3(...((m.bookAt as V3) ?? [0, 0, 0.1]));
+    this.flipA = m.pageFlip ?? -2.7;
+    this.closeA = m.bookClose ?? -2.6;
+    for (const r of pts) {
+      this.rest.push(new THREE.Vector3(r[0], r[1], r[2]));
+      this.p.push(new THREE.Vector3());
+      this.q.push(new THREE.Vector3());
     }
+    for (let i = 0; i < this.n - 1; i++) {
+      this.len0.push(this.rest[i].distanceTo(this.rest[i + 1]));
+      this.len.push(this.len0[i]);
+    }
+    // each segment's rest frame (its sculpted orientation)
+    for (let i = 1; i < this.n; i++) {
+      const f = new THREE.Vector3().subVectors(this.rest[i - 1], this.rest[i]).normalize();
+      const sd = new THREE.Vector3(1, 0, 0);
+      this.restQ.push(frame(f, sd, new THREE.Quaternion()));
+      this.sides.push(sd);
+      this.segN.push(rig.nodes['seg' + i]);
+    }
+    if (rig.meshes.body) rig.meshes.body.visible = false;
     let s = (seed * 9301 + 49297) % 233280;
     this.rnd = () => (s = (s * 9301 + 49297) % 233280) / 233280;
     this.t = this.rnd() * 10;
-    const m = rig.geo.spec.meta ?? {};
-    this.flipA = m.pageFlip ?? -2.4;
-    this.closeA = m.bookClose ?? -2.3;
-    this.lidClose = m.blink?.close ?? LID_CLOSE;
+    this.phase = this.rnd() * 6;
   }
 
-  /** turn a page now (no-op while one is turning, or for a stack of books) */
+  /** turn a page now (no-op while one is turning, or with no open book) */
   flipPage() {
-    if (this.pageT < 0 && this.rig.nodes.page) this.pageT = 0;
-  }
-  /** push the spectacles back up the nose */
-  nudgeSpecs() {
-    this.specsS.v -= 6;
+    if (this.pageT < 0 && this.rig.nodes.page && this.carry < 0.05) this.pageT = 0;
   }
 
-  private set(n: string, x: number, y = 0, z = 0) {
-    const t = this.tgt[n];
-    if (t) (t[0] = x), (t[1] = y), (t[2] = z);
-  }
-  private add(n: string, x: number, y = 0, z = 0) {
-    const t = this.tgt[n];
-    if (t) (t[0] += x), (t[1] += y), (t[2] += z);
+  /** lay the chain out at rest under the root (first frame, or after a teleport) */
+  private reset() {
+    const M = this.rig.root.matrixWorld;
+    for (let i = 0; i < this.n; i++) {
+      this.p[i].copy(this.rest[i]).applyMatrix4(M);
+      this.q[i].copy(this.p[i]);
+    }
+    this.inited = true;
   }
 
   update(dt: number) {
+    if (this.n < 3) return;
     const R = this.rnd;
     this.t += dt;
     const t = this.t;
+    const root = this.rig.root;
+    root.updateWorldMatrix(true, false);
+    const rp = _e.setFromMatrixPosition(root.matrixWorld);
+    if (!this.inited || rp.distanceTo(this.lastRoot) > 1.5) this.reset();
+    this.lastRoot.copy(rp);
     if (this.mode !== this.prevMode) {
       this.prevMode = this.mode;
       this.modeT = 0;
       this.shelved = false;
-      if (this.mode === 'surprised') (this.specsS.v += 9), (this.tassel[0].v += 8);
+      if (this.mode === 'surprised') for (let i = 0; i < 4; i++) this.q[i].y -= 0.006 * this.scale * (1 - i / 4); // a jolt upward
     }
     this.modeT += dt;
     const mt = this.modeT;
-    for (const n of BW_JOINTS) this.set(n, 0, 0, 0);
-    let l = 7;
-    let lookW = 1;
-    let jaw = 0;
-    let lids = 0;
-    this.closeTgt = 0;
-    // ---------------------------------------------------------------- look
-    this.nextLook -= dt;
-    if (this.lookAt) {
-      this.rig.root.updateWorldMatrix(true, false);
-      const p = this.rig.root.worldToLocal(_v.copy(this.lookAt));
-      this.tYaw = clamp(Math.atan2(p.x, p.z - 0.1), -0.9, 0.9);
-    } else if (this.nextLook <= 0) {
-      this.nextLook = 1.2 + R() * 2.5;
-      this.tYaw = (R() - 0.5) * 0.9;
-    }
-    this.yaw = damp(this.yaw, this.tYaw, 4, dt);
-    // a slow breathing swell travels up the body
-    const swell = (i: number) => Math.sin(t * 2.1 - i * 0.5) * 0.02;
+    const s = this.scale;
+
+    // ---------------------------------------------------------------- what the muscles want
+    let rearH = 0.05, rearM = 4, amp = 0.035, freq = 0.35, push = 0, nod = 0, turn = 0, carry = 1;
     switch (this.mode) {
       case 'idle':
+        rearH = 0.07 + Math.sin(t * 0.9) * 0.025;
+        nod = Math.sin(t * 1.3) * 0.25;
+        turn = Math.sin(t * 0.7) * 0.5; // the searching sway of a worm's front end
+        carry = 0;
+        break;
       case 'read': {
-        // settled, reading: the front sways a little, eyes scanning the lines
-        for (let i = 1; i < 10; i++) this.set(SEGS[i], swell(i) * 0.4, Math.sin(t * 0.7 + i * 0.3) * 0.015, 0);
-        this.set('head', 0.26 + Math.sin(t * 1.1) * 0.03, Math.sin(t * (this.mode === 'read' ? 1.6 : 0.5)) * 0.12, 0);
-        lookW = this.mode === 'read' ? 0.15 : 0.7;
-        if (this.mode === 'read') {
-          this.nextPage -= dt;
-          if (this.nextPage <= 0) {
-            this.nextPage = 2.2 + R() * 2;
-            this.flipPage();
-          }
+        rearH = 0.1;
+        rearM = 4;
+        // feeling along the lines: the head sweeps across the page and taps down now and then
+        turn = (((t * 0.55) % 1) - 0.5) * 0.9;
+        nod = 0.85 + Math.max(0, Math.sin(t * 5.5)) ** 8 * 0.35;
+        carry = 0;
+        this.nextPage -= dt;
+        if (this.nextPage <= 0) {
+          this.nextPage = 2.4 + R() * 2;
+          this.flipPage();
         }
         break;
       }
-      case 'inch': {
-        // a peristaltic wave from the tail to the head; the front is lowered but the head stays up
-        const stride = 0.05;
-        this.wave += dt * (this.speed / stride) * Math.PI * 2 * 0.25;
-        for (let i = 1; i < 10; i++) this.set(SEGS[i], -Math.sin(this.wave - i * 0.85) * 0.32 * (i < 6 ? 1 : 0.5), Math.sin(this.wave * 0.5 - i * 0.4) * 0.04, 0);
-        this.add('seg6', 0.2);
-        this.add('seg7', 0.3);
-        this.add('seg8', 0.15);
-        this.set('head', 0.05, 0, 0);
-        this.set('hand_l', -0.2 + Math.sin(this.wave) * 0.15);
-        this.set('hand_r', -0.2 - Math.sin(this.wave) * 0.15);
-        this.set('seg0', 0, Math.sin(this.wave * 0.5) * 0.04, 0);
-        lookW = 0.6;
-        l = 12;
+      case 'inch':
+        rearH = 0.012;
+        rearM = 3;
+        amp = 0.24;
+        freq = clamp(0.8 + (this.speed / s) * 4, 0.8, 3);
+        nod = -0.1;
         break;
-      }
       case 'rear':
+        rearH = 0.3;
+        rearM = 6;
+        turn = Math.sin(t * 0.8) * 0.4;
+        nod = -0.1;
+        break;
       case 'look':
+        rearH = 0.2;
+        rearM = 5;
+        break;
       case 'surprised':
+        rearH = 0.34 + Math.exp(-mt * 5) * 0.1;
+        rearM = 6;
+        nod = -0.45 * Math.exp(-mt * 3);
+        break;
       case 'shelve': {
-        // stand up tall off the floor
-        const tall = this.mode === 'look' ? 0.55 : 1;
-        this.set('seg3', -0.12 * tall);
-        this.set('seg4', -0.3 * tall);
-        this.set('seg5', -0.42 * tall);
-        this.set('seg6', -0.4 * tall);
-        this.set('seg7', -0.1 * tall);
-        this.set('seg8', 0.06 * tall);
-        this.set('seg9', 0.1 * tall);
-        this.set('head', this.mode === 'look' ? 0 : 0.15);
-        if (this.mode === 'surprised') {
-          const k = Math.exp(-mt * 4);
-          this.add('seg7', -0.4 * k);
-          this.add('seg8', -0.25 * k);
-          this.add('head', -0.4 * k);
-          this.set('hand_l', -0.9 * k, 0, 0.4 * k);
-          this.set('hand_r', -0.9 * k, 0, -0.4 * k);
-          jaw = 0.5 * k;
-          lids = -0.15;
+        // up high, a push forward at the top (the book goes onto the shelf), and back down
+        const up = clamp(mt / 0.6, 0, 1) * (1 - clamp((mt - 1.7) / 0.7, 0, 1));
+        rearH = 0.06 + 0.38 * up;
+        rearM = 7;
+        push = Math.sin(Math.PI * clamp((mt - 0.6) / 0.9, 0, 1)) * 0.09;
+        nod = -0.25 * up + push * 3;
+        if (!this.shelved && mt > 1.05) {
+          this.shelved = true;
+          this.onShelve?.();
         }
-        if (this.mode === 'shelve') {
-          // close the book, reach forward and up, push it home, settle back
-          const reach = sstep(0.45, 0.9, mt) * (1 - sstep(1.5, 2.0, mt));
-          this.closeTgt = sstep(0.1, 0.45, mt) * (1 - sstep(2.0, 2.4, mt));
-          this.add('seg8', 0.4 * reach);
-          this.add('seg9', 0.35 * reach);
-          this.add('head', -0.55 * reach);
-          this.set('hand_l', -1.0 * reach, 0, -0.1 * reach);
-          this.set('hand_r', -1.0 * reach, 0, 0.1 * reach);
-          this.set('book', 0.22 * reach);
-          if (!this.shelved && mt > 1.0) {
-            this.shelved = true;
-            this.onShelve?.();
-          }
-          if (mt > 2.6) this.mode = 'read';
-        }
-        l = this.mode === 'surprised' ? 16 : 6;
-        lookW = 0.8;
+        if (mt > 2.6) this.mode = 'read';
         break;
       }
     }
-    // off the floor the head levels itself against the bend of the body, so it never ends up face-down
-    if (this.mode !== 'read' && this.mode !== 'idle') {
-      let bend = 0;
-      for (let i = 1; i < 10; i++) bend += this.tgt[SEGS[i]][0];
-      this.add('head', -bend * 0.9, 0, 0);
+    if (this.lookAt && (this.mode === 'look' || this.mode === 'rear' || this.mode === 'idle' || this.mode === 'surprised')) {
+      _a.copy(this.lookAt);
+      root.worldToLocal(_a);
+      turn = clamp(Math.atan2(_a.x, _a.z), -1.1, 1.1) * 0.8;
+      nod = clamp(-Math.atan2(_a.y - this.rearH * s, Math.hypot(_a.x, _a.z)), -0.6, 0.6);
     }
-    this.add('head', 0, this.yaw * lookW, 0);
-    this.add('seg9', 0, this.yaw * 0.25 * lookW, 0);
-    const k = 1 - Math.exp(-l * dt);
-    for (const n of BW_JOINTS) {
-      const c = this.cur[n], g = this.tgt[n];
-      c[0] += (g[0] - c[0]) * k;
-      c[1] += (g[1] - c[1]) * k;
-      c[2] += (g[2] - c[2]) * k;
-    }
-    this.closeK = damp(this.closeK, this.closeTgt, 7, dt);
+    this.rearH = damp(this.rearH, rearH, 3.5, dt);
+    this.rearM = rearM;
+    this.amp = damp(this.amp, amp, 3, dt);
+    this.push = damp(this.push, push, 6, dt);
+    this.nod = damp(this.nod, nod, 6, dt);
+    this.turn = damp(this.turn, turn, 3, dt);
+    this.carry = damp(this.carry, carry, 4, dt);
 
-    // ---------------------------------------------------------------- page turning (hand helps)
+    // ---------------------------------------------------------------- the physics (fixed sub-steps)
+    const H = 1 / 120;
+    this.acc = Math.min(this.acc + dt, H * 6);
+    const fwd = _b.set(0, 0, 1).transformDirection(root.matrixWorld);
+    const fl = Math.hypot(fwd.x, fwd.z) || 1;
+    const fx = fwd.x / fl, fz = fwd.z / fl;
+    while (this.acc >= H) {
+      this.acc -= H;
+      this.step(H, rp, fx, fz, freq);
+    }
+
+    // ---------------------------------------------------------------- place the parts on the chain
+    _inv.copy(root.matrixWorld).invert();
+    root.getWorldQuaternion(_qi).invert();
+    for (let i = 1; i < this.n; i++) {
+      const node = this.segN[i - 1];
+      if (!node) continue;
+      const a = this.p[i - 1], b = this.p[i];
+      node.position.addVectors(a, b).multiplyScalar(0.5).applyMatrix4(_inv);
+      const f = _a.subVectors(a, b);
+      const l = f.length();
+      f.divideScalar(l || 1).applyQuaternion(_qi);
+      frame(f, this.sides[i - 1], node.quaternion);
+      node.quaternion.multiply(_q.copy(this.restQ[i - 1]).invert());
+      // contracted segments swell, stretched ones thin (the volume is kept)
+      const k = clamp(l / this.len0[i - 1], 0.6, 1.5);
+      const w = 1 / Math.sqrt(k);
+      node.scale.set(w, w, k);
+    }
+    // the head rides the front of the chain, turned and nodded by the mood
+    const hn = this.rig.nodes.head;
+    if (hn) {
+      hn.position.copy(this.p[0]).applyMatrix4(_inv);
+      const f = _a.subVectors(this.p[0], this.p[1]).normalize().applyQuaternion(_qi);
+      f.applyAxisAngle(UP, this.turn * 0.6);
+      const side = _b.crossVectors(UP, f);
+      if (side.lengthSq() > 1e-6) f.applyAxisAngle(side.normalize(), this.nod);
+      frame(f, this.headSide, hn.quaternion);
+    }
+    // the mouth works a little (nibbling over a page, a gasp)
+    const jaw = this.rig.nodes.jaw;
+    if (jaw) jaw.rotation.x = (this.mode === 'read' ? Math.max(0, Math.sin(t * 3.1)) * 0.25 : 0) + (this.mode === 'surprised' ? 0.5 * Math.exp(-mt * 3) : 0);
+    // the fez tassel swings with the head
+    const tn = this.rig.nodes.tassel;
+    if (tn) {
+      const tg = -this.nod * 0.8 + this.turn * 0.3;
+      this.tassel.v += (90 * (tg - this.tassel.x) - 4 * this.tassel.v) * Math.min(dt, 1 / 30);
+      this.tassel.x += this.tassel.v * Math.min(dt, 1 / 30);
+      tn.rotation.set(this.tassel.x * 0.6, 0, Math.sin(t * 1.3) * 0.06 + this.turn * 0.2);
+    }
+    this.placeBook(dt);
+  }
+
+  private step(h: number, rp: THREE.Vector3, fx: number, fz: number, freq: number) {
+    const n = this.n, p = this.p, q = this.q, s = this.scale;
+    const g = rp.y;
+    // peristalsis: link rest lengths pulse in a wave running from the head to the tail
+    this.phase += h * Math.PI * 2 * freq;
+    for (let i = 0; i < n - 1; i++) this.len[i] = this.len0[i] * (1 + this.amp * Math.sin(this.phase - i * 0.75));
+    // Verlet: inertia, a little damping, gravity
+    for (let i = 0; i < n; i++) {
+      const vx = (p[i].x - q[i].x) * 0.985, vy = (p[i].y - q[i].y) * 0.985, vz = (p[i].z - q[i].z) * 0.985;
+      q[i].copy(p[i]);
+      p[i].x += vx;
+      p[i].y += vy - 9.8 * h * h;
+      p[i].z += vz;
+    }
+    // the head seeks the root (pushing in pulses while it crawls); the neck lines up with the root's heading
+    const pulse = this.mode === 'inch' ? 0.45 + 0.55 * Math.max(0, Math.sin(this.phase)) : 1;
+    const hx = rp.x + fx * this.push * s, hz = rp.z + fz * this.push * s;
+    const hy = g + this.rad[0] + this.rearH * s;
+    const kH = 0.2 * pulse;
+    p[0].x += (hx - p[0].x) * kH;
+    p[0].z += (hz - p[0].z) * kH;
+    p[0].y += (hy - p[0].y) * 0.28;
+    const l0 = this.len0[0];
+    p[1].x += (hx - fx * l0 - p[1].x) * 0.06;
+    p[1].z += (hz - fz * l0 - p[1].z) * 0.06;
+    // muscles: the front end lifts toward its posture (and sags between steps under gravity)
+    const m = this.rearM;
+    for (let i = 1; i < Math.min(m, n); i++) {
+      const w = Math.pow(1 - i / m, 1.6);
+      const ty = g + this.rad[i] + this.rearH * s * w;
+      if (p[i].y < ty) p[i].y += (ty - p[i].y) * 0.16 * (0.4 + w);
+    }
+    // constraints: lengths, bending, the floor
+    const bend = this.rearH > 0.08 ? 0.35 : 0.14;
+    for (let it = 0; it < 6; it++) {
+      for (let i = 0; i < n - 1; i++) {
+        const a = p[i], b = p[i + 1];
+        const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+        const d = Math.hypot(dx, dy, dz) || 1e-6;
+        const k = ((d - this.len[i]) / d) * 0.5;
+        a.x += dx * k;
+        a.y += dy * k;
+        a.z += dz * k;
+        b.x -= dx * k;
+        b.y -= dy * k;
+        b.z -= dz * k;
+      }
+      for (let i = 0; i < n - 2; i++) {
+        const a = p[i], b = p[i + 2];
+        const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+        const d = Math.hypot(dx, dy, dz) || 1e-6;
+        const target = (this.len[i] + this.len[i + 1]) * 0.985;
+        if (d >= target) continue;
+        const k = ((d - target) / d) * 0.5 * bend;
+        a.x += dx * k;
+        a.y += dy * k;
+        a.z += dz * k;
+        b.x -= dx * k;
+        b.y -= dy * k;
+        b.z -= dz * k;
+      }
+      for (let i = 0; i < n; i++) if (p[i].y < g + this.rad[i]) p[i].y = g + this.rad[i];
+    }
+    // bristle friction on the floor: forward slides, backward grips, sideways drags
+    for (let i = 1; i < n; i++) {
+      if (p[i].y > g + this.rad[i] + 0.004 * s) continue;
+      const a = p[i - 1], b = p[Math.min(n - 1, i + 1)];
+      let tx = a.x - b.x, tz = a.z - b.z;
+      const tl = Math.hypot(tx, tz) || 1;
+      tx /= tl;
+      tz /= tl;
+      const dx = p[i].x - q[i].x, dz = p[i].z - q[i].z;
+      const along = dx * tx + dz * tz;
+      const lx = dx - tx * along, lz = dz - tz * along;
+      const back = along < 0 ? along * 0.92 : along * 0.12;
+      p[i].x -= tx * back + lx * 0.5;
+      p[i].z -= tz * back + lz * 0.5;
+    }
+  }
+
+  /** the book: open on the floor in front while it reads, shut and carried in the mouth otherwise */
+  private placeBook(dt: number) {
+    const bn = this.rig.nodes.book;
+    if (!bn) return;
+    const k = this.carry;
+    const hn = this.rig.nodes.head;
+    const s = this.scale;
+    if (hn) {
+      // carried: the spine across the mouth, the shut book hanging below it
+      const mouth = _a.set(0, -0.014 * s, 0.05 * s).applyQuaternion(hn.quaternion).add(hn.position);
+      const side = _c.set(1, 0, 0).applyQuaternion(hn.quaternion);
+      const up = _d.set(0, 1, 0).applyQuaternion(hn.quaternion);
+      const fw = _b.crossVectors(side, up);
+      _m.makeBasis(up.negate(), fw.negate(), side);
+      _q.setFromRotationMatrix(_m);
+      bn.position.lerpVectors(this.bookAt, mouth, k);
+      bn.quaternion.identity().slerp(_q, k);
+    }
+    // shut while carried; pages turn only while it lies open
+    const cr = this.rig.nodes.cover_r;
+    if (cr) cr.rotation.set(0, 0, this.closeA * sstep(0.15, 0.85, k));
     let page = 0;
-    let handHelp = 0;
     if (this.pageT >= 0) {
       this.pageT += dt;
-      const f = clamp((this.pageT - 0.12) / 0.5, 0, 1);
+      const f = clamp((this.pageT - 0.1) / 0.55, 0, 1);
       page = f * f * (3 - 2 * f);
-      handHelp = Math.sin(Math.PI * clamp(this.pageT / 0.62, 0, 1));
       if (this.pageT > 0.7) this.pageT = -1;
     }
-    // blinks, chatter-free mouth breathing, spectacles and tassel springs
-    this.nextBlink -= dt;
-    if (this.nextBlink <= 0) {
-      this.nextBlink = 1.8 + R() * 3.4;
-      this.blink = 0.15;
-      if (R() < 0.18) this.nudgeSpecs();
-    }
-    this.blink = Math.max(0, this.blink - dt);
-    let shut = lids;
-    if (this.blink > 0) shut = Math.max(shut, Math.sin((this.blink / 0.15) * Math.PI));
-    const sp = this.specsS.step(0, dt);
-    const ta = this.tassel[0].step(-this.cur.head[0] * 0.6 - this.cur.seg9[0] * 0.4, dt);
-    const tb = this.tassel[1].step(-this.cur.head[1] * 0.5, dt);
-
-    const rot = (n: string, x: number, y: number, z: number) => {
-      const node = this.rig.nodes[n];
-      const b = this.base[n];
-      if (node && b) node.rotation.set(b.x + x, b.y + y, b.z + z);
-    };
-    for (const n of SEGS) {
-      const c = this.cur[n];
-      rot(n, c[0], c[1], c[2]);
-    }
-    const hc = this.cur.head;
-    rot('head', hc[0], hc[1], hc[2]);
-    rot('jaw', clamp(jaw + Math.max(0, Math.sin(t * 1.7)) * 0.04, 0, 0.6), 0, 0);
-    rot('hand_l', this.cur.hand_l[0], this.cur.hand_l[1], this.cur.hand_l[2]);
-    rot('hand_r', this.cur.hand_r[0] - handHelp * 0.35, this.cur.hand_r[1] + handHelp * 0.4, this.cur.hand_r[2]);
-    rot('book', this.cur.book[0], this.cur.book[1], this.cur.book[2]);
-    rot('cover_r', 0, this.closeK * this.closeA, 0);
-    rot('page', 0, page * this.flipA, 0);
-    // the loose page only shows while it turns (at rest it lies in the face of the block)
-    if (this.rig.nodes.page) this.rig.nodes.page.visible = page > 0.02 && page < 0.98 && this.closeK < 0.05;
-    rot('specs', sp * 0.06, 0, 0);
-    const so = this.specsBase;
-    if (so) this.rig.nodes.specs?.position.set(so.x, so.y - sp * 0.004, so.z);
-    rot('cap', 0, 0, 0);
-    rot('tassel', ta * 0.5, 0, tb * 0.5 + Math.sin(t * 1.3) * 0.05);
-    const lid = clamp(shut, -0.2, 1) * this.lidClose;
-    rot('lid_l', lid, 0, 0);
-    rot('lid_r', lid, 0, 0);
-    // the body swells with each breath, segment by segment
-    for (let i = 0; i < 10; i++) {
-      const sw = 1 + swell(i) * 0.6;
-      this.rig.nodes[SEGS[i]]?.scale.set(sw, sw, 1);
+    const pn = this.rig.nodes.page;
+    if (pn) {
+      pn.rotation.set(0, 0, page * this.flipA);
+      pn.visible = page > 0.02 && page < 0.98 && k < 0.05;
     }
   }
 }

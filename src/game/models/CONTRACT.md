@@ -213,3 +213,7 @@ Duster tails, poncho fronts, bandana tails, capes, mummy bandage ribbons, flags 
 engine's Verlet cloth and rendered as blocky fabric strips. Models keep only the stiff upper garment and expose
 sockets: Sundown `coat_anchor_l`, `coat_anchor_r`, `coat_anchor_back` (waistline, on pelvis/torso), `bandana_anchor`
 (back of neck). Bosses/NPCs: `cape_anchor`. Props with flags: `meta.flagAnchor: [x,y,z]` meters.
+
+## Sundown hair (half-zombie remake)
+- Parts `hair_l`, `hair_l2`, `hair_r`, `hair_r2`, `hair_b`, `hair_b2` are children of `head`; chains listed in
+  `meta.hair.chains`. `installHairSway(rig)` (`characters/hairSway.ts`) drives them; rigs without hair ignore it.

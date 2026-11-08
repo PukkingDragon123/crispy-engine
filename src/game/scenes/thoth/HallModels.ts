@@ -897,6 +897,51 @@ export function thothDesk(): Built & { meta: { top: number; flame: V3; stool: V3
   return { model: m, voxelSize: vs, pivot: 'bottom', meta: { top: (T + 1) * vs, flame: [-22 * vs, (T + 8.5) * vs, 6 * vs], stool: [-8 * vs, 19 * vs, (zB + 4) * vs], write: [-4 * vs, (T + 2) * vs, 0] } };
 }
 
+// ======================================================================= Thoth's book pile (1/32)
+/** five giant tomes stacked crooked in the nave: Thoth's podium for saying hello (he is not
+ *  small, everybody else is just very big). Gilt corners, page edges, a ribbon, a candle stub.
+ *  meta.top: the height of the top cover (m). */
+export function bookPile(): Built & { top: number } {
+  const vs = 1 / 32;
+  const m = new VoxelModel('book_pile');
+  const books = [
+    { w: 18, d: 13, h: 4, rot: 0.0, col: LEATHERS[0] },
+    { w: 16, d: 12, h: 4, rot: 0.22, col: LEATHERS[3] },
+    { w: 17, d: 12, h: 3, rot: -0.12, col: LEATHERS[5] },
+    { w: 14, d: 10, h: 4, rot: 0.35, col: LEATHERS[7] },
+    { w: 13, d: 10, h: 3, rot: 0.1, col: LEATHERS[13] },
+  ];
+  let y = 0;
+  for (const b of books) {
+    const c = Math.cos(b.rot), sn = Math.sin(b.rot);
+    const R = Math.ceil(Math.hypot(b.w, b.d)) + 1;
+    for (let x = -R; x <= R; x++)
+      for (let z = -R; z <= R; z++) {
+        // the book's own frame
+        const u = x * c + z * sn, v = -x * sn + z * c;
+        if (Math.abs(u) > b.w || Math.abs(v) > b.d) continue;
+        for (let k = 0; k < b.h; k++) {
+          const cover = k === 0 || k === b.h - 1;
+          const spine = u < -b.w + 1.5;
+          const corner = cover && Math.abs(u) > b.w - 2.5 && Math.abs(v) > b.d - 2.5 && !spine;
+          let col: number = cover || spine ? b.col : (k % 2 ? 0xeee2c4 : 0xd8c8a0);
+          let f = 0;
+          if (corner) (col = GOLD.base), (f = VF.METAL);
+          else if (spine && (k === 1 || k === b.h - 2)) (col = GOLD.shade), (f = VF.METAL);
+          else if (!cover && !spine && (Math.abs(u) < b.w - 1 && Math.abs(v) < b.d - 1)) continue; // inside the page block
+          m.set(x, y + k, z, col, f);
+        }
+      }
+    y += b.h;
+  }
+  // a red ribbon hanging out of the second book, a candle stub on top
+  for (let k = 0; k < 9; k++) m.set(4, 6 - Math.min(5, k), 13 + Math.min(k, 3), 0xa8221a);
+  lathe(m, 5, -3, y, y + 2, () => 2.2, () => BRONZE[3], VF.METAL);
+  lathe(m, 5, -3, y + 3, y + 7, () => 1, (_x, yy) => (yy === y + 7 ? 0x3a2a20 : 0xeee2c4));
+  m.set(5, y + 8, -3, 0xffd27a, VF.GLOW);
+  return { model: m, voxelSize: vs, pivot: [0, 0, 0], top: y * vs };
+}
+
 // ======================================================================= rigs
 /** a flying book (1/48): `spine` (root) carrying the page block's two halves on the covers;
  *  `cover_l` / `cover_r` hinge on the spine (flap them), `leaf` is one page that can flip.

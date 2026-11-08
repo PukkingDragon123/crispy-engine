@@ -60,6 +60,8 @@ export interface HallUIState {
   page: { cur: number; total: number } | null;
   panel: PanelData | null;
   talk: string | null;
+  /** where Thoth's head is on screen (the balloon hangs over him there; null: the portrait box) */
+  talkAt: { x: number; y: number } | null;
   errand: ErrandSlip | null;
   gifts: GiftRow[] | null;
   satchel: string | null;
@@ -350,7 +352,7 @@ export class HallUI {
     if (s.view === 'nave') this.drawErrand(s.errand, s.satchel);
     if (this.panelKey && this.panelKey !== 'gifts' && s.panel && s.panel.key === this.panelKey) this.drawPanel(s.panel);
     else if (this.panelKey === 'gifts' && s.gifts) this.drawGifts(s);
-    this.drawTalk();
+    this.drawTalk(s);
     this.drawHint(s);
     this.drawBanner(rdt, s.banner);
     this.drawTip(s.tip);
@@ -488,18 +490,50 @@ export class HallUI {
     }
   }
 
-  private drawTalk() {
+  private drawTalk(s: HallUIState) {
     const a = this.talkK;
     if (a < 0.02 || !this.talkText) return;
     const S = this.S;
-    const nich = niche();
-    const x = 14, maxBW = Math.min(this.narrow ? this.W - 40 * S - 60 : 420, this.panelKey ? this.panelLeft() - 40 * S - 50 : 9999);
     const size = this.narrow ? 14 : 16;
     const shown = this.talkText.slice(0, Math.floor(this.talkT * 46));
+    const tabsTop = this.H - Math.ceil((15 * 2 + 14) / S) * S - 40;
+    const right = this.panelKey ? this.panelLeft() - 12 : this.W - 12;
+    const at = s.talkAt;
+    // over Thoth's head when he is on screen and clear of the sheet and the plaques
+    if (at && at.y > 90 && at.y < tabsTop + 20 && at.x > 30 && at.x < right - 20) {
+      const maxBW = Math.min(this.narrow ? this.W * 0.6 : 380, right - 20);
+      const lines = this.wrap(this.talkText, maxBW - 24, size);
+      const bwPx = Math.ceil((Math.max(...lines.map((l) => this.tw(l, size))) + 24) / S);
+      const bhPx = Math.ceil((lines.length * (size + 4) + 16) / S);
+      const bw = bwPx * S, bh = bhPx * S;
+      const bx = Math.max(10, Math.min(right - bw, at.x - bw * 0.3));
+      const by = Math.max(70, at.y - bh - 18 * (S / 2) - 10) + (1 - a) * 16;
+      this.blit(papyrus(bwPx, bhPx, 5, false), bx, by, a);
+      // the tail, stepping down to his beak
+      const c = this.c;
+      c.globalAlpha = a;
+      const tx = Math.max(bx + 10, Math.min(bx + bw - 14, at.x));
+      for (let i = 0; i < 7; i++) {
+        const w = (7 - i) * (S / 2) * 1.4;
+        px(c, tx - w / 2 + i * S * 0.5, by + bh - 2 + i * S, w, S, P.m);
+        px(c, tx - w / 2 + i * S * 0.5 - S, by + bh - 2 + i * S, S, S, P.o);
+        px(c, tx + w / 2 + i * S * 0.5, by + bh - 2 + i * S, S, S, P.o);
+      }
+      c.globalAlpha = 1;
+      let left = shown.length;
+      lines.forEach((l, i) => {
+        if (left <= 0) return;
+        this.ink(l.slice(0, left), bx + 12, by + 8 + i * (size + 4), INK, size, 'left', false, a);
+        left -= l.length + 1;
+      });
+      this.rect('talk', bx, by, bw, bh);
+      return;
+    }
+    const nich = niche();
+    const x = 14, maxBW = Math.min(this.narrow ? this.W - 40 * S - 60 : 420, this.panelKey ? this.panelLeft() - 40 * S - 50 : 9999);
     const lines = this.wrap(this.talkText, maxBW - 26, size);
     const bwPx = Math.ceil((Math.max(...lines.map((l) => this.tw(l, size))) + 26) / S);
     const bhPx = Math.ceil((lines.length * (size + 4) + 18) / S);
-    const tabsTop = this.H - Math.ceil((15 * 2 + 14) / S) * S - 40;
     const y = tabsTop - Math.max(46 * S, bhPx * S) - 12 + (1 - a) * 30;
     const bob = Math.sin(this.t * 2.2) * 1.2;
     this.blit(nich, x, y + bob, a);
@@ -590,7 +624,7 @@ export class HallUI {
     const budget = maxH - 40;
     if (p.known) {
       const loreLines = this.wrap(p.lore, inner, small);
-      const rest = (p.stats.length ? Math.ceil(p.stats.length / 2) * (small + 3) + 8 : 0) + (p.moves.length ? 40 : 0) + (p.weak ? 44 : 0) + 120;
+      const rest = (p.stats.length ? Math.ceil(Math.min(6, p.stats.length) / 2) * (small + 3) + 8 : 0) + (p.moves.length ? 40 : 0) + (p.weak ? 44 : 0) + small + 160;
       const room = Math.max(2, Math.floor((budget - y - rest) / (small + 3)));
       const shown = loreLines.slice(0, room);
       if (loreLines.length > room) shown[room - 1] = shown[room - 1].replace(/[ ,.;:]*\S*$/, '') + '...';

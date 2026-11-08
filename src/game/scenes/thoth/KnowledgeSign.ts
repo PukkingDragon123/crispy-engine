@@ -28,6 +28,7 @@ const INSET = 0x102060;
 
 interface Letter {
   mesh: THREE.Mesh;
+  mat: VoxelMaterial;
   home: THREE.Vector3;
   k: number;
   at: number;
@@ -109,13 +110,15 @@ export class KnowledgeSign {
     const lineH = top.h * VS;
     const place = (ln: ReturnType<typeof wordLetters>, y: number, delay: number) => {
       ln.letters.forEach((l, i) => {
-        const mesh = new THREE.Mesh(l.geo, this.mat);
+        const mat = makeVoxelMaterial({ emissiveStrength: 1 });
+        const mesh = new THREE.Mesh(l.geo, mat);
+        mesh.castShadow = false;
         this.geos.push(l.geo);
         const home = new THREE.Vector3((l.cx - ln.w / 2) * VS, y, 0);
         mesh.position.copy(home);
         mesh.scale.setScalar(0.001);
         this.group.add(mesh);
-        this.letters.push({ mesh, home, k: 0, at: delay + i * 0.32, ph: i * 0.9 + y });
+        this.letters.push({ mesh, mat, home, k: 0, at: delay + i * 0.32, ph: i * 0.9 + y });
       });
     };
     place(top, bot.h * VS + 0.08, 0.6);
@@ -220,7 +223,14 @@ export class KnowledgeSign {
       }
     }
     const lit = built / Math.max(1, this.letters.length);
-    (this.mat.userData.emissiveStrength as { value: number }).value = 0.75 + lit * 0.35 + h * 0.7 + (this.burstT >= 0 ? 0.8 : 0);
+    // a shimmer runs along the words now and then; a letter flares as it lands
+    const wave = (t * 0.55) % 3.2;
+    this.letters.forEach((l, i) => {
+      const x = i / Math.max(1, this.letters.length - 1);
+      const sh = Math.max(0, 1 - Math.abs(wave - x * 1.2 - 0.4) * 4);
+      const land = l.k > 0 && l.k < 1 ? 1.2 : 0;
+      (l.mat.userData.emissiveStrength as { value: number }).value = 1.05 + sh * 0.9 + h * 0.8 + land + (this.burstT >= 0 ? 0.9 : 0);
+    });
     this.light.intensity = (2.2 + h * 3 + Math.sin(t * 2.3) * 0.3) * lit;
   }
 
@@ -228,6 +238,7 @@ export class KnowledgeSign {
     for (const g of this.geos) g.dispose();
     this.proxy.geometry.dispose();
     this.mat.dispose();
+    for (const l of this.letters) l.mat.dispose();
     for (const b of this.books) b.rig.dispose();
     this.group.removeFromParent();
   }
