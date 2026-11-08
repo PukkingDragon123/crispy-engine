@@ -12,6 +12,7 @@ export const TALK = {
     'Shhh, the bookworms are working. Okay, I am done shhh-ing. HI!',
     'You smell like sand and adventures. Did you bring me something?',
   ],
+  coming: ['Wait for me! I am coming! My legs are very short!', 'One second! I am finding my other sandal!', 'Coming, coming! Do not touch the jars!'],
   helloMenu: [
     "You found my hall! It is the best hall. I'm ten thousand and three!",
     'Come in, come in! Wipe your bones on the mat!',

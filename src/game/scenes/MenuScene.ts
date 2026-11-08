@@ -476,6 +476,8 @@ export class MenuScene implements GameScene {
       ks.group.rotation.y = KSIGN.yaw;
       this.scene.add(ks.group);
       this.ksign = ks;
+      // Thoth and his bookworms bake in a worker while the menu idles, so the hall opens at once
+      this.engine.tweens.after(2.5, () => ThothHall.prewarm(), true);
     } catch (e) {
       console.warn('[menu] knowledge sign', e);
     }

@@ -96,7 +96,6 @@ export class KnowledgeSign {
   proxy: THREE.Mesh;
   private letters: Letter[] = [];
   private books: { rig: RigInstance; a: number; r: number; y: number; sp: number; flap: number; flip: number }[] = [];
-  private mat: VoxelMaterial;
   private light: THREE.PointLight;
   private t = 0;
   private hot = 0;
@@ -104,7 +103,6 @@ export class KnowledgeSign {
   private geos: THREE.BufferGeometry[] = [];
 
   constructor(private particles: Particles) {
-    this.mat = makeVoxelMaterial({ emissiveStrength: 1 });
     // the two lines of type
     const top = wordLetters("THOTH'S", 26, 1), bot = wordLetters('HALL', 34, 4);
     const lineH = top.h * VS;
@@ -237,7 +235,6 @@ export class KnowledgeSign {
   dispose() {
     for (const g of this.geos) g.dispose();
     this.proxy.geometry.dispose();
-    this.mat.dispose();
     for (const l of this.letters) l.mat.dispose();
     for (const b of this.books) b.rig.dispose();
     this.group.removeFromParent();

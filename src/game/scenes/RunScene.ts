@@ -72,6 +72,7 @@ import { OasisHeart } from '../run/OasisHeart';
 import { Barks } from '../audio/Barks';
 import { DeathCine, deathCineFromRun } from './DeathCine';
 import { CodexRun } from '../ui/codex/CodexRun';
+import { ThothErrand } from '../run/ThothErrand';
 import { Equipment } from '../player/Equipment';
 import { GearPickups } from '../run/GearLoot';
 import { GearHud } from '../ui/GearHud';
@@ -210,6 +211,8 @@ export class RunScene implements GameScene {
   private dying = false;
   oasis: OasisHeart | null = null;
   private codexRun: CodexRun | null = null;
+  /** Thoth's errand of the day ("find me a sand hippo calf!") and his satchel of study gifts */
+  private thothErrand: ThothErrand | null = null;
   equipment!: Equipment;
   gearLoot!: GearPickups;
   gearHud!: GearHud;
@@ -424,6 +427,8 @@ export class RunScene implements GameScene {
     this.progress = new ProgressLadder({ engine: e, ctx: this.ctx, hud: this.hud, director: this.director, world: this.world, shop: this.shop, camera: this.camera });
     new Barks(this.ctx, this.player); // Sundown's voiced quips; tears itself down with the scene
     this.codexRun = new CodexRun(this.ctx, this);
+    this.thothErrand = new ThothErrand(this.ctx, this);
+    ThothErrand.unpack((id) => this.items.add(id), (s) => this.hud.toast(s, '#7cf2b4', "From Thoth's satchel"));
 
     // place player
     const st = this.world.sa.start;
@@ -478,6 +483,7 @@ export class RunScene implements GameScene {
     this.oasis?.dispose();
     this.bountyRip?.dispose();
     this.codexRun?.dispose();
+    this.thothErrand?.dispose();
     this.progress?.dispose();
     this.engine.paused = false;
     this.engine.post.u.uDesat.value = 0;
@@ -675,6 +681,8 @@ export class RunScene implements GameScene {
     }
     const m = this.missions.hud();
     if (m?.objective) out.push(questFromObjective(m.objective));
+    const tq = this.thothErrand?.paperQuest();
+    if (tq) out.push(tq);
     return out;
   }
 
@@ -1042,6 +1050,7 @@ export class RunScene implements GameScene {
       return;
     }
     // codex discoveries wait until cutscenes, staged encounters and the rank-up are over
+    this.thothErrand?.update(rdt);
     this.codexRun?.update(rdt, this.introOn || this.picker.cinematic || Cinema.busy() || cineFlags.choice || this.dying);
     const e = this.engine;
     this.run.time += dt;

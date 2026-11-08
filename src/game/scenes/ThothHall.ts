@@ -26,6 +26,9 @@ import { modelEntry } from '../models/lookup';
 import { CONSUMABLES } from '../models/characters/consumables';
 import { ThothAnim, ThothMode } from '../models/characters/thoth';
 import { BookwormAnim, BookwormMode } from '../models/creatures/bookworm';
+import { bakeRig, bakedRig } from '../fx/RigBake';
+import { thothSay } from '../fx/ThothPop';
+import type { Speech } from '../audio/Voice';
 import { Puppet } from '../ui/codex/Puppet';
 import { entryPuppet, placeProps, plateMound } from '../ui/codex/Plate';
 import * as HM from './thoth/HallModels';
@@ -60,6 +63,8 @@ const WING_PLAN: { cat: CodexCat; side: -1 | 0 | 1; z: number; x?: number }[] = 
   { cat: 'legend', side: 0, z: -10.3, x: -0.7 },
 ];
 const APSE_Y = 1 / 12;
+/** the bookworms' jobs and which librarian does each (bookworm variants) */
+const WORM_JOBS: [string, number][] = [['gallery', 0], ['reader', 1], ['desk', 3], ['jars', 2]];
 
 // ---------------------------------------------------------------- shared geometry (kept warm between visits)
 const GEO = new Map<string, THREE.BufferGeometry>();
@@ -145,6 +150,8 @@ interface Walker {
   perch: number;
   /** where he climbed up from (he hops back down there) */
   perchBase: THREE.Vector3 | null;
+  /** a shelved book comes back after this many seconds (bookworms) */
+  bookBack: number;
 }
 interface Book {
   rig: RigInstance;
@@ -174,6 +181,7 @@ export class ThothHall {
   private goalPos = new THREE.Vector3();
   private goalLook = new THREE.Vector3();
   private par = new THREE.Vector2();
+  private wantFov = 42;
   private t = 0;
   // pointer
   private ptr = { x: -1, y: -1, down: false, sx: 0, sy: 0, moved: 0, touch: false, has: false };
@@ -183,6 +191,8 @@ export class ThothHall {
   private tip: HallUIState['tip'] = null;
   // life
   private thoth: Walker | null = null;
+  private waitingThoth = false;
+  private speech: Speech | null = null;
   private worms: Walker[] = [];
   private books: Book[] = [];
   private ladders: { rig: RigInstance; side: number; z: number; v: number; goal: number; wait: number }[] = [];
@@ -207,6 +217,12 @@ export class ThothHall {
   private onPDown = (e: PointerEvent) => this.pDown(e);
   private onPMove = (e: PointerEvent) => this.pMove(e);
   private onPUp = (e: PointerEvent) => this.pUp(e);
+
+  /** start baking Thoth and the bookworms in the background (call while a menu idles) */
+  static prewarm() {
+    void bakeRig('thoth');
+    for (const [, v] of WORM_JOBS) void bakeRig('bookworm', v);
+  }
 
   constructor(private engine: Engine, private o: ThothHallOpts) {
     this.glassMat = makeVoxelMaterial({ transparent: true, opacity: 0.13, roughness: 0.05 });
@@ -404,52 +420,83 @@ export class ThothHall {
       const c = new THREE.Vector3((Math.random() - 0.5) * 2.4, 5.2 + Math.random() * 1.6, 7 - k * 1.9);
       this.books.push({ rig, c, r: new THREE.Vector3(0.9 + Math.random() * 1.2, 0.35 + Math.random() * 0.4, 1.1 + Math.random() * 1.3), f: new THREE.Vector3(0.11 + Math.random() * 0.08, 0.23 + Math.random() * 0.1, 0.09 + Math.random() * 0.06), ph: Math.random() * 10, flap: Math.random() * 6, prev: c.clone(), flip: -1 });
     }
-    // ---- Thoth and the bookworms (their models come from the registry; absent → the hall carries on)
-    this.thoth = this.walker('thoth', new THREE.Vector3(0.9, 0, 5.4));
+    // ---- Thoth and the bookworms: baked in the background (a worker), so the hall never stalls on them.
+    // Ready ones walk in at once; the others pop in when their bake lands.
     this.thothHit = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.95, 0.6), this.silMat);
     this.thothHit.position.y = 0.47;
-    if (this.thoth) this.thoth.rig.root.add(this.thothHit);
-    const wormJobs: [string, string][] = [['gallery', 'bookworm'], ['ladder', 'bookworm_elder'], ['desk', 'bookworm_archivist'], ['shelf', 'bookworm_apprentice']];
-    wormJobs.forEach(([job, key], k) => {
-      const w = this.walker(key, new THREE.Vector3(0, 0, 0), k + 2);
-      if (!w) return;
-      w.job = job;
-      if (job === 'gallery') w.pos.set(HM.HALL.NX + 0.3, HM.HALL.GALLERY + 1 / 12, 5);
-      this.worms.push(w);
+    const thothNow = bakedRig('thoth');
+    if (thothNow) this.addThoth(thothNow, false);
+    else {
+      this.waitingThoth = true;
+      void bakeRig('thoth').then((g) => this.state !== 'done' && this.addThoth(g, true));
+    }
+    WORM_JOBS.forEach(([job, v], k) => {
+      const now = bakedRig('bookworm', v);
+      if (now) this.addWorm(now, job, k);
+      else void bakeRig('bookworm', v).then((g) => this.state !== 'done' && this.addWorm(g, job, k));
     });
     // ---- the screen
     this.ui = new HallUI(this.engine.overlay);
   }
 
-  /** a character from the registry as a walker, with its own animator (null when its model is missing) */
-  private walker(key: string, at: THREE.Vector3, seed = 3): Walker | null {
-    let spec: RigSpec | null = null;
-    try {
-      const r = modelEntry(key)?.() as RigSpec | undefined;
-      if (r?.parts) spec = r;
-    } catch (e) {
-      console.warn('[hall] model', key, e);
-    }
-    if (!spec) return null;
-    const rig = new RigInstance(buildRigGeo(spec, 'hall:' + key));
+  /** a baked rig as a walker, with its own animator */
+  private walker(geo: RigGeo, at: THREE.Vector3, worm: boolean, seed = 3): Walker {
+    const rig = new RigInstance(geo);
     rig.root.position.copy(at);
     this.scene.add(rig.root);
-    const isWorm = spec.meta?.kind === 'bookworm' || key.startsWith('bookworm');
     return {
       rig,
-      th: isWorm ? null : new ThothAnim(rig, seed),
-      bw: isWorm ? new BookwormAnim(rig, seed) : null,
+      th: worm ? null : new ThothAnim(rig, seed),
+      bw: worm ? new BookwormAnim(rig, seed) : null,
       pos: at.clone(),
       yaw: Math.PI,
       path: [],
       goalKey: '',
       face: null,
-      speed: isWorm ? 0.22 : 1.9,
+      speed: worm ? 0.2 : 1.9,
       gest: null,
       t: Math.random() * 10,
       perch: 0,
       perchBase: null,
+      bookBack: 0,
     };
+  }
+
+  /** Thoth arrives: at once on open, or (still baking) with a pop of glyphs on his book pile */
+  private addThoth(g: RigGeo, pop: boolean) {
+    if (this.thoth) return;
+    const at = new THREE.Vector3(PILE.x, PILE_TOP, PILE.z);
+    const th = this.walker(g, at, false, 3);
+    th.perch = PILE_TOP;
+    th.perchBase = new THREE.Vector3(PILE.x - 0.05, 0, PILE.z + 0.62);
+    th.goalKey = 'hello';
+    th.rig.root.add(this.thothHit);
+    this.thoth = th;
+    this.waitingThoth = false;
+    if (pop) {
+      const p = { x: at.x, y: at.y + 0.4, z: at.z };
+      this.particles.emit({ pos: p, count: 46, spread: 1.4, up: 0.8, life: [0.5, 1.2], size: [0.08, 0.01], sprite: ['ankh', 'eye', 'feather', 'scarab', 'star4'], color: [0xffe08a, 0x9ad8ff, 0xffffff], additive: true, drag: 1.6 });
+      this.engine.audio.play('divine_chime', { volume: 0.5, pitch: 1.3 });
+      th.th?.kick(3);
+      th.th?.flutter(1.5);
+      this.gesture(th, 'delight', 1.6);
+      this.talk(say(this.o.from === 'menu' ? TALK.helloMenu : TALK.hello), 6);
+    }
+  }
+
+  private addWorm(g: RigGeo, job: string, k: number) {
+    const start = job === 'gallery' ? new THREE.Vector3(HM.HALL.NX + 0.3, HM.HALL.GALLERY + 1 / 12, 5) : job === 'reader' ? new THREE.Vector3(-(HM.HALL.NX + 0.3), HM.HALL.GALLERY + 1 / 12, -2.5) : new THREE.Vector3(0, 0, 0);
+    const w = this.walker(g, start, true, k + 5);
+    w.job = job;
+    // shelving: the book leaves the mouth at the top of the push and comes back a little later
+    w.bw!.onShelve = () => {
+      const b = w.rig.nodes.book;
+      if (b) b.visible = false;
+      w.bookBack = 5 + Math.random() * 4;
+      const hp = w.rig.nodes.head?.getWorldPosition(new THREE.Vector3());
+      if (hp) this.particles.emit({ pos: hp, count: 6, spread: 0.3, up: 0.2, life: [0.4, 0.8], size: [0.04, 0.01], sprite: ['puff0', 'puff1'], color: 0xe8dcc0, alpha: 0.5, drag: 2 });
+    };
+    this.worms.push(w);
   }
 
   // ======================================================================= jars
@@ -574,7 +621,7 @@ export class ThothHall {
     this.setView('nave', true);
     this.camPos.set(0.2, 2.6, 8.6);
     this.camLook.set(0, 3.2, 0);
-    this.talk(say(this.o.from === 'menu' ? TALK.helloMenu : TALK.hello), 7);
+    this.talk(this.waitingThoth ? say(TALK.coming) : say(this.o.from === 'menu' ? TALK.helloMenu : TALK.hello), 7);
     (window as any).__hall = this;
     this.buildSome(60);
     void eng.fadeIn(0.6);
@@ -670,19 +717,23 @@ export class ThothHall {
       this.ped.k = Math.max(0, this.ped.k - dt * 6);
       if (this.ped.k <= 0 || !this.ped.obj) {
         this.ped.obj?.removeFromParent();
+        this.ped.obj?.traverse((o) => (o as THREE.Mesh).userData?.own && (o as THREE.Mesh).geometry.dispose());
         this.ped.puppet?.dispose();
         this.ped.obj = null;
         this.ped.puppet = null;
         this.ped.key = key;
         if (key && w && e) {
           try {
-            const sp = this.specimen(e, 0.8, 0.45);
+            const sp = this.specimen(e, 0.78, 0.4);
             if (sp) {
-              this.ped.obj = sp.obj;
+              // a holder for the pop-in scale (the specimen keeps its own fit scale)
+              const holder = new THREE.Group();
+              holder.add(sp.obj);
+              this.ped.obj = holder;
               this.ped.puppet = sp.puppet;
-              sp.obj.position.copy(w.pedPos).add(new THREE.Vector3(0, PED_TOP, 0));
-              sp.obj.rotation.y = Math.atan2(-w.fwd.x, -w.fwd.z) + (w.side === 0 ? 0.35 : w.side * 0.3);
-              this.scene.add(sp.obj);
+              holder.position.copy(w.pedPos).add(new THREE.Vector3(0, PED_TOP, 0));
+              holder.rotation.y = Math.atan2(-w.fwd.x, -w.fwd.z) + (w.side === 0 ? 0.35 : w.side * 0.3);
+              this.scene.add(holder);
               this.particles.emit({ pos: { x: w.pedPos.x, y: w.pedPos.y + PED_TOP + 0.1, z: w.pedPos.z }, count: 26, spread: 0.7, up: 0.9, life: [0.5, 1.2], size: [0.05, 0.01], sprite: ['spark', 'star4'], color: [0xffe08a, 0xfff4c8, 0x8ab0ff], additive: true, drag: 1.5 });
               this.engine.audio.play('divine_whisper', { volume: 0.25, pitch: 1.3 });
             }
@@ -710,9 +761,10 @@ export class ThothHall {
   // ======================================================================= the camera
   private frameGoal() {
     const asp = this.engine.width / this.engine.height;
-    const fov = THREE.MathUtils.degToRad(this.camera.fov);
+    const fov = THREE.MathUtils.degToRad(42);
     const hf = 2 * Math.atan(Math.tan(fov / 2) * asp);
     const usable = this.view === 'nave' ? 1 : clamp01((this.ui?.panelLeft() ?? this.engine.width * 0.62) / this.engine.width - 0.02);
+    this.wantFov = 42;
     if (this.view === 'nave') {
       this.goalPos.set(0, 1.75, 8.25);
       this.goalLook.set(0, 2.25, -6);
@@ -730,17 +782,44 @@ export class ThothHall {
       return;
     }
     const w = this.wings[this.wing];
-    // the stand and the pedestal together, in the part of the screen the sheet and the plaques leave free
-    const c = w.standPos.clone().lerp(w.pedPos, 0.45);
-    const contentW = 5.4;
-    let d = contentW / usable / (2 * Math.tan(hf / 2));
-    d = Math.max(3.8, Math.min(w.side === 0 ? 7.4 : 6.9, d));
-    const visW = 2 * d * Math.tan(hf / 2), visH = 2 * d * Math.tan(fov / 2);
+    // the stand and the pedestal's specimen together, in the part of the screen the sheet and the
+    // plaques leave free: extents along the screen's right axis (the pedestal stands nearer, so its
+    // offset reads wider by the perspective)
+    const pedOff = w.pedPos.clone().sub(w.standPos);
+    const pr = pedOff.dot(w.right), pd = -pedOff.dot(w.fwd);
+    let half = 0.45;
+    if (this.ped.obj && this.ped.key) {
+      const bb = new THREE.Box3().setFromObject(this.ped.obj);
+      if (!bb.isEmpty()) {
+        const sz = bb.getSize(new THREE.Vector3());
+        half = Math.max(0.3, Math.abs(sz.x * w.right.x) + Math.abs(sz.z * w.right.z)) / 2 / Math.max(0.2, this.ped.obj.scale.x);
+      }
+    }
+    // the camera stays in the nave (clear of the far bays, the ladders and the gallery); a narrow
+    // screen that would need it further back widens the lens instead
+    const maxD = w.side === 0 ? 6.4 : Math.abs(w.standPos.x) + 1.0 - 0.4;
+    let d = 5.5, lo = -2.25, hi = 2.25, th = Math.tan(hf / 2);
+    for (let it = 0; it < 3; it++) {
+      const k = d / Math.max(1, d - pd);
+      lo = Math.min(-2.25, (pr - half) * k);
+      hi = Math.max(2.25, (pr + half) * k);
+      d = (hi - lo + 0.5) / usable / (2 * th);
+      if (d > maxD) {
+        th = Math.min(Math.tan(THREE.MathUtils.degToRad(48)), (hi - lo + 0.5) / usable / (2 * maxD));
+        d = maxD;
+      }
+      d = Math.max(3.8, d);
+    }
+    this.wantFov = THREE.MathUtils.radToDeg(2 * Math.atan(th / asp));
+    const visW = 2 * d * th;
     const shift = (0.5 - usable / 2) * visW;
-    const look = c.add(new THREE.Vector3(0, 1.2, 0)).addScaledVector(w.right, shift);
-    void visH;
+    const look = w.standPos.clone().add(new THREE.Vector3(0, 1.2, 0)).addScaledVector(w.right, (lo + hi) / 2 + shift).addScaledVector(w.fwd, -0.4);
     this.goalLook.copy(look);
     this.goalPos.copy(look).addScaledVector(w.fwd, -d).add(new THREE.Vector3(0, 0.3, 0));
+    // the camera stays in front of its own bay (out of the piers' way); it turns instead of sliding
+    const lat = this.goalPos.clone().sub(w.standPos).dot(w.right);
+    const lim = w.side === 0 ? 2.2 : 1.3;
+    if (Math.abs(lat) > lim) this.goalPos.addScaledVector(w.right, Math.sign(lat) * lim - lat);
   }
 
   private updateCamera(rdt: number) {
@@ -759,6 +838,7 @@ export class ThothHall {
     const amp = this.view === 'nave' ? 0.12 : 0.05;
     cam.position.copy(this.camPos).addScaledVector(right, this.par.x * amp + Math.sin(t * 0.17) * 0.03).add(new THREE.Vector3(0, this.par.y * amp * 0.5 + Math.sin(t * 0.23) * 0.02, 0));
     cam.lookAt(this.camLook);
+    cam.fov = damp(cam.fov, Math.max(42, Math.min(80, this.wantFov)), 3, rdt);
     cam.aspect = this.engine.width / this.engine.height;
     cam.updateProjectionMatrix();
   }
@@ -820,6 +900,10 @@ export class ThothHall {
       l.z += l.v * dt;
       l.rig.root.position.set(l.side * (HM.HALL.NX - 2 / 12) , HM.HALL.GALLERY + 6 / 12, l.z);
       for (const wn of ['wheel_l', 'wheel_r']) l.rig.nodes[wn].rotation.x += (l.v * dt) / 0.09 * -l.side;
+    }
+    if (this.waitingThoth && Math.random() < dt * 30) {
+      const a = t * 3 + Math.random() * 6.28, r = 0.35 + Math.random() * 0.15;
+      this.particles.emit({ pos: { x: PILE.x + Math.cos(a) * r, y: PILE_TOP + 0.1 + Math.random() * 0.6, z: PILE.z + Math.sin(a) * r }, vel: { x: -Math.sin(a) * 0.9, y: 0.25, z: Math.cos(a) * 0.9 }, count: 1, life: [0.5, 0.9], size: [0.07, 0.02], sprite: ['ankh', 'eye', 'feather', 'scarab', 'spark'], color: [0xffe08a, 0x9ad8ff], additive: true, drag: 0.6 });
     }
     this.updateThoth(dt);
     this.updateWorms(dt);
@@ -969,39 +1053,48 @@ export class ThothHall {
   private updateWorms(dt: number) {
     const t = this.t;
     for (const w of this.worms) {
-      if (w.job === 'ladder') {
-        // the elder reads on the rolling ladder, riding it along the rail
-        const l = this.ladders[0];
-        l.rig.root.updateMatrixWorld(true);
-        const p = l.rig.nodes['ladder'].localToWorld(new THREE.Vector3(0, -2.05, 0.06));
-        w.pos.copy(p);
-        w.path = [];
-        w.yaw = l.side < 0 ? Math.PI / 2 : -Math.PI / 2;
-        w.face = null;
-      } else if (w.job === 'gallery') {
-        // up on the gallery, inching from one end to the other with a book; shelving it at the ends
+      if (w.bookBack > 0) {
+        w.bookBack -= dt;
+        if (w.bookBack <= 0) {
+          const bk = w.rig.nodes.book;
+          if (bk) bk.visible = true;
+        }
+      }
+      const shelving = w.gest?.mode === 'shelve';
+      if (w.job === 'gallery') {
+        // up on the gallery, crawling from one end to the other; at each end it shelves its book
         if (!w.path.length && !w.gest) {
-          const far = w.pos.z > 0 ? -5.6 : 7.2;
+          const far = w.pos.z > 1 ? -5.4 : 7.2;
           w.path = [new THREE.Vector3(HM.HALL.NX + 0.3, HM.HALL.GALLERY + 1 / 12, far)];
           w.goalKey = 'g' + far;
-          this.gesture(w, 'shelve', 2.6);
+          this.gesture(w, 'shelve', 2.7);
         }
-        w.face = w.pos.x > 0 ? Math.PI / 2 : -Math.PI / 2;
-      } else if (w.job === 'desk') {
-        const top = (DESK_META?.top ?? 0.97) + 0.005;
-        const p = this.deskGroup.localToWorld(new THREE.Vector3(-0.42, top, -0.3));
-        w.pos.copy(p);
+        w.face = shelving ? Math.PI / 2 : null;
+      } else if (w.job === 'reader') {
+        // the elder reads up on the far gallery, now and then lifting its head at a noise
         w.path = [];
-        w.face = this.deskGroup.rotation.y + 0.6;
-        if (!w.gest && Math.random() < dt * 0.05) this.gesture(w, 'look', 2.5);
+        w.yaw = 0;
+        if (!w.gest && Math.random() < dt * 0.04) this.gesture(w, Math.random() < 0.5 ? 'look' : 'rear', 2.4);
+        if (!w.gest && Math.random() < dt * 0.25) w.bw?.flipPage();
+      } else if (w.job === 'desk') {
+        // the archivist keeps the ledger on Thoth's desk
+        const top = (DESK_META?.top ?? 0.97) + 0.005;
+        w.pos.copy(this.deskGroup.localToWorld(new THREE.Vector3(0.2, top, -0.36)));
+        w.path = [];
+        w.yaw = this.deskGroup.rotation.y + Math.PI / 2;
+        if (!w.gest && Math.random() < dt * 0.05) this.gesture(w, 'look', 2.2);
+        if (!w.gest && Math.random() < dt * 0.3) w.bw?.flipPage();
       } else {
-        // the apprentice tends the jars of whichever wing you are in
+        // the apprentice tends the jars of whichever wing you are in: crawls along the stand, shelves
         const wg = this.view === 'wing' ? this.wings[this.wing] : this.wings[0];
-        const goal = wg.standPos.clone().addScaledVector(wg.right, 2.25 * (Math.sin(t * 0.05) > 0 ? 1 : -1)).addScaledVector(wg.fwd, -0.15);
+        const side = Math.sin(t * 0.045) > 0 ? 1 : -1;
+        const goal = wg.standPos.clone().addScaledVector(wg.right, 2.35 * side).addScaledVector(wg.fwd, -0.2);
         goal.y = wg.floor;
-        this.goTo(w, goal, 'jars' + wg.i + (goal.x > 0 ? 'a' : 'b') + Math.sign(Math.sin(t * 0.05)));
-        w.face = Math.atan2(-wg.fwd.x, -wg.fwd.z);
-        if (!w.path.length && !w.gest && Math.random() < dt * 0.12) this.gesture(w, Math.random() < 0.5 ? 'rear' : 'look', 2.2);
+        this.goTo(w, goal, 'jars' + wg.i + side);
+        if (!w.path.length) {
+          w.face = Math.atan2(wg.fwd.x, wg.fwd.z);
+          if (!w.gest && Math.random() < dt * 0.15) this.gesture(w, Math.random() < 0.6 ? 'shelve' : 'look', 2.7);
+        } else w.face = null;
       }
       this.stepWalker(w, dt);
     }
@@ -1011,8 +1104,15 @@ export class ThothHall {
   private talk(text: string, hold = 6) {
     this.talkText = text;
     this.talkLeft = hold + text.length / 46;
-    this.thoth?.th?.talk(Math.min(4, text.length / 18));
-    if (Math.random() < 0.5) this.engine.audio.play('squeak', { volume: 0.12, pitch: 1.6 + Math.random() * 0.4 });
+    // his voice (the child's voice synth he uses in the runs too); the beak chatters along
+    this.speech?.stop(0.08);
+    this.speech = null;
+    try {
+      this.speech = thothSay(text, { volume: 0.8 });
+    } catch {
+      /* no voice: the balloon still talks */
+    }
+    this.thoth?.th?.talk(Math.min(5, this.speech?.duration ?? text.length / 16));
   }
 
   // ======================================================================= input
@@ -1365,6 +1465,7 @@ export class ThothHall {
 
   dispose() {
     this.state = 'done';
+    this.speech?.stop(0.1);
     this.restorePost();
     window.removeEventListener('pointerdown', this.onPDown);
     window.removeEventListener('pointermove', this.onPMove);

@@ -590,6 +590,7 @@ export class HallUI {
 
   // ---------------------------------------------------------------- the specimen sheet
   private drawPanel(p: PanelData) {
+    // (p is trimmed below on short screens)
     const S = this.S;
     const a = this.panelK;
     if (a < 0.01) return;
@@ -629,22 +630,37 @@ export class HallUI {
     if (p.known) {
       const loreLines = this.wrap(p.lore, inner, small);
       const rest = (p.stats.length ? Math.ceil(Math.min(6, p.stats.length) / 2) * (small + 3) + 8 : 0) + (p.moves.length ? 40 : 0) + (p.weak ? 44 : 0) + small + 160;
-      const room = Math.max(2, Math.floor((budget - y - rest) / (small + 3)));
+      const short = maxH < 300;
+      const room = Math.max(0, Math.floor((budget - y - rest + (short ? (p.moves.length ? 40 : 0) + (p.weak ? 44 : 0) : 0)) / (small + 3)));
       const shown = loreLines.slice(0, room);
-      if (loreLines.length > room) shown[room - 1] = shown[room - 1].replace(/[ ,.;:]*\S*$/, '') + '...';
+      if (loreLines.length > room && room > 0) shown[room - 1] = shown[room - 1].replace(/[ ,.;:]*\S*$/, '') + '...';
       for (const l of shown) line(l, small, INK, 'left', 3);
+      if (short) {
+        p = { ...p, moves: [], weak: undefined };
+      }
       if (p.stats.length) {
         y += 4;
+        // two columns of label / value; a pair too long for half the sheet gets a whole row
         const col = inner / 2;
-        p.stats.slice(0, 6).forEach(([lab, val], i) => {
-          const yy = y + Math.floor(i / 2) * (small + 3);
-          const xx = x + pad + (i % 2) * col;
+        let ci = 0;
+        for (const [lab, val] of p.stats.slice(0, 6)) {
+          const wide = this.tw(lab, small - 1) + this.tw(val, small - 1) + 22 > col;
+          if (wide && ci === 1) {
+            ci = 0;
+            y += small + 3;
+          }
+          const yy = y, xx = x + pad + ci * col, cw = wide ? inner : col;
           ops.push((y0) => {
             this.ink(lab, xx, y0 + yy, SEPIA, small - 1);
-            this.ink(val, xx + col - 10, y0 + yy, INK, small - 1, 'right');
+            this.ink(val, xx + cw - 10, y0 + yy, INK, small - 1, 'right');
           });
-        });
-        y += Math.ceil(Math.min(6, p.stats.length) / 2) * (small + 3) + 4;
+          if (wide || ci === 1) {
+            ci = 0;
+            y += small + 3;
+          } else ci = 1;
+        }
+        if (ci === 1) y += small + 3;
+        y += 4;
       }
       if (p.moves.length) {
         const mv = this.wrap(p.moves.slice(0, 4).map((m) => `"${m}"`).join('   '), inner, small - 1).slice(0, 2);
