@@ -470,7 +470,15 @@ export class Qte {
           const u = (((ang - Math.PI / 4) % (Math.PI / 2)) + Math.PI / 2) % (Math.PI / 2);
           if (Math.min(u, Math.PI / 2 - u) < 0.13) continue; // four gaps on the diagonals: a gunsight
         }
-        c.fillStyle = Math.abs(d) <= hw ? (d < -hw + 1 && w > 1 ? col : d > hw - 1 && w > 2 ? shadeOf(col) : col) : INK;
+        let fill = INK;
+        if (Math.abs(d) <= hw) {
+          // a bevelled metal band lit from the upper left: the outer face catches the light up there,
+          // the inner face down here (on a 1 px wire only the outer rule applies)
+          const L = ((x + y) / Math.max(1, Math.hypot(x, y))) * -0.7071;
+          const face = w > 1 && d < 0 ? -L : L;
+          fill = col === INK ? INK : face > 0.4 ? lighterOf(col) : face < -0.4 ? shadeOf(col) : col;
+        }
+        c.fillStyle = fill;
         c.fillRect(x + S, y + S, 1, 1);
       }
     if (notch)
@@ -491,6 +499,15 @@ export class Qte {
   private blitCentered(cv: HTMLCanvasElement, x: number, y: number) {
     this.ctx.drawImage(cv, Math.round(x - (cv.width - 1) / 2), Math.round(y - (cv.height - 1) / 2));
   }
+  /** a ring as a physical object: its ink shadow dropped down-right, then the metal */
+  private blitRing(r: number, w: number, col: string, notch: boolean, x: number, y: number) {
+    const c = this.ctx;
+    const a = c.globalAlpha;
+    c.globalAlpha = a * 0.45;
+    this.blitCentered(this.ringSprite(r, w, INK, notch), x + 1, y + 2);
+    c.globalAlpha = a;
+    this.blitCentered(this.ringSprite(r, w, col, notch), x, y);
+  }
 
   /** the timing ring: notched sight ring + the closing ring with a short afterimage trail */
   private drawRing(cx: number, cy: number, k: number, r: number, rt: number, r0: number, tone: 'gold' | 'jade', alpha: number) {
@@ -500,7 +517,7 @@ export class Qte {
     const hot = tone === 'jade' ? JADE_H : GOLD_H;
     const mid = tone === 'jade' ? JADE : GOLD;
     // the sight breathes a little and glows as the ring arrives
-    this.blitCentered(this.ringSprite(rt, 2, near > 0.82 ? hot : BONE, true), cx, cy);
+    this.blitRing(rt, 2, near > 0.82 ? hot : BONE, true, cx, cy);
     if (near > 0.6) {
       c.globalAlpha = alpha * (near - 0.6) * 1.6;
       this.blitCentered(this.ringSprite(rt + 3, 1, mid, false), cx, cy);
@@ -515,7 +532,7 @@ export class Qte {
     }
     c.globalAlpha = alpha;
     const col = k < 0.45 ? BONE_D : k < Qte.RING_PERFECT - 0.1 ? mid : hot;
-    this.blitCentered(this.ringSprite(r, 2, col, false), cx, cy);
+    this.blitRing(r, 2, col, false, cx, cy);
     c.globalAlpha = 1;
   }
 
@@ -523,7 +540,9 @@ export class Qte {
   private track(cx: number, cy: number, w: number, zone: number, perfect: number, x: number, inside: boolean) {
     const c = this.ctx;
     const x0 = Math.round(cx - w / 2), y0 = cy - 5;
-    // frame: ink, dark leather well, a lit top lip
+    // a dropped shadow, then the frame: ink, dark leather well, a lit top lip
+    c.fillStyle = 'rgba(26,14,6,0.45)';
+    c.fillRect(x0 - 1, y0 + 1, w + 4, 14);
     c.fillStyle = INK;
     c.fillRect(x0 - 2, y0 - 2, w + 4, 14);
     c.fillStyle = '#3e2414';
@@ -727,11 +746,23 @@ export class Qte {
   }
 }
 
-/** one step darker for the outer edge of a ring band */
+/** one step lighter: the lit face of a band */
+function lighterOf(col: string) {
+  if (col === GOLD) return GOLD_H;
+  if (col === GOLD_H || col === BONE || col === JADE_H) return '#ffffff';
+  if (col === JADE) return JADE_H;
+  if (col === BONE_D) return BONE;
+  if (col === GOLD_D) return GOLD;
+  return col;
+}
+/** one step darker: the shadowed face of a band */
 function shadeOf(col: string) {
   if (col === GOLD_H) return GOLD;
   if (col === GOLD) return GOLD_D;
   if (col === JADE_H) return JADE;
   if (col === BONE) return BONE_D;
+  if (col === JADE) return '#2f8f7c';
+  if (col === BONE_D) return '#8a7656';
+  if (col === GOLD_D) return '#5a3a0c';
   return col;
 }

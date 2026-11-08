@@ -777,6 +777,7 @@ export class Bench3D implements Mode {
     }
     this.goTo(this.home);
     this.rack.focus = null;
+    this.rack.spotOverride = null;
     this.listen(false);
     this.done = true;
     this.h.engine.audio.play('rev_close', { volume: 0.35 });
@@ -1094,6 +1095,9 @@ export class Bench3D implements Mode {
         }
       }
     }
+    // ---- the warm spot follows the gun down onto the turntable, and back up to the rack
+    const T = this.ttAt;
+    this.rack.spotOverride = this.state === 'work' || this.state === 'down' ? { pos: _sp.set(T.x + 0.32, T.y + 0.85, T.z + 0.55), target: _st.set(T.x - 0.08, T.y + this.felt, T.z) } : null;
     // ---- pins, tags, twine, the hover, the work order
     if (this.state === 'work') {
       this.refreshSpots();
@@ -1240,6 +1244,7 @@ export class Bench3D implements Mode {
 }
 
 /** move an object along a matrix blend (position eased with a hop, rotation slerped, scale lerped) */
+const _sp = new THREE.Vector3(), _st = new THREE.Vector3();
 const _pa = new THREE.Vector3(), _qa = new THREE.Quaternion(), _sa = new THREE.Vector3(), _pb = new THREE.Vector3(), _qb = new THREE.Quaternion(), _sb = new THREE.Vector3();
 function lerpMatrix(o: THREE.Object3D, A: THREE.Matrix4, B: THREE.Matrix4, e: number, hop: number) {
   A.decompose(_pa, _qa, _sa);

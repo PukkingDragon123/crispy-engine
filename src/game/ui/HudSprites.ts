@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import { IconFactory } from './IconFactory';
 import { UI } from './PixelUI';
 import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
+import type { PixelFx } from './HudKit';
 
 export interface Sprite {
   cv: HTMLCanvasElement;
@@ -439,7 +440,7 @@ const variants = new WeakMap<HTMLCanvasElement, Map<string, HTMLCanvasElement>>(
  * A post-processed copy of a picture (cached): 'flash' white-hot, 'dim' sunk in
  * shade, 'ember' red-hot, 'jade' soul-lit, 'grey' sealed / drained.
  */
-export function variant(src: Sprite | HTMLCanvasElement, kind: 'flash' | 'dim' | 'ember' | 'jade' | 'grey'): HTMLCanvasElement {
+export function variant(src: Sprite | HTMLCanvasElement, kind: 'flash' | 'dim' | 'ember' | 'jade' | 'grey' | 'shadow' | 'stock'): HTMLCanvasElement {
   const cv = 'cv' in src ? src.cv : src;
   let m = variants.get(cv);
   if (!m) variants.set(cv, (m = new Map()));
@@ -457,7 +458,9 @@ export function variant(src: Sprite | HTMLCanvasElement, kind: 'flash' | 'dim' |
     const r = d[k], g = d[k + 1], b = d[k + 2];
     const l = r * 0.3 + g * 0.59 + b * 0.11;
     let p: [number, number, number];
-    if (kind === 'flash') p = l < 40 ? [255, 214, 160] : [255, 248, 228];
+    if (kind === 'shadow') p = [26, 14, 6];
+    else if (kind === 'stock') p = l < 40 ? [42, 24, 12] : [120, 92, 58];
+    else if (kind === 'flash') p = l < 40 ? [255, 214, 160] : [255, 248, 228];
     else if (kind === 'dim') p = palNearest(r * 0.5 + 6, g * 0.48 + 4, b * 0.5 + 8);
     else if (kind === 'ember') p = palNearest(Math.min(255, r * 1.1 + 40), g * 0.62, b * 0.5);
     else if (kind === 'jade') p = palNearest(r * 0.6, Math.min(255, g * 0.9 + 46), Math.min(255, b * 0.75 + 24));
@@ -469,6 +472,90 @@ export function variant(src: Sprite | HTMLCanvasElement, kind: 'flash' | 'dim' |
   c.putImageData(img, 0, 0);
   m.set(kind, o);
   return o;
+}
+
+// ------------------------------------------------------------------ physical objects: shadow, thickness, glints
+// The HUD's key light comes from the upper left (as in every photograph), so a
+// piece `lift` HUD px off the screen casts a hard pixel shadow down and right,
+// with a softer fringe; the higher it rises (a card lifted, a shell dropping in)
+// the further its shadow falls.
+const SH_CORE = 0.36, SH_SOFT = 0.15;
+export function shadowOffset(lift: number): [number, number] {
+  return [Math.round(1 + lift * 0.55), Math.round(1 + lift * 0.85)];
+}
+/** a picture as a physical object: its cast shadow, then itself (centred on cx, cy) */
+export function blitObj(c: CanvasRenderingContext2D, sp: Sprite | HTMLCanvasElement, cx: number, cy: number, lift = 2, alpha = 1, w?: number, h?: number) {
+  if (alpha <= 0.01) return;
+  const sh = variant(sp, 'shadow');
+  const [dx, dy] = shadowOffset(lift);
+  const fade = Math.max(0.35, 1 - lift / 40);
+  blitC(c, sh, cx + dx + 1, cy + dy + 1, alpha * SH_SOFT * fade, w, h);
+  blitC(c, sh, cx + dx, cy + dy, alpha * SH_CORE * fade, w, h);
+  blitC(c, sp, cx, cy, alpha, w, h);
+}
+/** the squash turn with its shadow (the shadow narrows with the turn) */
+export function blitSquashObj(c: CanvasRenderingContext2D, cv: HTMLCanvasElement, cx: number, cy: number, sx: number, alpha = 1, sy = 1, lift = 2) {
+  const sh = variant(cv, 'shadow');
+  const [dx, dy] = shadowOffset(lift);
+  blitSquash(c, sh, cx + dx + 1, cy + dy + 1, sx, alpha * SH_SOFT, sy);
+  blitSquash(c, sh, cx + dx, cy + dy, sx, alpha * SH_CORE, sy);
+  blitSquash(c, cv, cx, cy, sx, alpha, sy);
+}
+/** a row-sheared picture (a hanging note, a fanned card) with its shadow */
+export function blitShearObj(c: CanvasRenderingContext2D, cv: HTMLCanvasElement, x: number, y: number, dx: (row: number) => number, alpha = 1, lift = 2, shadowOf?: HTMLCanvasElement) {
+  const sh = variant(shadowOf ?? cv, 'shadow');
+  const [ox, oy] = shadowOffset(lift);
+  blitShear(c, sh, x + ox + 1, y + oy + 1, dx, alpha * SH_SOFT);
+  blitShear(c, sh, x + ox, y + oy, dx, alpha * SH_CORE);
+  blitShear(c, cv, x, y, dx, alpha);
+}
+
+let glintFx: PixelFx | null = null;
+/** the additive pixel layer glints are thrown on (Hud3D owns it) */
+export function setGlintFx(fx: PixelFx | null) {
+  glintFx = fx;
+}
+const glintSpotsMap = new WeakMap<HTMLCanvasElement, [number, number][]>();
+/** where light can catch on a picture: its brightest pixels, the lit (upper-left) edges first */
+function glintSpots(cv: HTMLCanvasElement) {
+  let s = glintSpotsMap.get(cv);
+  if (s) return s;
+  s = [];
+  const d = cv.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, cv.width, cv.height).data;
+  const W = cv.width, H = cv.height;
+  const lum = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= W || y >= H) return -1;
+    const k = (y * W + x) * 4;
+    return d[k + 3] ? d[k] * 0.3 + d[k + 1] * 0.59 + d[k + 2] * 0.11 : -1;
+  };
+  const cand: [number, number, number][] = [];
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      const l = lum(x, y);
+      if (l < 170) continue;
+      const edge = lum(x - 1, y) < 60 || lum(x, y - 1) < 60;
+      cand.push([x, y, l + (edge ? 40 : 0) - (x / W + y / H) * 30]);
+    }
+  cand.sort((a, b) => b[2] - a[2]);
+  for (const [x, y] of cand.slice(0, 24)) s.push([x, y]);
+  glintSpotsMap.set(cv, s);
+  return s;
+}
+/**
+ * Now and then light catches a bright edge of a metal / glass / gilt picture drawn
+ * centred on (cx, cy): a four-point pixel twinkle. `rate` = glints per second.
+ */
+export function glint(sp: Sprite | HTMLCanvasElement, cx: number, cy: number, rate: number, dt: number) {
+  if (!glintFx || Math.random() > rate * dt) return;
+  const cv = 'cv' in sp ? sp.cv : sp;
+  const spots = glintSpots(cv);
+  if (!spots.length) return;
+  const [sx, sy] = spots[(Math.random() * spots.length) | 0];
+  const x = Math.round(cx - cv.width / 2) + sx + 0.5, y = Math.round(cy - cv.height / 2) + sy + 0.5;
+  const life = 0.32 + Math.random() * 0.18;
+  glintFx.emit({ x, y, life, size: 1, c0: 0xffffff, c1: 0xffd36b, alpha: 1 });
+  for (const [ax, ay, k] of [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [2, 0, 0.6], [-2, 0, 0.6], [0, 2, 0.6], [0, -2, 0.6]] as [number, number, number][])
+    glintFx.emit({ x: x + ax, y: y + ay, life: life * (k === 1 ? 0.75 : 0.5), size: 1, c0: 0xfff6d0, c1: 0xffb040, alpha: 0.85 * k });
 }
 
 /** a wrapper group (the IconFactory turns the wrapper; the content keeps its own pose) */

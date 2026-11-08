@@ -332,6 +332,8 @@ export class GunRack {
   spot: THREE.SpotLight | null = null;
   /** the bay being looked at (null: nobody at the rack) */
   focus: number | null = null;
+  /** the bench borrows the spot to light the turntable while a gun is on it */
+  spotOverride: { pos: THREE.Vector3; target: THREE.Vector3 } | null = null;
   private cartridges = new THREE.Group();
   private clip: THREE.Mesh | null = null;
   private spotK = 0;
@@ -578,12 +580,18 @@ export class GunRack {
     const sp = this.spot;
     if (sp) {
       const f = this.focus !== null ? this.bays[this.focus] : null;
-      this.spotK = damp(this.spotK, f ? 1 : 0, 3, rdt);
-      if (f) {
-        sp.position.lerp(_v.copy(f.bulb).add(_off), 1 - Math.exp(-rdt * 5));
-        sp.target.position.lerp(f.centre, 1 - Math.exp(-rdt * 5));
+      const o = this.spotOverride;
+      this.spotK = damp(this.spotK, f || o ? 1 : 0, 3, rdt);
+      const k = 1 - Math.exp(-rdt * 4);
+      if (o) {
+        sp.position.lerp(o.pos, k);
+        sp.target.position.lerp(o.target, k);
+      } else if (f) {
+        sp.position.lerp(_v.copy(f.bulb).add(_off), k);
+        sp.target.position.lerp(f.centre, k);
       }
-      sp.intensity = 0.6 + this.spotK * 3.4;
+      sp.distance = o ? 3.2 : 2.4;
+      sp.intensity = 0.6 + this.spotK * (o ? 5 : 3.4);
     }
   }
 
