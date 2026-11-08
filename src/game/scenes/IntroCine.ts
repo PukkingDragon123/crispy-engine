@@ -762,7 +762,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
       const sunCam = Q.clone().addScaledVector(nP, -2.7).addScaledVector(lat, 0.75);
       sunCam.y = gy(sunCam) + 0.5;
       const sunLook = Q.clone().addScaledVector(nP, 6.5);
-      sunLook.y = gy(sunLook) + 1.5;
+      sunLook.y = gy(sunLook) + 1.25;
       eng.audio.play('whoosh_big', { volume: 0.5, pitch: 0.4 });
       eng.audio.play('sand_spray', { volume: 0.4, pitch: 0.7 });
       let cut = true;

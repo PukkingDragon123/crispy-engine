@@ -1850,22 +1850,36 @@ function placeLandmark(ctx: ThemeCtx, zn: ZoneDef, type: LandmarkType) {
   const SMALL = { has: (k: string) => SMALL_SCATTER.has(k) || FOLIAGE.has(k) };
   let best: { x: number; z: number } | null = null;
   let bestSoft = 1e9;
-  for (let k = 0; k < 120; k++) {
-    const a = rng.range(0, Math.PI * 2), r = rng.range(R * 0.4, R * 0.74);
-    const x = zn.cx + Math.cos(a) * r, z = zn.cz + Math.sin(a) * r;
-    if (zn.mouths.some((m) => Math.hypot(m.x - x, m.z - z) < half + 22)) continue;
-    if (blocked(zn, x, z, half + 2)) continue;
-    let hard = 0,
-      soft = 0;
-    for (const o of zn.anchors) {
-      if (Math.hypot(o.x - x, o.z - z) >= half + 4) continue;
-      if (SMALL.has(o.kind)) soft++;
-      else hard++;
+  // where to look: the first zone's trading post (the run's first shop) goes within sight of the
+  // start, ahead of the rider (36-72 m, its smoke and lanterns lead him in); a trading post that
+  // finds no room looks wider before giving up (every run needs its shop)
+  const ring = (cx: number, cz: number, a0: number, a1: number, r0: number, r1: number) => () => {
+    const a = rng.range(a0, a1), r = rng.range(r0, r1);
+    return [cx + Math.cos(a) * r, cz + Math.sin(a) * r];
+  };
+  const phases: { n: number; mouth: number; at: () => number[] }[] = [];
+  if (type === 'tradingPost' && zn.index === 0) phases.push({ n: 90, mouth: half + 22, at: ring(zn.cx, zn.cz - zn.r * 0.45, -1.05, 1.05, 36, 72) });
+  phases.push({ n: 120, mouth: half + 22, at: ring(zn.cx, zn.cz, 0, Math.PI * 2, R * 0.4, R * 0.74) });
+  if (type === 'tradingPost') phases.push({ n: 200, mouth: half + 8, at: ring(zn.cx, zn.cz, 0, Math.PI * 2, R * 0.15, R * 0.84) });
+  for (const ph of phases) {
+    for (let k = 0; k < ph.n; k++) {
+      const [x, z] = ph.at();
+      if (Math.hypot(x - zn.cx, z - zn.cz) > R * 0.84) continue;
+      if (zn.mouths.some((m) => Math.hypot(m.x - x, m.z - z) < ph.mouth)) continue;
+      if (blocked(zn, x, z, half + 2)) continue;
+      let hard = 0,
+        soft = 0;
+      for (const o of zn.anchors) {
+        if (Math.hypot(o.x - x, o.z - z) >= half + 4) continue;
+        if (SMALL.has(o.kind)) soft++;
+        else hard++;
+      }
+      if (hard > 0 || soft >= bestSoft) continue;
+      best = { x, z };
+      bestSoft = soft;
+      if (soft === 0) break;
     }
-    if (hard > 0 || soft >= bestSoft) continue;
-    best = { x, z };
-    bestSoft = soft;
-    if (soft === 0) break;
+    if (best) break;
   }
   if (!best) return;
   const { x, z } = best;

@@ -26,6 +26,18 @@
 // re-arms once you have ridden off and stayed away a few seconds; never with
 // enemies within 15 m or during a boss fight. The world is paused throughout.
 //
+// Inside, the wares are set out on his display stall (ui/ShopShelf.ts): they fly
+// out of his basket and land on its two steps, each over a manila price tag
+// inked with the price and what it does. Hovering (or pressing its number)
+// lifts a ware and floats a card beside it in Alagard: what it is, what it
+// does, what it means for you right now (your pockets, your health, the gear it
+// would replace), the price. Buying counts the coins across into his claws one
+// by one, hands the ware over, flips its tag to SOLD and gets a word from him.
+// The stock holds for a restock period (fresh after every boss wave, StockBook):
+// one ware is the day's deal, and once a period you can try to haggle on the
+// porch. Out in the world, run/ShopBeacon.ts makes him easy to find (smoke
+// column, lanterns, music and bell on the wind, footprint trails, a toast).
+//
 // Old Mother Tamsin (models/characters/tortoise.ts, frozen) is still the
 // puppet here too: Ozymandias is her rig re-dressed, and she keeps her own
 // rug shop (the shot from the rug, the dolly back) wherever she stands alone.
@@ -45,6 +57,10 @@ import { clamp, damp, noise, rnd } from '../../engine/math/rand';
 import { Ease } from '../../engine/Tween';
 import { FloatText3D } from '../fx/FloatText3D';
 import { Voice } from '../audio/Voice';
+import { ShopBeacon, type BeaconInfo } from '../run/ShopBeacon';
+import { stallModel, stallTopAt, PriceTag, type Stall } from './ShopShelf';
+import { GEAR, SLOT_INFO, type GearId } from '../player/Equipment';
+import { RARITY } from '../run/Upgrades';
 
 /** what the run hands her each frame so she can stage her own arrival scene */
 export interface MerchantHooks {
@@ -79,6 +95,70 @@ export interface Ware {
   price: number;
   model: string;
   buy(): boolean; // false = couldn't (e.g. inventory full)
+  /** two or three words for the price tag: what it does */
+  short?: string;
+  /** what it means for you right now (your pockets, your health, the gear it would replace) */
+  note?: () => WareNote | null;
+}
+export interface WareNote {
+  text: string;
+  /** an improvement for you (green) */
+  good?: boolean;
+  /** a snag (red): pockets full, worse than what you have */
+  bad?: boolean;
+}
+
+/**
+ * The shop's stock for a restock period: a fresh shelf after every boss wave
+ * (periods turn at waves 5, 10, 15 ...), what has sold off it, the day's deal
+ * (30% off one ware) and the porch haggle (once a period: 15% off everything,
+ * or a firm no). Missions asks for wares through `stock`, so the shelf you come
+ * back to is the one you left.
+ */
+export class StockBook {
+  period = -1;
+  wares: Ware[] = [];
+  sold = new Set<string>();
+  deal: string | null = null;
+  haggle: 'none' | 'won' | 'lost' = 'none';
+  /** visits this period (the first gets "fresh stock") */
+  visits = 0;
+  constructor(private ctx: Ctx) {}
+  static periodOf(wave: number) {
+    return Math.floor(Math.max(0, wave) / 5);
+  }
+  /** the wave whose boss brings the next fresh stock */
+  get nextRestock() {
+    return (this.period + 1) * 5;
+  }
+  /** the shelf for now: built by `make` when the period has turned, else the same one */
+  stock(make: () => Ware[]): Ware[] {
+    const p = StockBook.periodOf(this.ctx.run.wave);
+    if (p !== this.period || !this.wares.length) {
+      this.period = p;
+      this.wares = make();
+      this.sold.clear();
+      this.haggle = 'none';
+      this.visits = 0;
+      const pool = this.wares.filter((w) => w.id !== 'card');
+      this.deal = pool.length ? rnd.pick(pool).id : null;
+    }
+    return this.wares;
+  }
+  /** what it costs today */
+  price(w: Ware) {
+    let k = 1;
+    if (w.id === this.deal) k *= 0.7;
+    if (this.haggle === 'won') k *= 0.85;
+    return Math.max(1, Math.round(w.price * k));
+  }
+  /** the porch haggle: once a period; a higher bounty rank talks him down more often */
+  tryHaggle() {
+    if (this.haggle !== 'none') return this.haggle === 'won';
+    const won = rnd.chance(0.45 + Math.min(0.3, this.ctx.run.rank * 0.03));
+    this.haggle = won ? 'won' : 'lost';
+    return won;
+  }
 }
 
 const TITLE = 'MOTHER TAMSIN';
@@ -101,14 +181,32 @@ const LINES_C: typeof LINES = {
   shot: ['Hrrm! Not indoors!', 'Not at the shop, rider!', 'I have outlived better shots than you.'],
   arrive: ['Hrrm. A rider. Whoa, Gobi. We have a customer.', 'Ahh... a visitor. We have walked nine hundred years for this.', 'Slow down, slow down. The pots rattle.'],
 };
-/** what you can say to him on his porch (the first goes in, the last rides on) */
-const TALK: { q: string; a: string[]; go?: 'enter' | 'bye' }[] = [
+/** what you can say to him on his porch (the first goes in, the last rides on; haggling once a restock) */
+const TALK: { q: string; a: string[]; go?: 'enter' | 'bye'; haggle?: true }[] = [
   { q: 'Show me your wares.', a: ['Come in, come in. Wipe your bones.', 'Hrrm. Come up. Mind the step, Gobi is ticklish.', 'Inside, then. The kettle is on.'], go: 'enter' },
+  { q: 'Can you do better on the price?', a: [], haggle: true },
   { q: 'Who are you?', a: ['Ozymandias, merchant of the walking road. Nine hundred years on this shell.', 'Ozymandias. I sell, Gobi walks. Since the pyramids were pointy.'] },
   { q: 'Why is a tree growing on your turtle?', a: ['Gobi swallowed an acacia seed in the old kingdom. Now it shades us both.', 'It came up through the porch one spring. We let it stay.'] },
   { q: 'Is it safe out here?', a: ['When outlaws come, Gobi digs in and I bar the shutters. Sand is a fine door.', 'Safe as sand. If Gobi starts digging, you start riding.'] },
   { q: 'Just passing through.', a: ['Then pass slowly. Safe roads, little bones.', 'Hrrm. The road will bring you back. It always does.'], go: 'bye' },
 ];
+/** Ozymandias on prices and stock */
+const OZ = {
+  haggleWin: ['Hrrm. For an honest skull... fifteen off everything. Until the caravan comes.', 'You drive a hard bargain for a man with no stomach. Fifteen off.', 'Gobi likes you. Fine. Fifteen off, and not a copper more.'],
+  haggleLose: ['Nine hundred years and I have never haggled. I am not starting today.', 'The price is the price. Gobi has to eat.', 'Hrrm. No. Ask me again after the next caravan.'],
+  fresh: ['Fresh off the caravan. Still smells of camel.', 'New stock. Mind the dust on it.', 'The caravan came through. Look, look.'],
+  same: ['Same shelf as before. The caravan comes after the next big one.', 'Nothing new yet. The caravan follows the storm.'],
+};
+/** what he says as he takes your coins for a particular ware */
+const SOLD_LINE: Record<string, string[]> = {
+  dynamite: ['Light it outside. Outside!', 'Not near the shell, please.'],
+  heal: ['Drink it all at once. Do not smell it first.'],
+  card: ['The cards know you now. Choose well.'],
+  charm: ['Serket will be watching. Behave.'],
+  whiskey: ['Not before noon. Hrrm. It is always noon here.'],
+  smoke: ['Pop it, and I never saw you.'],
+  dagger: ['A little of you for a lot of oomph. Mind the fingers.'],
+};
 const VOICE_T = { title: TITLE, lines: LINES };
 const VOICE_C = { title: 'OZYMANDIAS', lines: LINES_C };
 
@@ -785,10 +883,60 @@ class Turtle {
     }
     this.poseHouse(0);
     this.poseRider(0);
+    this.stallObj = this.buildStall(rig);
+  }
+
+  /** the display stall in the middle of the shop (part of the room: it sinks with the house when he digs in) */
+  readonly stallObj: THREE.Object3D | null;
+  private buildStall(rig: RigInstance): THREE.Object3D | null {
+    const sh = this.n.shell, off = this.rest.shell;
+    if (!sh || !off) return null;
+    try {
+      const st = stallModel();
+      const rm = this.meta.room ?? {};
+      const fl = this.meta.porch?.[1] ?? 3.0;
+      // in front of the counter, a step toward the side wall so his walk in round the counter's end stays clear
+      const at: number[] = rm.stall ?? [rm.rug?.[0] ?? -0.25, rm.rug?.[1] ?? fl, (rm.rug?.[2] ?? -0.3) - 0.18];
+      const g = new THREE.Group();
+      g.name = 'ozy_stall';
+      const mesh = new THREE.Mesh(st.geo, rig.material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      g.add(mesh);
+      // shell space = root space less the shell's rest offset (it has no rest rotation)
+      g.position.set(at[0] - off.x, at[1] - off.y + 0.003, at[2] - off.z);
+      g.rotation.y = -Math.PI / 2; // its front (-z) toward the door
+      sh.add(g);
+      return g;
+    } catch (e) {
+      console.warn('[shop] stall', e);
+      return null;
+    }
   }
 
   get hidden() {
     return this.mode === 'hiding' || this.mode === 'hidden';
+  }
+  /** the camp he walks round */
+  get homePos() {
+    return this.home;
+  }
+  /** the stovepipe mouth, world space (it sinks with the house when he digs in) */
+  chimneyWorld(out: THREE.Vector3) {
+    const c = this.toWorld(this.meta.chimney ?? [-1.35, 6.75, -1.15], out);
+    c.y -= this.dig * this.digM + this.ch.drop * this.dropM;
+    return c;
+  }
+  /** the porch lanterns' glass, world space */
+  lanternWorld(out: THREE.Vector3[]) {
+    let i = 0;
+    for (const k of ['lantern_a', 'lantern_b']) {
+      const o = this.n[k];
+      if (!o || i >= out.length) continue;
+      o.localToWorld(out[i].set(0, -0.28, 0));
+      i++;
+    }
+    return i === out.length ? out : out.slice(0, i);
   }
   private get yaw() {
     return this.root.rotation.y;
@@ -1372,7 +1520,7 @@ class Turtle {
 type Merchant = Tamsin | Turtle;
 
 // ================================================================== the wares as rigid bodies
-type BodyState = 'wait' | 'free' | 'held' | 'sold' | 'pack' | 'gone';
+type BodyState = 'wait' | 'fly' | 'shelf' | 'free' | 'held' | 'sold' | 'pack' | 'gone';
 interface Body {
   ware: Ware;
   obj: THREE.Group;
@@ -1400,6 +1548,17 @@ interface Body {
   spot: { m: VoxelMaterial; u: SpotUniforms };
   /** time spent hovered (she comments after a beat) */
   gaze: number;
+  /** the stall: it flies to its slot and stands there until it is knocked off (rest = the slot) */
+  onShelf: boolean;
+  flyT: number;
+  /** upright on its slot, turned a little */
+  q0: THREE.Quaternion;
+  /** landing squash 0..1 */
+  land: number;
+  /** its price tag on the stall (null on the rug) */
+  tag: PriceTag | null;
+  /** the order it stands in (number keys) */
+  idx: number;
 }
 
 const G = 10.5;
@@ -1445,6 +1604,8 @@ interface Visit {
   t: number;
   // the porch talk
   asked: Set<number>;
+  /** what is on offer to say right now (haggling drops out once tried) */
+  opts: typeof TALK;
   plaques: FloatText3D[];
   plaqueT: number;
   showAt: number;
@@ -1575,6 +1736,21 @@ export class Shop {
   // the rug's light pools
   private rugSpot: { m: VoxelMaterial; u: SpotUniforms } | null = null;
   private bosses = new Set<{ alive?: boolean }>();
+  /** the beacons that lead you to each turtle house (smoke column, lanterns, music, prints) */
+  private beacons = new Map<Turtle, ShopBeacon>();
+  /** the stock this restock period (Missions fills it through book.stock) */
+  readonly book: StockBook;
+  /** gear worn per slot (the "replaces your ..." line) */
+  private worn = new Map<string, string>();
+  /** the stall the wares stand on (indoors), and their price tags */
+  private stall: Stall | null = null;
+  private tags: PriceTag[] = [];
+  /** the hovered ware's card: name, what it does, what it means for you, the price */
+  private card: FloatText3D[] = [];
+  private cardFor: Body | null = null;
+  /** a number key picked the ware: the mouse leaves it be until it moves */
+  private kbHold = false;
+  private kbMouse = [0, 0];
 
   constructor(private ctx: Ctx, private input: Input, private cam: CameraRig) {
     ctx.scene.add(this.group);
@@ -1587,6 +1763,9 @@ export class Shop {
     this.unsub.push(ctx.events.on('shot', () => this.onGunfire()));
     this.unsub.push(ctx.events.on('explosion', (p: { x: number; y: number; z: number }, r: number) => this.onBlast(p, r ?? 3)));
     this.unsub.push(ctx.events.on('propShot', (_c: unknown, p: THREE.Vector3) => p && this.onBlast(p, -4)));
+    this.book = new StockBook(ctx);
+    this.unsub.push(ctx.events.on('gearChanged', (slot: string, id: string | null) => (id ? this.worn.set(slot, id) : this.worn.delete(slot))));
+    (window as unknown as { __shop?: Shop }).__shop = this; // dev handle
     // no arrival scene while a boss is up
     this.unsub.push(ctx.events.on('bossIntro', (b: { alive?: boolean }) => b && this.bosses.add(b)));
     for (const ev of ['bossKilled', 'bossDefeated'])
@@ -1610,10 +1789,15 @@ export class Shop {
       const meta = rig.geo.spec.meta ?? {};
       p = meta.turtleHouse ? new Turtle(this.ctx, rig, meta, hooks?.home ?? null, hooks?.rider ?? null) : new Tamsin(this.ctx, rig, rig.root, meta);
       this.puppets.set(rig, p);
+      if (p instanceof Turtle) {
+        const t = p;
+        this.beacons.set(t, new ShopBeacon(this.ctx, { root: t.root, home: t.homePos, chimney: (o) => t.chimneyWorld(o), lanterns: (o) => t.lanternWorld(o) }));
+      }
     }
     if (p instanceof Turtle && hooks) p.hooks = hooks;
-    if (this.owns(p)) return; // the shop / its arrival scene drives her
     const h = Math.min(dt, 1 / 20);
+    if (p instanceof Turtle) this.beacons.get(p)?.update(h, hunter ?? null, p.hidden);
+    if (this.owns(p)) return; // the shop / its arrival scene drives her
     if (h <= 0) return;
     const d = hunter ? hunter.distanceTo(rig.root.position) : 99;
     if (p instanceof Turtle) {
@@ -1676,6 +1860,20 @@ export class Shop {
       if (Math.hypot(e.pos.x - at.x, e.pos.z - at.z) <= r) return true;
     }
     return false;
+  }
+
+  /** the nearest walking shop (the HUD compass): where, how far, dug in, visited */
+  nearestShop(): BeaconInfo | null {
+    let best: BeaconInfo | null = null;
+    for (const [t, b] of this.beacons) {
+      if (!t.root.parent) continue;
+      if (!best || b.info.dist < best.dist) best = b.info;
+    }
+    return best;
+  }
+  /** an arrival scene or a visit is on */
+  get visiting() {
+    return !!this.visit || !!this.arrival;
   }
 
   /** where the customer stands to trade with a walking merchant (null: a standing one) */
@@ -2024,15 +2222,24 @@ export class Shop {
     eng.paused = true;
     eng.input.setWantLock(false);
     this.visit = {
-      g, hooks, phase: 'talk', t: 0, asked: new Set(), plaques: [], plaqueT: 0, showAt: 0.4, hover: -1, go: null, goAt: 0,
+      g, hooks, phase: 'talk', t: 0, asked: new Set(), opts: this.talkOptions(), plaques: [], plaqueT: 0, showAt: 0.4, hover: -1, go: null, goAt: 0,
       actor: null, path: [], wp: [], cum: [0], s: 0, walkPh: 0, walkAmt: 0, lastStep: 0, yaw: 0, standYaw: 0, heading: 0, breath: 0,
       base: { pos: this.shot.pos.clone(), look: this.shot.look.clone(), fov: this.shot.fov },
       cp: new THREE.Vector3(), cl: new THREE.Vector3(), doorAt: -1, from: { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50 }, outAt: -1, ozGo: false, skip: false,
     };
     this.phase = 'visit';
     this.speechForce = 1;
-    this.bar.innerHTML = `click or press 1-${TALK.length} to answer &nbsp;·&nbsp; ESC to ride on`;
+    this.beacons.get(g)?.visited();
+    this.talkBar(this.visit!);
     this.bar.style.display = 'block';
+  }
+
+  /** what he can be asked right now (the haggle once a restock period) */
+  private talkOptions() {
+    return TALK.filter((c) => !c.haggle || this.book.haggle === 'none');
+  }
+  private talkBar(v: Visit) {
+    this.bar.innerHTML = `click or press 1-${v.opts.length} to answer &nbsp;·&nbsp; ESC to ride on`;
   }
 
   private updateVisit(h: number) {
@@ -2075,10 +2282,10 @@ export class Shop {
     this.placeChoices(v, h);
     let pick = -1;
     if (v.plaques.length && v.t - v.plaqueT > 0.3) {
-      for (let k = 0; k < TALK.length; k++) if (inp.wasPressed('Digit' + (k + 1)) || inp.wasPressed('Numpad' + (k + 1))) pick = k;
+      for (let k = 0; k < v.opts.length; k++) if (inp.wasPressed('Digit' + (k + 1)) || inp.wasPressed('Numpad' + (k + 1))) pick = k;
       if (v.hover >= 0 && inp.wasPressed('Mouse0')) pick = v.hover;
     }
-    if (inp.wasPressed('Escape') || inp.wasPressed('KeyT')) pick = TALK.length - 1;
+    if (inp.wasPressed('Escape') || inp.wasPressed('KeyT')) pick = v.opts.length - 1;
     if (pick >= 0) this.choose(v, pick);
     if (v.go && v.t >= v.goAt) {
       if (v.go === 'enter') this.startEnter(v);
@@ -2088,9 +2295,11 @@ export class Shop {
 
   private showChoices(v: Visit) {
     v.plaqueT = v.t;
+    v.opts = this.talkOptions();
+    this.talkBar(v);
     const halfH = 1.4 * Math.tan((this.shot.fov * Math.PI) / 360);
-    v.plaques = TALK.map((c, i) => {
-      const old = v.asked.has(i) && !c.go;
+    v.plaques = v.opts.map((c, i) => {
+      const old = v.asked.has(TALK.indexOf(c)) && !c.go;
       const ft = new FloatText3D(`${i + 1}.  ${c.q}`, { size: halfH * 0.085, px: 44, cps: 70, wrap: 60, align: 'left', hdr: old ? 0.8 : 1.2, color: old ? '#cdbb98' : '#fff3d6', glow: old ? '#6a4a28' : '#ffb070' });
       ft.mesh.renderOrder = 991;
       this.ctx.scene.add(ft.mesh);
@@ -2130,8 +2339,9 @@ export class Shop {
 
   private choose(v: Visit, i: number) {
     if (v.go) return;
-    const c = TALK[i];
-    v.asked.add(i);
+    const c = v.opts[i];
+    if (!c) return;
+    v.asked.add(TALK.indexOf(c));
     for (const ft of v.plaques) {
       ft.show(false);
       this.fading.push(ft);
@@ -2139,6 +2349,17 @@ export class Shop {
     v.plaques = [];
     v.hover = -1;
     this.ctx.sfx('ui_click', null, 0.45);
+    if (c.haggle) {
+      // once a restock: he knocks fifteen off everything, or he will not budge
+      const won = this.book.tryHaggle();
+      this.speak(rnd.pick(won ? OZ.haggleWin : OZ.haggleLose), won ? 'laugh' : 'squinty');
+      if (won) {
+        v.g.nod();
+        this.ctx.sfx('gold_burst', null, 0.35, 1.3);
+      } else v.g.shake();
+      v.showAt = v.t + 1.4;
+      return;
+    }
     this.speak(rnd.pick(c.a), c.go === 'bye' ? 'neutral' : 'laugh');
     v.g.nod();
     if (c.go) {
@@ -2503,9 +2724,46 @@ export class Shop {
     }
     this.bodies = [];
     if (this.rug) this.group.remove(this.rug);
+    this.clearShelf();
     this.tip.style.display = 'none';
     this.bar.style.display = 'none';
     this.hovered = null;
+  }
+
+  /** the price tags and the hovered ware's card go */
+  private clearShelf() {
+    for (const t of this.tags) t.dispose();
+    this.tags = [];
+    this.clearCard();
+    this.stall = null;
+    this.kbHold = false;
+  }
+
+  /** a ware's price tag: today's price, what it does, deal / sold / too dear */
+  private inkTag(tag: PriceTag, w: Ware) {
+    const price = this.book.price(w);
+    tag.set({ price, short: this.shortOf(w), was: price !== w.price ? w.price : null, deal: w.id === this.book.deal, sold: this.book.sold.has(w.id), dear: this.ctx.run.gold < price });
+  }
+
+  /** the two or three words on the tag */
+  private shortOf(w: Ware) {
+    if (w.short) return w.short;
+    const g = w.id.startsWith('gear_') ? GEAR[w.id.slice(5) as GearId] : null;
+    if (g) return `${SLOT_INFO[g.slot].name} gear`;
+    return '';
+  }
+
+  /** what a ware means for you now: gear against what you wear, the rest from the ware itself */
+  private noteOf(w: Ware): WareNote | null {
+    if (w.note) return w.note();
+    const g = w.id.startsWith('gear_') ? GEAR[w.id.slice(5) as GearId] : null;
+    if (!g) return null;
+    const curId = this.worn.get(g.slot) as GearId | undefined;
+    const cur = curId ? GEAR[curId] : null;
+    if (!cur) return { text: `Your ${SLOT_INFO[g.slot].name.toLowerCase()} slot is empty: a straight gain.`, good: true };
+    if (cur.id === g.id) return { text: 'You are already wearing one of these.', bad: true };
+    const up = RARITY[g.rarity].rank - RARITY[cur.rarity].rank;
+    return { text: `Replaces your ${cur.name} (${RARITY[cur.rarity].name}).`, good: up > 0, bad: up < 0 };
   }
 
   // ---------------------------------------------------------------- the shop
@@ -2567,7 +2825,14 @@ export class Shop {
       this.fwdAng = facing + Math.PI;
     }
     const g = this.group;
-    if (this.indoor && her instanceof Turtle) {
+    const stallObj = this.indoor && her instanceof Turtle ? her.stallObj : null;
+    this.stall = stallObj ? stallModel() : null;
+    if (stallObj) {
+      // the stall's own frame: its steps are the shelves the wares land on
+      stallObj.updateMatrixWorld(true);
+      stallObj.getWorldPosition(g.position);
+      stallObj.getWorldQuaternion(g.quaternion);
+    } else if (this.indoor && her instanceof Turtle) {
       // on the floor of the house, the rug's long side across the doorway view,
       // unrolling from his counter toward the door
       her.toWorld(her.meta.room?.rug ?? [-0.25, 3, -0.3], C);
@@ -2585,8 +2850,8 @@ export class Shop {
     }
     g.updateMatrixWorld(true);
     this.gq.copy(g.quaternion).invert();
-    // ---- rug
-    if (!this.rug) {
+    // ---- rug (not under the stall)
+    if (!this.rug && !this.stall) {
       try {
         const r = (PM as any).rug?.(1) as { model: any; voxelSize: number } | undefined;
         if (r?.model) {
@@ -2605,7 +2870,7 @@ export class Shop {
         /* no rug: wares go on the sand */
       }
     }
-    if (this.rug) {
+    if (this.rug && !this.stall) {
       g.add(this.rug);
       this.rug.scale.set(1, 1, 0.02); // rolled up; it unrolls toward the customer
       this.ctx.sfx('bandage', C, 0.5, 0.8);
@@ -2620,26 +2885,59 @@ export class Shop {
       her.lookAt = null;
     }
     this.tumbleAt = Math.max((her ? her.outIn() : 0) + 0.45, 1.0);
-    const nW = wares.length;
-    this.bodies = wares.map((w, i) => {
+    // the stall: up to four wares on each step, the cheap things on the front step; a tag for every
+    // slot (a sold ware leaves its SOLD tag behind)
+    const S = this.stall;
+    const shelf = S ? wares.slice(0, S.slotX.length * 2) : wares;
+    const lower = S ? Math.min(S.slotX.length, Math.ceil(shelf.length / 2)) : 0;
+    const slotOf = (i: number) => {
+      const top = i >= lower;
+      const n = top ? shelf.length - lower : lower, k = top ? i - lower : i;
+      return { tier: S!.tiers[top ? 1 : 0], x: (k - (n - 1) / 2) * S!.slotStep };
+    };
+    if (S) {
+      const tagMat = (her as Turtle).rig.material;
+      shelf.forEach((w, i) => {
+        const { tier, x } = slotOf(i);
+        const tag = new PriceTag(tagMat);
+        tag.root.position.set(x, tier.tackY, tier.tackZ);
+        g.add(tag.root);
+        this.tags.push(tag);
+        this.inkTag(tag, w);
+        if (this.book.sold.has(w.id)) tag.shown = tag.want = 1;
+      });
+    }
+    const nW = shelf.length;
+    let order = 0;
+    this.bodies = shelf.flatMap((w, i) => {
+      if (S && this.book.sold.has(w.id)) return [];
       const spot = spotMaterial();
       const { obj, he } = itemObject(w.model, spot.m);
       obj.visible = false;
       g.add(obj);
-      // indoors: two staggered rows a little toward his counter (they skid toward the door as they land)
-      const x = (i - (nW - 1) / 2) * (this.indoor ? Math.min(0.36, 2.0 / Math.max(1, nW - 1)) : 0.42) + (rnd.next() - 0.5) * 0.06;
-      const z = (this.indoor ? (i % 2 ? 0.34 : 0.08) : i % 2 ? 0.12 : -0.1) + (rnd.next() - 0.5) * 0.06;
-      const slot = new THREE.Vector3(x, this.rugTop + he.y, z);
+      let slot: THREE.Vector3;
+      if (S) {
+        const { tier, x } = slotOf(i);
+        slot = new THREE.Vector3(x, tier.top + he.y, tier.slotZ);
+      } else {
+        // indoors: two staggered rows a little toward his counter (they skid toward the door as they land)
+        const x = (i - (nW - 1) / 2) * (this.indoor ? Math.min(0.36, 2.0 / Math.max(1, nW - 1)) : 0.42) + (rnd.next() - 0.5) * 0.06;
+        const z = (this.indoor ? (i % 2 ? 0.34 : 0.08) : i % 2 ? 0.12 : -0.1) + (rnd.next() - 0.5) * 0.06;
+        slot = new THREE.Vector3(x, this.rugTop + he.y, z);
+      }
       const I = new THREE.Vector3((he.y * he.y + he.z * he.z) / 3, (he.x * he.x + he.z * he.z) / 3, (he.x * he.x + he.y * he.y) / 3);
       const key = w.model;
       const sound: Body['sound'] = /dagger|shield|charm|coin|dynamite/i.test(key) ? 'metal' : /bottle/i.test(key) ? 'glass' : 'soft';
-      return {
+      const b: Body = {
         ware: w, obj, he, invI: new THREE.Vector3(1 / I.x, 1 / I.y, 1 / I.z), rad: Math.max(he.x, he.y, he.z) * 0.8,
         p: new THREE.Vector3(), v: new THREE.Vector3(), q: new THREE.Quaternion(), w: new THREE.Vector3(),
-        state: 'wait' as BodyState, t: 0, launch: this.tumbleAt + 0.14 + i * 0.13, slot, rest: slot.clone(),
+        state: 'wait' as BodyState, t: 0, launch: this.tumbleAt + 0.14 + order * 0.16, slot, rest: slot.clone(),
         still: 0, asleep: false, spin: rnd.next() * 6, landed: false, clack: 0, arc0: new THREE.Vector3(), sound,
         lit: 0, spot, gaze: 0,
+        onShelf: false, flyT: 0.7, q0: new THREE.Quaternion().setFromAxisAngle(UP, Math.PI + (rnd.next() - 0.5) * 0.7), land: 0,
+        tag: S ? this.tags[i] : null, idx: order++,
       };
+      return [b];
     });
     // each ware's light from above (written just before it draws)
     for (const b of this.bodies) {
@@ -2675,7 +2973,11 @@ export class Shop {
     this.phase = 'browse';
     if (!this.greeted) {
       this.greeted = true;
-      this.pendingLine = { text: rnd.pick(this.voice.lines.hello), mood: 'laugh', at: (her ? her.outIn() : 0) + 0.15 };
+      // behind his counter: fresh stock the first time this restock, the same shelf after
+      const bk = this.book;
+      if (this.stall) bk.visits++;
+      const line = this.stall && bk.visits === 1 ? rnd.pick(OZ.fresh) : this.stall && bk.sold.size ? rnd.pick(OZ.same) : rnd.pick(this.voice.lines.hello);
+      this.pendingLine = { text: line, mood: 'laugh', at: (her ? her.outIn() : 0) + 0.15 };
     }
     if (this.indoor) return Promise.resolve(); // the visit resolves when he is back on his board
     return new Promise((res) => (this.done = res));
@@ -2724,13 +3026,23 @@ export class Shop {
       t.toWorld(rm.cam ?? [1.3, 4.38, 0.1], this.camMain.pos);
       t.toWorld(rm.look ?? [-0.8, 3.75, -0.35], this.camMain.look);
       const g = this.group, wx = Math.min(this.rugHalf.x, 0.95);
-      const subject = [
-        t.framingTop(new THREE.Vector3()).add(_a.set(0, 0.18, 0)),
-        g.localToWorld(new THREE.Vector3(-wx, this.rugTop, 0.3)),
-        g.localToWorld(new THREE.Vector3(wx, this.rugTop, 0.3)),
-        g.localToWorld(new THREE.Vector3(-wx, this.rugTop, -0.12)),
-        g.localToWorld(new THREE.Vector3(wx, this.rugTop, -0.12)),
-      ];
+      const S = this.stall;
+      const subject = S
+        ? [
+            // him over the counter, the stall's top step and its wares, the tags under the front lip
+            t.framingTop(new THREE.Vector3()).add(_a.set(0, 0.14, 0)),
+            g.localToWorld(new THREE.Vector3(-S.halfX, S.tiers[1].top + 0.3, S.tiers[1].slotZ)),
+            g.localToWorld(new THREE.Vector3(S.halfX, S.tiers[1].top + 0.3, S.tiers[1].slotZ)),
+            g.localToWorld(new THREE.Vector3(-S.halfX * 0.92, S.tiers[0].tackY - 0.11, S.tiers[0].tackZ)),
+            g.localToWorld(new THREE.Vector3(S.halfX * 0.92, S.tiers[0].tackY - 0.11, S.tiers[0].tackZ)),
+          ]
+        : [
+            t.framingTop(new THREE.Vector3()).add(_a.set(0, 0.18, 0)),
+            g.localToWorld(new THREE.Vector3(-wx, this.rugTop, 0.3)),
+            g.localToWorld(new THREE.Vector3(wx, this.rugTop, 0.3)),
+            g.localToWorld(new THREE.Vector3(-wx, this.rugTop, -0.12)),
+            g.localToWorld(new THREE.Vector3(wx, this.rugTop, -0.12)),
+          ];
       this.camMain.fov = this.fitShot(this.camMain.pos, subject, this.camMain.look);
       this.focus.copy(this.camMain.look);
       return;
@@ -2848,13 +3160,19 @@ export class Shop {
   }
 
   private updateBar() {
-    this.bar.innerHTML = `<span style="color:#ffd36b">${Math.floor(this.ctx.run.gold)} gold</span> &nbsp;·&nbsp; click to buy &nbsp;·&nbsp; right-click to shoot &nbsp;·&nbsp; ESC / T to leave`;
+    const bk = this.book, n = this.bodies.length;
+    const keys = n > 1 ? `click a ware or press 1-${n} &nbsp;·&nbsp; click / Enter to buy` : 'click to buy';
+    const off = bk.haggle === 'won' ? ' &nbsp;<span style="color:#b8f07a">fifteen off today</span>' : '';
+    const restock = this.stall ? `<div style="font-size:15px;color:#c9a97c;margin-top:4px">fresh stock after the wave ${bk.nextRestock} boss</div>` : '';
+    this.bar.innerHTML = `<span style="color:#ffd36b">${Math.floor(this.ctx.run.gold)} gold</span>${off} &nbsp;·&nbsp; ${keys} &nbsp;·&nbsp; right-click to shoot &nbsp;·&nbsp; ESC / T to leave${restock}`;
   }
 
   dispose() {
     if (this.visit) this.endVisit();
     if (this.arrival) this.abortArrival();
     if (this.active) this.finish();
+    for (const b of this.beacons.values()) b.dispose();
+    this.beacons.clear();
     for (const u of this.unsub) u();
     this.unsub = [];
     this.tip.remove();
@@ -2884,7 +3202,8 @@ export class Shop {
         b.state = 'gone';
         continue;
       }
-      if (b.state !== 'free' && b.state !== 'held') continue;
+      if (b.state !== 'free' && b.state !== 'held' && b.state !== 'shelf' && b.state !== 'fly') continue;
+      b.obj.scale.setScalar(1);
       b.state = 'pack';
       b.t = -(0.3 + 0.06 * i++); // once she has started waving
       b.arc0.copy(b.p);
@@ -2902,6 +3221,7 @@ export class Shop {
     }
     this.bodies = [];
     if (this.rug) this.group.remove(this.rug);
+    this.clearShelf();
     this.tip.style.display = 'none';
     this.bar.style.display = 'none';
     this.cam.setCine(null);
@@ -2935,23 +3255,30 @@ export class Shop {
 
   private buy(b: Body) {
     const ctx = this.ctx;
-    if (b.state !== 'held' && b.state !== 'free') return;
-    if (ctx.run.gold < b.ware.price) {
+    if (b.state !== 'held' && b.state !== 'free' && b.state !== 'shelf') return;
+    const price = this.book.price(b.ware);
+    if (ctx.run.gold < price) {
       ctx.sfx('ui_error', null, 0.8);
       this.speak(rnd.pick(this.voice.lines.poor), 'squinty');
-      this.kick(b, _v.set(0, 1.6, 0), null);
+      if (b.onShelf) {
+        // it hops on its slot; the tag swings
+        b.land = 1;
+        b.tag?.kick(1.2);
+      } else this.kick(b, _v.set(0, 1.6, 0), null);
       this.her?.shake();
       return;
     }
     if (!b.ware.buy()) {
       ctx.sfx('ui_error', null, 0.8);
-      ctx.toast('POCKETS FULL', '#ff8a6a', 'Use or drop a consumable first');
+      this.speak('Your pockets are full, little bones. Use something first.', 'squinty');
+      this.her?.shake();
       return;
     }
-    ctx.run.gold -= b.ware.price;
+    ctx.run.gold -= price;
+    this.book.sold.add(b.ware.id);
+    if (b.tag) this.inkTag(b.tag, b.ware);
     ctx.sfx('gold_burst', null, 0.8);
-    ctx.sfx('pickup_gold', null, 0.7);
-    ctx.toast(b.ware.name.toUpperCase(), '#9dff3a', `-${b.ware.price} gold · into your satchel`);
+    ctx.toast(b.ware.name.toUpperCase(), '#9dff3a', `-${price} gold · into your satchel`);
     b.state = 'sold';
     b.t = 0;
     b.arc0.copy(b.p);
@@ -2965,17 +3292,24 @@ export class Shop {
     this.punch = 1;
     const her = this.her;
     if (her && this.hunter) {
+      // the coins are counted across one at a time from his purse into Ozymandias's claws, each with a clink
       const from = this.satchel(new THREE.Vector3());
       const to = her.coinPoint(new THREE.Vector3());
-      const T = 0.6, g = 14;
+      const T = 0.55, g = 14;
       const vel = to.clone().sub(from).multiplyScalar(1 / T);
       vel.y += 0.5 * g * T;
-      ctx.particles.emit({ pos: from, count: Math.min(14, 4 + Math.round(b.ware.price / 12)), vel, spread: 0.45, life: [T, T + 0.06], size: [0.11, 0.11], sprite: ['coinspin0', 'coinspin1', 'coinspin2', 'coinspin3'], color: 0xffffff, gravity: g, sizeJitter: 0.1 });
-      this.coinsAt = T;
+      const n = Math.min(12, 3 + Math.round(price / 18));
+      for (let i = 0; i < n; i++) {
+        ctx.particles.emit({ pos: from, count: 1, vel, spread: 0.12, life: [T, T + 0.04], size: [0.11, 0.11], sprite: ['coinspin0', 'coinspin1', 'coinspin2', 'coinspin3'], color: 0xffffff, gravity: g, sizeJitter: 0.1, delay: i * 0.075 });
+        ctx.audio.play('pickup_gold', { pos: to, volume: 0.32, pitch: 1.0 + i * 0.035, delay: T + i * 0.075 });
+      }
+      this.coinsAt = T + n * 0.075;
       this.coinsTo.copy(to);
     }
-    this.speak(rnd.pick(this.voice.lines.thanks), 'laugh');
+    const sl = SOLD_LINE[b.ware.id];
+    this.speak(rnd.pick(sl && rnd.chance(0.7) ? sl : this.voice.lines.thanks), 'laugh');
     her?.nod();
+    for (const o of this.bodies) if (o.tag && o !== b && o.state !== 'sold' && o.state !== 'gone') this.inkTag(o.tag, o.ware); // what you can still afford
     this.updateBar();
   }
   private coinsAt = -1;
@@ -3027,19 +3361,24 @@ export class Shop {
     this.hoverLock -= h;
     this.shotCd -= h;
     if (this.phase === 'browse') {
+      // a number key picks a ware off the shelf (Enter buys it), the mouse hovers and clicks
+      for (let k = 0; k < 9; k++) if (inp.wasPressed('Digit' + (k + 1)) || inp.wasPressed('Numpad' + (k + 1))) this.focusWare(k);
       this.pick();
       if (inp.wasPressed('Mouse2') && this.shotCd <= 0) this.shoot();
-      if (this.hovered && inp.wasPressed('Mouse0')) this.buy(this.hovered);
+      if (this.hovered && (inp.wasPressed('Mouse0') || inp.wasPressed('Enter'))) this.buy(this.hovered);
     }
-    this.updateTip();
+    this.updateCard(h);
+    const tagsDown = this.phase === 'leave' && this.pt > 0.55;
+    for (const tg of this.tags) tg.update(h, tagsDown ? 0 : tg.want);
     // ---- spotlights, dust in the beams, her commentary
     const hb = this.hovered;
     for (const b of this.bodies) {
-      const up = b.state === 'held' || (b.state === 'free' && b.landed);
+      const up = b.state === 'held' || b.state === 'shelf' || (b.state === 'free' && b.landed);
       b.lit = damp(b.lit, up ? (b === hb ? 1 : 0.55) : 0, 3.5, h);
       b.gaze = b === hb && b.state === 'held' ? b.gaze + h : 0;
       if (b.lit > 0.3 && rnd.chance(h * (1.2 + b.lit * 1.6))) {
-        const c = this.group.localToWorld(_v.set(b.rest.x + (rnd.next() - 0.5) * 0.24, this.rugTop + 0.06 + rnd.next() * 0.45, b.rest.z + (rnd.next() - 0.5) * 0.24));
+        const base = b.onShelf ? b.rest.y - b.he.y : this.rugTop;
+        const c = this.group.localToWorld(_v.set(b.rest.x + (rnd.next() - 0.5) * 0.24, base + 0.06 + rnd.next() * 0.45, b.rest.z + (rnd.next() - 0.5) * 0.24));
         ctx.particles.emit({ pos: { x: c.x, y: c.y, z: c.z }, count: 1, vel: { x: 0, y: 0.05, z: 0 }, spread: 0.04, life: [1.4, 2.4], size: [0.026, 0.012], sprite: 'glow8', additive: true, color: 0xffe2a8, alpha: 0.5, drag: 0.6, fadeIn: 0.3 });
       }
     }
@@ -3164,12 +3503,17 @@ export class Shop {
     const inp = this.input;
     const W = this.ctx.engine.width, H = this.ctx.engine.height;
     const base = Math.max(55, W * 0.055);
+    if (this.kbHold) {
+      // a number key chose: the mouse takes over again once it moves
+      if (Math.hypot(inp.mouseX - this.kbMouse[0], inp.mouseY - this.kbMouse[1]) < 6) return;
+      this.kbHold = false;
+    }
     let best: Body | null = null, bd = Infinity, curD = Infinity;
     if (this.hoverLock <= 0)
       for (const b of this.bodies) {
-        if (!(b.state === 'held' || (b.state === 'free' && b.landed))) continue;
+        if (!(b.state === 'held' || b.state === 'shelf' || (b.state === 'free' && b.landed))) continue;
         // anchor on where it rests, so lifting it never steals the hover
-        _v.set(b.rest.x, this.rugTop + b.he.y, b.rest.z);
+        _v.set(b.rest.x, b.onShelf ? b.rest.y : this.rugTop + b.he.y, b.rest.z);
         if (b.state === 'free') _v.copy(b.p);
         this.group.localToWorld(_v).project(this.ctx.camera);
         if (_v.z > 1) continue;
@@ -3191,35 +3535,114 @@ export class Shop {
           best.state = 'held';
           best.asleep = false;
           best.rest.copy(best.p);
+        } else if (best.state === 'shelf') {
+          best.state = 'held';
+          best.tag?.kick(0.5);
         }
       }
       this.hovered = best;
     }
   }
 
-  private updateTip() {
-    const b = this.hovered;
-    if (!b || this.phase !== 'browse') {
+  /** number key k: lift the k-th ware on the shelf (the mouse leaves it be until it moves) */
+  private focusWare(k: number) {
+    const live = this.bodies.filter((b) => b.state === 'shelf' || b.state === 'held' || (b.state === 'free' && b.landed)).sort((a, b) => a.idx - b.idx);
+    const b = live[k];
+    if (!b) return;
+    if (this.hovered && this.hovered !== b && this.hovered.state === 'held') this.drop(this.hovered);
+    if (b.state === 'free') {
+      b.asleep = false;
+      b.rest.copy(b.p);
+    }
+    b.state = 'held';
+    b.tag?.kick(0.5);
+    this.hovered = b;
+    this.kbHold = true;
+    this.kbMouse = [this.input.mouseX, this.input.mouseY];
+    this.ctx.sfx('card_hover', null, 0.5);
+  }
+
+  private clearCard() {
+    for (const f of this.card) {
+      f.show(false);
+      this.fading.push(f);
+    }
+    this.card = [];
+    this.cardFor = null;
+  }
+
+  /**
+   * The hovered ware's card, floating beside it in Alagard: its name, what it
+   * does, what it means for you (green: a gain; red: a snag), and the price
+   * (the deal and the haggle shown, red when you are short).
+   */
+  private updateCard(h: number) {
+    const hb = this.hovered;
+    const b = hb && hb.state === 'held' && this.phase === 'browse' ? hb : null;
+    if (b !== this.cardFor) {
+      this.clearCard();
+      this.cardFor = b;
+      if (b) this.makeCard(b);
+    }
+    if (!b || !this.card.length) {
       this.tip.style.display = 'none';
       return;
     }
-    const w = b.ware, inp = this.input;
-    const afford = this.ctx.run.gold >= w.price;
-    this.tip.innerHTML = `<div style="font-size:20px;color:#8a2a18">${w.name}</div><div style="margin:4px 0 6px">${w.desc}</div><div style="color:${afford ? '#7a5a10' : '#a02a1a'}">${w.price} gold</div>`;
-    this.tip.style.display = 'block';
-    this.tip.style.left = `${inp.mouseX + 18}px`;
-    this.tip.style.top = `${inp.mouseY - 10}px`;
+    const cam = this.ctx.camera;
+    const at = this.group.localToWorld(_l.copy(b.rest));
+    at.y += 0.12;
+    const dist = at.distanceTo(cam.position);
+    // on the open side of the ware, a hand's breadth in front of it (toward the lens)
+    const nx = _b.copy(at).project(cam).x;
+    const side = nx > 0.05 ? -1 : 1;
+    const right = _a.set(1, 0, 0).applyQuaternion(cam.quaternion);
+    const up = _c.set(0, 1, 0).applyQuaternion(cam.quaternion);
+    const fwd = _w.subVectors(cam.position, at).normalize();
+    const wMax = Math.max(...this.card.map((f) => f.mesh.scale.x));
+    const totalH = this.card.reduce((a, f) => a + f.mesh.scale.y, 0);
+    let y = totalH * 0.5 + 0.02;
+    for (const f of this.card) {
+      const fh = f.mesh.scale.y;
+      f.anchor.copy(at).addScaledVector(fwd, dist * 0.12).addScaledVector(right, side * (0.16 + wMax * 0.5)).addScaledVector(up, y - fh * 0.5);
+      y -= fh * 0.92;
+      f.update(h, cam);
+      f.mesh.position.copy(f.anchor); // pinned in their column (no float bob)
+    }
+  }
+
+  private makeCard(b: Body) {
+    const w = b.ware;
+    const cam = this.ctx.camera;
+    const at = this.group.localToWorld(_l.copy(b.rest));
+    const sz = clamp(at.distanceTo(cam.position) * 0.024, 0.03, 0.08);
+    const price = this.book.price(w), gold = Math.floor(this.ctx.run.gold);
+    const note = this.noteOf(w);
+    let pl = `${price} gold`;
+    if (price !== w.price) pl += w.id === this.book.deal ? `  (today's deal, was ${w.price})` : `  (haggled, was ${w.price})`;
+    if (gold < price) pl += `  · you have ${gold}`;
+    const mk = (text: string, size: number, color: string, glow: string, wrap = 34) => {
+      const f = new FloatText3D(text, { size, px: 44, cps: 140, wrap, hdr: 1.15, color, glow });
+      f.mesh.renderOrder = 992;
+      this.ctx.scene.add(f.mesh);
+      return f;
+    };
+    this.card = [mk(w.name, sz * 1.3, '#ffd36b', '#ff9a40', 26), mk(w.desc, sz, '#fff3d6', '#b07040')];
+    if (note) this.card.push(mk(note.text, sz * 0.95, note.good ? '#b8f07a' : note.bad ? '#ff9a7a' : '#e8d6b0', note.good ? '#3a7a20' : note.bad ? '#8a2a18' : '#7a5a30'));
+    this.card.push(mk(pl, sz * 1.05, gold < price ? '#ff8a6a' : '#ffd36b', '#a05a20', 44));
   }
 
   // ---------------------------------------------------------------- rigid bodies
   private launch(b: Body) {
-    b.state = 'free';
+    b.state = this.stall ? 'fly' : 'free';
     b.obj.visible = true;
     const start = this.packPoint(_v, (rnd.next() - 0.5) * 0.3);
     this.ctx.fx.dust({ x: start.x, y: start.y, z: start.z }, 0.22, P.sand1, 2);
     this.group.worldToLocal(start);
     b.p.copy(start);
+    b.arc0.copy(start);
+    b.t = 0;
     const T = (this.her instanceof Turtle ? 0.72 : 0.64) + rnd.next() * 0.14; // out of his basket on the counter
+    b.flyT = T;
     b.v.copy(b.slot).sub(b.p).multiplyScalar(1 / T);
     b.v.y += 0.5 * G * T;
     b.q.setFromEuler(new THREE.Euler(rnd.next() * 6.28, rnd.next() * 6.28, rnd.next() * 6.28));
@@ -3235,6 +3658,7 @@ export class Shop {
   }
 
   private floorAt(x: number, z: number) {
+    if (this.stall) return stallTopAt(this.stall, x, z) ?? 0; // the stall's steps, else the floorboards
     if (Math.abs(x) <= this.rugHalf.x && Math.abs(z) <= this.rugHalf.y) return this.rugTop;
     if (this.indoor) return 0; // the floorboards
     // off the rug: the real sand, measured from the rug's plane
@@ -3245,7 +3669,9 @@ export class Shop {
   /** an impulse j (m/s, local) at local point at (null: the centre) */
   private kick(b: Body, jIn: THREE.Vector3, at: THREE.Vector3 | null) {
     const j = _kj.copy(jIn);
-    if (b.state === 'held') {
+    if (b.state === 'held' || b.state === 'shelf') {
+      if (b.onShelf) b.tag?.kick(1.4);
+      b.onShelf = false; // knocked off the stall: it is a loose thing now
       b.state = 'free';
       if (this.hovered === b) {
         this.hovered = null;
@@ -3264,6 +3690,12 @@ export class Shop {
   }
 
   private drop(b: Body) {
+    if (b.onShelf) {
+      b.state = 'shelf';
+      b.land = 0.5;
+      b.tag?.kick(0.4);
+      return;
+    }
     b.state = 'free';
     b.asleep = false;
     b.still = 0;
@@ -3280,12 +3712,35 @@ export class Shop {
     }
     for (const b of this.bodies) {
       b.clack -= h;
+      let sink = 0;
       if (b.state === 'held') {
+        // lifted off its slot (or off the rug) and turned slowly in the light
         b.spin += h * 1.25;
-        _v.set(b.rest.x, this.rugTop + 0.36 + Math.sin(this.t * 2.3 + b.spin) * 0.012, b.rest.z);
+        if (b.onShelf) _v.set(b.rest.x, b.rest.y + 0.15 + Math.sin(this.t * 2.3 + b.spin) * 0.01, b.rest.z - 0.05);
+        else _v.set(b.rest.x, this.rugTop + 0.36 + Math.sin(this.t * 2.3 + b.spin) * 0.012, b.rest.z);
         b.p.lerp(_v, 1 - Math.exp(-8 * h));
         _q.setFromAxisAngle(UP, b.spin);
         b.q.slerp(_q, 1 - Math.exp(-6 * h));
+        b.obj.scale.setScalar(1);
+      } else if (b.state === 'fly') {
+        // out of his basket on a ballistic arc, tumbling, righting itself over the last stretch to land on its slot
+        b.t += h;
+        const t = Math.min(b.t, b.flyT);
+        b.p.copy(b.arc0).addScaledVector(b.v, t);
+        b.p.y -= 0.5 * G * t * t;
+        _q.set(b.w.x * h * 0.5, b.w.y * h * 0.5, b.w.z * h * 0.5, 0).multiply(b.q);
+        b.q.set(b.q.x + _q.x, b.q.y + _q.y, b.q.z + _q.z, b.q.w + _q.w).normalize();
+        const k = smoother((b.t - b.flyT * 0.5) / (b.flyT * 0.5));
+        if (k > 0) b.q.slerp(b.q0, k * 0.45);
+        if (b.t >= b.flyT) this.land(b);
+      } else if (b.state === 'shelf') {
+        // standing on its slot; a landing (or a hop when you cannot pay) squashes it into the wood
+        b.land = Math.max(0, b.land - h * 3.2);
+        b.p.lerp(b.rest, 1 - Math.exp(-14 * h));
+        b.q.slerp(b.q0, 1 - Math.exp(-12 * h));
+        const sq = Math.sin(b.land * Math.PI) * Math.min(1, b.land * 1.6);
+        b.obj.scale.set(1 + 0.13 * sq, 1 - 0.18 * sq, 1 + 0.13 * sq);
+        sink = b.he.y * 0.18 * sq;
       } else if (b.state === 'sold' || b.state === 'pack') {
         b.t += h;
         const sold = b.state === 'sold';
@@ -3317,8 +3772,31 @@ export class Shop {
         }
       }
       b.obj.position.copy(b.p);
+      b.obj.position.y -= sink;
       b.obj.quaternion.copy(b.q);
     }
+  }
+
+  /** a ware lands on its slot on the stall: a clack, a puff of dust, its tag drops down and swings */
+  private land(b: Body) {
+    b.state = 'shelf';
+    b.onShelf = true;
+    b.landed = true;
+    b.land = 1;
+    b.p.copy(b.rest);
+    b.v.set(0, 0, 0);
+    b.w.set(0, 0, 0);
+    b.asleep = true;
+    if (b.tag) {
+      this.inkTag(b.tag, b.ware);
+      b.tag.want = 1;
+      b.tag.kick(1);
+    }
+    const wp = this.group.localToWorld(_v.set(b.rest.x, b.rest.y - b.he.y, b.rest.z));
+    if (b.sound === 'metal') this.ctx.sfx('shell_casing', wp, 0.32, 0.8);
+    else if (b.sound === 'glass') this.ctx.sfx('shell_casing', wp, 0.26, 1.3);
+    else this.ctx.sfx('board_land', wp, 0.2, 1.6);
+    this.ctx.fx.dust({ x: wp.x, y: wp.y + 0.02, z: wp.z }, 0.16, P.sand0, 2);
   }
 
   private step(b: Body, h: number) {
@@ -3394,7 +3872,17 @@ export class Shop {
     } else b.still = 0;
     // a soft lip around the rug keeps knocked wares within reach (only once
     // they are down: her pack is outside it and they fly in over the lip)
-    if (b.landed && b.p.y < this.rugTop + 0.5) {
+    if (this.stall && b.landed) {
+      // knocked off the stall: the room's floor (kept in front of his counter and in shot)
+      if (Math.abs(b.p.x) > 0.95) {
+        b.p.x = Math.sign(b.p.x) * 0.95;
+        b.v.x *= -0.3;
+      }
+      if (b.p.z < -0.9 || b.p.z > 0.42) {
+        b.p.z = clamp(b.p.z, -0.9, 0.42);
+        b.v.z *= -0.3;
+      }
+    } else if (b.landed && b.p.y < this.rugTop + 0.5) {
       const lx = this.rugHalf.x + 0.12, lz = this.rugHalf.y + 0.1;
       if (Math.abs(b.p.x) > lx) {
         b.p.x = Math.sign(b.p.x) * lx;
@@ -3414,10 +3902,10 @@ export class Shop {
     const B = this.bodies;
     for (let i = 0; i < B.length; i++) {
       const a = B[i];
-      if (a.state !== 'free' && a.state !== 'held') continue;
+      if (a.state !== 'free' && a.state !== 'held' && a.state !== 'shelf') continue;
       for (let j = i + 1; j < B.length; j++) {
         const b = B[j];
-        if (b.state !== 'free' && b.state !== 'held') continue;
+        if (b.state !== 'free' && b.state !== 'held' && b.state !== 'shelf') continue;
         const n = _v.copy(b.p).sub(a.p);
         const d = n.length(), r = a.rad + b.rad;
         if (d >= r || d < 1e-5) continue;
@@ -3447,7 +3935,7 @@ export class Shop {
     const o = this.ray.ray.origin.clone(), d = this.ray.ray.direction.clone();
     const hitP = new THREE.Vector3();
     let hitB: Body | null = null;
-    const live = this.bodies.filter((b) => b.state === 'free' || b.state === 'held');
+    const live = this.bodies.filter((b) => b.state === 'free' || b.state === 'held' || b.state === 'shelf');
     const hits = this.ray.intersectObjects(live.map((b) => b.obj), true);
     if (hits.length) {
       hitP.copy(hits[0].point);
@@ -3554,8 +4042,21 @@ export class Shop {
   }
 }
 
+/** what the stock can ask about you (for the "what it means for you" line on a ware's card) */
+export interface StockYou {
+  /** how many of an item you carry, and whether one more fits */
+  pockets?(id: ItemId): { have: number; room: boolean };
+  /** your health now and at most */
+  hp?(): [number, number];
+}
+/** the words on each consumable's price tag */
+const SHORT: Record<string, string> = {
+  bandage: 'heals 35%', goldBandage: 'heals 70%, cleanses', dagger: '+40% damage', smoke: 'vanish, +dodge', shield: 'tin shield',
+  charm: 'cleanse, untouchable', dynamite: 'six-metre blast', snakeoil: 'speed, fire rate', whiskey: '+25% crit',
+};
+
 /** standard stock for the trading post */
-export function merchantStock(ctx: Ctx, add: (id: ItemId) => boolean, heal: () => void, card: () => void): Ware[] {
+export function merchantStock(ctx: Ctx, add: (id: ItemId) => boolean, heal: () => void, card: () => void, you: StockYou = {}): Ware[] {
   const w = ctx.run.wave;
   const scale = 1 + w * 0.03;
   const pool = (Object.keys(ITEMS) as ItemId[]).filter((id) => id !== 'charm' || w > 10);
@@ -3564,8 +4065,27 @@ export function merchantStock(ctx: Ctx, add: (id: ItemId) => boolean, heal: () =
     const id = rnd.pick(pool);
     if (!picks.includes(id)) picks.push(id);
   }
-  const wares: Ware[] = picks.map((id) => ({ id, name: ITEMS[id].name, desc: ITEMS[id].desc, price: Math.round(ITEMS[id].price * scale), model: ITEMS[id].model, buy: () => add(id) }));
-  wares.push({ id: 'heal', name: 'Camel-Milk Tonic', desc: 'Drink it all. Heals to full. Tastes like regret.', price: Math.round(45 * scale), model: 'bottle', buy: () => (heal(), true) });
-  wares.push({ id: 'card', name: 'Fortune Card', desc: 'A sealed upgrade card from the merchant\'s deck. Pick 1 of 3.', price: Math.round(90 * scale), model: 'book', buy: () => (card(), true) });
+  const wares: Ware[] = picks.map((id) => ({
+    id, name: ITEMS[id].name, desc: ITEMS[id].desc, price: Math.round(ITEMS[id].price * scale), model: ITEMS[id].model, buy: () => add(id), short: SHORT[id],
+    note: () => {
+      const p = you.pockets?.(id);
+      if (!p) return null;
+      if (!p.room) return { text: 'Your pockets are full: use one first.', bad: true };
+      return p.have ? { text: `You carry ${p.have}. One more fits.` } : { text: 'Fits in an empty pocket.', good: true };
+    },
+  }));
+  wares.push({
+    id: 'heal', name: 'Camel-Milk Tonic', desc: 'Drink it all. Heals to full. Tastes like regret.', price: Math.round(45 * scale), model: 'bottle', buy: () => (heal(), true), short: 'heals to full',
+    note: () => {
+      const hp = you.hp?.();
+      if (!hp) return null;
+      const [h, m] = hp;
+      return h < m * 0.75 ? { text: `Your health: ${Math.round(h)} of ${Math.round(m)}.`, good: true } : { text: `Your health: ${Math.round(h)} of ${Math.round(m)}. Nearly whole.` };
+    },
+  });
+  wares.push({
+    id: 'card', name: 'Fortune Card', desc: 'A sealed upgrade card from the merchant\'s deck. Pick 1 of 3.', price: Math.round(90 * scale), model: 'book', buy: () => (card(), true), short: 'upgrade card',
+    note: () => ({ text: 'Three upgrade cards are dealt: keep one, like a rank-up.', good: true }),
+  });
   return wares;
 }

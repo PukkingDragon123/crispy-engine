@@ -23,7 +23,7 @@ import { CardStudio } from './CardStudio';
 import { Kit, TAROT_BAR, TarotDef, TarotFx } from './TarotCards';
 import { CARD, tarotFrame } from '../models/props/tarot';
 import { isSkillLearned } from '../player/Skills';
-import { SpriteBank, Shot, Sprite, blitC, blitSquash, blitShear, variant, wrap, palNearest } from './HudSprites';
+import { SpriteBank, Shot, Sprite, blitC, blitSquash, blitShear, shadowOffset, variant, wrap, palNearest } from './HudSprites';
 import { UI, keycap, text, px } from './PixelUI';
 import { isTouchDevice } from './TouchControls';
 
@@ -556,12 +556,28 @@ export class TarotBar {
         if (!pic) return;
         const sx = Math.max(0.08, Math.abs(cs)) * (1 + swell);
         const tilt = fan + Math.sin(this.t * 0.9 + i) * 0.02;
+        // real card stock: a shadow that falls further the higher the card rises, and its edge (thickness)
+        const solid = showFace && face ? face.cv : back ? back.cv : pic;
+        const rise = 3 + lift * 14 + card.hover * 6 + Math.sin(card.unlock * Math.PI) * 9;
+        const [ox, oy] = shadowOffset(rise);
+        const sh = variant(solid, 'shadow'), stock = variant(solid, 'stock');
         if (Math.abs(cs) > 0.995 && swell < 0.01) {
           // at rest: the fan is a shear about the card's centre (crisp rows)
-          blitShear(c, pic, x - pic.width / 2, y - pic.height / 2, (r) => (r - pic!.height / 2) * -Math.tan(tilt));
+          const left = x - pic.width / 2, top = y - pic.height / 2;
+          const shear = (r: number) => (r - pic!.height / 2) * -Math.tan(tilt);
+          blitShear(c, sh, left + ox + 1, top + oy + 1, shear, 0.14);
+          blitShear(c, sh, left + ox, top + oy, shear, 0.34);
+          blitShear(c, stock, left + 1, top + 1, shear);
+          blitShear(c, pic, left, top, shear);
           if (!showFace && card.locked) return;
-          if (showFace && !readyNow) blitShear(c, variant(pic === card.live ? face!.cv : pic, 'dim'), x - pic.width / 2, y - pic.height / 2, (r) => (r - pic!.height / 2) * -Math.tan(tilt), 0.22);
-        } else blitSquash(c, pic, x, y, sx, 1, 1 + swell);
+          if (showFace && !readyNow) blitShear(c, variant(pic === card.live ? face!.cv : pic, 'dim'), left, top, shear, 0.22);
+        } else {
+          blitSquash(c, sh, x + ox + 1, y + oy + 1, sx, 0.14, 1 + swell);
+          blitSquash(c, sh, x + ox, y + oy, sx, 0.34, 1 + swell);
+          // mid-turn the card's edge shows as its thickness
+          blitSquash(c, stock, x + (cs >= 0 ? 1 : -1), y + 1, sx, 1, 1 + swell);
+          blitSquash(c, pic, x, y, sx, 1, 1 + swell);
+        }
         if (card.flash > 0.02) blitSquash(c, variant(showFace && face ? face.cv : pic, 'flash'), x, y, sx, card.flash * 0.75, 1 + swell);
       });
     });
@@ -571,7 +587,11 @@ export class TarotBar {
     for (const a of hud.cardAnchors) {
       if (!this.touch) {
         const kc = keycap(a.key);
-        c.drawImage(kc, Math.round(a.x - kc.width / 2), Math.round(a.y + a.h / 2 + 2));
+        const kx = Math.round(a.x - kc.width / 2), ky = Math.round(a.y + a.h / 2 + 2);
+        c.globalAlpha = 0.3;
+        c.drawImage(variant(kc, 'shadow'), kx + 1, ky + 2);
+        c.globalAlpha = 1;
+        c.drawImage(kc, kx, ky);
       }
       if (a.cd > 0.05 && a.cd < 99) text(c, a.cd < 1 ? a.cd.toFixed(1) : String(Math.ceil(a.cd)), a.x, a.y - 8, UI.text, 16, 'center');
     }

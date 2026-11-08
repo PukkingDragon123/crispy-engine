@@ -16,6 +16,7 @@ import type { CameraRig } from '../player/CameraRig';
 import type { Qte } from '../ui/Qte';
 import type { Choice } from '../ui/Choice';
 import { Shop, merchantStock, type MerchantHooks, type Ware } from '../ui/Shop';
+import { ITEMS, type ItemId } from '../player/Items';
 import { Interactions, Interactable, Chest, ChestTier } from './Interact';
 import type { Inventory } from '../player/Items';
 import { modelEntry } from '../models/lookup';
@@ -142,10 +143,36 @@ export class Missions {
     const d = this.d;
     return {
       board: d.player.board,
-      stock: () => [...merchantStock(d.ctx, (id) => d.items.add(id), () => d.player.heal(d.player.maxHp), () => d.card()), ...(d.gearWares?.() ?? [])],
+      stock: () => this.wares(),
       busy: () => this.busy || d.choice.active || !d.player.alive,
       ...extra,
     };
+  }
+
+  /**
+   * The shop's shelf: the same stock until the next boss wave brings a fresh one
+   * (the shop's StockBook keeps what sold), consumables + the tonic + a fortune
+   * card + gear pieces, each able to say what it means for you right now.
+   */
+  private wares(): Ware[] {
+    const d = this.d;
+    return d.shop.book.stock(() => [
+      ...merchantStock(d.ctx, (id) => d.items.add(id), () => d.player.heal(d.player.maxHp), () => d.card(), {
+        pockets: (id: ItemId) => {
+          let have = 0, room = false;
+          for (const sl of d.items.slots) {
+            if (!sl) room = true;
+            else if (sl.id === id) {
+              have += sl.count;
+              if (sl.count < ITEMS[id].stack) room = true;
+            }
+          }
+          return { have, room };
+        },
+        hp: () => [d.player.hp, d.player.maxHp],
+      }),
+      ...(d.gearWares?.() ?? []),
+    ]);
   }
 
   /** walk-in cinematic, then the landmark's offer */
@@ -169,7 +196,7 @@ export class Missions {
         const merchant = this.npcs.find((n) => n.kind === 'merchant' && n.lm === lm) ?? this.npcs.find((n) => n.kind === 'merchant');
         if (merchant) merchant.t = 0;
         const at = merchant ? merchant.rig.root.position : rugAt;
-        await this.d.shop.open(at.clone(), facing, [...merchantStock(ctx, (id) => this.d.items.add(id), () => this.d.player.heal(this.d.player.maxHp), () => this.d.card()), ...(this.d.gearWares?.() ?? [])], merchant?.rig.root.position ?? door);
+        await this.d.shop.open(at.clone(), facing, this.wares(), merchant?.rig.root.position ?? door);
         return;
       }
       // crane shot around the landmark

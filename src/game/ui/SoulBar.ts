@@ -24,7 +24,7 @@ import { buildRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { VF } from '../../engine/voxel/VoxelModel';
 import { modelEntry } from '../models/lookup';
 import { sculpt, Surf, PixelFx, fbm3, h3, mixc, mulc, clamp01, sstep, len2, len3, TAU, uiSfx, METAL, lerp } from './HudKit';
-import { SpriteBank, Shot, Sprite, blitC, blitSquash, variant, framingBox } from './HudSprites';
+import { SpriteBank, Shot, Sprite, blitC, blitObj, blitSquash, glint, variant, framingBox } from './HudSprites';
 
 // ------------------------------------------------------------------ profile (HUD px)
 /** interior bottom of the glass above the foot */
@@ -619,7 +619,9 @@ export class SoulBar {
     const X = a.x + rock, Y = a.y - hop;
     // the jar stands on its foot at the anchor
     const cx = X, cy = Y - (body.by + body.bh) + body.h / 2;
-    blitC(c, body, cx, cy);
+    // brass and glass standing a little off the screen: a cast shadow, light running over the cage and the glass
+    blitObj(c, body, cx, cy, 2 + hop);
+    glint(body, cx, cy, this.ready ? 2.2 : 0.6, dt);
     if (this.flash > 0.02) blitC(c, variant(body, 'flash'), cx, cy, this.flash * 0.55);
     if (lid) {
       // the stopper: rattles when full, pops and spins when uncorked

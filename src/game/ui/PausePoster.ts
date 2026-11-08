@@ -3,12 +3,17 @@
 // gunshots nail its top corners in place — bullet holes and all — and it hangs
 // there, still fluttering a little, while the buttons ride on it. Unpausing
 // rips it off the nails and the wind carries it away.
-// The poster's picture is Sundown photographed in 3D (IconFactory); the paper
-// itself is shaded procedurally in the shader (fibres, foxing, scorched edge).
+// Like the rest of the HUD it is crisp pixel art: Hud3D renders the cloth into
+// a render target at HUD-pixel resolution and blows it up nearest-neighbour, the
+// paper's light is stepped onto a few cel tones, its torn edge carries an ink
+// line, and it casts a shadow (the same cloth, darkened, offset down-right).
+// The poster's ink is set at the poster's own pixel size: Alagard type and
+// Sundown photographed in 3D (IconFactory), printed in sepia on the HUD palette.
 import * as THREE from 'three';
 import { IconFactory } from './IconFactory';
 import { buildRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
+import { palNearest, pixelText, pixelTextWidth } from './HudSprites';
 
 const NX = 13, NY = 17;
 const ASPECT = 300 / 430;
@@ -17,12 +22,14 @@ const VS = /* glsl */ `
 varying vec2 vUv; varying vec3 vN;
 void main(){ vUv = uv; vN = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
 const FS = /* glsl */ `
-uniform sampler2D map; uniform float uHasMap; uniform vec4 uHole1, uHole2; uniform float uAspect, uSeed;
+uniform sampler2D map; uniform float uHasMap; uniform vec4 uHole1, uHole2; uniform float uAspect, uSeed, uShadow; uniform vec2 uPx;
 varying vec2 vUv; varying vec3 vN;
 float h(vec2 p){ p = fract(p * vec2(123.34, 456.21) + uSeed); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float n2(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(h(i), h(i + vec2(1, 0)), f.x), mix(h(i + vec2(0, 1)), h(i + vec2(1, 1)), f.x), f.y); }
 float fbm(vec2 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++){ s += a * n2(p); p = p * 2.07 + 1.3; a *= 0.5; } return s; }
+// palette colours are written as sRGB; the output is encoded once more at the end
+vec3 srgb(vec3 c){ return pow(c, vec3(2.2)); }
 float hole(vec4 H, vec2 uv, inout vec3 col){
   if (H.w < 0.5) return 1.0;
   vec2 d = (uv - H.xy) * vec2(uAspect, 1.0);
@@ -54,9 +61,18 @@ void main(){
   }
   if (hole(uHole1, vUv, col) < 0.5) discard;
   if (hole(uHole2, vUv, col) < 0.5) discard;
-  // folds catch the light
+  if (uShadow > 0.5) { gl_FragColor = vec4(srgb(vec3(0.1, 0.055, 0.024)), 0.36); return; }
+  // pixel paper: the paper tones stepped (the ink keeps its own), a one-pixel ink line on the torn edge
+  if (!(uHasMap > 0.5 && texture2D(map, vUv).a > 0.5)) {
+    // the paper onto the pixel kit's parchment ramp (as the mission notes)
+    float pl = dot(col, vec3(0.3, 0.59, 0.11));
+    col = srgb(pl > 0.9 ? vec3(1.0, 0.957, 0.847) : pl > 0.8 ? vec3(0.937, 0.863, 0.69) : pl > 0.66 ? vec3(0.839, 0.725, 0.522) : pl > 0.45 ? vec3(0.663, 0.518, 0.306) : pl > 0.24 ? vec3(0.42, 0.26, 0.13) : vec3(0.16, 0.086, 0.04));
+  }
+  if (edge < tear + uPx.y * 1.05) col = srgb(vec3(0.16, 0.086, 0.04));
+  // folds catch the key light in hard cel steps
   vec3 n = normalize(vN);
-  float l = 0.6 + 0.4 * clamp(dot(n * (gl_FrontFacing ? 1.0 : -1.0), normalize(vec3(-0.35, 0.55, 1.0))), 0.0, 1.0);
+  float l = clamp(dot(n * (gl_FrontFacing ? 1.0 : -1.0), normalize(vec3(-0.35, 0.55, 1.0))), 0.0, 1.0);
+  l = l > 0.82 ? 1.0 : l > 0.62 ? 0.9 : l > 0.4 ? 0.8 : 0.7;
   gl_FragColor = vec4(col * l, 1.0);
   #include <colorspace_fragment>
 }`;
@@ -73,7 +89,12 @@ interface P {
 
 export class PausePoster {
   mesh: THREE.Mesh;
+  /** the same cloth, darkened and offset: the poster's cast shadow */
+  shadow: THREE.Mesh;
   private mat: THREE.ShaderMaterial;
+  private shadowMat: THREE.ShaderMaterial;
+  /** css px per HUD px (set by the HUD each frame) */
+  scale = 2;
   private geo: THREE.PlaneGeometry;
   private pts: P[] = [];
   private springs: [number, number, number, number][] = [];
@@ -100,6 +121,8 @@ export class PausePoster {
         uHole2: { value: new THREE.Vector4(0, 0, 0, 0) },
         uAspect: { value: ASPECT },
         uSeed: { value: Math.random() },
+        uShadow: { value: 0 },
+        uPx: { value: new THREE.Vector2(0.004, 0.003) },
       },
       vertexShader: VS,
       fragmentShader: FS,
@@ -111,25 +134,33 @@ export class PausePoster {
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 20;
     this.mesh.visible = false;
-    scene.add(this.mesh);
+    this.shadowMat = this.mat.clone();
+    this.shadowMat.uniforms = { ...this.mat.uniforms, uShadow: { value: 1 } };
+    this.shadowMat.transparent = true;
+    this.shadow = new THREE.Mesh(this.geo, this.shadowMat);
+    this.shadow.frustumCulled = false;
+    this.shadow.renderOrder = 19;
+    this.shadow.visible = false;
+    scene.add(this.shadow, this.mesh);
   }
 
-  /** the poster's ink: Sundown photographed from his own 3D rig + typography */
-  buildArt(renderer: THREE.WebGLRenderer, hero: RigSpec | null) {
+  /** the poster's ink at its own HUD-pixel size: Alagard type + Sundown photographed from his own 3D rig */
+  buildArt(renderer: THREE.WebGLRenderer, hero: RigSpec | null, scale = this.scale) {
     this.needsArt = false;
-    const W = 600, H = Math.round(600 / ASPECT);
+    const W = Math.max(60, Math.round(this.w / scale)), H = Math.max(80, Math.round(this.h / scale));
     const cv = document.createElement('canvas');
     cv.width = W;
     cv.height = H;
     const c = cv.getContext('2d')!;
+    c.imageSmoothingEnabled = false;
     const ink = '#2a160a';
-    c.fillStyle = ink;
-    c.textAlign = 'center';
-    c.textBaseline = 'top';
-    c.font = '112px Alagard';
-    c.fillText('PAUSED', W / 2, 46);
-    c.font = '30px Alagard';
-    c.fillText('— the outlaws hold their breath —', W / 2, 168);
+    const big = pixelTextWidth('PAUSED', 48) < W * 0.86 ? 48 : 32;
+    const y0 = Math.round(H * 0.06);
+    pixelText(c, 'PAUSED', W / 2, y0, { size: big, color: ink, align: 'center' });
+    const sub = '— the outlaws hold their breath —';
+    pixelText(c, pixelTextWidth(sub, 16) < W * 0.94 ? sub : 'the outlaws hold their breath', W / 2, y0 + big * 1.05, { size: 16, color: '#5c2a12', align: 'center' });
+    const box = Math.round(Math.min(W * 0.66, H * 0.48));
+    const py = Math.round(y0 + big * 1.05 + 22);
     if (hero) {
       try {
         const f = new IconFactory(renderer);
@@ -139,39 +170,43 @@ export class PausePoster {
         n['fore_r']?.rotation.set(-1.3, 0, 0);
         n['head']?.rotation.set(0.08, 0.25, 0);
         r.root.updateMatrixWorld(true);
-        const shot = f.capture(r.root, { w: 150, h: 150, ss: 4, yaw: 0.45, pitch: 0.08, fill: 0.95, dy: 0.18, light: 'sunset', levels: 12, ink: '#2a160a', rim: '#ffe2a8' });
-        c.imageSmoothingEnabled = false;
-        // sepia print of the photo
-        const tmp = document.createElement('canvas');
-        tmp.width = shot.width;
-        tmp.height = shot.height;
-        const tc = tmp.getContext('2d')!;
-        tc.drawImage(shot, 0, 0);
-        const id = tc.getImageData(0, 0, tmp.width, tmp.height);
+        const shot = f.capture(r.root, { w: box, h: box, ss: 4, yaw: 0.45, pitch: 0.08, fill: 0.95, dy: 0.18, light: 'sunset', levels: 24, ink: '#2a160a', rim: '#ffe2a8' });
+        // printed in sepia ink, posterised onto the HUD's paper-and-wood ramp
+        const sc = shot.getContext('2d', { willReadFrequently: true })!;
+        const id = sc.getImageData(0, 0, shot.width, shot.height);
         for (let i = 0; i < id.data.length; i += 4) {
+          if (!id.data[i + 3]) continue;
           const l = (id.data[i] * 0.3 + id.data[i + 1] * 0.59 + id.data[i + 2] * 0.11) / 255;
-          id.data[i] = Math.min(255, 70 + l * 175);
-          id.data[i + 1] = Math.min(255, 40 + l * 150);
-          id.data[i + 2] = Math.min(255, 20 + l * 105);
+          const p = palNearest(Math.min(255, 70 + l * 175), Math.min(255, 40 + l * 150), Math.min(255, 20 + l * 105));
+          id.data[i] = p[0];
+          id.data[i + 1] = p[1];
+          id.data[i + 2] = p[2];
         }
-        tc.putImageData(id, 0, 0);
-        c.globalAlpha = 0.92;
-        c.drawImage(tmp, W / 2 - 165, 214, 330, 330);
-        c.globalAlpha = 1;
+        sc.putImageData(id, 0, 0);
+        // a printed frame round the portrait
+        c.fillStyle = ink;
+        c.fillRect(Math.round(W / 2 - box / 2) - 3, py - 3, box + 6, 1);
+        c.fillRect(Math.round(W / 2 - box / 2) - 3, py + box + 2, box + 6, 1);
+        c.fillRect(Math.round(W / 2 - box / 2) - 3, py - 3, 1, box + 6);
+        c.fillRect(Math.round(W / 2 + box / 2) + 2, py - 3, 1, box + 6);
+        c.drawImage(shot, Math.round(W / 2 - box / 2), py);
         f.dispose();
         r.root.traverse((o) => (o as THREE.Mesh).isMesh && ((o as THREE.Mesh).material as THREE.Material).dispose());
       } catch (e) {
         console.warn('[poster] portrait capture failed', e);
       }
     }
-    c.font = '54px Alagard';
-    c.fillText('SUNDOWN', W / 2, 556);
-    c.font = '30px Alagard';
-    c.fillText('REWARD: A BREATHER', W / 2, H - 70);
+    pixelText(c, 'SUNDOWN', W / 2, py + box + 8, { size: 32, color: ink, align: 'center' });
+    pixelText(c, 'REWARD: A BREATHER', W / 2, H - 30, { size: 16, color: ink, align: 'center' });
+    this.art?.dispose();
     this.art = new THREE.CanvasTexture(cv);
     this.art.colorSpace = THREE.SRGBColorSpace;
+    this.art.magFilter = THREE.NearestFilter;
+    this.art.minFilter = THREE.NearestFilter;
+    this.art.generateMipmaps = false;
     this.mat.uniforms.map.value = this.art;
     this.mat.uniforms.uHasMap.value = 1;
+    this.mat.uniforms.uPx.value.set(1 / W, 1 / H);
   }
 
   open(W: number, H: number) {
@@ -215,7 +250,9 @@ export class PausePoster {
     this.state = 'in';
     this.st = 0;
     this.shots = 0;
-    this.mesh.visible = true;
+    this.mesh.visible = this.shadow.visible = true;
+    // the ink is set at the poster's pixel size (it changes with the window)
+    this.needsArt = true;
   }
 
   close() {
@@ -276,13 +313,16 @@ export class PausePoster {
     this.geo.computeVertexNormals();
     this.geo.computeBoundingSphere();
     this.mesh.position.set(0, 0, 400);
+    // it hangs a little off the screen: its shadow falls down-right, further while it flies
+    const lift = this.state === 'pinned' ? 5 : 12;
+    this.shadow.position.set(Math.round(1 + lift * 0.55) * this.scale, -Math.round(1 + lift * 0.85) * this.scale, 399);
     const c = this.centroid();
     this.centre.x = c.x;
     this.centre.y = -c.y;
     this.centre.visible = this.state === 'pinned' ? Math.min(1, this.st * 3) : 0;
     if (this.state === 'out' && (this.st > 2.2 || c.x > W + this.w * 1.2)) {
       this.state = 'off';
-      this.mesh.visible = false;
+      this.mesh.visible = this.shadow.visible = false;
     }
   }
 
@@ -350,8 +390,10 @@ export class PausePoster {
 
   dispose() {
     this.mesh.removeFromParent();
+    this.shadow.removeFromParent();
     this.geo.dispose();
     this.mat.dispose();
+    this.shadowMat.dispose();
     this.art?.dispose();
     void this.scene;
   }

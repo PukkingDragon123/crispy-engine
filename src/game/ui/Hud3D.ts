@@ -32,7 +32,7 @@ import { MissionPaper, questFromObjective } from './MissionPaper';
 import { OutlawHud } from './OutlawHud';
 import { Cinema, type BossLike } from '../cine/Cinema';
 import { ArsenalHud } from './ArsenalHud';
-import { SpriteBank, Sprite, Shot, blitC, variant, framingBox, wrap } from './HudSprites';
+import { SpriteBank, Sprite, Shot, blitC, blitObj, glint, setGlintFx, variant, framingBox, wrap } from './HudSprites';
 import { PixelFx } from './HudKit';
 
 export interface CutInOpts {
@@ -256,6 +256,8 @@ export class Hud3D implements HudPainter {
   private lastCounts: number[] = [];
   private lastItemKey: string[] = [];
   private brass = new PixelFx(160, false, 7);
+  /** light catching metal, glass and gilt: pixel twinkles over every piece */
+  private glints = new PixelFx(240, true, 62);
   // soul jar, mission paper, outlaw furniture, arsenal
   private soul: SoulBar;
   private paper: MissionPaper;
@@ -271,6 +273,11 @@ export class Hud3D implements HudPainter {
   private posterOpen = false;
   private posterUi: HTMLDivElement | null = null;
   private pp: PausePoster | null = null;
+  /** the pause poster is rendered on its own at HUD-pixel resolution, then blown up nearest-neighbour */
+  private posterScene = new THREE.Scene();
+  private posterRT: THREE.WebGLRenderTarget | null = null;
+  private posterQuad: THREE.Mesh | null = null;
+  private posterPass = new THREE.Scene();
   private ppPending = false;
   private keyLight: THREE.DirectionalLight;
   /** the tarot ability cards (their art is photographed once the renderer and the player rig are known) */
@@ -296,7 +303,8 @@ export class Hud3D implements HudPainter {
     const fill = new THREE.DirectionalLight(0x9fc4ff, 0.5);
     fill.position.set(0.8, -0.2, 0.6);
     this.scene.add(fill);
-    this.scene.add(this.brass.points);
+    this.scene.add(this.brass.points, this.glints.points);
+    setGlintFx(this.glints);
 
     this.soul = new SoulBar(this.scene, hud);
     this.paper = new MissionPaper(this.scene);
@@ -321,7 +329,7 @@ export class Hud3D implements HudPainter {
   showPause(open: boolean, actions?: { label: string; fn: () => void }[]) {
     this.posterOpen = open;
     if (!this.pp) {
-      this.pp = new PausePoster(this.scene);
+      this.pp = new PausePoster(this.posterScene);
       this.pp.onShot = (n) => {
         const eng = (window as any).__engine;
         eng?.audio?.play('rev_shot', { volume: 0.9, pitch: n ? 1.06 : 1 });
@@ -365,6 +373,7 @@ export class Hud3D implements HudPainter {
       this.ppPending = false;
       pp.open(W, H);
     }
+    pp.scale = this.hud.scale;
     pp.update(dt, W, H, this.pt);
     if (this.posterUi) {
       const v = pp.centre.visible;
@@ -609,7 +618,9 @@ export class Hud3D implements HudPainter {
       const gi = this.cylinderImage(n, rho - g * 0.11 * Math.sign(cy.angVel), cy.shown, cy.venom);
       if (gi) blitC(c, gi.cv, x, y, 0.22);
     }
-    blitC(c, img.cv, x, y);
+    // floats a few pixels off the screen: its shadow falls down-right; light runs over the rims
+    blitObj(c, img.cv, x, y, 4);
+    glint(img.cv, x, y, 0.5 + spd * 0.05, dt);
   }
 
   private paintCasings(c: CanvasRenderingContext2D, dt: number, n: number) {
@@ -631,7 +642,7 @@ export class Hud3D implements HudPainter {
         r.case.inner.rotation.set(Math.PI / 2, 0, (f * Math.PI) / 4);
         return { obj: r.case.root, w: 14, h: 14, yaw: 0, pitch: 0.2, fit: true };
       });
-      if (sp) blitC(c, sp, k.x, k.y, Math.min(1, k.life * 3));
+      if (sp) blitObj(c, sp, k.x, k.y, 7, Math.min(1, k.life * 3));
     }
   }
 
@@ -664,7 +675,7 @@ export class Hud3D implements HudPainter {
     if (!sp) return;
     const shake = this.heartHurt * 3;
     const x = hh.x + Math.round((Math.random() - 0.5) * shake), y = hh.y - 3 + Math.round((Math.random() - 0.5) * shake) + Math.round(Math.sin(this.t * 1.3) * 0.6);
-    blitC(c, sp, x, y);
+    blitObj(c, sp, x, y, 3);
     // hurt: white-hot flash; low health: the heart flushes ember red with every beat
     if (this.heartHurt > 0.05) blitC(c, variant(sp, 'flash'), x, y, this.heartHurt * 0.85);
     else if (frac < 0.3) blitC(c, variant(sp, 'ember'), x, y, (0.5 + 0.5 * Math.sin(this.t * 10)) * 0.55);
@@ -683,7 +694,11 @@ export class Hud3D implements HudPainter {
       });
     for (let i = 0; i < NF; i++) get(i);
     const sp = this.bank.exact('coin:' + f, 18) ?? this.bank.exact('coin:0', 18);
-    if (sp) blitC(c, sp, co.x, co.y - Math.round(co.pop * 3));
+    if (sp) {
+      const y = co.y - Math.round(co.pop * 3);
+      blitObj(c, sp, co.x, y, 2 + co.pop * 3);
+      glint(sp, co.x, y, 0.35 + co.pop * 6, dt);
+    }
   }
 
   // ---------------------------------------------------------------- consumables
@@ -703,7 +718,7 @@ export class Hud3D implements HudPainter {
       if (!sp) return;
       const pop = this.itemPop[i];
       const hop = Math.round(Math.sin(pop * Math.PI) * 4 + Math.sin(this.t * 2 + i * 1.7) * 0.6);
-      blitC(c, sp, it.x, it.y - hop);
+      blitObj(c, sp, it.x, it.y - hop, 2 + hop);
       if (pop > 0.5) blitC(c, variant(sp, 'flash'), it.x, it.y - hop, (pop - 0.5) * 1.4);
     });
     hud.items3D.length = items.length;
@@ -729,8 +744,9 @@ export class Hud3D implements HudPainter {
     this.tex.needsUpdate = true;
     const visible = hud.visible && hud.anchors.slide < 0.98;
     // the 2D pixel particles ride above the canvas; they keep running (and hide with the HUD)
-    this.brass.points.visible = visible;
+    this.brass.points.visible = this.glints.points.visible = visible;
     this.brass.update(dt, s);
+    this.glints.update(dt, s);
     this.soul.fx(dt, s, visible);
     this.outlaw.fx(dt, s, visible);
     this.arsenal.fx(dt, s, visible);
@@ -742,7 +758,7 @@ export class Hud3D implements HudPainter {
 
   render(renderer: THREE.WebGLRenderer) {
     this.bank.pump(renderer, 4);
-    if (this.pp?.active && this.pp.needsArt) this.pp.buildArt(renderer, this.bustSpec);
+    if (this.pp?.active && this.pp.needsArt) this.pp.buildArt(renderer, this.bustSpec, this.hud.scale);
     this.tarot.build(renderer, this.bustSpec, this.bustKey, this.gunSpec);
     const ac = renderer.autoClear;
     const lc = renderer.localClippingEnabled;
@@ -755,18 +771,60 @@ export class Hud3D implements HudPainter {
     renderer.render(this.base, this.cam);
     renderer.clearDepth();
     renderer.render(this.scene, this.cam);
+    if (this.pp?.active) this.renderPoster(renderer);
     globalUniforms.uRim.value = rim;
     renderer.autoClear = ac;
     renderer.localClippingEnabled = lc;
   }
 
+  /** the poster cloth into a HUD-resolution target, then onto the screen on the HUD's pixel grid */
+  private renderPoster(renderer: THREE.WebGLRenderer) {
+    const W = window.innerWidth, H = window.innerHeight, s = this.hud.scale;
+    const w = Math.ceil(W / s), h = Math.ceil(H / s);
+    if (!this.posterRT || this.posterRT.width !== w || this.posterRT.height !== h) {
+      this.posterRT?.dispose();
+      this.posterRT = new THREE.WebGLRenderTarget(w, h, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false });
+      this.posterRT.texture.colorSpace = THREE.SRGBColorSpace;
+      if (!this.posterQuad) {
+        this.posterQuad = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ transparent: true, premultipliedAlpha: true, depthTest: false, depthWrite: false, toneMapped: false }));
+        this.posterQuad.frustumCulled = false;
+        this.posterPass.add(this.posterQuad);
+      }
+      (this.posterQuad.material as THREE.MeshBasicMaterial).map = this.posterRT.texture;
+      (this.posterQuad.material as THREE.MeshBasicMaterial).needsUpdate = true;
+    }
+    // the target covers whole HUD pixels: the camera spans w*s × h*s css px
+    const cam = this.posterCam;
+    cam.left = 0;
+    cam.right = w * s;
+    cam.top = 0;
+    cam.bottom = -h * s;
+    cam.updateProjectionMatrix();
+    const prevClear = renderer.getClearColor(new THREE.Color()), prevAlpha = renderer.getClearAlpha();
+    renderer.setRenderTarget(this.posterRT);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear(true, true, true);
+    renderer.render(this.posterScene, cam);
+    renderer.setRenderTarget(null);
+    renderer.setClearColor(prevClear, prevAlpha);
+    this.posterQuad!.position.set((w * s) / 2, -(h * s) / 2, 0);
+    this.posterQuad!.scale.set(w * s, h * s, 1);
+    renderer.clearDepth();
+    renderer.render(this.posterPass, this.cam);
+  }
+  private posterCam = new THREE.OrthographicCamera(0, 1, 0, -1, -4000, 4000);
+
   dispose() {
+    this.posterRT?.dispose();
+    this.pp?.dispose();
     this.tarot.dispose();
     this.soul.dispose();
     this.paper.dispose();
     this.outlaw.dispose();
     this.arsenal.dispose();
     this.brass.dispose();
+    this.glints.dispose();
+    setGlintFx(null);
     const i = this.hud.painters.indexOf(this);
     if (i >= 0) this.hud.painters.splice(i, 1);
     this.posterUi?.remove();

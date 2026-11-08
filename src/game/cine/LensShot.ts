@@ -148,7 +148,9 @@ void main(){
   if (uGlare > 0.001) {
     vec2 d = (uv - uSun) * vec2(uAspect, 1.0);
     float ds = length(d);
-    col += vec3(1.0, 0.82, 0.55) * (exp(-ds * 6.0) * 0.18 + exp(-ds * 22.0) * 1.5) * uGlare;
+    // a white-hot disc, a tight corona, a little haze round it
+    col += vec3(1.0, 0.95, 0.85) * exp(-ds * 42.0) * 3.6 * uGlare;
+    col += vec3(1.0, 0.82, 0.55) * (exp(-ds * 6.0) * 0.12 + exp(-ds * 12.0) * 0.55) * uGlare;
     col += vec3(1.0, 0.86, 0.62) * exp(-abs(d.y) * 90.0) * exp(-abs(d.x) * 2.6) * 0.8 * uGlare;
   }
   // white heat (the white-out itself is the grade's overlay, after tone mapping)

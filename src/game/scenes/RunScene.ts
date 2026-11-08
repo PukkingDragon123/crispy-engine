@@ -192,6 +192,8 @@ export class RunScene implements GameScene {
   private pickerShown = false;
   private cineHudHidden = false;
   private hudHero = new THREE.Vector3();
+  /** the opening (cold open, sun shot, poster, Serket) is playing: codex cards wait */
+  private introOn = false;
   private zoneCine: ZoneCine | null = null;
   tutorial: Tutorial | null = null;
   ruins: RuinNests | null = null;
@@ -430,7 +432,9 @@ export class RunScene implements GameScene {
     if (this.opts.intro) {
       // the HUD stays hidden for the whole cinematic
       this.hud.visible = false;
+      this.introOn = true;
       void playIntro({ engine: e, cam: this.camRig, player: this.player, fx: this.fx, particles: this.particles, world: this.world, scene: this.scene, cutIn: (t, c, x) => this.hud3d.cutIn(t, c, x) }).then((r) => {
+        this.introOn = false;
         this.hud.visible = true;
         // Serket stays to teach the ropes (skipping the intro skips the lesson)
         if (r.skipped) this.director.start(this.opts.startWave ?? 1);
@@ -1014,7 +1018,7 @@ export class RunScene implements GameScene {
       return;
     }
     // codex discoveries wait until cutscenes, staged encounters and the rank-up are over
-    this.codexRun?.update(rdt, this.picker.cinematic || Cinema.busy() || cineFlags.choice);
+    this.codexRun?.update(rdt, this.introOn || this.picker.cinematic || Cinema.busy() || cineFlags.choice);
     const e = this.engine;
     this.run.time += dt;
     // pause toggle (simple until poster scene)

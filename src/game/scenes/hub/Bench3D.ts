@@ -182,7 +182,7 @@ export class Bench3D implements Mode {
     this.feltTop = this.felt - (this.tt?.nodes['top']?.position.y ?? 0.1);
     if (ts?.meta?.crank) this.crank.set(...(ts.meta.crank as [number, number, number]));
     const trs = safe(() => WS.partsTray(44, 3.5));
-    this.trayX = this.ttAt.x - 0.27;
+    this.trayX = this.ttAt.x - 0.62;
     this.trayZ = this.zFront - 4.5 * FV;
     this.trayLen = 44 * FV;
     k.put(trs, this.trayX, this.trayZ, 0, this.top, 1, false);
@@ -197,11 +197,10 @@ export class Bench3D implements Mode {
       card.mesh.position.set(...cb.meta.paper);
       card.mesh.position.z += 0.003;
       grp.add(card.mesh);
-      grp.position.set(this.ttAt.x - 0.6, this.top + 0.13, this.zBack + 0.068);
-      grp.rotation.set(-0.06, 0.12, 0.03);
-      const nail = new THREE.Mesh(nailGeo(), sharedVoxelMaterial);
-      nail.position.set(0, cg.boundingBox!.max.y - 0.012, -0.004);
-      grp.add(nail);
+      // propped on the bench's front corner by the turntable, tipped up toward whoever is working
+      grp.position.set(this.ttAt.x + 0.11, this.top + 0.004, this.zFront - 0.012);
+      grp.rotation.set(-1.02, -0.18, 0, 'YXZ');
+      grp.scale.setScalar(0.86);
       this.h.scene.add(grp);
       this.board = { grp, card };
     }
@@ -661,7 +660,7 @@ export class Bench3D implements Mode {
     return { at, face: Math.atan2(c.x - at.x, c.z - at.y) };
   }
   private workRest() {
-    const at = new THREE.Vector2(this.ttAt.x - 0.82, this.zFront + 0.3);
+    const at = new THREE.Vector2(this.ttAt.x - 1.25, this.zFront + 0.28);
     return { at, face: Math.atan2(this.ttAt.x - at.x, this.ttAt.z - at.y) };
   }
   /** look at another bay */

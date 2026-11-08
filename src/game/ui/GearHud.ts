@@ -10,7 +10,7 @@ import { VoxelModel, VF } from '../../engine/voxel/VoxelModel';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { Equipment, GEAR_SLOTS, GearId, GearSlot, buildGearDisplay, gearGlassMaterial, gearHex } from '../player/Equipment';
-import { SpriteBank, Shot, blitC, variant, wrap, framingBox } from './HudSprites';
+import { SpriteBank, Shot, blitC, blitObj, glint, variant, wrap, framingBox } from './HudSprites';
 
 const BRONZE = { base: 0xbf8446, shade: 0x8e5a2c, hi: 0xe8b070, dark: 0x4e2c12 };
 const WALNUT = { base: 0x3a2618, shade: 0x2a1a10, hi: 0x4e3422 };
@@ -122,15 +122,18 @@ export class GearHud implements HudPainter {
       }
       sl.pop = Math.max(0, sl.pop - dt * 2.5);
       const cx = x0 + i * (PW + 2), cy = y0 + Math.round(Math.sin(this.t * 1.7 + i) * 0.4);
-      if (sock) blitC(c, id ? sock : variant(sock, 'dim'), cx, cy);
+      if (sock) blitObj(c, id ? sock : variant(sock, 'dim'), cx, cy, 1);
       const gem = this.gem(id ? gearHex(id) : 0x6a5440);
       const gp = Math.round(Math.sin(Math.min(1, sl.pop) * Math.PI) * 1.5);
-      if (gem) blitC(c, gem, cx - 0.5, cy + PH / 2 - 2 - gp);
+      if (gem) {
+        blitC(c, gem, cx - 0.5, cy + PH / 2 - 2 - gp);
+        if (id) glint(gem, cx - 0.5, cy + PH / 2 - 2 - gp, 0.25, dt);
+      }
       if (id) {
         const pc = this.piece(id);
         if (pc) {
           const hop = Math.round(Math.sin(Math.min(1, sl.pop) * Math.PI) * 4);
-          blitC(c, pc, cx, cy - 1 - hop);
+          blitObj(c, pc, cx, cy - 1 - hop, 1 + hop);
           if (sl.pop > 0.4) blitC(c, variant(pc, 'flash'), cx, cy - 1 - hop, (sl.pop - 0.4) * 1.4);
         }
       }

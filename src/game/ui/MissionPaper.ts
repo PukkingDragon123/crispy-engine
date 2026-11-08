@@ -17,7 +17,7 @@
 import * as THREE from 'three';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { sculpt, Surf, PixelFx, wrapInk, fbm3, h3, mixc, mulc, clamp, clamp01, TAU, uiSfx, METAL, KNZ, len2 } from './HudKit';
-import { SpriteBank, Shot, blitC, blitShear, palNearest, pixelText, pixelTextWidth, wrap } from './HudSprites';
+import { SpriteBank, Shot, blitC, blitObj, blitShear, blitShearObj, shadowOffset, variant, palNearest, pixelText, pixelTextWidth, wrap } from './HudSprites';
 
 /** what one note says */
 export interface PaperQuest {
@@ -104,6 +104,7 @@ function nailModel() {
 
 /** the note's parchment at HUD-pixel resolution, on the pixel kit's parchment palette, ink-outlined */
 function notePaper(w: number, h: number, seed: number, coffee: [number, number, number], scorch: [number, number]) {
+  const fold: [number, number] = [0.46 + ((seed * 7.3) % 1) * 0.1, 0.3 + ((seed * 3.1) % 1) * 0.1];
   const cv = document.createElement('canvas');
   cv.width = w;
   cv.height = h;
@@ -137,6 +138,17 @@ function notePaper(w: number, h: number, seed: number, coffee: [number, number, 
       const sc = sm(0.55, 0, Math.hypot((u - scorch[0]) * asp, v - scorch[1]) + (fbm01(u * 7 + o, v * 7) - 0.5) * 0.35);
       col = mixv(col, [0.3, 0.15, 0.06], sc * 0.55);
       col = mixv(col, [0.08, 0.04, 0.02], sc * sm(tear + 0.09, tear + 0.01, edge));
+      // folded in thirds and in half once: each facet takes the upper-left light a little differently,
+      // every fold a lit ridge over a shadowed valley; the bottom corner curls up off the nail board
+      const fy = Math.round(h * fold[0]), fx = Math.round(w * fold[1]);
+      let lit = (j < fy ? 1.035 : 0.95) * (i < fx ? 1.02 : 0.985);
+      if (j === fy - 1) lit *= 1.1;
+      else if (j === fy || j === fy + 1) lit *= j === fy ? 0.8 : 0.9;
+      if (j > h * 0.1 && i === fx - 1) lit *= 1.07;
+      else if (j > h * 0.1 && i === fx) lit *= 0.86;
+      const cu = Math.hypot((1 - u) * asp, 1 - v);
+      if (cu < 0.16) lit *= 0.82 + (cu / 0.16) * 0.18 + (Math.abs(cu - 0.1) < 0.012 ? 0.3 : 0);
+      col = [col[0] * lit, col[1] * lit, col[2] * lit];
       const p = palNearest(clamp01(col[0]) * 255, clamp01(col[1]) * 255, clamp01(col[2]) * 255);
       d[k] = p[0];
       d[k + 1] = p[1];
@@ -591,7 +603,7 @@ export class MissionPaper {
     if (nl && this.nailShow > 0.05) {
       const drive = this.nailT < 1 ? 1 - this.nailT : 0;
       const sz = nl.w * Math.max(0.2, this.nailShow) * (1 + drive * 0.7);
-      blitC(c, nl.cv, ax, ay - Math.round(drive * 3), 1, sz, sz);
+      blitObj(c, nl.cv, ax, ay - Math.round(drive * 3), 1 + drive * 4, 1, sz, sz);
     }
     this.bottom = bottom;
     void s;
@@ -609,17 +621,17 @@ export class MissionPaper {
     const tilt = Math.tan(n.ang + n.lean);
     const t = this.t + n.seed * 10;
     const alpha = n.state === 'tear' ? clamp01(1.6 - n.st * 0.8) : 1;
-    blitShear(
-      c,
-      pic,
-      left,
-      top,
-      (r) => {
-        const hang = clamp01((r - 7 * u) / Math.max(1, n.h));
-        return -(r - 7 * u) * tilt + Math.sin(t * 5.3 + r * 0.16) * amp * Math.pow(hang, 1.3) * (flying ? 1.4 : 1) + Math.sin(t * 8.7 - r * 0.3) * amp * 0.35 * hang * hang;
-      },
-      alpha
-    );
+    const sway = (r: number) => {
+      const hang = clamp01((r - 7 * u) / Math.max(1, n.h));
+      return -(r - 7 * u) * tilt + Math.sin(t * 5.3 + r * 0.16) * amp * Math.pow(hang, 1.3) * (flying ? 1.4 : 1) + Math.sin(t * 8.7 - r * 0.3) * amp * 0.35 * hang * hang;
+    };
+    // worn paper off the board: its shadow sways with it, further off while it flies (and gone with what burnt)
+    const rise = flying ? 9 : 2 + n.ruffle * 3;
+    if (n.state === 'burn') {
+      const [ox, oy] = shadowOffset(rise);
+      blitShear(c, variant(n.base, 'shadow'), left + ox, top + oy, sway, 0.34 * (1 - n.burnP));
+      blitShear(c, pic, left, top, sway, alpha);
+    } else blitShearObj(c, pic, left, top, sway, alpha, rise, n.base);
   }
 
   private drawScrap(c: CanvasRenderingContext2D, sc: { n: Note; t: number; ox: number; oy: number }, ax: number, ay: number, wind: number) {
@@ -628,7 +640,7 @@ export class MissionPaper {
     if (!r || !n.base) return;
     const cv = scrapCanvas(n);
     const u = n.fs / 16;
-    blitShear(c, cv, ax - r.w / 2 + Math.round(sc.ox), ay - Math.round(7 * u) + Math.round(sc.oy), (row) => Math.sin(this.t * 6 + row * 0.5) * wind * 0.8 * (row / r.h), clamp01(4.5 - sc.t));
+    blitShearObj(c, cv, ax - r.w / 2 + Math.round(sc.ox), ay - Math.round(7 * u) + Math.round(sc.oy), (row) => Math.sin(this.t * 6 + row * 0.5) * wind * 0.8 * (row / r.h), clamp01(4.5 - sc.t), sc.t > 2.6 ? 8 : 2);
   }
 
   private advance(n: Note, dt: number, ax: number, ay: number, k: number) {

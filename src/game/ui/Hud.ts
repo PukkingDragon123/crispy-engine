@@ -15,6 +15,7 @@ import type { SoulAnchor } from './SoulBar';
 import { WATCH_DROP, type OutlawAnchors } from './OutlawHud';
 import { isTouchDevice } from './TouchControls';
 import { SLOT, type ArsenalAnchors } from './ArsenalHud';
+import { shadowOffset, variant } from './HudSprites';
 
 /** one quest note on the mission paper stack */
 export type HudQuest = PaperQuest;
@@ -291,8 +292,17 @@ export class Hud {
     } else c.drawImage(img, sx, sy, f.w, f.h, Math.round(x), Math.round(y), f.w * s, f.h * s);
     c.globalAlpha = 1;
   }
-  private blit(cv: HTMLCanvasElement, x: number, y: number) {
-    this.ctx.drawImage(cv, Math.round(x), Math.round(y));
+  /** a frame, plate, plank or key cap: a physical piece, so it casts a little shadow down-right */
+  private blit(cv: HTMLCanvasElement, x: number, y: number, lift = 2) {
+    const c = this.ctx;
+    if (lift > 0 && this.use3D) {
+      const a = c.globalAlpha;
+      const [dx, dy] = shadowOffset(lift);
+      c.globalAlpha = a * 0.3;
+      c.drawImage(variant(cv, 'shadow'), Math.round(x + dx), Math.round(y + dy));
+      c.globalAlpha = a;
+    }
+    c.drawImage(cv, Math.round(x), Math.round(y));
   }
   /** type drawn after the picture layer (so a card, jar or cylinder never covers it) */
   private tl(...a: Parameters<typeof text>) {

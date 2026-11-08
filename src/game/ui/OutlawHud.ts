@@ -21,7 +21,7 @@ import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { VF } from '../../engine/voxel/VoxelModel';
 import { sculpt, Surf, PixelFx, fbm3, h3, mixc, mulc, clamp, clamp01, sstep, len2, len3, segD, sdRoundBox2, TAU, uiSfx, METAL, KNZ } from './HudKit';
-import { SpriteBank, Shot, Sprite, blitC, blitSquash, framingBox, wrap, pixelText, pixelTextWidth } from './HudSprites';
+import { SpriteBank, Shot, Sprite, blitC, blitObj, blitSquash, blitSquashObj, glint, framingBox, wrap, pixelText, pixelTextWidth } from './HudSprites';
 import { UI, px } from './PixelUI';
 
 const V2 = 2; // voxels per HUD px for the big pieces
@@ -558,7 +558,7 @@ export class OutlawHud {
     const n = Math.max(1, Math.round(L / step));
     for (let i = 0; i <= n; i++) {
       const f = i / n;
-      blitC(c, i % 2 ? ed : fa, x1 + (x0 - x1) * f, y1 + (y0 - y1) * f);
+      blitObj(c, i % 2 ? ed : fa, x1 + (x0 - x1) * f, y1 + (y0 - y1) * f, 3);
     }
   }
 
@@ -588,7 +588,9 @@ export class OutlawHud {
         const bounce = Math.round(Math.sin(this.starSpin * Math.PI) * 4);
         const sx = this.starSpin > 0 ? Math.cos(spin) : 1;
         const y = st.y - bounce + Math.round(Math.sin(this.t * 0.9) * 0.6);
-        blitSquash(c, sp.cv, st.x, y, Math.abs(sx) < 0.12 ? 0.12 * Math.sign(sx || 1) : sx);
+        // pinned to the coat: a hard little shadow; light catches the tin points
+        blitSquashObj(c, sp.cv, st.x, y, Math.abs(sx) < 0.12 ? 0.12 * Math.sign(sx || 1) : sx, 1, 1, 2 + bounce);
+        glint(sp, st.x, y, this.starSpin > 0 ? 8 : 0.45, dt);
         if (Math.abs(sx) > 0.7) pixelText(c, String(st.rank), st.x, y - (small ? 5 : 8), { size: small ? Math.round(16 * k * 1.1) : 16, color: '#1a0e06', align: 'center', lip: '#fff6dc' });
       }
     }
@@ -614,7 +616,8 @@ export class OutlawHud {
       if (sp) {
         const jx = Math.round(this.boardKick.a * 2), jy = Math.round(-Math.abs(this.boardKick.a) * 2);
         const x = tb.x + jx, y = tb.y + jy;
-        blitC(c, sp, x, y);
+        // nailed planks a hair off the screen; they rock on their nails when money comes in
+        blitObj(c, sp, x, y, 2 + Math.abs(jy));
         const amt = '$' + now.toLocaleString('en-US');
         const fs = small ? Math.max(10, Math.round(16 * k * 1.15)) : 16;
         // painted on the planks, in the HUD's own outlined type
@@ -645,7 +648,7 @@ export class OutlawHud {
       for (const sd of [-1, 1]) this.chain(c, k, pq.x + sd * RING_X * k, -5, X + sd * RING_X * k, py - RING_Y * k - 2 * k);
       const sp = this.plaque(k);
       if (sp) {
-        blitC(c, sp, X, py);
+        blitObj(c, sp, X, py, 4);
         const roomy = pixelTextWidth(pq.label, 32) <= (PLQ_W - 26) * k;
         const fs = roomy ? 32 : small ? Math.max(10, Math.round(16 * k * 1.15)) : 16;
         // burnt into the leather: dark seared type with a singed pale lip
@@ -658,7 +661,9 @@ export class OutlawHud {
         const tg = this.tag(k);
         if (tg) {
           const ty = py + 19 * k - Math.round((1 - this.tagShow) * 10 * k);
-          blitC(c, tg, X + Math.round(Math.sin(this.t * 1.3) * 0.6), ty, Math.min(1, this.tagShow * 1.5));
+          const tx = X + Math.round(Math.sin(this.t * 1.3) * 0.6);
+          blitObj(c, tg, tx, ty, 4, Math.min(1, this.tagShow * 1.5));
+          glint(tg, tx, ty, 0.3, dt);
           if (this.tagShow > 0.6) pixelText(c, pq.time, X, ty - (small ? 3 : 7), { size: small ? Math.max(10, Math.round(16 * k * 1.15)) : 16, color: '#3a2208', align: 'center', lip: '#fff0be' });
         }
       }
@@ -693,7 +698,8 @@ export class OutlawHud {
       this.chain(c, k, pq.x, top, pq.x - Math.sin(ang) * (drop - (WR + 10) * WATCH_S * k), bowY);
       const sp = this.bank.exact('ol:watch' + Math.min(30, sec), Math.round(116 * WATCH_S * k) + 2) ?? this.watchFrame(Math.min(30, sec), k, 56);
       if (sp) {
-        blitC(c, sp, cx, cy);
+        blitObj(c, sp, cx, cy, 5);
+        glint(sp, cx, cy, 0.6 + bell * 5, dt);
         // the bell being rung: brass fills round the rim
         if (bell > 0.01) {
           const R = (WR - 1.2) * WATCH_S * k;

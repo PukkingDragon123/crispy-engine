@@ -22,7 +22,7 @@ import { buildWeaponRig } from '../player/Weapons';
 import type { GunId } from '../meta/Blueprints';
 import { xMarker, blueprintScroll, mapFragment } from '../models/props/treasure';
 import { sculpt, Surf, PixelFx, fbm3, h3, mixc, mulc, clamp01, sstep, len2, len3, sdRoundBox2, TAU, uiSfx, METAL, KNZ } from './HudKit';
-import { SpriteBank, Shot, blitC, variant, framingBox, wrap } from './HudSprites';
+import { SpriteBank, Shot, blitC, blitObj, glint, variant, framingBox, wrap } from './HudSprites';
 
 // ------------------------------------------------------------------ shotgun shell (HUD px, 3 vox/px, axis +y)
 const SV = 3;
@@ -338,13 +338,14 @@ export class ArsenalHud {
     const st = A.strip;
     if (st && st.slots.length > 1) {
       const belt = this.belt(st.slots.length, k);
-      if (belt) blitC(c, belt, st.x, st.y);
+      if (belt) blitObj(c, belt, st.x, st.y, 2);
       for (const sl of st.slots) {
         const g = this.gun(sl.id, sl.active, k);
         this.gun(sl.id, !sl.active, k);
         if (!g) continue;
         const lift = sl.active ? Math.round(3 + Math.sin(this.t * 2.2) * 0.8) : 0;
-        blitC(c, sl.active ? g : variant(g, 'dim'), sl.x, st.y - lift);
+        blitObj(c, sl.active ? g : variant(g, 'dim'), sl.x, st.y - lift, 1 + lift);
+        if (sl.active) glint(g, sl.x, st.y - lift, 0.4, dt);
       }
     }
     // ---------------------------------------------------- shells
@@ -367,7 +368,8 @@ export class ArsenalHud {
         const bob = Math.sin(this.t * 1.6 + i * 0.9) * 1.2;
         const x = A.x + (i - (nShell - 1) / 2) * 12 * k;
         const y = A.y - fall * k + bob + swapDrop;
-        blitC(c, sp, x, y);
+        blitObj(c, sp, x, y, 3 + fall * k * 0.3);
+        glint(sp, x, y, 0.25, dt);
         // a fresh shell drops in glinting
         if (d < 0.6) blitC(c, variant(sp, 'flash'), x, y, (0.6 - d) * 1.2);
       }
@@ -384,7 +386,8 @@ export class ArsenalHud {
         const out = this.drumOut;
         const kick = Math.round(Math.sin(this.drumKick * 14) * this.drumKick * 1.5);
         const x = A.x + out * 10 * k + kick, y = A.y + out * 26 * k + swapDrop + Math.sin(this.t * 1.6) * 1.2 + Math.abs(kick);
-        blitC(c, sp, x, y, 1 - out * 0.55);
+        blitObj(c, sp, x, y, 3 + out * 6, 1 - out * 0.55);
+        glint(sp, x, y, 0.4, dt);
       }
     }
     // ---------------------------------------------------- treasure markers
@@ -392,13 +395,14 @@ export class ArsenalHud {
       const mk = A.markers[i];
       const sp = this.prize(mk.kind, k);
       const bob = Math.round(Math.sin(this.t * 2.4 + i) * 1.5);
-      if (sp) blitC(c, sp, mk.x, mk.y - bob - (mk.edge ? 0 : 12 * k));
+      // a prize hovering over its spot: the shadow stays below while it bobs
+      if (sp) blitObj(c, sp, mk.x, mk.y - bob - (mk.edge ? 0 : 12 * k), 5 + bob);
       if (mk.edge) {
         // the sign rides between the picture and the edge, pointing the way
         const d = ((Math.round((mk.ang / TAU) * 16) % 16) + 16) % 16;
         const ar = this.arrow(d, k);
         const pulse = Math.round(Math.sin(this.t * 6) * 1);
-        if (ar) blitC(c, ar, mk.x + Math.cos(mk.ang) * (22 * k + pulse), mk.y + Math.sin(mk.ang) * (22 * k + pulse));
+        if (ar) blitObj(c, ar, mk.x + Math.cos(mk.ang) * (22 * k + pulse), mk.y + Math.sin(mk.ang) * (22 * k + pulse), 3);
       }
     }
     void s;
@@ -418,7 +422,7 @@ export class ArsenalHud {
       }
       const fr = ((Math.floor((f.r / Math.PI) * 4) % 4) + 4) % 4;
       const sp = this.hull(fr, k);
-      if (sp) blitC(c, variant(sp, 'dim'), f.x, f.y, Math.min(1, f.life * 3));
+      if (sp) blitObj(c, variant(sp, 'dim'), f.x, f.y, 8, Math.min(1, f.life * 3));
     }
   }
 
