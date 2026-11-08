@@ -16,8 +16,8 @@ const HF_CELL = 2;
 const LOD_CELL = [0.125, 0.25, 0.5, 1, 2, 4];
 const LOD_STEP = [0.0625, 0.125, 0.25, 0.5, 1, 2];
 const LOD_DIST = [32, 64, 110, 172, 262, 384];
-/** hard ground (rock, flagstones, turf, dirt, mud) is built of big blocks this wide in the near rings */
-const BLOCK_M = 0.5;
+/** hard ground (rock, flagstones, turf, dirt, mud) is built of big 1 m blocks in the near rings */
+const BLOCK_M = 1;
 const BLOCK_MATS = new Set<number>([MAT.ROCK, MAT.DARK_ROCK, MAT.TILE, MAT.DIRT, MAT.GRASS, MAT.MUD]);
 
 // sRGB palette per material: [top A, top B, side]
@@ -295,11 +295,11 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
             if (m == 7.0 && !gTop) {
               // turf hanging over the block edge: a ragged pixel fringe, the blade tips a shade darker
               float tx = floor(puv.x * 128.0);
-              float fl = (2.0 + floor(th(vec2(tx, 3.0)) * 3.0) + step(0.82, th(vec2(tx, 9.0))) * 3.0) / 32.0;
+              float fl = (1.0 + floor(th(vec2(tx, 3.0)) * 2.5) + step(0.85, th(vec2(tx, 9.0))) * 2.0) / 16.0;
               float dT = vTM.y / 64.0;
               if (dT < fl) {
                 float shd = dot(vColor.rgb, vec3(0.3, 0.59, 0.11)) / 0.1695;
-                vec3 turf = vec3(0.223, 0.391, 0.0685) * pxSample(puv, ${PX.GRASS_TOP}.0) * shd * (dT > fl - 0.04 ? 0.72 : 1.0);
+                vec3 turf = vec3(0.223, 0.391, 0.0685) * pxSample(puv, ${PX.GRASS_TOP}.0) * shd * (dT > fl - 0.0625 ? 0.72 : 1.0);
                 diffuseColor.rgb = mix(diffuseColor.rgb, turf, pxK);
               }
             }
@@ -494,6 +494,21 @@ export class Terrain {
         continue;
       }
       if (c.dirty || c.builtLod !== lod) want.push(c);
+    }
+    // shadow casters: everything near the sun's shadow map, plus far chunks on the sun's side
+    // (their long shadows can reach it); chunks beyond it on the far side cannot shadow anything
+    // the map covers
+    const sd = globalUniforms.uSunDirW.value;
+    const sl = Math.hypot(sd.x, sd.z) || 1;
+    for (const c of this.live) {
+      if (!c.mesh) continue;
+      if (c.builtLod > 2) {
+        c.mesh.castShadow = false;
+        continue;
+      }
+      const dx = c.cx * CHUNK + CHUNK / 2 - focus.x, dz = c.cz * CHUNK + CHUNK / 2 - focus.z;
+      const near = Math.max(0, Math.hypot(dx, dz) - CHUNK * 0.71);
+      c.mesh.castShadow = near < 44 || (dx * sd.x + dz * sd.z) / sl > -CHUNK * 0.5;
     }
     // nearest / finest first
     want.sort((a, b) => a.lod - b.lod || this.dist2(a, focus) - this.dist2(b, focus));
@@ -709,7 +724,7 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
   const M = new Uint8Array(W * W);
   /** 1 = the cell belongs to a big pixel-textured block (hard ground: rock, flagstones, turf, dirt, mud) */
   const B = new Uint8Array(W * W);
-  // near rings: hard ground snaps to 0.5 m blocks (one height per block, coarser steps on cliffs)
+  // near rings: hard ground snaps to 1 m blocks (one height per block, coarser steps on cliffs)
   // so it reads as big textured blocks; sand keeps its fine rideable columns
   const blocky = cs <= BLOCK_M;
   const nb = Math.ceil((N + 2) * cs / BLOCK_M) + 2;
@@ -805,26 +820,65 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
   };
   const quadCols = new Array(12).fill(0);
   const AO = [0.62, 0.78, 0.9, 1.0];
-  let run: { x0: number; x1: number; z0: number; z1: number; h: number; m: number; hex: number; b: number; ci0: number; ci1: number; cj: number; blk: number } | null = null;
-  const flushRun = () => {
-    if (!run) return;
-    toLin(run.hex, run.b, quadCols, 0);
-    toLin(run.hex, run.b, quadCols, 3);
-    toLin(run.hex, run.b, quadCols, 6);
-    toLin(run.hex, run.b, quadCols, 9);
+  // side faces of neighbouring columns with the same step (same bottom / top / colour) merge
+  // into runs up to MAXRUN long: along x for the +-z faces, along z for the +-x faces
+  type SideRun = { a0: number; a1: number; line: number; yb: number; yt: number; hex: number; m: number; sm: boolean; h: number };
+  const maxCells = Math.max(1, Math.round(MAXRUN / cs));
+  const zRuns: (SideRun | null)[] = [null, null]; // +z, -z (current row)
+  const xRuns: (SideRun | null)[][] = [new Array(N).fill(null), new Array(N).fill(null)]; // +x, -x per column
+  const emitSide = (di: number, dj: number, r: SideRun) => {
+    let ax: number, az: number, bx: number, bz: number, aci: number, acj: number, bci: number, bcj: number;
+    if (di === 1) {
+      const x = ox + (r.line + 1) * cs;
+      ax = x; az = oz + r.a1 * cs; bx = x; bz = oz + r.a0 * cs;
+      aci = r.line + 1; acj = r.a1; bci = r.line + 1; bcj = r.a0;
+    } else if (di === -1) {
+      const x = ox + r.line * cs;
+      ax = x; az = oz + r.a0 * cs; bx = x; bz = oz + r.a1 * cs;
+      aci = r.line; acj = r.a0; bci = r.line; bcj = r.a1;
+    } else if (dj === 1) {
+      const z = oz + (r.line + 1) * cs;
+      ax = ox + r.a0 * cs; az = z; bx = ox + r.a1 * cs; bz = z;
+      aci = r.a0; acj = r.line + 1; bci = r.a1; bcj = r.line + 1;
+    } else {
+      const z = oz + r.line * cs;
+      ax = ox + r.a1 * cs; az = z; bx = ox + r.a0 * cs; bz = z;
+      aci = r.a1; acj = r.line; bci = r.a0; bcj = r.line;
+    }
+    const shadeB = r.sm ? 0.9 : 0.8 * 0.82;
+    const shadeT = r.sm ? 0.98 : 0.97;
+    toLin(r.hex, shadeB, quadCols, 0);
+    toLin(r.hex, shadeB, quadCols, 3);
+    toLin(r.hex, shadeT, quadCols, 6);
+    toLin(r.hex, shadeT, quadCols, 9);
     let vn: number[] | null = null;
-    if (soft(run.m) && !run.blk) {
-      cn(run.ci0, run.cj, qn, 0);
-      cn(run.ci0, run.cj + 1, qn, 3);
-      cn(run.ci1, run.cj + 1, qn, 6);
-      cn(run.ci1, run.cj, qn, 9);
+    if (r.sm) {
+      cn(aci, acj, qn, 0);
+      cn(bci, bcj, qn, 3);
+      cn(bci, bcj, qn, 6);
+      cn(aci, acj, qn, 9);
       vn = qn;
     }
-    pushQuad(run.x0, run.h, run.z0, run.x0, run.h, run.z1, run.x1, run.h, run.z1, run.x1, run.h, run.z0, 0, 1, 0, quadCols, run.m, false, vn);
-    run = null;
+    dTop[0] = dTop[1] = r.h - r.yb;
+    dTop[2] = dTop[3] = r.h - r.yt;
+    pushQuad(ax, r.yb, az, bx, r.yb, bz, bx, r.yt, bz, ax, r.yt, az, di, 0, dj, quadCols, r.m, false, vn);
   };
+  const sameRun = (r: SideRun | null, a: number, yb: number, yt: number, hex: number, m: number, sm: boolean) =>
+    !!r && r.a1 === a && r.yb === yb && r.yt === yt && r.hex === hex && r.m === m && r.sm === sm && r.a1 - r.a0 < maxCells;
+  const tHex = new Uint32Array(N * N);
+  const tB = new Float32Array(N * N);
+  const tAO = new Uint8Array(N * N);
   for (let j = 0; j < N; j++) {
-    flushRun();
+    // +-x runs that did not continue into this row are finished
+    if (j > 0)
+      for (let d = 0; d < 2; d++)
+        for (let ci = 0; ci < N; ci++) {
+          const r = xRuns[d][ci];
+          if (r && r.a1 < j) {
+            emitSide(d === 0 ? 1 : -1, 0, r);
+            xRuns[d][ci] = null;
+          }
+        }
     if ((j & 7) === 7) yield;
     for (let i = 0; i < N; i++) {
       const k = i + 1 + (j + 1) * W;
@@ -861,32 +915,13 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
         a10 = ao(e_, n_, ne),
         a11 = ao(e_, s_, se),
         a01 = ao(w_, s_, sw);
-      // vertices: (x0,z0) (x0,z1) (x1,z1) (x1,z0)  -> CCW from above
-      const open = a00 === 3 && a01 === 3 && a11 === 3 && a10 === 3;
+      // tops are merged in a second, 2D pass (below); remember what each cell needs
       const blk = B[k];
       const sm = soft(m) && !blk;
-      if (open && run && run.h === h && run.m === m && run.hex === topHex && run.b === bright && run.blk === blk && run.z0 === z0 && run.x1 - run.x0 < MAXRUN - 1e-6) {
-        run.x1 = x1; // extend the merged strip
-        run.ci1 = i + 1;
-      } else {
-        flushRun();
-        if (open) run = { x0, x1, z0, z1, h, m, hex: topHex, b: bright, ci0: i, ci1: i + 1, cj: j, blk };
-        else {
-          toLin(topHex, bright * AO[a00], quadCols, 0);
-          toLin(topHex, bright * AO[a01], quadCols, 3);
-          toLin(topHex, bright * AO[a11], quadCols, 6);
-          toLin(topHex, bright * AO[a10], quadCols, 9);
-          let vn: number[] | null = null;
-          if (sm) {
-            cn(i, j, qn, 0);
-            cn(i, j + 1, qn, 3);
-            cn(i + 1, j + 1, qn, 6);
-            cn(i + 1, j, qn, 9);
-            vn = qn;
-          }
-          pushQuad(x0, h, z0, x0, h, z1, x1, h, z1, x1, h, z0, 0, 1, 0, quadCols, m, a00 + a11 < a01 + a10, vn);
-        }
-      }
+      const c = i + j * N;
+      tHex[c] = topHex;
+      tB[c] = bright;
+      tAO[c] = a00 | (a10 << 2) | (a11 << 4) | (a01 << 6);
       // sides toward lower neighbours (and border skirts)
       const sideHex = m === MAT.ROCK || m === MAT.DARK_ROCK ? -1 : pal[2];
       const border = (di: number, dj: number) => i + di < 0 || i + di >= N || j + dj < 0 || j + dj >= N;
@@ -904,6 +939,26 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
         // split tall sides into strata bands for rock
         const bottom = nh;
         const segs = sideHex === -1 ? Math.max(1, Math.min(8, Math.ceil((h - bottom) / 1.0))) : 1;
+        if (segs === 1 && sideHex !== -1 && !isBorder) {
+          if (dj !== 0) {
+            const d = dj === 1 ? 0 : 1;
+            const r = zRuns[d];
+            if (sameRun(r, i, bottom, h, sideHex, m, sm)) r!.a1 = i + 1;
+            else {
+              if (r) emitSide(0, dj, r);
+              zRuns[d] = { a0: i, a1: i + 1, line: j, yb: bottom, yt: h, hex: sideHex, m, sm, h };
+            }
+          } else {
+            const d = di === 1 ? 0 : 1;
+            const r = xRuns[d][i];
+            if (sameRun(r, j, bottom, h, sideHex, m, sm)) r!.a1 = j + 1;
+            else {
+              if (r) emitSide(di, 0, r);
+              xRuns[d][i] = { a0: j, a1: j + 1, line: i, yb: bottom, yt: h, hex: sideHex, m, sm, h };
+            }
+          }
+          continue;
+        }
         for (let s = 0; s < segs; s++) {
           const yb = bottom + ((h - bottom) * s) / segs;
           const yt = bottom + ((h - bottom) * (s + 1)) / segs;
@@ -946,8 +1001,59 @@ function* buildChunkGeometry(f: Heightfield, ox: number, oz: number, lod: number
         }
       }
     }
+    for (let d = 0; d < 2; d++) {
+      const r = zRuns[d];
+      if (r) emitSide(0, d === 0 ? 1 : -1, r);
+      zRuns[d] = null;
+    }
   }
-  flushRun();
+  for (let d = 0; d < 2; d++)
+    for (let ci = 0; ci < N; ci++) {
+      const r = xRuns[d][ci];
+      if (r) emitSide(d === 0 ? 1 : -1, 0, r);
+    }
+  // tops: greedy rectangles (up to MAXRUN a side) of cells with the same height, colour and
+  // corner AO; a rectangle only grows along an axis the AO does not change along, so the
+  // interpolated shading is exactly the per-cell one
+  const done = new Uint8Array(N * N);
+  const same = (c: number, d: number, kc: number, kd: number) => H[kc] === H[kd] && M[kc] === M[kd] && B[kc] === B[kd] && tHex[c] === tHex[d] && tB[c] === tB[d] && tAO[c] === tAO[d];
+  for (let j = 0; j < N; j++) {
+    if ((j & 15) === 15) yield;
+    for (let i = 0; i < N; i++) {
+      const c = i + j * N;
+      if (done[c]) continue;
+      const kc = i + 1 + (j + 1) * W;
+      const ao = tAO[c];
+      const a00 = ao & 3, a10 = (ao >> 2) & 3, a11 = (ao >> 4) & 3, a01 = (ao >> 6) & 3;
+      let w = 1, hgt = 1;
+      if (a00 === a10 && a01 === a11) while (i + w < N && w < maxCells && !done[c + w] && same(c, c + w, kc, kc + w)) w++;
+      if (a00 === a01 && a10 === a11)
+        grow: while (j + hgt < N && hgt < maxCells) {
+          for (let t = 0; t < w; t++) {
+            const d = c + t + hgt * N;
+            if (done[d] || !same(c, d, kc, kc + t + hgt * W)) break grow;
+          }
+          hgt++;
+        }
+      for (let q = 0; q < hgt; q++) for (let t = 0; t < w; t++) done[c + t + q * N] = 1;
+      const h = H[kc], m = M[kc], hex = tHex[c], br = tB[c];
+      const x0 = ox + i * cs, x1 = ox + (i + w) * cs, z0 = oz + j * cs, z1 = oz + (j + hgt) * cs;
+      // vertices: (x0,z0) (x0,z1) (x1,z1) (x1,z0)  -> CCW from above
+      toLin(hex, br * AO[a00], quadCols, 0);
+      toLin(hex, br * AO[a01], quadCols, 3);
+      toLin(hex, br * AO[a11], quadCols, 6);
+      toLin(hex, br * AO[a10], quadCols, 9);
+      let vn: number[] | null = null;
+      if (soft(m) && !B[kc]) {
+        cn(i, j, qn, 0);
+        cn(i, j + hgt, qn, 3);
+        cn(i + w, j + hgt, qn, 6);
+        cn(i + w, j, qn, 9);
+        vn = qn;
+      }
+      pushQuad(x0, h, z0, x0, h, z1, x1, h, z1, x1, h, z0, 0, 1, 0, quadCols, m, a00 + a11 < a01 + a10, vn);
+    }
+  }
   void tmp;
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));

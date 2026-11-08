@@ -1,9 +1,9 @@
 // Pixel-art material textures for the big-block look: crisp, nearest-filtered
 // tiles synthesised once at load from tileable noise, cellular patterns, grain,
 // bedding, erosion and mortar layouts (no hand-drawn pictures). Every layer is a
-// 128 x 128 tile laid out in world space at 32 texels per metre (one tile = 4 m),
-// so a 0.5 m terrain block shows 16 x 16 texels and the grid of stones, flagstones
-// and planks lines up with the block grid.
+// 128 x 128 tile laid out in world space at 16 texels per metre (one tile = 8 m):
+// Minecraft proportions, so a 1 m terrain block shows 16 x 16 texels, planks are
+// four texels wide and the grid of stones and flagstones lines up with the blocks.
 //
 // Texels store a per-channel colour RATIO (texel / material reference colour, /4):
 // the shaders multiply the surface's own colour (vertex colour: palette, AO,
@@ -12,7 +12,7 @@
 import * as THREE from 'three';
 
 export const PX_SIZE = 128;
-export const PX_PER_M = 32;
+export const PX_PER_M = 16;
 /** texture layers */
 export const PX = {
   SAND: 0,
@@ -161,12 +161,12 @@ function sandTop(x: number, y: number) {
   const n = fbm(x, y, 11, 32, 3);
   let i = n < 0.36 ? 1 : n < 0.64 ? 2 : 3;
   const h = ih(x, y, 21);
-  if (h > 0.975) i = Math.min(4, i + 1);
-  else if (h < 0.035) i = Math.max(0, i - 1);
+  if (h > 0.982) i = Math.min(4, i + 1);
+  else if (h < 0.03) i = Math.max(0, i - 1);
   let c = SAND_T[i];
-  if (h > 0.9965) c = 0xfff4dc; // quartz glint
-  else if (h < 0.006) c = 0x9a7a58; // heavy mineral
-  const p = pebble(x, y, 14, 31, 0.7, 1.8, PEB_SAND, 0xc89c62, 0.45);
+  if (h > 0.998) c = 0xfff4dc; // quartz glint
+  else if (h < 0.004) c = 0x9a7a58; // heavy mineral
+  const p = pebble(x, y, 16, 31, 0.6, 1.3, PEB_SAND, 0xc89c62, 0.28);
   return p >= 0 ? p : c;
 }
 function sandSide(x: number, y: number) {
@@ -183,7 +183,7 @@ function sandSide(x: number, y: number) {
 }
 function packedTop(x: number, y: number) {
   // a sun-baked crust broken into plates, hairline cracks with a lit lip
-  const w = cell(x, y, 13, 51);
+  const w = cell(x, y, 9, 51);
   const e = w.f2 - w.f1;
   const plate = ih(w.id, 1, 51);
   const T = [0xbd8e56, 0xc89a60, 0xd2a46a, 0xdcb076, 0xe6bd84];
@@ -385,50 +385,42 @@ function mud(x: number, y: number) {
 
 // ------------------------------------------------------------------ building / prop surfaces (multipliers)
 function wood(x: number, y: number): RGB {
-  // planks along v, 8 texels (0.25 m) wide: seams with a lit edge, butt joints, grain, knots, checks, nails
-  const p = Math.floor(x / 8), lx = x - p * 8;
-  const segL = 40 + Math.floor(ih(p, 1, 141) * 56);
+  // planks along v, 4 texels (0.25 m) wide: a dark seam, a lit edge, butt joints, grain, knots, nails
+  const p = Math.floor(x / 4), lx = x - p * 4;
+  const segL = 16 + 4 * Math.floor(ih(p, 1, 141) * 9);
   const off = Math.floor(ih(p, 2, 141) * segL);
   const sy = wrap(y + off, S);
   const seg = Math.floor(sy / segL), ly = sy - seg * segL;
   const k = ih(p, seg + 7, 142);
-  if (lx === 0) return M(0.52, 0.04);
-  if (ly === 0 && segL < S) return M(0.6, 0.04);
-  let v = 0.92 + k * 0.16;
-  if (lx === 1) v *= 1.12;
-  if (lx === 7) v *= 0.9;
-  if (ly === 1) v *= 1.08;
-  // grain: long streaks broken along the plank
-  const g = vn(x, y, 1, 16, 143) * 0.7 + vn(x, y, 8, 32, 144) * 0.3;
-  v *= g > 0.66 ? 1.07 : g < 0.3 ? 0.88 : 1;
-  // weather checks
-  if (ih(x, Math.floor(y / 9), 145) < 0.035 && lx > 1 && lx < 7) v *= 0.7;
-  // knots with a ring
-  const kn = ih(p, seg, 146);
-  if (kn < 0.3) {
-    const ky = segL * (0.25 + 0.5 * ih(p, seg, 147)), kx = 2.5 + ih(p, seg, 148) * 3;
-    const d = Math.hypot((lx - kx) * 1.6, (ly - ky) * 0.7);
-    if (d < 1.1) return M(0.5, 0.08);
-    if (d < 2.3) v *= 0.82;
-  }
-  // one nail at each plank end, rust bleeding below it
-  const nx = 3 + (p & 1);
-  if (lx === nx && (ly === 3 || ly === segL - 4)) return M(0.42, -0.04);
-  if (lx === nx && (ly === 4 || ly === segL - 3) && ih(p, seg, 149) < 0.6) return [v * 1.0, v * 0.82, v * 0.7];
+  if (lx === 0) return M(0.55, 0.04);
+  if (ly === 0 && segL < S) return M(0.62, 0.04);
+  let v = 0.9 + k * 0.18;
+  if (lx === 1) v *= 1.1;
+  if (lx === 3) v *= 0.92;
+  if (ly === 1) v *= 1.06;
+  // grain: streaks running the length of the plank, broken now and then
+  const g = vn(x, y, 1, 8, 143) * 0.7 + vn(x, y, 4, 16, 144) * 0.3;
+  v *= g > 0.68 ? 1.07 : g < 0.3 ? 0.89 : 1;
+  // a knot here and there, a dark check along the grain
+  if (ih(p, seg, 146) < 0.22 && ly === Math.floor(segL * (0.3 + 0.4 * ih(p, seg, 147))) && lx === 2) return M(0.52, 0.08);
+  if (ih(x, Math.floor(y / 5), 145) < 0.03 && lx > 1) v *= 0.74;
+  // a nail near the foot of some planks, rust bleeding below it
+  if (lx === 2 && ly === segL - 2 && ih(p, seg, 148) < 0.5) return M(0.44, -0.04);
+  if (lx === 2 && ly === segL - 1 && ih(p, seg, 148) < 0.5 && ih(p, seg, 149) < 0.6) return [v, v * 0.84, v * 0.72];
   // bleached, silvered patches
   const b = fbm(x, y, 150, 32, 3);
-  if (b > 0.64) return [v * 1.06, v * 1.06, v * 1.1];
+  if (b > 0.64) return [v * 1.05, v * 1.06, v * 1.1];
   return M(v, 0.02);
 }
 function brick(x: number, y: number): RGB {
   // cut sandstone masonry: 0.25 m courses, staggered blocks, mortar, pits and chips
-  const c = coursed(x, y, 8, 16, 5, 161);
+  const c = coursed(x, y, 4, 8, 2, 161);
   const k = ih(c.id, 1, 161);
-  if (c.ly === 0 || c.lx === 0) return M(0.68, 0.02);
-  if (ih(c.id, Math.floor(c.lx / 3), 162) < 0.05 && (c.ly === 1 || c.ly === 7)) return M(0.72, 0.02);
+  if (c.ly === 0 || c.lx === 0) return M(0.66, 0.02);
+  if (ih(c.id, c.lx, 162) < 0.06 && c.ly === 1) return M(0.74, 0.02);
   let v = 0.9 + k * 0.2;
   if (c.ly === 1 || c.lx === 1) v *= 1.1;
-  if (c.ly === 7 || c.lx === c.L - 1) v *= 0.88;
+  if (c.ly === 3 || c.lx === c.L - 1) v *= 0.88;
   const n = fbm(x, y, 163, 8, 2);
   v *= n > 0.66 ? 1.05 : n < 0.3 ? 0.94 : 1;
   const pit = cell(x, y, 6, 164);
@@ -446,10 +438,11 @@ function adobe(x: number, y: number): RGB {
     if (ih(x, y, 173) < 0.03) v *= 0.9;
     return M(v, -0.01);
   }
-  const c = coursed(x, y, 8, 16, 2, 174);
-  if (c.ly <= 1 || c.lx <= 1) return M(c.ly === 1 || c.lx === 1 ? 0.86 : 0.74, 0.02);
+  const c = coursed(x, y, 4, 8, 1, 174);
+  if (c.ly === 0 || c.lx === 0) return M(0.76, 0.02);
   let v = 0.92 + ih(c.id, 1, 175) * 0.16;
-  if (c.ly === 2 || c.lx === 2) v *= 1.06;
+  if (c.ly === 1 || c.lx === 1) v *= 1.06;
+  if (c.ly === 3) v *= 0.92;
   const e = fbm(x, y, 176, 4, 2);
   if (e < 0.28) v *= 0.82; // erosion pits
   if (ih(x, y, 177) < 0.05) return [v * 1.18, v * 1.1, v * 0.8]; // straw
@@ -483,7 +476,7 @@ function metal(x: number, y: number): RGB {
 }
 function cloth(x: number, y: number): RGB {
   // heavy canvas: tabby weave, slubs, sun-faded stains, a stitched seam
-  let v = (x + y) % 2 === 0 ? 1.03 : 0.97;
+  let v = (x + y) % 2 === 0 ? 1.015 : 0.985;
   if (ih(0, y, 201) < 0.08) v *= 1.04; // slub threads
   const st = fbm(x, y, 202, 32, 3);
   if (st > 0.7) v *= 0.92;
@@ -494,11 +487,11 @@ function cloth(x: number, y: number): RGB {
 }
 function bark(x: number, y: number): RGB {
   // palm trunk: overlapping leaf-base scales in diamond rows, fibrous between
-  const row = Math.floor(y / 6);
-  const sx = wrap(x + (row % 2) * 5, S);
-  const lx = sx % 10, ly = y - row * 6;
-  const d = Math.abs(lx - 5) / 5 + ly / 6;
-  let v = 0.95 + ih(Math.floor(sx / 10), row, 211) * 0.12;
+  const row = Math.floor(y / 3);
+  const sx = wrap(x + (row % 2) * 2, S);
+  const lx = sx % 4, ly = y - row * 3;
+  const d = Math.abs(lx - 2) / 2 + ly / 3;
+  let v = 0.95 + ih(Math.floor(sx / 4), row, 211) * 0.12;
   if (d > 1.0) v = 0.62;
   else if (d > 0.86) v *= 0.82;
   else if (ly <= 1) v *= 1.1;
@@ -507,11 +500,10 @@ function bark(x: number, y: number): RGB {
 }
 function cactus(x: number, y: number): RGB {
   // saguaro skin: vertical ribs (lit crest, shaded groove), areoles with pale spines
-  const lx = x % 8;
-  let v = lx === 0 ? 0.72 : lx === 1 || lx === 7 ? 0.86 : lx === 4 ? 1.12 : 1.0;
+  const lx = x % 4;
+  let v = lx === 0 ? 0.76 : lx === 2 ? 1.12 : 1.0;
   v *= 0.97 + vn(x, y, 8, 32, 221) * 0.06;
-  if (lx === 4 && (y + Math.floor(x / 8) * 3) % 7 === 0) return [1.5, 1.42, 1.18];
-  if (lx === 3 && (y + Math.floor(x / 8) * 3) % 7 === 1 && ih(x, y, 222) < 0.5) return [1.3, 1.24, 1.02];
+  if (lx === 2 && (y + Math.floor(x / 4) * 2) % 5 === 0) return [1.5, 1.42, 1.18];
   return [v * 0.98, v, v * 0.96];
 }
 

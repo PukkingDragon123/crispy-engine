@@ -834,7 +834,7 @@ export class HubScene implements GameScene {
         stand: bst, face: Math.PI, at: gp.clone(), r: 0.75, objs: [wb], pose: 'bench',
         via: [new THREE.Vector2(-1.15, LANE_Z), new THREE.Vector2(bst.x + 0.4, bst.y + 0.75)], slot: [-0.86, 0.84, 'left'], surf: wbSm.meta.top, reach: 0.4,
         // back by the plaid chair, so the gun rack over the cabinet is in the shot with him at the bench
-        shot: { pos: new THREE.Vector3(bst.x + 2.15, 1.68, bst.y + 1.5), look: new THREE.Vector3(), fov: 50, subject: new THREE.Vector3(bst.x, 1.18, bst.y), ndc: [-0.3, -0.05] },
+        shot: { pos: new THREE.Vector3(bst.x + 2.2, 1.9, bst.y + 1.42), look: new THREE.Vector3(), fov: 50, subject: new THREE.Vector3(bst.x, 1.18, bst.y), ndc: [-0.3, -0.02] },
       });
     }
 

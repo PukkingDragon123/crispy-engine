@@ -148,7 +148,8 @@ function photograph(model: VoxelModel, vs: number, skip?: (x: number, y: number,
           if (q >= 0) occ++;
         }
       const above = bAxis !== 1 && at(bx, by + 1, bz) >= 0 ? 0.9 : 1;
-      const k = (0.66 + 0.46 * ndl) * (1 - occ * 0.045) * above;
+      // kept a little dark: the planes are lit again in game by the sun from straight above
+      const k = (0.52 + 0.4 * ndl) * (1 - occ * 0.05) * above;
       const o = (px + py * W) * 3;
       col[o] = s2l((bc >> 16) & 255) * k;
       col[o + 1] = s2l((bc >> 8) & 255) * k;

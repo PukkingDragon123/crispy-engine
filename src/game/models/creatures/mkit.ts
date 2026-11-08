@@ -40,6 +40,8 @@ export interface PlateOpt {
   /** lean of the spike toward the rear (0 = straight out of the surface) */
   spikeLean?: number;
   fl?: number;
+  /** clean style: an even outline, a keeled roof with a bevelled edge, and a four-tone ramp (crest highlight, light faces, shaded bevel, dark sides) */
+  clean?: boolean;
   /** only replace cells that pass (e.g. keep a plate inside one part's region) */
   keep?: (x: number, y: number, z: number) => boolean;
 }
@@ -62,17 +64,20 @@ export function plate(m: VoxelModel, S: V3, nIn: V3, fwd: V3, o: PlateOpt, pal: 
         if (w < -sink || w > o.h * 2.2) continue;
         const nu = dot3(d, t) / o.a, nv = dot3(d, b) / o.b;
         const ang = Math.atan2(nv, nu);
-        const wob = 1 + (n01(Math.cos(ang) * 1.6, Math.sin(ang) * 1.6, seed * 0.37, 1, seed) - 0.5) * 0.32;
+        const wob = 1 + (n01(Math.cos(ang) * 1.6, Math.sin(ang) * 1.6, seed * 0.37, 1, seed) - 0.5) * (o.clean ? 0.08 : 0.32);
         const r = Math.pow(Math.abs(nu) ** sq + Math.abs(nv) ** sq, 1 / sq) / wob;
         if (r > 1) continue;
         const dome = Math.sqrt(Math.max(0, 1 - r * r));
         const ridge = 1 - keel * Math.min(1, Math.abs(nv));
-        const hh = o.h * (0.55 + 0.45 * dome) * ridge + tilt * o.h * -nu * 0.55;
+        const hh = o.clean
+          ? o.h * (0.35 + 0.65 * ridge) * (0.45 + 0.55 * Math.min(1, (1 - r) / 0.25)) + tilt * o.h * -nu * 0.55
+          : o.h * (0.55 + 0.45 * dome) * ridge + tilt * o.h * -nu * 0.55;
         if (w > hh) continue;
         if (o.keep && !o.keep(i, j, k)) continue;
         const top = w > hh - 1.4;
         let c: number;
-        if (!top) c = w < 0.8 ? pal.sand : pal.base;
+        if (o.clean) c = !top ? pal.base : keel > 0.2 && Math.abs(nv) < 0.14 && r < 0.86 ? pal.top : r > 0.78 ? pal.rim : pal.mid;
+        else if (!top) c = w < 0.8 ? pal.sand : pal.base;
         else {
           // a weathered face, a bleached keel and proud rear edge, a dark worn rim, growth rings
           c = nu > 0.5 ? mixc(pal.mid, pal.base, 0.5) : pal.mid; // the front tucks under the plate ahead
@@ -242,14 +247,15 @@ const N6: V3[] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0
  * interior cells of a parent region near a cut into the child (`near(x, y, z)`),
  * so the joint never opens a gap as the child bends.
  */
-export function splitMany(src: VoxelModel, parts: Record<string, VoxelModel>, assign: (x: number, y: number, z: number) => string, plugs: { from: string; to: string; near: (x: number, y: number, z: number) => boolean }[] = []) {
+export function splitMany(src: VoxelModel, parts: Record<string, VoxelModel>, assign: (x: number, y: number, z: number) => string, plugs: { from: string; to: string; near: (x: number, y: number, z: number) => boolean; inner?: number }[] = []) {
   src.forEach((x, y, z, c, f) => {
     const p = assign(x, y, z);
     parts[p]?.set(x, y, z, c, f);
     for (const pl of plugs) {
       if (pl.from !== p || !pl.near(x, y, z)) continue;
       let inner = true;
-      for (const [dx, dy, dz] of N6) if (!src.has(x + dx * 2, y + dy * 2, z + dz * 2) || !src.has(x + dx, y + dy, z + dz)) inner = false;
+      const D = pl.inner ?? 2;
+      for (const [dx, dy, dz] of N6) for (let k = 1; k <= D; k++) if (!src.has(x + dx * k, y + dy * k, z + dz * k)) inner = false;
       if (inner) parts[pl.to]?.set(x, y, z, c, f);
     }
   });

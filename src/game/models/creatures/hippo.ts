@@ -18,6 +18,10 @@
 //    heat-venting cheek frills (bony rays and a vascular membrane) that flare in
 //    display, the hippo's own red "blood sweat" sunscreen streaking from the eyes.
 //
+// The mouth is two sculpts that meet at the lips: heavy rounded upper flews hang over a
+// broad U-shaped lower jaw; open, they show a vaulted ridged palate, gums, molars and the
+// tongue lying in its bowl.
+//
 // RIG (faces +Z, LEFT = +X, origin on the ground under the belly):
 //   body (root, mid barrel) → chest → neck → head → jaw → tongue
 //                                             head → eye_l/eye_r, lid_l/lid_r, ear_l/ear_r,
@@ -35,7 +39,7 @@
 import * as THREE from 'three';
 import type { RigInstance } from '../../../engine/voxel/Rig';
 import { CRig, VoxelModel, VF, V3, RigSpec, Prim, ell, cap, tube, line, paint, exposed, mixc, n01, h01, wetEye, add3, sub3, scl3, dot3, norm3, cross3, sstep, invXYZ, memoBy, clamp01 } from './ckit';
-import { fblob, plate, castIn, normalAt, splitMany, groove, tri, surfaceCells, cullBuried, type Pal } from './mkit';
+import { fblob, plate, castIn, normalAt, splitMany, groove, tri, surfaceCells, cullBuried, type Pal, type PlateOpt } from './mkit';
 
 // ============================================================================ palette
 const HIDE = {
@@ -68,8 +72,9 @@ const HIDE = {
   bristle: 0xe6d8c2,
   bristleD: 0x584034,
 };
-const PL_ADULT: Pal = { top: 0xe6d6b2, mid: 0xc6ad86, base: 0x7c644c, rim: 0x9c8264, ring: 0xab9270, crack: 0x4a3628, sand: 0x6e5644 };
-const PL_CALF: Pal = { top: 0xecd4be, mid: 0xdcb8a0, base: 0xc09482, rim: 0xa07262, ring: 0xd2ae96, crack: 0xa07262, sand: 0xbf9480 };
+/** plates: highlight (keel crest) / light (faces) / shade (bevelled edge) / dark (sides) */
+const PL_ADULT: Pal = { top: 0xefe3c6, mid: 0xcfb790, base: 0x6e5946, rim: 0xa58a69, ring: 0xb39a76, crack: 0x4a3628, sand: 0x6e5946 };
+const PL_CALF: Pal = { top: 0xf2dcc8, mid: 0xe0bea6, base: 0xa47864, rim: 0xc4987f, ring: 0xd2ae96, crack: 0xa07262, sand: 0xa47864 };
 const FRILL = { mem: 0xa23a2a, memD: 0x6e2420, vein: 0x4a1614, memHi: 0xcc643c, ray: 0xe6d6b4, rayD: 0xa88c6a };
 const FRILL_CALF = { mem: 0xe0907c, memD: 0xc87064, vein: 0xb05a54, memHi: 0xf2b494, ray: 0xf4e4cc, rayD: 0xd8bea4 };
 
@@ -181,9 +186,7 @@ function buildHippo(L: Look): RigSpec {
       const pm = n01(q[0] * 1.3, q[1] * 1.7, q[2], 1.6, 17);
       if (pm > 0.64) {
         const f = sstep(0.64, 0.7, pm) * sstep(0.3, 0.5, vy);
-        c = mixc(c, HIDE.scour, 0.4 * f);
-        const g = (q[2] + q[1] * 0.45) * 16 + n01(q[0], q[1], q[2], 5, 5) * 1.4;
-        if (g - Math.floor(g) < 0.14) c = mixc(c, HIDE.scratch, 0.35 * f);
+        c = mixc(c, HIDE.scour, 0.32 * f);
       }
     }
     if (q[1] > 0.75) for (const [a, b] of SCARS) {
@@ -195,7 +198,7 @@ function buildHippo(L: Look): RigSpec {
       // the healed bite on the left shoulder: a crescent of pale pocks
       const bq = sub3(q, [0.66, 1.08, 0.58]);
       const br = Math.hypot(bq[1], bq[2]);
-      if (q[0] > 0.4 && Math.abs(br - 0.16) < 0.022 && Math.atan2(bq[1], bq[2]) > -1.2 && Math.sin(Math.atan2(bq[1], bq[2]) * 9) > 0.1) c = HIDE.scar;
+      if (q[0] > 0.4 && Math.abs(br - 0.16) < 0.02 && Math.atan2(bq[1], bq[2]) > -1.2) c = mixc(c, HIDE.scar, 0.7);
     }
     if (q[1] < 0.5) c = mixc(c, HIDE.dust, sstep(0.5, 0.18, q[1]) * 0.55); // caked sand
     return babyPink(c);
@@ -222,105 +225,97 @@ function buildHippo(L: Look): RigSpec {
     EB([0, 1.5, -0.25], [0.42, 0.12, 0.6]), // a low ridge along the spine
     EB([0, 1.4, 0.48], [0.46, 0.2, 0.42]), // the muscled shoulder hump
   ];
-  fblob(torso, bodyPrims, bodyCol, { k: U(0.16), disp: lumps(0.5, 0.45, 11), keep: (_x, y) => y >= 0, inner: INNER });
+  fblob(torso, bodyPrims, bodyCol, { k: U(0.16), disp: lumps(0.3, 0.5, 11), keep: (_x, y) => y >= 0, inner: INNER });
   const surf = surfaceCells(torso);
-  // ---- skin folds: three rings round the neck, one behind the shoulders, one before the hips
+  // ---- skin folds: three rings round the neck, one behind the shoulders, one before the hips. They wrap
+  // the flanks only, so the spine and belly read as one unbroken line; the rig's cuts hide in them.
   {
     const dz = (f: (x: number, y: number) => number) => (x: number, y: number, z: number) => {
       const q = invB(Mc(x, y, z));
       return ((q[2] - f(q[0], q[1])) * L.bl) / dv;
     };
     const shade = baby
-      ? { floor: (c: number) => mixc(c, HIDE.crease, 0.28), front: (c: number) => mixc(c, HIDE.lipFold, 0.2) }
-      : { floor: (c: number) => mixc(c, HIDE.crease, 0.7), behind: (c: number) => mixc(c, HIDE.crease, 0.12), front: (c: number) => mixc(c, HIDE.lipFold, 0.3), lip: 2.6, lipCol: (c: number) => mixc(c, HIDE.lipFold, 0.45) };
-    const wob = (x: number, y: number) => (Math.sin(y * 13 + x * 3) * 0.6 + Math.sin(y * 29 - x * 7) * 0.4) * 0.016;
-    const depth = baby ? 1 : 2;
-    for (let r = 0; r < (baby ? 1 : 3); r++) groove(torso, dz((x, y) => cutNeck(x, y) + r * 0.125 + (r ? Math.sin(x * 5 + r) * 0.015 : 0)), { depth: r === 0 ? depth : 1, rim: 1.6, ...shade, region: (x, y, z) => invB(Mc(x, y, z))[2] > 0.8, cand: surf });
-    const notBelly = (x: number, y: number, z: number) => invB(Mc(x, y, z))[1] > 0.5;
-    groove(torso, dz((x, y) => cutChest(x, y) + wob(x, y)), { depth, rim: 1.4, ...shade, cand: surf, region: notBelly });
-    groove(torso, dz((x, y) => cutRump(x, y) - wob(x, y + 1)), { depth, rim: 1.4, ...shade, cand: surf, region: notBelly });
+      ? { floor: (c: number) => mixc(c, HIDE.crease, 0.25), front: (c: number) => mixc(c, HIDE.lipFold, 0.15) }
+      : { floor: (c: number) => mixc(c, HIDE.crease, 0.55), behind: (c: number) => mixc(c, HIDE.crease, 0.1), front: (c: number) => mixc(c, HIDE.lipFold, 0.22), lip: 1.6, lipCol: (c: number) => mixc(c, HIDE.lipFold, 0.3) };
+    const wob = (x: number, y: number) => (Math.sin(y * 13 + x * 3) * 0.6 + Math.sin(y * 29 - x * 7) * 0.4) * 0.012;
+    const flank = (lo: number, hi: number) => (x: number, y: number, z: number) => {
+      const q = invB(Mc(x, y, z));
+      return q[1] > lo && q[1] < hi;
+    };
+    for (let r = 0; r < (baby ? 1 : 3); r++) groove(torso, dz((x, y) => cutNeck(x, y) + r * 0.125 + (r ? Math.sin(x * 5 + r) * 0.015 : 0)), { depth: 1, rim: 1.4, ...shade, region: (x, y, z) => invB(Mc(x, y, z))[2] > 0.8 && flank(0.5, 1.4)(x, y, z), cand: surf });
+    groove(torso, dz((x, y) => cutChest(x, y) + wob(x, y)), { depth: 1, rim: 1.4, ...shade, cand: surf, region: flank(0.52, 1.4) });
+    groove(torso, dz((x, y) => cutRump(x, y) - wob(x, y + 1)), { depth: 1, rim: 1.4, ...shade, cand: surf, region: flank(0.52, 1.4) });
     // finer echo creases either side of the big folds (layered, bunched hide)
     if (!baby)
-      for (const [f, o] of [[cutChest, -0.07], [cutChest, 0.075], [cutRump, 0.07], [cutRump, -0.065]] as [(x: number, y: number) => number, number][])
-        groove(torso, dz((x, y) => f(x, y) + o + Math.sin(y * 9 + x * 3) * 0.012), { depth: 1, width: 0.45, rim: 0.9, floor: (c) => mixc(c, HIDE.crease, 0.5), behind: (c) => mixc(c, HIDE.crease, 0.18), region: (x, y, z) => invB(Mc(x, y, z))[1] > 0.55, cand: surf });
-  }
-  // ---- osteoderm plates: keeled rows down the spine, shields over shoulders and haunches
-  {
-    const top = Math.ceil(U(2.4));
-    const clearOfCuts = (z: number, half: number) =>
-      Math.abs(z - cutChest(0, 1.6)) > half + 0.035 && Math.abs(z - cutRump(0, 1.6)) > half + 0.035 && Math.abs(z - cutNeck(0, 1.45)) > half + 0.03 && Math.abs(z - (cutNeck(0, 1.45) + 0.125)) > half + 0.02;
-    const bell = (z: number) => Math.max(Math.exp(-(((z + 0.15) / 0.55) ** 2)), 0.85 * Math.exp(-(((z - 0.55) / 0.3) ** 2)));
-    let seed = 1;
-    const dorsal = (x: number, z: number, a: number, b: number, h: number, keel: number, spike = 0) => {
-      const hz = a;
-      if (!clearOfCuts(z, hz + 0.01)) return;
-      const from = V(B([x, 0, z]));
-      from[1] = top;
-      const hit = castIn(torso, [from[0] + 0.5, from[1], from[2] + 0.5], [0, -1, 0]);
-      if (!hit) return;
-      const n = normalAt(torso, hit, 3);
-      plate(torso, [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5], n, [0, 0, 1], { a: pb(a), b: pb(b), h: pb(h) * (baby ? 0.45 : 1), keel, tilt: baby ? 0.1 : 0.35, sink: 2.5, seed: seed++, sq: 2.4, spike: baby ? 0 : pb(spike), spikeLean: 0.85, rings: !baby, cracks: !baby }, PAL);
-    };
-    // the spine: big keeled plates, spiked over the hump and the loins
-    for (let z = 1.16; z > -1.38; z -= baby ? 0.24 : 0.17) {
-      const k = bell(z);
-      const big = k > 0.8 && !baby;
-      dorsal(0, z, 0.12 + 0.05 * k, 0.17 + 0.07 * k, 0.08 + 0.07 * k, 0.5, big ? 0.12 + 0.1 * k : 0);
-    }
-    // two flanking rows, staggered
-    for (const s of [1, -1])
-      for (let z = 1.05; z > -1.3; z -= baby ? 0.28 : 0.18) {
-        const k = bell(z + 0.1);
-        dorsal(s * 0.33, z, 0.11 + 0.03 * k, 0.12 + 0.03 * k, 0.06 + 0.035 * k, 0.35);
-      }
-    // shoulder and haunch shields: shingled downward like roof tiles
-    if (!baby)
-      both((s) => {
-        // two staggered rows of overlapping scales over each shoulder and haunch
-        const cl: [V3, number, number][] = [];
-        for (const [zc, yc] of [[0.66, 1.3], [-0.98, 1.3]] as [number, number][])
-          for (let r = 0; r < 2; r++)
-            for (let c = 0; c < 3 - r; c++) {
-              const z = zc + (c - (2 - r) / 2) * 0.2;
-              if ((zc > 0 && z < 0.42) || (zc < 0 && z > -0.74)) continue;
-              cl.push([[0.6 + r * 0.1, yc - r * 0.2, z], 0.11 - r * 0.015, 0.075 - r * 0.012]);
-            }
-        for (const [p, a, h] of cl) {
-          const tgt = V(B(sx(p, s)));
-          const out = norm3([s * 1, 0.55, 0]);
-          const hit = castIn(torso, add3(tgt, scl3(out, U(0.8))), scl3(out, -1));
-          if (!hit) continue;
-          const n = normalAt(torso, hit, 3);
-          plate(torso, [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5], n, [0, 1, 0], { a: pb(a), b: pb(a * 1.15), h: pb(h), keel: 0.2, tilt: 0.45, sink: 2.5, seed: seed++, sq: 2.8 }, PAL);
-        }
-      });
+      for (const [f, o] of [[cutChest, -0.075], [cutRump, 0.075]] as [(x: number, y: number) => number, number][])
+        groove(torso, dz((x, y) => f(x, y) + o + Math.sin(y * 9 + x * 3) * 0.012), { depth: 1, width: 0.45, rim: 0.9, floor: (c) => mixc(c, HIDE.crease, 0.4), region: flank(0.6, 1.3), cand: surf });
   }
   // ---- split along the folds: body (mid barrel), chest (+ front legs), neck, rump (+ hind legs, tail)
   const body = rig.part('body', undefined, V(B(J.bodyC)));
   const chest = rig.part('chest', 'body', V(B(J.chestJ)));
   const neck = rig.part('neck', 'chest', V(B(J.neckJ)));
   const rump = rig.part('rump', 'body', V(B(J.rumpJ)));
+  const torsoParts: Record<string, VoxelModel> = { body, chest, neck, rump };
+  const regionOf = (x: number, y: number, z: number) => {
+    const q = invB(Mv(x, y, z));
+    if (q[2] > cutNeck(q[0], q[1])) return q[2] < J.headJ[2] + 0.13 ? 'neck' : 'drop';
+    if (q[2] > cutChest(q[0], q[1])) return 'chest';
+    if (q[2] < cutRump(q[0], q[1])) return 'rump';
+    return 'body';
+  };
   {
-    const regionOf = (x: number, y: number, z: number) => {
-      const q = invB(Mv(x, y, z));
-      if (q[2] > cutNeck(q[0], q[1])) return q[2] < J.headJ[2] + 0.13 ? 'neck' : 'drop';
-      if (q[2] > cutChest(q[0], q[1])) return 'chest';
-      if (q[2] < cutRump(q[0], q[1])) return 'rump';
-      return 'body';
-    };
     const near = (f: (x: number, y: number) => number, sgn: number) => (x: number, y: number, z: number) => {
       const q = invB(Mv(x, y, z));
       const d = (f(q[0], q[1]) - q[2]) * sgn;
-      return d >= 0 && d < 2.5 * dv;
+      return d >= 0 && d < 3 * dv;
     };
-    splitMany(torso, { body, chest, neck, rump }, regionOf, [
-      { from: 'body', to: 'chest', near: near(cutChest, 1) },
-      { from: 'chest', to: 'neck', near: near(cutNeck, 1) },
-      { from: 'body', to: 'rump', near: near(cutRump, -1) },
+    // the plugs reach one cell under the skin: when a joint bends, the hide closes over the gap instead of a hole
+    splitMany(torso, torsoParts, regionOf, [
+      { from: 'body', to: 'chest', near: near(cutChest, 1), inner: 1 },
+      { from: 'chest', to: 'neck', near: near(cutNeck, 1), inner: 1 },
+      { from: 'body', to: 'rump', near: near(cutRump, -1), inner: 1 },
     ]);
   }
+  // ---- osteoderm plates, grown after the split: each plate belongs wholly to the part under its centre and
+  // laps over the neighbouring part, so the armour runs as one line across the folds (and hides the cuts)
+  {
+    const top = Math.ceil(U(2.4));
+    const bell = (z: number) => Math.max(Math.exp(-(((z + 0.15) / 0.55) ** 2)), 0.85 * Math.exp(-(((z - 0.55) / 0.3) ** 2)));
+    let seed = 1;
+    const grow = (hit: V3, fwd: V3, o: PlateOpt) => {
+      const S: V3 = [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5];
+      plate(torsoParts[regionOf(hit[0], hit[1], hit[2])] ?? body, S, normalAt(torso, hit, 3), fwd, o, PAL);
+    };
+    const dorsal = (x: number, z: number, a: number, b: number, h: number, keel: number, spike = 0) => {
+      const from = V(B([x, 0, z]));
+      from[1] = top;
+      const hit = castIn(torso, [from[0] + 0.5, from[1], from[2] + 0.5], [0, -1, 0]);
+      if (hit) grow(hit, [0, 0, 1], { a: pb(a), b: pb(b), h: pb(h) * (baby ? 0.45 : 1), keel, tilt: baby ? 0.1 : 0.32, sink: 2.5, seed: seed++, sq: 2.5, spike: baby ? 0 : pb(spike), spikeLean: 0.85, clean: true });
+    };
+    // the spine: a single file of big keeled plates, spiked over the hump and the loins
+    for (let z = 1.12; z > -1.4; z -= baby ? 0.3 : 0.235) {
+      const k = bell(z);
+      dorsal(0, z, 0.15 + 0.05 * k, 0.2 + 0.07 * k, 0.09 + 0.07 * k, 0.6, k > 0.8 && !baby ? 0.12 + 0.1 * k : 0);
+    }
+    // a flanking row each side, staggered
+    for (const s of [1, -1])
+      for (let z = 1.0; z > -1.3; z -= baby ? 0.34 : 0.26) {
+        const k = bell(z + 0.1);
+        dorsal(s * 0.36, z, 0.13 + 0.03 * k, 0.14 + 0.03 * k, 0.065 + 0.03 * k, 0.4);
+      }
+    // shoulder and haunch shields: three broad scales each, shingled downward like roof tiles
+    if (!baby)
+      both((s) => {
+        for (const [p, a, h] of [[[0.6, 1.3, 0.64], 0.16, 0.08], [[0.72, 1.07, 0.56], 0.13, 0.065], [[0.7, 1.08, 0.8], 0.12, 0.06], [[0.62, 1.32, -0.98], 0.16, 0.08], [[0.74, 1.08, -0.86], 0.13, 0.065], [[0.72, 1.06, -1.12], 0.12, 0.06]] as [V3, number, number][]) {
+          const tgt = V(B(sx(p, s)));
+          const out = norm3([s, 0.55, 0]);
+          const hit = castIn(torso, add3(tgt, scl3(out, U(0.8))), scl3(out, -1));
+          if (hit) grow(hit, [0, 1, 0], { a: pb(a), b: pb(a * 1.15), h: pb(h), keel: 0.35, tilt: 0.4, sink: 2.5, seed: seed++, sq: 2.6, clean: true });
+        }
+      });
+  }
 
-  // ================================================================ head (+ jaw split along the mouth)
+  // ================================================================ head and jaw: two sculpts that meet at fleshy lips
   const headCol = (i: number, j: number, k: number) => {
     const q = invH(Mv(i, j, k));
     let c = HIDE.base;
@@ -328,16 +323,15 @@ function buildHippo(L: Look): RigSpec {
     if (m > 0.66) c = mixc(c, HIDE.dark, 0.16);
     else if (m < 0.34) c = mixc(c, HIDE.light, 0.18);
     if (q[1] > 1.38) c = mixc(c, HIDE.light, sstep(1.38, 1.62, q[1]) * 0.4);
-    // pink skin round the eyes and cheeks; a pink-lipped mouth
+    // pink skin round the eyes, on the flews and the cheeks
     const ex = Math.abs(q[0]) - 0.33, ey = q[1] - 1.48, ez = q[2] - 1.66;
     const de = Math.sqrt(ex * ex + ey * ey + ez * ez);
     if (de < 0.2) c = mixc(c, HIDE.pink, sstep(0.2, 0.1, de) * 0.55);
-    if (q[1] < 1.12 && Math.abs(q[0]) > 0.3) c = mixc(c, HIDE.pink, sstep(1.12, 0.92, q[1]) * 0.42);
-    if (Math.abs(q[1] - mouthY(q)) < 0.06 && q[2] > 1.5) c = mixc(c, HIDE.pink, 0.35);
+    if (q[1] < 1.14 && Math.abs(q[0]) > 0.28) c = mixc(c, HIDE.pink, sstep(1.14, 0.9, q[1]) * 0.5);
     // blood sweat weeping from the eyes down the cheeks
-    if (!baby && Math.abs(q[0]) > 0.2 && q[2] > 1.42 && q[2] < 1.82 && q[1] < 1.42 && q[1] > 0.92) {
+    if (!baby && Math.abs(q[0]) > 0.2 && q[2] > 1.42 && q[2] < 1.82 && q[1] < 1.42 && q[1] > 0.95) {
       const st = (Math.abs(q[0]) * 2 + q[2]) * 9 + n01(q[0], q[1] * 0.25, q[2], 4, 3) * 1.4;
-      if (st - Math.floor(st) < 0.2) c = mixc(c, HIDE.sweat, 0.55 * sstep(0.92, 1.25, q[1]));
+      if (st - Math.floor(st) < 0.2) c = mixc(c, HIDE.sweat, 0.45 * sstep(0.95, 1.25, q[1]));
     }
     if (q[1] < 0.7) c = mixc(c, HIDE.dust, 0.3);
     // three claw scars across the left brow
@@ -347,43 +341,72 @@ function buildHippo(L: Look): RigSpec {
     }
     return babyPink(c);
   };
-  const headPrims: Prim[] = [
+  const subE = (c: V3, r: V3, k: number): Prim => ({ ...EH(c, r), sub: true, k: U(k * L.hk) });
+  const head = rig.part('head', 'neck', V(H(J.headJ)));
+  fblob(head, [
     EH([0, 1.3, 1.54], [0.44, 0.33, 0.4]), // cranium
-    EH([0.34, 1.08, 1.55], [0.25, 0.3, 0.32]), // jowls
-    EH([-0.34, 1.08, 1.55], [0.25, 0.3, 0.32]),
-    EH([0, 1.16, 2.0], [0.4, 0.24, 0.44]), // long snout
-    EH([0.25, 1.03, 2.1], [0.3, 0.25, 0.34]), // bulbous lip lobes over the tusk roots
-    EH([-0.25, 1.03, 2.1], [0.3, 0.25, 0.34]),
+    EH([0.34, 1.12, 1.55], [0.25, 0.26, 0.3]), // jowls
+    EH([-0.34, 1.12, 1.55], [0.25, 0.26, 0.3]),
+    EH([0, 1.18, 2.0], [0.42, 0.25, 0.46]), // the broad, rounded muzzle
+    EH([0.27, 1.04, 2.08], [0.29, 0.22, 0.34]), // heavy upper-lip flews over the tusk roots
+    EH([-0.27, 1.04, 2.08], [0.29, 0.22, 0.34]),
+    EH([0, 1.03, 2.32], [0.3, 0.14, 0.16]), // the front lip roll
+    EH([0, 1.33, 1.95], [0.28, 0.12, 0.28]), // the domed nasal pad
     EH([0.14, 1.27, 2.27], [0.1, 0.075, 0.095]), // raised nostrils
     EH([-0.14, 1.27, 2.27], [0.1, 0.075, 0.095]),
     EH(J.turret, [0.135, 0.12, 0.135]), // periscope eye turrets
     EH(mir(J.turret), [0.135, 0.12, 0.135]),
     EH([0, 1.5, 1.5], [0.28, 0.11, 0.2]), // brow
-    EH([0, 1.38, 1.86], [0.16, 0.08, 0.2]), // nasal bridge
     EH([0.235, 1.53, 1.37], [0.09, 0.08, 0.08]), // ear mounds
     EH([-0.235, 1.53, 1.37], [0.09, 0.08, 0.08]),
-    CH([0, 0.93, 1.48], [0, 0.86, 2.14], 0.4, 0.34), // heavy lower jaw
-    EH([0.24, 0.87, 2.04], [0.3, 0.2, 0.36]), // chin lobes
-    EH([-0.24, 0.87, 2.04], [0.3, 0.2, 0.36]),
     CH([0, 1.1, 1.3], [0, 1.12, 1.45], 0.46, 0.46), // neck join (stays inside the neck)
-  ];
-  const headMass = new VoxelModel('headMass');
-  fblob(headMass, headPrims, headCol, { k: U(0.09 * L.hk), disp: lumps(0.45, 0.3, 21), keep: (x, y, z) => y >= 0 && invH(Mv(x, y, z))[2] >= 1.23, inner: INNER });
-  const head = rig.part('head', 'neck', V(H(J.headJ)));
+    subE([0, 0.4, 2.1], [0.56, 0.6, 0.85], 0.07), // the jaw's room: the flews hang lowest at the sides
+    subE([0, 0.95, 1.98], [0.27, 0.14, 0.5], 0.06), // the vaulted palate
+  ], headCol, { k: U(0.09 * L.hk), disp: lumps(0.3, 0.32, 21), keep: (x, y, z) => y >= 0 && invH(Mv(x, y, z))[2] >= 1.23, inner: INNER });
   const jaw = rig.part('jaw', 'head', V(H(J.hinge)));
+  fblob(jaw, [
+    CH([0, 0.92, 1.45], [0, 0.86, 2.12], 0.37, 0.32), // the mandible
+    EH([0.24, 0.87, 2.02], [0.29, 0.2, 0.36]), // chin lobes
+    EH([-0.24, 0.87, 2.02], [0.29, 0.2, 0.36]),
+    EH([0.34, 0.93, 1.56], [0.23, 0.2, 0.27]), // the lower cheeks
+    EH([-0.34, 0.93, 1.56], [0.23, 0.2, 0.27]),
+    EH([0, 0.93, 2.3], [0.27, 0.1, 0.15]), // the lower lip roll
+    subE([0, 1.62, 2.0], [0.6, 0.6, 0.95], 0.07), // the line of the lips: the jaw's rim rises toward its sides
+    subE([0, 1.02, 1.93], [0.24, 0.1, 0.42], 0.05), // the tongue bowl
+  ], headCol, { k: U(0.09 * L.hk), disp: lumps(0.3, 0.32, 22), keep: (x, y, z) => y >= 0 && invH(Mv(x, y, z))[2] >= 1.26, inner: INNER });
+  // ---- the mouth: pink fleshy lips rolling over the gums, a wet ridged palate, gums and molars round the tongue bowl
   {
-    const hm = { head, jaw };
-    splitMany(headMass, hm, (x, y, z) => {
+    const rep: [VoxelModel, number, number, number, number, number][] = [];
+    const lipC = (edge: boolean) => mixc(HIDE.lip, HIDE.pink, edge ? 0.2 : 0.55);
+    head.forEach((x, y, z) => {
       const q = invH(Mv(x, y, z));
-      return q[2] > 1.36 && q[1] < mouthY(q) ? 'jaw' : 'head';
+      if (q[2] < 1.42 || q[1] > 1.16 || !exposed(head, x, y, z)) return;
+      const below = !head.has(x, y - 1, z);
+      const toMid = !head.has(x - Math.sign(x + 0.5), y, z);
+      if (below && Math.abs(q[0]) < 0.3 && q[1] > 0.9 && q[2] < 2.42) rep.push([head, x, y, z, Math.floor(q[2] / 0.085) & 1 ? HIDE.palate : mixc(HIDE.palate, HIDE.ridge, 0.4), VF.METAL]);
+      else if (below || !head.has(x, y - 2, z)) rep.push([head, x, y, z, lipC(below), VF.SOLID]);
+      else if (toMid && Math.abs(q[0]) < 0.52 && q[1] < 1.06) rep.push([head, x, y, z, HIDE.gum, VF.METAL]);
     });
+    jaw.forEach((x, y, z) => {
+      const q = invH(Mv(x, y, z));
+      if (q[2] < 1.45 || q[1] < 0.8 || !exposed(jaw, x, y, z)) return;
+      const above = !jaw.has(x, y + 1, z);
+      const ax = Math.abs(q[0]);
+      if (above && ax < 0.25 && q[2] > 1.48 && q[2] < 2.36 && q[1] < 1.01) {
+        const molar = ax > 0.16 && q[2] > 1.52 && q[2] < 1.9 && Math.floor(q[2] / 0.06) % 3 !== 0;
+        rep.push([jaw, x, y, z, molar ? HIDE.molar : HIDE.gum, molar ? VF.SOLID : VF.METAL]);
+      } else if (above || !jaw.has(x, y + 2, z)) rep.push([jaw, x, y, z, lipC(above), VF.SOLID]);
+      else if (!jaw.has(x - Math.sign(x + 0.5), y, z) && ax < 0.5 && q[1] > 0.88) rep.push([jaw, x, y, z, HIDE.gum, VF.METAL]);
+    });
+    for (const [m, x, y, z, c, f] of rep) m.set(x, y, z, c, f);
   }
-  const hz = V(H(J.hinge))[2];
-  /** a cell with an empty horizontal neighbour within R (rim of a cut face) */
-  const rimOf = (m: VoxelModel, x: number, y: number, z: number, R: number) => {
-    for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) if (!m.has(x + dx, y, z + dz)) return true;
-    return false;
-  };
+  // where the tongue lies: the floor of the bowl down the middle
+  const floorY = new Map<number, number>();
+  jaw.forEach((x, y, z) => {
+    if (jaw.has(x, y + 1, z) || invH(Mv(x, y, z))[1] > 1.02) return;
+    const key = z * 4096 + x;
+    floorY.set(key, Math.max(floorY.get(key) ?? -1e9, y));
+  });
   // ---- lower tusks: great curved sand-polished ivory sweeping up past the lip (the left one snapped off)
   const TUSK: V3[] = [[0.36, 0.9, 2.06], [0.44, 1.1, 2.19], [0.51, 1.3, 2.18], [0.54, 1.45, 2.06], [0.52, 1.53, 1.94]];
   const TUSK_R = [0.085, 0.074, 0.058, 0.036, 0.016];
@@ -395,7 +418,7 @@ function buildHippo(L: Look): RigSpec {
   if (!baby) {
     both((s) => {
       const pts = TUSK.map((p) => V(H(sx(p, s))));
-      tube(head, pts, TUSK_R.map((r) => U(r * L.hk) + 1.1), 0, { carve: true });
+      tube(head, pts, TUSK_R.map((r) => U(r * L.hk) + 0.6), 0, { carve: true });
       const snapped = s > 0;
       const use = snapped ? pts.slice(0, 4) : pts;
       const radii = (snapped ? TUSK_R.slice(0, 4).map((r, i) => (i === 3 ? 0.045 : r)) : TUSK_R).map((r) => U(r * L.hk));
@@ -423,39 +446,6 @@ function buildHippo(L: Look): RigSpec {
     both((s) => {
       ell(jaw, V(H(sx([0.36, 0.97, 2.08], s))), [U(0.05 * L.hk), U(0.06 * L.hk), U(0.05 * L.hk)], HIDE.ivoryTip);
       ell(jaw, V(H(sx([0.1, 0.95, 2.42], s))), [U(0.035 * L.hk), U(0.03 * L.hk), U(0.04 * L.hk)], HIDE.ivoryTip);
-    });
-  }
-  // ---- the mouth: lip line, gums, a bowl carved into the jaw (the tongue lies in it), molars; palate ridges above
-  const floorY = new Map<number, number>();
-  {
-    const tops: V3[] = [];
-    const ivoryish = (c: number) => c === HIDE.ivory || c === HIDE.ivoryBase || c === HIDE.ivoryTip || c === HIDE.ivoryCrack;
-    jaw.forEach((x, y, z, c) => {
-      if (!jaw.has(x, y + 1, z) && z > hz + 1 && !ivoryish(c)) tops.push([x, y, z]);
-    });
-    const bowl: V3[] = [];
-    for (const [x, y, z] of tops) {
-      if (!rimOf(jaw, x, y, z, 3)) bowl.push([x, y, z]);
-      else jaw.set(x, y, z, rimOf(jaw, x, y, z, 1) ? HIDE.lip : HIDE.gum);
-    }
-    for (const [x, y, z] of bowl) {
-      jaw.del(x, y, z);
-      jaw.del(x, y - 1, z);
-    }
-    for (const [x, y, z] of bowl) {
-      const q = invH(Mv(x, y - 2, z));
-      if (!jaw.has(x, y - 2, z)) continue;
-      jaw.set(x, y - 2, z, HIDE.gum, VF.METAL); // wet
-      if (Math.abs(q[0]) > 0.2 && q[2] > 1.5 && q[2] < 1.88 && Math.floor(q[2] / dv) % 3 !== 0) jaw.set(x, y - 1, z, HIDE.molar);
-      const key = z * 4096 + x;
-      floorY.set(key, Math.max(floorY.get(key) ?? -1e9, y - 2));
-    }
-    head.forEach((x, y, z) => {
-      if (head.has(x, y - 1, z) || z <= hz + 1) return;
-      const q = invH(Mv(x, y, z));
-      if (q[1] > mouthY(q) + 0.08) return;
-      if (rimOf(head, x, y, z, 1)) head.set(x, y, z, HIDE.lip);
-      else head.set(x, y, z, z % 3 === 0 ? HIDE.ridge : HIDE.palate, VF.METAL);
     });
   }
   // ---- the tongue: a thick, wet, grooved slab in the bowl that lifts and curls when the mouth gapes
@@ -496,7 +486,7 @@ function buildHippo(L: Look): RigSpec {
       const hit = castIn(target, add3(tgt, scl3(o, U(0.5))), scl3(o, -1));
       if (!hit) return null;
       const n = normalAt(target, hit, 3);
-      plate(m, [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5], n, fwd, { a: ph(a), b: ph(b), h: ph(h) * (baby ? 0.5 : 1), keel, tilt, sink: 2, seed: seed++, sq: 2.3, spike: baby ? 0 : ph(spike), spikeLean: 1.1, rings: !baby, cracks: !baby }, PAL);
+      plate(m, [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5], n, fwd, { a: ph(a), b: ph(b), h: ph(h) * (baby ? 0.5 : 1), keel, tilt, sink: 2, seed: seed++, sq: 2.4, spike: baby ? 0 : ph(spike), spikeLean: 1.1, clean: true }, PAL);
       return hit;
     };
     both((s) => {
@@ -504,17 +494,15 @@ function buildHippo(L: Look): RigSpec {
       onHead(head, head, sx([0.29, 1.56, 1.5], s), sx([0.25, 1, -0.35], s), [0, 0, 1], 0.12, 0.1, 0.05, 0.3, 0.45, 0.1);
       onHead(head, head, sx([0.17, 1.6, 1.4], s), sx([0.15, 1, -0.4], s), [0, 0, 1], 0.08, 0.07, 0.035, 0.3, 0.4, baby ? 0 : 0.06);
       // cheek scutes over the jowls
-      onHead(head, head, sx([0.52, 1.18, 1.55], s), sx([1, 0.3, 0], s), [0, 1, 0], 0.075, 0.08, 0.03, 0.15, 0.35);
-      onHead(head, head, sx([0.5, 1.28, 1.72], s), sx([1, 0.5, 0.2], s), [0, 1, 0], 0.06, 0.065, 0.025, 0.15, 0.3);
+      onHead(head, head, sx([0.52, 1.22, 1.58], s), sx([1, 0.4, 0], s), [0, 1, 0], 0.1, 0.1, 0.035, 0.25, 0.35);
     });
     onHead(head, head, [0, 1.63, 1.48], [0, 1, 0], [0, 0, 1], 0.12, 0.1, 0.045, 0.4, 0.35);
     onHead(head, head, [0, 1.48, 1.9], [0, 1, 0.15], [0, 0, 1], 0.15, 0.13, 0.045, 0.25, 0.2); // nasal boss
-    onHead(head, head, [0, 1.43, 2.1], [0, 1, 0.3], [0, 0, 1], 0.08, 0.08, 0.03, 0.2, 0.2);
     // a keratin spade under the chin, scraped bright from digging in
     const chin = castIn(jaw, V(H([0, 0.3, 2.12])), [0, 1, 0.25]);
     if (chin) {
       const n = normalAt(jaw, chin, 3);
-      plate(jaw, [chin[0] + 0.5, chin[1] + 0.5, chin[2] + 0.5], n, [0, 0, 1], { a: ph(0.22), b: ph(0.2), h: ph(0.04) * (baby ? 0.5 : 1), keel: 0.1, tilt: -0.2, sink: 2, seed: 77, sq: 3, rings: !baby, cracks: false }, PAL);
+      plate(jaw, [chin[0] + 0.5, chin[1] + 0.5, chin[2] + 0.5], n, [0, 0, 1], { a: ph(0.22), b: ph(0.2), h: ph(0.04) * (baby ? 0.5 : 1), keel: 0.1, tilt: -0.2, sink: 2, seed: 77, sq: 3, clean: true }, PAL);
     }
   }
   // ================================================================ eyes on periscope turrets, lids, ears
@@ -664,11 +652,11 @@ function buildHippo(L: Look): RigSpec {
     ], legCol, { k: U(0.06), disp: lumps(0.3, 0.3, 33), inner: INNER, keep: above(mid, low) });
     // keratin scutes down the front of the forearm / shin
     if (!baby)
-      for (const [t, a, w] of [[0.2, 0.07, 0.08], [0.48, 0.065, 0.07], [0.74, 0.055, 0.06]] as number[][]) {
+      for (const [t, a, w] of [[0.28, 0.085, 0.09], [0.66, 0.075, 0.08]] as number[][]) {
         const p = add3(mid, scl3(sub3(low, mid), t));
         const hit = castIn(shin, V(add3(p, [0.08, 0, 0.6])), [-0.12, 0, -1]);
         if (!hit) continue;
-        plate(shin, [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5], normalAt(shin, hit, 3), [0, 1, 0], { a: U(a * lr), b: U(w * lr), h: U(0.03 * lr), keel: 0.3, tilt: 0.4, sink: 2, seed: 90 + t * 10 + (front ? 0 : 7), sq: 2.6 }, PAL);
+        plate(shin, [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5], normalAt(shin, hit, 3), [0, 1, 0], { a: U(a * lr), b: U(w * lr), h: U(0.035 * lr), keel: 0.35, tilt: 0.4, sink: 2, seed: 90 + t * 10 + (front ? 0 : 7), sq: 2.6, clean: true }, PAL);
       }
     const foot = rig.part('foot_' + k + 'l', 'shin_' + k + 'l', V(low));
     fblob(foot, [
@@ -719,7 +707,7 @@ function buildHippo(L: Look): RigSpec {
       if (!baby && i < 2) {
         const mid = scl3(add3(a, b), 0.5);
         const hit = castIn(m, add3(mid, [0, U(0.3), -U(0.2)]), [0, -0.83, 0.55]);
-        if (hit) plate(m, [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5], normalAt(m, hit, 2), norm3(sub3(a, b)), { a: U(0.06), b: U(0.04), h: U(0.04), keel: 0.6, tilt: 0.4, sink: 1.5, seed: 120 + i, sq: 2.2, spike: U(0.05 - i * 0.015), spikeLean: 1 }, PAL);
+        if (hit) plate(m, [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5], normalAt(m, hit, 2), norm3(sub3(a, b)), { a: U(0.07), b: U(0.05), h: U(0.045), keel: 0.6, tilt: 0.4, sink: 1.5, seed: 120 + i, sq: 2.4, spike: U(0.05 - i * 0.015), spikeLean: 1, clean: true }, PAL);
       }
       if (last) {
         const tipP = B(J.tailTip);
@@ -738,7 +726,7 @@ function buildHippo(L: Look): RigSpec {
   for (const p of rig.parts) if (p.parent && /^(leg|shin|foot|toes|head|tail1)/.test(p.name)) cullBuried(p.model, rig.m(p.parent), 3);
   // overlapping parts never share an exposed cell (no coplanar z-fighting at the joints)
   for (const p of rig.parts) {
-    if (!p.parent || /^(eye|lid)_/.test(p.name)) continue;
+    if (!p.parent || /^(eye|lid)_/.test(p.name) || p.name === 'jaw' || p.name === 'tongue') continue;
     const par = rig.m(p.parent);
     const del: V3[] = [];
     p.model.forEach((x, y, z) => {

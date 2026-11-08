@@ -61,6 +61,7 @@ import { ShopBeacon, type BeaconInfo } from '../run/ShopBeacon';
 import { stallModel, stallTopAt, PriceTag, type Stall } from './ShopShelf';
 import { GEAR, SLOT_INFO, type GearId } from '../player/Equipment';
 import { RARITY } from '../run/Upgrades';
+import { GobiAnim } from '../models/creatures/turtleHouse';
 
 /** what the run hands her each frame so she can stage her own arrival scene */
 export interface MerchantHooks {
@@ -844,6 +845,8 @@ class Turtle {
   readonly lastHunter = new THREE.Vector3(NaN, 0, 0);
   readonly rugDist = 4.2;
   hooks: MerchantHooks | null = null;
+  /** the remade Gobi's own joints (second neck segment, toes, tail tips, lure) */
+  private gobi!: GobiAnim;
 
   constructor(private ctx: Ctx, readonly rig: RigInstance, meta: any, home: THREE.Vector3 | null, rider: RigInstance | null) {
     this.root = rig.root;
@@ -882,6 +885,7 @@ class Turtle {
       this.rPos.set(pp[0], pp[1], pp[2]);
     }
     this.poseHouse(0);
+    this.gobi = new GobiAnim(rig);
     this.poseRider(0);
     this.stallObj = this.buildStall(rig);
   }
@@ -1402,6 +1406,7 @@ class Turtle {
       this.poseRider(dt);
       rd.update(dt);
     }
+    this.gobi.update(dt);
   }
 
   /** door, shutters, gangplank */
