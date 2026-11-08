@@ -15,8 +15,9 @@
 import * as THREE from 'three';
 import type { Engine } from '../../engine/Engine';
 import { touchScreen } from '../../engine/Input';
-import { buildRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
+import { buildRigGeo, RigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
+import { downsampleModel } from '../../engine/voxel/VoxelModel';
 import { makeVoxelMaterial, sharedVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { Particles } from '../fx/Particles';
 import { Codex, CodexCat, CodexEntry, CodexSection, F_CLAIM, F_READ, F_SEEN } from '../meta/Codex';
@@ -70,6 +71,22 @@ function geo(key: string, make: () => HM.Built) {
     GEO.set(key, g);
   }
   return g;
+}
+/** the jars' little figures are LODs of the rigs (the engine's own downsample, as distant enemies use) */
+const LODS = new WeakMap<RigGeo, Map<number, THREE.BufferGeometry[]>>();
+function lodGeos(g: RigGeo, f: number) {
+  let byF = LODS.get(g);
+  if (!byF) LODS.set(g, (byF = new Map()));
+  let gs = byF.get(f);
+  if (!gs) {
+    const vs = g.spec.voxelSize;
+    gs = g.parts.map((p) => {
+      const ds = downsampleModel(p.model, f, 0.3);
+      return ds.count > 0 ? buildVoxelGeometry(ds, { voxelSize: vs * f, pivot: [p.pivot[0] / f, p.pivot[1] / f, p.pivot[2] / f] }) : p.geo;
+    });
+    byF.set(f, gs);
+  }
+  return gs;
 }
 let WALLS: THREE.BufferGeometry[] | null = null;
 const HM_WALLS = () => (WALLS ??= HM.hallWalls().map((b) => buildVoxelGeometry(b.model, { voxelSize: b.voxelSize, pivot: b.pivot })));
@@ -472,7 +489,7 @@ export class ThothHall {
     j.shown = null;
   }
   /** a specimen to fit in a box (height h, radius r): a puppet, or a place's miniature */
-  private specimen(e: CodexEntry, h: number, r: number): { obj: THREE.Object3D; puppet: Puppet | null } | null {
+  private specimen(e: CodexEntry, h: number, r: number): { obj: THREE.Object3D; puppet: Puppet | null; k: number } | null {
     let obj: THREE.Object3D | null = null;
     let puppet: Puppet | null = null;
     if (e.theme) {
@@ -490,14 +507,14 @@ export class ThothHall {
     puppet?.update(0.016);
     obj.updateMatrixWorld(true);
     const bb = new THREE.Box3().setFromObject(obj);
-    if (bb.isEmpty()) return { obj, puppet };
+    if (bb.isEmpty()) return { obj, puppet, k: 1 };
     const size = bb.getSize(new THREE.Vector3());
     const k = Math.min(h / Math.max(0.01, size.y), (r * 2) / Math.max(0.01, Math.max(size.x, size.z)), 3);
     const wrap = new THREE.Group();
     wrap.add(obj);
     obj.position.y -= bb.min.y;
     wrap.scale.setScalar(k);
-    return { obj: wrap, puppet };
+    return { obj: wrap, puppet, k };
   }
   private buildSome(budgetMs: number) {
     const t0 = performance.now();
@@ -508,6 +525,13 @@ export class ThothHall {
       try {
         const sp = this.specimen(e, 0.5, 0.17);
         if (sp) {
+          // a jar figure is small on screen: swap its parts for a coarser build (about 1.5 cm voxels as shown)
+          const rig = sp.puppet?.rig;
+          if (rig) {
+            const f = Math.max(2, Math.min(6, Math.round(1 / 65 / (rig.geo.spec.voxelSize * sp.k * JAR_SCALE))));
+            const gs = lodGeos(rig.geo, f);
+            rig.geo.parts.forEach((p, i) => (rig.meshes[p.name].geometry = gs[i]));
+          }
           j.holder.add(sp.obj);
           j.extra = sp.obj;
           j.puppet = sp.puppet;
@@ -707,8 +731,8 @@ export class ThothHall {
     }
     const w = this.wings[this.wing];
     // the stand and the pedestal together, in the part of the screen the sheet and the plaques leave free
-    const c = w.standPos.clone().lerp(w.pedPos, 0.32);
-    const contentW = 5.0;
+    const c = w.standPos.clone().lerp(w.pedPos, 0.45);
+    const contentW = 5.4;
     let d = contentW / usable / (2 * Math.tan(hf / 2));
     d = Math.max(3.8, Math.min(w.side === 0 ? 7.4 : 6.9, d));
     const visW = 2 * d * Math.tan(hf / 2), visH = 2 * d * Math.tan(fov / 2);

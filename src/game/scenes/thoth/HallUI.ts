@@ -427,12 +427,12 @@ export class HallUI {
     const S = this.S;
     const t1 = "THOTH'S HALL";
     const sub = s.nextGift ? `Studies ${s.studies}  ·  next gift at ${s.nextGift.at}` : `Studies ${s.studies}  ·  every gift given`;
-    const wPx = Math.ceil(Math.max(this.tw(t1, 24), this.tw(sub, 14)) / S) + 22;
-    const hPx = Math.ceil(50 / S) + 6;
+    const wPx = Math.ceil((Math.max(this.tw(t1, 24), this.tw(sub, 14)) + 26) / S);
+    const hPx = Math.ceil(60 / S);
     const x = 14, y = 12;
     this.blit(lapisPlate(wPx, hPx, false, 11), x, y);
-    this.ink(t1, x + (wPx * S) / 2, y + 5 * (S / 2) + 2, '#ffd36b', 24, 'center', true);
-    this.ink(sub, x + (wPx * S) / 2, y + 32 * (S / 2) + 4, '#cfdcf6', 14, 'center');
+    this.ink(t1, x + (wPx * S) / 2, y + 8, '#ffd36b', 24, 'center', true);
+    this.ink(sub, x + (wPx * S) / 2, y + 36, '#cfdcf6', 14, 'center');
   }
 
   private drawButtons(s: HallUIState) {
@@ -507,17 +507,21 @@ export class HallUI {
       const bhPx = Math.ceil((lines.length * (size + 4) + 16) / S);
       const bw = bwPx * S, bh = bhPx * S;
       const bx = Math.max(10, Math.min(right - bw, at.x - bw * 0.3));
-      const by = Math.max(70, at.y - bh - 18 * (S / 2) - 10) + (1 - a) * 16;
+      const by = Math.max(70, at.y - bh - 14 - 4 * S) + (1 - a) * 16;
       this.blit(papyrus(bwPx, bhPx, 5, false), bx, by, a);
-      // the tail, stepping down to his beak
+      // the tail: a stepped wedge of papyrus from the balloon down to the top of his head
       const c = this.c;
       c.globalAlpha = a;
-      const tx = Math.max(bx + 10, Math.min(bx + bw - 14, at.x));
-      for (let i = 0; i < 7; i++) {
-        const w = (7 - i) * (S / 2) * 1.4;
-        px(c, tx - w / 2 + i * S * 0.5, by + bh - 2 + i * S, w, S, P.m);
-        px(c, tx - w / 2 + i * S * 0.5 - S, by + bh - 2 + i * S, S, S, P.o);
-        px(c, tx + w / 2 + i * S * 0.5, by + bh - 2 + i * S, S, S, P.o);
+      const tx = Math.max(bx + 12, Math.min(bx + bw - 16, at.x));
+      const ty0 = by + bh - S, ty1 = Math.max(ty0 + 4 * S, at.y - 4);
+      const steps = Math.max(3, Math.round((ty1 - ty0) / S));
+      for (let i = 0; i < steps; i++) {
+        const k = i / steps;
+        const w = Math.max(S, Math.round(((1 - k) * 7 * S) / S) * S);
+        const cx = tx + (at.x - tx) * k;
+        const yy = ty0 + i * S;
+        px(c, cx - w / 2 - S, yy, w + 2 * S, S, P.o);
+        if (w > S) px(c, cx - w / 2, yy, w, S, i === 0 ? P.m : P.l);
       }
       c.globalAlpha = 1;
       let left = shown.length;

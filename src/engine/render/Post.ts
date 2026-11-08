@@ -367,6 +367,14 @@ export class PostStack {
 
   render(dt: number) {
     this.updateLook(dt);
-    this.composer.render(dt);
+    // The scene must land in the composer's first target every frame: the sun shafts read that
+    // target's depth. The composer flips read / write once per swapping pass and never resets,
+    // so with an odd number of them enabled (the intro's lens pass + the shafts, or ThothPop's
+    // ripple) the scene went to the other target every other frame and the shafts read the depth
+    // the outline pass had just cleared: the whole view washed out on alternate frames (the sun
+    // cutscene's blink), or stayed washed out whenever the shafts switched on in the wrong phase.
+    const c = this.composer;
+    if (c.readBuffer !== c.renderTarget1) c.swapBuffers();
+    c.render(dt);
   }
 }
