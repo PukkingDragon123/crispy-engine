@@ -113,8 +113,7 @@ export function slotPieces(specs: RigSpec[]): THREE.Group[] {
   });
 }
 /** the rig-space box, per option rig, of what changes across a slot's options */
-export function slotBoxes(specs: RigSpec[]): THREE.Box3[] {
-  const zone = diffZones(specs);
+export function slotBoxes(specs: RigSpec[], zone = diffZones(specs)): THREE.Box3[] {
   const v = new THREE.Vector3();
   return specs.map((s) => {
     const box = new THREE.Box3();
