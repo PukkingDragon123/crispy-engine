@@ -619,7 +619,8 @@ function buildHead(hair: boolean): HeadBuild {
 // ---- hair
 /** hairline height by angle round the head (0 = front, pi = back) */
 const HAIRLINE: [number, number][] = [[0, 58.35], [0.8, 58.0], [1.05, 56.4], [1.3, 55.2], [1.52, 54.7], [1.85, 54.5], [2.1, 52.7], [2.45, 50.7], [Math.PI, 49.9]];
-/** a scraggly cap of black hair over the scalp: thin and flat under the hat crown, full below the brim,
+/** a scraggly cap of black hair over the scalp: pressed flat under the hat (painted on the scalp, so no
+ *  hat crown is ever pierced and the head stays whole when the hat comes off), full below the brim,
  *  combed into vertical clumps, ragged at the hairline, thinning to dead grey strands at the rot */
 function hairCap(h: Sc) {
   const H = h.m;
@@ -629,21 +630,32 @@ function hairCap(h: Sc) {
     const th = thOf(x, z);
     return keyAt(HAIRLINE, th) + 0.42 * Math.sin(th * 15 + (x >= 0 ? 1 : -1)) + 0.25 * Math.sin(th * 29 + 0.7);
   };
-  h.region([-8.8, 49, -10.4], [8.8, 64.8, 7.6], (x, y, z) => {
-    if (H.has(vi(x), vi(y), vi(z)) || y < hlOf(x, z)) return false;
-    const d = headRotSdf(x, y, z);
-    if (d < 0.35) return false;
-    const cl = clumpOf(x, y, z);
-    let t = (y > 58.6 ? 0.5 : 0.5 + 0.3 * sstep((58.6 - y) / 1.4)) * (1 + 0.22 * cl);
-    if (d < 1.4) t = cl > 0.2 ? t * 0.75 : 0;
-    const n = Math.pow(Math.abs(x) / (6.75 + t), 2.15) + Math.pow(Math.abs(y - 55.4) / (8.1 + t), 2.15) + Math.pow(Math.abs(z + 0.8) / (7.45 + t), 2.15);
-    return n <= 1;
-  }, (x, y, z) => {
+  const hairCol = (x: number, y: number, z: number) => {
     const cl = clumpOf(x, y, z);
     if (headRotSdf(x, y, z) < 2 && cl > 0.55) return HAIR_GREY;
     if (y < hlOf(x, z) + 0.6) return HAIR_ALT;
     return cl > 0.55 ? HAIR.hi : cl < -0.45 ? HAIR.shade : HAIR.base;
+  };
+  // flat under the crown: the scalp's own surface turns to hair
+  const skinC = new Set([SKIN.base, SKIN.shade, SKIN.hi].map((c) => c & 0xffffff));
+  const flat: [number, number, number, number][] = [];
+  H.forEach((i, j, l, c) => {
+    const x = cen(i), y = cen(j), z = cen(l);
+    if (y < 58.6 || !skinC.has(c & 0xffffff) || headRotSdf(x, y, z) < 0.6) return;
+    if (H.has(i + 1, j, l) && H.has(i - 1, j, l) && H.has(i, j + 1, l) && H.has(i, j, l + 1) && H.has(i, j, l - 1)) return;
+    flat.push([i, j, l, hairCol(x, y, z)]);
   });
+  for (const [i, j, l, c] of flat) H.set(i, j, l, c);
+  h.region([-8.8, 49, -10.4], [8.8, 58.75, 7.6], (x, y, z) => {
+    if (y > 58.75 || H.has(vi(x), vi(y), vi(z)) || y < hlOf(x, z)) return false;
+    const d = headRotSdf(x, y, z);
+    if (d < 0.35) return false;
+    const cl = clumpOf(x, y, z);
+    let t = (0.5 + 0.3 * sstep((58.6 - y) / 1.4)) * (1 + 0.22 * cl);
+    if (d < 1.4) t = cl > 0.2 ? t * 0.75 : 0;
+    const n = Math.pow(Math.abs(x) / (6.75 + t), 2.15) + Math.pow(Math.abs(y - 55.4) / (8.1 + t), 2.15) + Math.pow(Math.abs(z + 0.8) / (7.45 + t), 2.15);
+    return n <= 1;
+  }, hairCol);
   // the sideburn running down in front of the living ear
   h.region([4.5, 50.6, -1.4], [7.4, 55.8, 2.2], (x, y, z) => {
     if (H.has(vi(x), vi(y), vi(z))) return false;
@@ -771,24 +783,6 @@ function hairLocks(): { locks: HairLock[]; chains: HairChain[] } {
   };
 }
 
-/** hats with a crown: below this height the head may show, above it only what the crown encloses */
-const CROWN_BASE: Partial<Record<HatId, number>> = { stetson: 59.15, bandit: 59.15, tophat: 59.15, sombrero: 59.15 };
-/** shave whatever of the head / hair pokes out through a hat crown (and drop cells shared with the hat) */
-function fitUnderHat(m: VoxelModel, hat: VoxelModel, id: HatId) {
-  dedupe(m, hat);
-  const yb = CROWN_BASE[id];
-  if (yb === undefined) return;
-  const del: V3[] = [];
-  m.forEach((i, j, l) => {
-    const y = cen(j);
-    if (y < yb) return;
-    const x = cen(i), z = cen(l), r = Math.hypot(x, z + 0.9) || 1;
-    const dx = x / r, dz = (z + 0.9) / r;
-    for (let s = 0.5; s <= 11; s += 0.5) if (hat.has(Math.round(i + dx * s), j, Math.round(l + dz * s))) return;
-    del.push([i, j, l]);
-  });
-  for (const [i, j, l] of del) m.del(i, j, l);
-}
 
 // ================================================================== BONES
 const zSpine = (y: number) => {
@@ -2016,14 +2010,14 @@ function tophat() {
     const yb = B0 + (Math.abs(x) > 8.2 ? 1.1 * sstep((Math.abs(x) - 8.2) / 2.4) : 0);
     return y >= yb && y <= yb + 0.8;
   }, K.base);
-  h.region([-7.6, B0, -8.2], [7.6, 75.4, 6.8], (x, y, z) => {
+  h.region([-7.6, B0, -8.8], [7.6, 75.4, 7.0], (x, y, z) => {
     const f = y > 70 ? (y - 70) * 0.07 : 0;
-    const d = Math.pow(Math.abs(x) / (6.9 + f), 3) + Math.pow(Math.abs(z + 0.7) / (6.4 + f), 3);
-    const di = Math.pow(Math.abs(x) / (5.9 + f), 3) + Math.pow(Math.abs(z + 0.7) / (5.4 + f), 3);
+    const d = Math.pow(Math.abs(x) / (6.9 + f), 3) + Math.pow(Math.abs(z + 0.85) / (7.0 + f), 3);
+    const di = Math.pow(Math.abs(x) / (5.9 + f), 3) + Math.pow(Math.abs(z + 0.85) / (6.0 + f), 3);
     return d <= 1 && (di > 1 || y > 74.4) && y <= 75.3;
   }, (x, y) => (y > 61.2 && y < 63.4 ? TOON.red.base : y > 74.9 ? K.hi : K.base));
   // a playing card tucked in the band
-  const cz = 6.0;
+  const cz = 6.15;
   h.rbox([3.9, 64.4, cz], [1.05, 1.55, 0.22], 0.15, TOON.white.base);
   h.ell([3.9, 64.4, cz + 0.2], [0.42, 0.5, 0.2], TOON.red.base);
   shadeRamps(h.m, [K], true);
@@ -2438,7 +2432,6 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     dedupe(head, mask.head);
     dedupe(jaw, mask.head);
   }
-  fitUnderHat(head, hat, look.hat);
   dedupe(jaw, head);
   dedupe(hd.brow_l, head);
   dedupe(hd.brow_r, head);
@@ -2448,10 +2441,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     dedupe(hd.brow_l, g);
     dedupe(hd.brow_r, g);
   }
-  for (const lk of hair?.locks ?? []) {
-    fitUnderHat(lk.model, hat, look.hat);
-    for (const other of [head, jaw, mask?.head, hd.brow_l]) dedupe(lk.model, other);
-  }
+  for (const lk of hair?.locks ?? []) for (const other of [head, jaw, mask?.head, hd.brow_l]) dedupe(lk.model, other);
   dedupe(torso.m, head);
   dedupe(torso.m, jaw);
   dedupe(pelvis.m, torso.m);
