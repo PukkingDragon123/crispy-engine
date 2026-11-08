@@ -159,7 +159,7 @@ const PEB_SAND = [[0x8f7356, 0xa88a68, 0xc8ad8a], [0x9a5c3e, 0xb4724c, 0xcf9268]
 
 function sandTop(x: number, y: number) {
   const n = fbm(x, y, 11, 32, 3);
-  let i = n < 0.4 ? 1 : n < 0.6 ? 2 : 3;
+  let i = n < 0.36 ? 1 : n < 0.64 ? 2 : 3;
   const h = ih(x, y, 21);
   if (h > 0.975) i = Math.min(4, i + 1);
   else if (h < 0.035) i = Math.max(0, i - 1);
@@ -204,9 +204,9 @@ function rockTop(x: number, y: number) {
   if (lx === 0 || ly === 0) return ih(x, y, 66) < 0.15 ? ROCK_T[1] : ROCK_T[0];
   // chipped corners
   if ((lx <= 2 && ly <= 2 && lx + ly <= 3 - Math.floor(k * 2)) || (lx >= 14 && ly >= 14 && lx + ly >= 28 + Math.floor(k * 2))) return ROCK_T[0];
-  const cb = Math.abs(((Math.hypot(lx - 16 * k, ly - 16 * (1 - k)) + vn(x, y, 8, 8, 62) * 3) % 5) - 2.5) < 0.5;
+  const cb = Math.abs(((Math.hypot(lx - 16 * k, ly - 16 * (1 - k)) * 0.8 + vn(x, y, 8, 8, 62) * 2) % 4) - 2) < 0.35 && vn(x, y, 16, 16, 65) > 0.5;
   const n = fbm(x, y, 63, 16, 3);
-  let i = 2 + Math.floor(k * 2) + (n > 0.6 ? 1 : n < 0.36 ? -1 : 0);
+  let i = 2 + Math.floor(k * 2) + (n > 0.64 ? 1 : 0);
   if (cb) i -= 1;
   if (lx === 1 || ly === 1) i += 1;
   if (lx === 15 || ly === 15) i -= 1;
@@ -245,7 +245,7 @@ function rockSide(x: number, y: number) {
   const k = ih(c.id, 2, 71);
   if (c.ly === 0) return ROCK_T[0];
   if (c.lx === 0) return ih(x, y, 76) < 0.2 ? ROCK_T[1] : ROCK_T[0];
-  const lam = fbm(x * 0.25, y, 72, 8, 2) + vn(x, y, 32, 2, 73) * 0.35;
+  const lam = fbm(x, y, 72, 32, 2, 0.25) * 0.75 + vn(x, y, 32, 2, 73) * 0.35;
   let i = 2 + Math.floor(k * 2) + (lam > 0.72 ? 1 : lam < 0.42 ? -1 : 0);
   if (c.ly === 1) i += 1;
   if (c.ly === 7) i -= 1;
@@ -313,15 +313,19 @@ function dirtTop(x: number, y: number) {
 }
 function soilSide(x: number, y: number, dark: number) {
   const wob = (vn(x, y, 32, 32, 111) - 0.5) * 4;
-  const b = fbm(x * 0.2, y + wob, 112, 8, 3);
+  const b = fbm(x, wrap(Math.round(y + wob), S), 112, 32, 3, 0.25);
   let i = b < 0.4 ? 1 : b < 0.6 ? 2 : 3;
   const h = ih(x, y, 113);
   if (h > 0.97) i++;
   else if (h < 0.05) i--;
   i = Math.max(0, Math.min(4, i - dark));
   // fine roots hanging down from the turf
-  const r = ih(x, 0, 114);
-  if (dark && r < 0.12 && y % 32 < 6 + r * 50 && Math.abs(Math.sin((y + r * 90) * 0.9)) < 0.9) return 0x4a3220;
+  if (dark) {
+    // a few fine roots wandering down from the turf
+    const rc = cell(x, y, 24, 116);
+    const rx = rc.dx + (vn(x, y, 4, 4, 117) - 0.5) * 3;
+    if (ih(rc.id, 1, 116) < 0.35 && Math.abs(rx) < 0.5 && rc.dy < 4 && rc.dy > -7) return 0x4a3220;
+  }
   const p = pebble(x, y, 12, 115, 0.8, 2.2, PEB_DIRT, DIRT_T[0], 0.5);
   return p >= 0 ? p : DIRT_T[i];
 }
@@ -356,15 +360,23 @@ function grassTopBuf() {
   }
   return (grassBuf = b);
 }
+let mudF: Float32Array | null = null;
 function mud(x: number, y: number) {
   const T = [0x3e2e20, 0x4c3828, 0x5c4532, 0x6e553e, 0x86704f];
-  const n = fbm(x, y, 131, 32, 4);
-  let i = n < 0.38 ? 1 : n < 0.58 ? 2 : 3;
-  // wet sheen picks out the ridges
-  const gx = fbm(x + 1, y, 131, 32, 4) - fbm(x - 1, y, 131, 32, 4), gy = fbm(x, y + 1, 131, 32, 4) - fbm(x, y - 1, 131, 32, 4);
-  if (gx + gy < -0.05 && ih(x, y, 132) < 0.45) return 0xa48c6c;
-  const w = cell(x, y, 20, 133);
-  if (w.f1 < 3 + ih(w.id, 1, 133) * 3 && ih(w.id, 2, 133) < 0.5) return w.f1 > 2.2 && w.dy < 0 ? 0x8a7458 : T[0];
+  if (!mudF) {
+    mudF = new Float32Array(S * S);
+    for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) mudF[i + j * S] = fbm(i, j, 131, 32, 4);
+  }
+  const f = (i: number, j: number) => mudF![wrap(i, S) + wrap(j, S) * S];
+  const n = f(x, y);
+  let i = n < 0.38 ? 1 : n < 0.6 ? 2 : 3;
+  // wet sheen catches the lit side of the ridges
+  const gx = f(x + 1, y) - f(x - 1, y), gy = f(x, y + 1) - f(x, y - 1);
+  if (gx + gy < -0.035 && n > 0.5 && ih(x, y, 132) < 0.5) return 0x9a8262;
+  // shallow puddles: dark water with a lit far rim
+  const w = cell(x, y, 32, 133);
+  const pr = 3 + ih(w.id, 1, 133) * 4;
+  if (ih(w.id, 2, 133) < 0.4 && w.f1 < pr) return w.f1 > pr - 1 && w.dy < 0 ? 0x8a7458 : 0x34261a;
   if (ih(x, y, 134) < 0.04) i--;
   return T[Math.max(0, Math.min(4, i))];
 }
@@ -385,7 +397,7 @@ function wood(x: number, y: number): RGB {
   if (lx === 7) v *= 0.9;
   if (ly === 1) v *= 1.08;
   // grain: long streaks broken along the plank
-  const g = vn(x * 4, y, 4, 22, 143 + p) * 0.7 + vn(x, y, 8, 48, 144) * 0.3;
+  const g = vn(x, y, 1, 16, 143) * 0.7 + vn(x, y, 8, 32, 144) * 0.3;
   v *= g > 0.66 ? 1.07 : g < 0.3 ? 0.88 : 1;
   // weather checks
   if (ih(x, Math.floor(y / 9), 145) < 0.035 && lx > 1 && lx < 7) v *= 0.7;
@@ -443,21 +455,21 @@ function adobe(x: number, y: number): RGB {
 function rockNat(x: number, y: number): RGB {
   // natural sandstone: wavy bedding, cross-bed sets, pits, a few dark varnish streaks
   const wob = (vn(x, y, 32, 32, 181) - 0.5) * 6;
-  const b = fbm(x * 0.15, y + wob, 182, 8, 3);
+  const b = fbm(x, wrap(Math.round(y + wob), S), 182, 32, 3, 0.2);
   let v = b > 0.62 ? 1.1 : b > 0.5 ? 1.02 : b > 0.38 ? 0.94 : 0.86;
   const cb = (x + y * 0.6 + vn(x, y, 16, 16, 183) * 10) % 6;
   if (cb < 0.8 && vn(x, y, 32, 16, 184) > 0.55) v *= 0.9;
   const pit = cell(x, y, 7, 185);
   if (pit.f1 < 0.75 && ih(pit.id, 1, 185) < 0.55) return M(0.7, 0.03);
   if (pit.f1 < 1.5 && ih(pit.id, 1, 185) < 0.55 && pit.dx + pit.dy < 0) v *= 1.08;
-  const st = ih(x, 0, 186);
-  if (st < 0.05 && vn(x, y, 4, 32, 187) > 0.5) return [v * 0.7, v * 0.6, v * 0.55];
+  const st = cell(x, y, 32, 186);
+  if (ih(st.id, 1, 186) < 0.3 && Math.abs(st.dx) < 0.6 + st.dy * 0.08 && st.dy > 0 && st.dy < 12) return [v * 0.74, v * 0.64, v * 0.58];
   return M(v, 0.02);
 }
 function metal(x: number, y: number): RGB {
   // weathered tin / iron: rust blooms, pitting, rust bleeding down, bright scratches
   const r = fbm(x, y, 191, 16, 4);
-  const streak = vn(x, y, 2, 40, 192);
+  const streak = vn(x, y, 2, 32, 192);
   let c: RGB = M(0.96 + (vn(x, y, 8, 8, 193) - 0.5) * 0.1);
   if (r > 0.6) c = r > 0.7 ? [1.12, 0.74, 0.5] : [1.0, 0.8, 0.64];
   else if (streak > 0.78) c = [0.98, 0.84, 0.72];
@@ -471,11 +483,11 @@ function cloth(x: number, y: number): RGB {
   let v = (x + y) % 2 === 0 ? 1.03 : 0.97;
   if (ih(0, y, 201) < 0.08) v *= 1.04; // slub threads
   const st = fbm(x, y, 202, 32, 3);
-  if (st > 0.66) v *= 0.88;
-  else if (st < 0.3) v *= 1.06;
-  if (x % 42 === 0) return M(0.8, 0.03);
-  if (x % 42 === 2 && y % 4 < 2) return M(0.86, 0.03);
-  return M(v, st > 0.66 ? 0.05 : 0);
+  if (st > 0.7) v *= 0.92;
+  else if (st < 0.28) v *= 1.04;
+  if (x % 64 === 0) return M(0.8, 0.03);
+  if (x % 64 === 2 && y % 4 < 2) return M(0.86, 0.03);
+  return M(v, st > 0.7 ? 0.04 : 0);
 }
 function bark(x: number, y: number): RGB {
   // palm trunk: overlapping leaf-base scales in diamond rows, fibrous between

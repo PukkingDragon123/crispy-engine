@@ -65,6 +65,8 @@ import { RuinNests } from '../run/RuinNests';
 import { Wildlife } from '../run/Wildlife';
 import { TreasureHunt } from '../run/TreasureHunt';
 import { CavePit } from '../run/CavePit';
+import { SoulReaping, prewarmReaping } from './SoulReaping';
+import { BountyRip } from '../run/BountyRip';
 import { OasisHeart } from '../run/OasisHeart';
 import { Barks } from '../audio/Barks';
 import { DeathCine, deathCineFromRun } from './DeathCine';
@@ -200,6 +202,7 @@ export class RunScene implements GameScene {
   wildlife: Wildlife | null = null;
   treasure: TreasureHunt | null = null;
   cavePit: CavePit | null = null;
+  private bountyRip: BountyRip | null = null;
   oasis: OasisHeart | null = null;
   private codexRun: CodexRun | null = null;
   equipment!: Equipment;
@@ -467,6 +470,7 @@ export class RunScene implements GameScene {
     this.treasure?.dispose();
     this.cavePit?.dispose();
     this.oasis?.dispose();
+    this.bountyRip?.dispose();
     this.codexRun?.dispose();
     this.engine.paused = false;
     this.engine.post.u.uDesat.value = 0;
@@ -578,6 +582,15 @@ export class RunScene implements GameScene {
       this.engine.post.u.uDamage.value = Math.min(1, this.engine.post.u.uDamage.value + a / 40);
     });
     ev.on('playerDeath', () => this.onPlayerDeath());
+    // bosses and alphas leave a WANTED poster by the body: rip it off for a bonus
+    this.bountyRip = new BountyRip({
+      ctx: this.ctx, player: this.player, qte: this.qte, addBounty: (v) => this.addBounty(v),
+      addGold: (v) => {
+        this.run.gold += v;
+        this.run.totalGold += v;
+      },
+    });
+    prewarmReaping();
     this.director.onWaveStart = (s) => this.onWaveStart(s);
     this.director.spawnBoss = (wave) => this.spawnBoss(wave);
     this.director.onWaveEnd = (s) => this.onWaveEnd(s);
@@ -854,7 +867,8 @@ export class RunScene implements GameScene {
 
   private async onPlayerDeath() {
     const eng = this.engine;
-    this.hud.toast('YOU DIED', '#ff5a3a', this.run.revived ? 'The desert keeps your bones…' : 'Your soul sinks through the sand…', true);
+    // the first death plays out in the world (heart, soul, Anubis' arm); the last one gets the plain verdict
+    if (this.run.revived) this.hud.toast('YOU DIED', '#ff5a3a', 'The desert keeps your bones…', true);
     this.ctx.sfx('sting_negative', null, 0.8);
     this.ctx.sfx('soul_leave', null, 0.9);
     eng.slowMo(0.15, 6);
@@ -863,8 +877,7 @@ export class RunScene implements GameScene {
     if (this.run.revived) return this.endRun(false);
     // once per run: the Weighing of the Heart
     this.run.revived = true;
-    await eng.tweens.wait(1.8, true);
-    await eng.fadeOut(0.9);
+    await new SoulReaping({ ctx: this.ctx, player: this.player, qte: this.qte, hud: (on) => this.hud.setVisible(on) }).run();
     const trial = new AnubisTrial(eng, this.qte, this.player.rig.geo);
     this.trial = trial;
     eng.post.setSceneCamera(trial.scene, trial.camera);
