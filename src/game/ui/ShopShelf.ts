@@ -161,6 +161,8 @@ export function stallTopAt(s: Stall, x: number, z: number): number | null {
 // ================================================================== the price tag
 const TAG_VS = 1 / 200;
 const TAG_W = 30, TAG_H = 17; // card size in voxels (0.15 x 0.085 m)
+/** hung a little larger than life so the price reads from the doorway */
+const TAG_SCALE = 1.3;
 let tagGeo: THREE.BufferGeometry | null = null;
 let twineGeo: THREE.BufferGeometry | null = null;
 /** the card: a manila tag with clipped top corners, a punched and reinforced hole, a slight curl, rubbed edges */
@@ -338,7 +340,7 @@ export class PriceTag {
 
   update(dt: number, want: number) {
     this.shown += (want - this.shown) * Math.min(1, dt * 7);
-    this.root.scale.setScalar(Math.max(0.0001, Math.min(1, this.shown * 1.15)));
+    this.root.scale.setScalar(Math.max(0.0001, Math.min(1, this.shown * 1.15)) * TAG_SCALE);
     // two damped pendulums (front-back, side to side)
     this.av += (-38 * this.ax - 3.2 * this.av) * dt;
     this.bv += (-32 * this.bx - 3.0 * this.bv) * dt;

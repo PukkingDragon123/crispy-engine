@@ -427,8 +427,8 @@ export class BountyBoard implements Mode {
       id: 'bounty', label: 'The Long Ride', title: 'THE LONG RIDE', short: 'LONG RIDE', sub: this.subline(), verb: 'Read the board',
       stand, face: Math.atan2(AT.x - stand.x, AT.z - stand.y), at: this.W(0, 0.62, 0), r: 0.9, objs: [this.root], pose: 'range',
       via: [new THREE.Vector2(-2.62, 0.25)], slot: [-0.86, 0.84, 'left'],
-      // from back by the rope coil: the board to the left of frame, him just clear of its right edge
-      shot: { pos: new THREE.Vector3(-3.25, 1.62, -0.25), look: new THREE.Vector3(), fov: 42, subject: this.W(0, 0.62, 0), ndc: [-0.12, 0.05] },
+      // square on from the middle of the garage: the board right of centre, him at the left, clear of it
+      shot: { pos: new THREE.Vector3(AT.x, 1.62, -0.3), look: new THREE.Vector3(), fov: 42, subject: this.W(0, 0.62, 0), ndc: [0.12, 0.05] },
     });
   }
 
