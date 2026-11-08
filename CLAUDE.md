@@ -28,7 +28,10 @@
 ## Current art direction (latest user notes win)
 - Realistic lighting with an anime-painted look: cel light ramp, black ink outlines, and lots of 2D pixel-art particles
   for dust, sand and trails. "Lighting 100× better, super realistic and anime-painted".
-- Not cartoony. Sundown matches the user's skeleton reference exactly.
+- Not cartoony. Sundown (latest note): half zombie, half human, with hair: rotted and exposed skull and teeth on part of
+  the face, living skin on the rest; punk cowboy outfit, mask and shades kept.
+- Codex is now Thoth's Hall: Thoth is a tiny, very cute ibis-headed god, 10,000 years old but talks like a child,
+  collects creatures; his hall is a beautiful library run by worm librarians (bookworms).
 - Very high voxel counts everywhere. Fluid, procedural animation.
 - Enemy skill names reference Rolling Stones / Guns N' Roses / Beatles songs.
 - UI (latest note): the lower HUD stays live 3D: the soul jar, the heart, the revolver cylinder and bullets, the
