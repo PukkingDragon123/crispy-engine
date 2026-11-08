@@ -31,6 +31,7 @@ interface Card {
   points: number;
   portrait: HTMLCanvasElement | null;
   glyphs: string[];
+  compact: boolean;
   w: number;
 }
 interface Spark {
@@ -166,8 +167,13 @@ export class CodexRun {
     for (const ch of e.name) seed = (seed * 31 + ch.charCodeAt(0)) % 9973;
     for (let i = 0; i < 7; i++) glyphs.push(GLYPHS[(seed + i * 5) % GLYPHS.length]);
     const portrait = this.portrait(d);
-    const textW = Math.max(pixelTextWidth('THOTH RECORDS', 16) + 8 + pixelTextWidth(what, 16), pixelTextWidth(e.name, 16), glyphs.length * 9 + 6 + pixelTextWidth(section, 16));
-    this.card = { what, name: e.name, section, points: d.points, portrait, glyphs, w: Math.round(48 + textW + 10 + (portrait ? 36 : 0) + pixelTextWidth(`+${d.points}`, 32) + 22) };
+    // a phone gets the compact card: no portrait, four glyphs, the tag without the god's name
+    const compact = window.innerWidth / this.scale() < 520;
+    if (compact) glyphs.length = 4;
+    const head = compact ? 0 : pixelTextWidth('THOTH RECORDS', 16) + 8;
+    const textW = Math.max(head + pixelTextWidth(what, 16), pixelTextWidth(e.name, 16), glyphs.length * 9 + 6 + pixelTextWidth(section, 16));
+    const pic = compact ? null : portrait;
+    this.card = { what, name: e.name, section, points: d.points, portrait: pic, glyphs, compact, w: Math.round(48 + textW + 10 + (pic ? 36 : 0) + pixelTextWidth(`+${d.points}`, 32) + 22) };
     this.showT = 0;
     this.lastGlyph = -1;
     eng.audio.play('page_turn', { volume: 0.5, pitch: 1.1 });
@@ -210,7 +216,7 @@ export class CodexRun {
     const inK = Math.min(1, t / 0.45), outK = t > 3.4 ? Math.min(1, (t - 3.4) / 0.5) : 0;
     const ease = 1 + 2.2 * Math.pow(inK - 1, 3) + 1.2 * Math.pow(inK - 1, 2);
     const cw = card.w, ch = ART.cart_m.h;
-    const x0 = Math.round(W - 4 - cw * ease + (cw + 12) * outK * outK), y0 = Math.round(H * 0.34 - ch / 2 + Math.sin(t * 2.1) * 0.6);
+    const x0 = Math.round(W - 4 - cw * ease + (cw + 12) * outK * outK), y0 = Math.round(H * 0.5 - ch / 2 + Math.sin(t * 2.1) * 0.6); // mid-right: clear of the plaque, the notes and the cards
     // the cartouche and its shadow
     const cart = strip3(ART.cart_l, ART.cart_m, ART.cart_r, cw, 'cartouche');
     c.globalAlpha = 0.34;
@@ -228,7 +234,7 @@ export class CodexRun {
     if (writing && Math.random() < rdt * 30) this.sparks.push({ x: tx + 14 + nib[0], y: ty + 18 + nib[1], vx: (Math.random() - 0.3) * 30, vy: -10 - Math.random() * 25, t: 0, life: 0.3 + Math.random() * 0.4, c: Math.random() < 0.5 ? '#fff0a6' : '#e2b24a' });
     // the writing: what, the name, the section; the hieroglyphs appear one by one in gold ink
     const lx = x0 + 46;
-    const hw = pixelText(c, 'THOTH RECORDS', lx, y0 + 5, { size: 16, color: '#e2b24a', outline: '#0c1028' });
+    const hw = card.compact ? -8 : pixelText(c, 'THOTH RECORDS', lx, y0 + 5, { size: 16, color: '#e2b24a', outline: '#0c1028' });
     pixelText(c, card.what, lx + hw + 8, y0 + 5, { size: 16, color: '#7cf2b4', outline: '#0c1028' });
     pixelText(c, card.name, lx, y0 + 19, { size: 16, color: '#fff4d8', outline: '#0c1028' });
     const shown = Math.max(0, Math.min(card.glyphs.length, Math.floor((t - 0.3) / 0.18)));
