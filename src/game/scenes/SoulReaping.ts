@@ -1121,7 +1121,7 @@ export class SoulReaping {
     const e = this.armEntry(V());
     e.y = this.ctx.world.groundAt(e.x, e.z);
     const k = sstep(0, 1.1, t);
-    const p = this.cam.p.clone().lerp(e.clone().add(V(0, 0.1, 0)), k * k);
+    const p = this.cam.p.clone().lerp(e.clone().add(V(0, 1.5, 0)), k * k);
     const l = e.clone().add(V(0, -3, 0)).addScaledVector(this.away, 0.6 * (1 - k));
     return { p, l, fov: lerp(52, 88, k) };
   };
@@ -1131,14 +1131,14 @@ export class SoulReaping {
     const k = sstep(0, 1.1, this.diveT);
     const cam = this.ctx.camera;
     const fwd = cam.getWorldDirection(this.v2);
-    const n = Math.floor(rdt * (60 + 260 * k)) + 1;
+    const n = Math.floor(rdt * (80 + 340 * k)) + 1;
     for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2, r = 0.3 + Math.random() * (1.6 - k);
-      const d = 0.4 + Math.random() * 1.6;
+      const a = Math.random() * Math.PI * 2, r = 0.2 + Math.random() * (1.4 - k * 0.8);
+      const d = 0.35 + Math.random() * (1.6 - k * 0.9);
       const right = V(1, 0, 0).applyQuaternion(cam.quaternion), up = V(0, 1, 0).applyQuaternion(cam.quaternion);
       const at = cam.position.clone().addScaledVector(fwd, d).addScaledVector(right, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r);
-      const big = Math.random() < 0.35 * k;
-      this.fx.emit({ pos: at, vel: { x: -fwd.x * 6, y: -fwd.y * 6 + 1, z: -fwd.z * 6 }, count: 1, life: [0.25, 0.6], size: big ? [0.6, 1.4] : [0.03, 0.06], sprite: big ? ['puff0', 'puff1', 'puff2'] : ['dot3', 'grain1', 'streak'], color: big ? [0x5a4630, 0x4a3826, 0x6a5238] : SAND, alpha: big ? 0.85 : 1, stretch: big ? 0 : 0.08, drag: 1 });
+      const big = Math.random() < 0.15 + 0.4 * k;
+      this.fx.emit({ pos: at, vel: { x: -fwd.x * 6, y: -fwd.y * 6 + 1, z: -fwd.z * 6 }, count: 1, life: [0.3, 0.7], size: big ? [0.8, 1.8] : [0.03, 0.06], sprite: big ? ['puff0', 'puff1', 'puff2'] : ['dot3', 'grain1', 'streak'], color: big ? [0x7a5e40, 0x6a5238, 0x5a4630] : SAND, alpha: big ? 0.92 : 1, stretch: big ? 0 : 0.08, drag: 1 });
     }
   }
 

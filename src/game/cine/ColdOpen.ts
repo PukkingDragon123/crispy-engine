@@ -1,33 +1,20 @@
-// The cold open: ~10.5 s of action in front of the (approved, unchanged) opening.
+// The cold open: ~4.5 s, straight to the point.
 //
-// Dusk on a lonely stretch of frontier street out in the dunes. Sundown steps
-// out of a saloon and walks toward the lens, unhurried; a lit fuse fizzes back
-// across the sand behind him to the dynamite stacked on the porch. BOOM - time
-// drops into slow motion as the saloon comes apart in a voxel fireball: the
-// building shatters into tumbling chunks, a shock ring rolls through the living
-// sand under his boots, burning planks and embers rain down around him and he
-// never once looks back. A close-up: the fire on his skull, the hat brim dips.
-// The wagon goes up too - a wide shot of a small figure walking out of an
-// inferno - and the title "dustUP" bursts up out of the sand in front of the
-// blaze in voxel-cast gold. Then he stops, lifts his head into the lens, turns
-// side-on and outdraws the camera: the round punches a hole through the lens
-// (cracked glass, a scorched ember lip, light bleeding through), time freezes,
-// and the view flies into the hole until it burns white - the white-hot desert
-// sun the intro picks up from (LensShot). Without a lens rig it cuts to black.
-// He walks drunk (anim/drunkWalk.ts): lurching, swaying, weaving, stumbling.
-// Uses the intro's own skip (SPACE / ESC / the SKIP label).
+// Dusk out in the dunes. Sundown staggers away from the lens, three whiskeys
+// deep (anim/drunkWalk.ts), stops, turns round and outdraws the camera: the
+// round punches a hole through the lens (cracked glass, a scorched ember lip,
+// light bleeding through), time freezes, and the view flies into the hole until
+// it burns white - the white-hot desert sun the intro picks up from (LensShot).
+// Without a lens rig it cuts to black. Uses the intro's own skip.
 import * as THREE from 'three';
 import type { Engine } from '../../engine/Engine';
 import type { CameraRig } from '../player/CameraRig';
 import type { Player } from '../player/Player';
 import type { World } from '../world/World';
 import { RigInstance, buildRigGeo, type RigSpec } from '../../engine/voxel/Rig';
-import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
-import type { VoxelModel } from '../../engine/voxel/VoxelModel';
 import { modelEntry } from '../models/lookup';
 import * as CH from '../models/characters';
 import { CineKit, GRAIN, SAND, type KitWorld } from './CineKit';
-import { VoxelWord, warmLetters } from './VoxelLetters';
 import { DrunkGait } from '../anim/drunkWalk';
 import { LensShot } from './LensShot';
 
@@ -45,39 +32,11 @@ export interface ColdOpenDeps {
   lens?: LensShot | null;
 }
 
-const UP = new THREE.Vector3(0, 1, 0);
 const sat = (k: number) => (k < 0 ? 0 : k > 1 ? 1 : k);
 const ease = (k: number) => {
   k = sat(k);
   return k * k * (3 - 2 * k);
 };
-
-interface SetPiece {
-  mesh: THREE.Mesh;
-  model: VoxelModel;
-  vs: number;
-  pivot: [number, number, number];
-  /** which blast takes it: 1 the saloon, 2 the wagon */
-  boom: number;
-}
-
-function piece(key: string): { mesh: THREE.Mesh; model: VoxelModel; vs: number; pivot: [number, number, number]; box: THREE.Box3 } | null {
-  try {
-    const e = modelEntry(key)?.() as { model?: VoxelModel; voxelSize?: number } | undefined;
-    if (!e?.model || !e.voxelSize) return null;
-    const b = e.model.bounds();
-    const pivot: [number, number, number] = [(b.minX + b.maxX + 1) / 2, b.minY, (b.minZ + b.maxZ + 1) / 2];
-    const geo = buildVoxelGeometry(e.model, { voxelSize: e.voxelSize, pivot });
-    geo.computeBoundingBox();
-    const mesh = new THREE.Mesh(geo);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    return { mesh, model: e.model, vs: e.voxelSize, pivot, box: geo.boundingBox!.clone() };
-  } catch (err) {
-    console.warn('[coldopen] model failed', key, err);
-    return null;
-  }
-}
 
 /** a flat, clear patch of desert well inside the storm, away from the start */
 function findSet(world: World, p: THREE.Vector3) {
@@ -108,64 +67,17 @@ function findSet(world: World, p: THREE.Vector3) {
 export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
   const { engine: eng, cam, world, scene, player } = d;
   if (d.skipped()) return;
-  warmLetters();
   const gAt = (x: number, z: number) => world.groundAt(x, z);
   const p0 = player.pos.clone();
   const S = findSet(world, p0);
-  // the street runs from the saloon toward the lens; the start (and the poster) lie behind the camera
+  // `dir` points from him toward the lens; he walks the other way until he turns
   const dir = new THREE.Vector3(p0.x - S.x, 0, p0.z - S.z);
   if (dir.lengthSq() < 1) dir.set(1, 0, 0);
   dir.normalize();
   const side = new THREE.Vector3(dir.z, 0, -dir.x);
   const yawD = Math.atan2(dir.x, dir.z);
-  const at = (fwd: number, right: number, up = 0) => {
-    const v = S.clone().addScaledVector(dir, fwd).addScaledVector(side, right);
-    v.y = gAt(v.x, v.z) + up;
-    return v;
-  };
   const kit = new CineKit(eng, scene, world as unknown as KitWorld);
   const own: THREE.Object3D[] = [];
-  const geos: THREE.BufferGeometry[] = [];
-  const pieces: SetPiece[] = [];
-  const add = (key: string, pos: THREE.Vector3, yaw: number, boom: number, sink = 0.05) => {
-    const pc = piece(key);
-    if (!pc) return null;
-    pc.mesh.material = player.material;
-    pc.mesh.position.copy(pos).add(new THREE.Vector3(0, -sink, 0));
-    pc.mesh.rotation.y = yaw;
-    scene.add(pc.mesh);
-    own.push(pc.mesh);
-    geos.push(pc.mesh.geometry);
-    if (boom) pieces.push({ mesh: pc.mesh, model: pc.model, vs: pc.vs, pivot: pc.pivot, boom });
-    return pc;
-  };
-  // ---- the set: a saloon with dynamite on its porch, a wagon, barrels, a hitching rail
-  let frontZ = 5;
-  {
-    const pc = piece('saloon');
-    if (pc) {
-      frontZ = pc.box.max.z;
-      const C = at(-(frontZ + 4), 0);
-      let lo = C.y;
-      for (const [a, b] of [[-5, -4], [5, -4], [-5, 4], [5, 4]]) lo = Math.min(lo, gAt(C.x + side.x * a + dir.x * b, C.z + side.z * a + dir.z * b));
-      pc.mesh.material = player.material;
-      pc.mesh.position.set(C.x, lo - 0.25, C.z);
-      pc.mesh.rotation.y = yawD;
-      scene.add(pc.mesh);
-      own.push(pc.mesh);
-      geos.push(pc.mesh.geometry);
-      pieces.push({ mesh: pc.mesh, model: pc.model, vs: pc.vs, pivot: pc.pivot, boom: 1 });
-    }
-  }
-  const porch = at(-3.4, 2.6);
-  add('tnt_crate_1', porch, yawD + 0.3, 1);
-  add('tnt_crate_2', porch.clone().add(new THREE.Vector3(0, 0.55, 0)).addScaledVector(side, 0.12), yawD - 0.2, 1, 0);
-  add('whiskey_barrel_1', at(-3.2, -3.4), yawD, 1);
-  add('whiskey_barrel_2', at(-2.6, -4.2), yawD + 1, 1);
-  add('hitching_rail', at(-2.2, 4.6), yawD + Math.PI / 2, 1);
-  const wagonAt = at(-1.2, -6.4);
-  add('wagon_1', wagonAt, yawD + 0.35, 2);
-  add('signpost_1', at(4.5, 4.4), yawD - 0.6, 0);
   // ---- Sundown on foot: his own rig, gun on the hip, board slung on his back, Pinch on the shoulder
   const actor = new RigInstance(player.rig.geo, { material: player.material });
   const gun = new RigInstance(player.gun.geo, { material: player.material });
@@ -192,25 +104,11 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
     pinch = new RigInstance(buildRigGeo(ps, 'pinch:coldopen'), { material: player.material });
     if (!actor.attach('shoulder_l', pinch.root)) actor.nodes['torso']?.add(pinch.root);
   }
-  // he starts clear of the sand drifted against the saloon's front
-  const A = at(-0.6, 0.4);
-  actor.root.position.copy(A);
-  actor.root.rotation.y = yawD;
+  actor.root.position.copy(S);
+  actor.root.rotation.y = yawD + Math.PI;
   scene.add(actor.root);
   own.push(actor.root);
   actor.setExpression('determined');
-  const head = () => {
-    const n = actor.nodes['head'] ?? actor.root;
-    return n.getWorldPosition(new THREE.Vector3());
-  };
-  // ---- the title, cast in voxels (rises later, behind him, in front of the blaze)
-  const word = new VoxelWord('dustUP', { height: 2.3, style: 'gold', fog: false, glow: 0.7 });
-  let wordIn = false;
-  word.onLand = (_l, p, i) => {
-    kit.sandPop(p, 1.1, true);
-    kit.sfx(i % 2 ? 'rock_crumble' : 'sand_burst', p, 0.8, 0.7 + Math.random() * 0.2);
-    cam.addTrauma(0.12);
-  };
 
   // ---- the clock
   let last = performance.now();
@@ -218,48 +116,28 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
   let T = 0;
   let rate = 1;
   const gait = new DrunkGait(3.7);
-  let headX = -0.03;
-  let boom1 = false, boom2 = false, fadeOut = false;
-  // ---- the draw: he stops, looks into the lens, turns side-on and shoots it (needs the intro's lens rig)
+  let fadeOut = false, turnStep = false, rattled = false;
+  // ---- the draw: he stops, turns round, looks into the lens and shoots it (needs the intro's lens rig)
   const lens = d.lens ?? null;
-  const DRAW = 9.2;
-  const END = lens ? DRAW + 3.35 : 10.6;
+  const DRAW = 1.3;
+  /** after the shot: the frozen beat, then the push into the hole */
+  const PUSH_AT = 0.95, PUSH_DUR = 0.95;
+  const END = lens ? DRAW + 1.05 + PUSH_AT + PUSH_DUR + 0.05 : DRAW + 1.9;
   let drawn = false, fired = false, heart = false, pushing = false;
   const mz = new THREE.Vector3(), camW = new THREE.Vector3(), tv = new THREE.Vector3();
   const HOL = { x: 0.2, z: -0.26, f: -0.7 };
   const aim = { x: 0, z: 0 };
   let recoil = 0;
-  const fuseFrom = A.clone();
-  const fuseTo = porch.clone();
   const shot = (pos: THREE.Vector3, look: THREE.Vector3, fov: number, roll = 0) => {
     pos.y = Math.max(pos.y, gAt(pos.x, pos.z) + 0.3);
     cam.setCine({ pos, look, fov, roll }, false);
   };
-  const blast = (pc: SetPiece[], center: THREE.Vector3, r: number) => {
-    for (const p of pc) {
-      p.mesh.updateMatrixWorld(true);
-      // chunks of about 0.3 m whatever the model's voxel size
-      const big = p.model.map.size > 40000;
-      kit.debris.shatter(p.model, p.vs, p.mesh.matrixWorld.clone(), p.pivot, { chunk: Math.max(2, Math.round(0.3 / p.vs)), speed: 12 + r, max: big ? 460 : 110, up: 8 });
-      p.mesh.visible = false;
-    }
-    kit.blast(center, r, { wood: true, debris: 90 });
-    kit.after(0.12, () => kit.blast(center.clone().addScaledVector(side, r * 0.6).add(new THREE.Vector3(0, r * 0.4, 0)), r * 0.6, { ring: false, flash: false, sound: false, wood: true }));
-    kit.after(0.3, () => kit.blast(center.clone().addScaledVector(side, -r * 0.7).add(new THREE.Vector3(0, r * 0.2, 0)), r * 0.55, { ring: false, flash: false, sound: false, wood: true }));
-    kit.burn(center, r * 0.9, 40);
-    cam.addTrauma(0.9);
-  };
   try {
     eng.letterbox(true, 0.01);
-    void eng.fadeIn(0.9);
-    eng.audio.play('dynamite_fuse', { volume: 0.7 });
-    eng.audio.play('door_creak', { volume: 0.6, pitch: 0.8 });
-    // dev: ?coldfrom=9 starts late with the set left standing (checks the draw without the blasts)
+    void eng.fadeIn(0.6);
+    // dev: ?coldfrom=1 starts the cold open late
     const from = +(new URLSearchParams(location.search).get('coldfrom') ?? 0);
-    if (from > 0) {
-      T = from;
-      boom1 = boom2 = true;
-    }
+    if (from > 0) T = from;
     while (!d.skipped() && T < END) {
       await eng.tweens.wait(0.016, true);
       const now = performance.now();
@@ -268,24 +146,25 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
       if ((window as any).__cineHold) continue; // dev: freeze for a screenshot
       T += dt;
       (window as any).__coldT = T;
-      // time: real speed until the blast, then deep slow motion, easing up a little for the title
-      rate = T < 2.0 ? 1 : T < 7.6 ? 0.3 : 0.42;
-      // the shot freezes the world (once the flash has burnt out); only the lens lives on
-      if (fired && T > DRAW + 1.05 + 0.09) rate = 0.05;
-      else if (fired) rate = 1;
+      // real time until the shot; the shot freezes the world (once the flash has burnt out); only the lens lives on
+      rate = fired && T > DRAW + 1.05 + 0.09 ? 0.05 : 1;
       const cdt = dt * rate;
       const dd = T - DRAW;
-      // the world (its living sand) slows with us
       eng.slowMo(rate, 30);
-      // ---- Sundown staggers toward the lens, three whiskeys deep, and never looks back
-      const walkAmt = lens ? 1 - ease((dd - 0.05) / 0.5) : 1;
+      // ---- Sundown staggers away from the lens, stops, and turns round on it
+      const walkAmt = 1 - ease((dd + 0.15) / 0.35);
       gait.update(cdt, 6.0, walkAmt);
       gait.pose(actor.nodes, { armL: true, armR: !drawn, head: false });
-      actor.root.position.addScaledVector(dir, cdt * 1.15 * walkAmt);
+      actor.root.position.addScaledVector(dir, -cdt * 1.15 * walkAmt);
+      const turnK = ease((dd - 0.05) / 0.38);
+      actor.root.rotation.y = yawD + Math.PI * (1 - turnK);
       const ap = actor.root.position;
       ap.y = gAt(ap.x, ap.z);
-      if (gait.stepped) {
-        if (rate > 0.9) eng.audio.play('footstep_sand', { volume: 0.4, pitch: 0.9 + Math.random() * 0.2 });
+      // the boot that plants as he swings round
+      const pivot = !turnStep && dd > 0.2;
+      if (pivot) turnStep = true;
+      if (gait.stepped || pivot) {
+        eng.audio.play('footstep_sand', { volume: 0.4, pitch: 0.9 + Math.random() * 0.2 });
         const fp = actor.nodes[gait.foot === 1 ? 'shin_l' : 'shin_r']?.getWorldPosition(tv) ?? ap;
         kit.particles.emit({ pos: { x: fp.x, y: ap.y + 0.04, z: fp.z }, count: 5, spread: 1.2, up: 1.1, life: [0.4, 0.8], size: [0.05, 0.03], sprite: GRAIN, color: SAND, gravity: 9, ground: true });
       }
@@ -293,12 +172,11 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
       if (n['jaw']) n['jaw'].rotation.x = actor.exprJaw;
       n['brow_l']?.rotation.set(0, 0, actor.exprBrow[0]);
       n['brow_r']?.rotation.set(0, 0, actor.exprBrow[1]);
-      // the hat brim dips in the close-up; the head lolls on top of it
-      headX += ((T > 4.6 && T < 5.8 ? 0.2 : -0.03) - headX) * Math.min(1, dt * 4);
-      n['head']?.rotation.set(headX + gait.head.x, gait.head.y, gait.head.z);
+      n['head']?.rotation.set(-0.03 + gait.head.x, gait.head.y, gait.head.z);
       if (lens && dd > 0) {
         // ---- the draw (in real time: the fastest thing in a frozen world)
-        if (dd > 0.08 && !drawn && dd < 0.2) {
+        if (dd > 0.08 && !rattled) {
+          rattled = true;
           actor.setExpression('focus');
           eng.audio.play('skeleton_rattle', { volume: 0.35, pitch: 0.8 });
         }
@@ -373,13 +251,13 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
           // cracks race out from the hole, the lip cools, the light behind it swells
           lens.crack = 1 - Math.pow(1 - sat(f / 0.16), 3);
           lens.burn = 0.35 + 0.65 * Math.exp(-f * 1.4);
-          lens.light = 0.35 + 0.85 * ease((f - 0.25) / 1.1);
-          if (!heart && f > 0.35) {
+          lens.light = 0.35 + 0.85 * ease((f - 0.15) / 0.75);
+          if (!heart && f > 0.25) {
             heart = true;
             eng.audio.play('heartbeat', { volume: 0.7, pitch: 0.9 });
           }
           // ...then the view flies into the hole and burns white: the desert sun
-          const pk = sat((f - 1.25) / 1.05);
+          const pk = sat((f - PUSH_AT) / PUSH_DUR);
           if (pk > 0 && !pushing) {
             pushing = true;
             eng.audio.play('whoosh_big', { volume: 0.9, pitch: 0.55 });
@@ -394,86 +272,14 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
       if (pinch) {
         const pn = pinch.nodes;
         for (let k = 1; k <= 5; k++) pn['tail' + k]?.rotation.set(-0.3 - Math.sin(T * 2 + k) * 0.08, 0, 0);
-        pinch.root.rotation.y = boom1 ? Math.PI * 0.85 : Math.sin(T * 1.3) * 0.3; // Pinch looks back. Sundown doesn't.
+        pinch.root.rotation.y = Math.sin(T * 1.3) * 0.3;
       }
       actor.root.updateMatrixWorld(true);
-      // ---- the fuse fizzing back across the sand to the porch
-      if (!boom1) {
-        const k = sat(T / 2.0);
-        const fp = fuseFrom.clone().lerp(fuseTo, k);
-        fp.y = gAt(fp.x, fp.z) + 0.05;
-        kit.particles.emit({ pos: fp, count: 3, spread: 1.6, up: 0.8, life: [0.15, 0.4], size: [0.06, 0.01], sprite: 'spark', additive: true, color: [0xfff0b0, 0xffa040], drag: 2, gravity: 3 });
-        kit.particles.emit({ pos: fp, count: 1, vel: { x: 0, y: 0.6, z: 0 }, spread: 0.2, life: [0.6, 1.1], size: [0.08, 0.2], sprite: 'puff0', color: 0x8a7a68, alpha: 0.5, drag: 1 });
-        kit.light(fp, 0xffb050, 3, 0.12, 4);
-      }
-      if (!boom1 && T >= 2.0) {
-        boom1 = true;
-        const saloon = pieces.find((p) => p.boom === 1 && p.model.map.size > 40000);
-        const center = saloon ? saloon.mesh.position.clone().add(new THREE.Vector3(0, 2.4, 0)) : at(-(frontZ + 4), 0, 2.4);
-        blast(pieces.filter((p) => p.boom === 1), center, 6.2);
-        kit.blast(porch, 3, { ring: false, flash: false, sound: false, wood: true });
-        eng.audio.play('time_slow', { volume: 0.8, pitch: 0.85 });
-        eng.flash(0xfff4d8, 0.75, 0.5);
-      }
-      if (!boom2 && T >= 5.6) {
-        boom2 = true;
-        blast(pieces.filter((p) => p.boom === 2), wagonAt.clone().add(new THREE.Vector3(0, 0.8, 0)), 3.6);
-      }
-      // burning planks and embers raining down around him
-      if (boom1 && T < 8.5 && Math.random() < dt * 9) {
-        const a = Math.random() * Math.PI * 2, r = 1.5 + Math.random() * 5;
-        const x = ap.x + Math.cos(a) * r, z = ap.z + Math.sin(a) * r;
-        kit.debris.burst(x, ap.y + 7 + Math.random() * 4, z, 1 + Math.floor(Math.random() * 2), 0.14, [0x5a3a1e, 0x2a1a10, 0x8a5a30], 1.2, -3);
-        kit.particles.emit({ pos: { x, y: ap.y + 6, z }, count: 4, vel: { x: 0, y: -4, z: 0 }, spread: 0.8, life: [1.2, 2], size: [0.07, 0.02], sprite: ['dot3', 'spark'], additive: true, color: [0xffd080, 0xff7a20], gravity: 2, drag: 0.6 });
-      }
-      if (boom1 && Math.random() < dt * 6) kit.ash(head().addScaledVector(dir, 1.2), 2, { x: side.x * 1.2, y: 0, z: side.z * 1.2 });
-      // ---- the title rises out of the sand between him and the blaze
-      if (!wordIn && T >= 7.4) {
-        wordIn = true;
-        const L = ap.clone().addScaledVector(dir, -4.2);
-        L.y = gAt(L.x, L.z);
-        word.group.position.copy(L);
-        word.group.rotation.y = yawD;
-        word.plant(gAt);
-        scene.add(word.group);
-        own.push(word.group);
-        word.enter('rise', 0.1, 0.05);
-        kit.shock(L.x, L.z, { power: 0.5, speed: 9, life: 1.4 });
-        // the dust settles out of the street so the name reads
-        kit.billows.thin(L, 10);
-        kit.billows.thin(ap, 8);
-        eng.audio.play('quake_rumble', { volume: 0.8, pitch: 0.9 });
-      }
-      if (wordIn) word.update(dt);
-      // ---- the camera
-      const h = head();
-      if (T < 2.0) {
-        const k = T / 2.0;
-        shot(ap.clone().addScaledVector(dir, 4.6 - k * 0.3).addScaledVector(side, 0.9).add(new THREE.Vector3(0, 1.05, 0)), ap.clone().add(new THREE.Vector3(0, 1.2, 0)).addScaledVector(dir, -2.5), 46 - k * 2);
-      } else if (T < 4.4) {
-        const k = (T - 2.0) / 2.4;
-        const a = -0.35 + k * 0.6;
-        const off = dir.clone().applyAxisAngle(UP, a).multiplyScalar(3.9 - k * 0.6);
-        shot(ap.clone().add(off).add(new THREE.Vector3(0, 0.42, 0)), ap.clone().add(new THREE.Vector3(0, 1.4, 0)).addScaledVector(dir, -3), 40 - k * 4, 0.06 - k * 0.04);
-      } else if (T < 5.6) {
-        const k = (T - 4.4) / 1.2;
-        shot(h.clone().addScaledVector(dir, 1.25 - k * 0.15).addScaledVector(side, 0.42).add(new THREE.Vector3(0, -0.14, 0)), h.clone().add(new THREE.Vector3(0, 0.02, 0)), 30 - k * 2, -0.03);
-      } else if (T < 7.6) {
-        const k = (T - 5.6) / 2.0;
-        // from the side away from the wagon: a small figure walking out of the inferno
-        shot(ap.clone().addScaledVector(side, 12 - k * 1.5).addScaledVector(dir, 6.5).add(new THREE.Vector3(0, 2.0 + k * 0.4, 0)), ap.clone().add(new THREE.Vector3(0, 2.2, 0)).addScaledVector(dir, -5).addScaledVector(side, -2), 54);
-      } else if (!lens || T < DRAW) {
-        // low, looking up: the name against the smoke column, him walking out under it
-        const k = ease((T - 7.6) / 3.0);
-        const L = word.group.position;
-        shot(ap.clone().addScaledVector(dir, 7.2 + k * 2).addScaledVector(side, 0.5).add(new THREE.Vector3(0, 0.55 + k * 0.45, 0)), L.clone().add(new THREE.Vector3(0, 1.45 + k * 0.35, 0)), 52 - k * 4);
-      } else {
-        // face to face: the blaze and the name behind him, the lens in front of him (it creeps in, then holds)
-        const k = ease(Math.min(dd, 1.05) / 1.05);
-        shot(ap.clone().addScaledVector(dir, 2.75 - k * 0.3).addScaledVector(side, 0.32).add(new THREE.Vector3(0, 1.22, 0)), ap.clone().add(new THREE.Vector3(0, 1.32, 0)).addScaledVector(side, 0.06), 38);
-      }
+      // ---- the camera: low behind him as he walks off; he turns round into it, it creeps in, then holds
+      const k = ease(sat(dd / 1.05));
+      shot(ap.clone().addScaledVector(dir, 2.95 - k * 0.3).addScaledVector(side, 0.34).add(new THREE.Vector3(0, 1.2, 0)), ap.clone().add(new THREE.Vector3(0, 1.3, 0)).addScaledVector(dir, -2.2 * (1 - turnK)).addScaledVector(side, 0.06), 40 - k * 2);
       kit.update(cdt, cdt);
-      if (!lens && !fadeOut && T >= 9.9) {
+      if (!lens && !fadeOut && T >= END - 0.7) {
         fadeOut = true;
         void eng.fadeOut(0.65, '#000');
       }
@@ -482,10 +288,8 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
     // hand back on black (or on the lens burnt white): the intro picks up from here
     if (!d.skipped() && !lens) eng.fadeEl.style.opacity = '1';
     eng.slowMo(1, 1000);
-    word.dispose();
     actor.dispose();
     for (const o of own) o.removeFromParent();
-    for (const g of geos) g.dispose();
     kit.dispose();
     cam.setCine(null, false);
   }

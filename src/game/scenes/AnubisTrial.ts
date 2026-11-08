@@ -224,7 +224,7 @@ type ShotFn = (t: number) => { p: THREE.Vector3; l: THREE.Vector3; fov: number }
 type Phase = 'build' | 'tunnel' | 'descent' | 'gate' | 'hall' | 'throne' | 'judge' | 'grant' | 'take';
 /** the fall through the sand: from (0, TUN_Y0) to (0, TUN_Y1) over TUN_T seconds; the god lets go at TUN_RELEASE */
 const TUN_Y0 = 64, TUN_Y1 = 30.5, TUN_T = 3.4, TUN_RELEASE = 2.1;
-const TSAND = [0x5a4630, 0x6a5238, 0x8a6a48, 0x3a2c1e, 0x9a7a54];
+const TSAND = [0x9a7a54, 0xb08a5e, 0x7a5e40, 0xc8a070, 0x8a6a48];
 
 const TEXT: Record<Line['who'], FloatTextOpts> = {
   anubis: { size: 0.4, color: '#ffe6ad', glow: '#ff9d3a', cps: 34, wrap: 30, hdr: 1.7, px: 72 },
@@ -1081,16 +1081,18 @@ export class AnubisTrial {
       }
     }
     // the walls: grains spiralling up past us as we fall, widening and thinning as the shaft opens
-    const n = Math.floor(dt * 420 * dens) + (rnd.next() < (dt * 420 * dens) % 1 ? 1 : 0);
+    const n = Math.floor(dt * 1000 * dens) + (rnd.next() < (dt * 1000 * dens) % 1 ? 1 : 0);
     for (let i = 0; i < n; i++) {
-      const ang = rnd.next() * Math.PI * 2, r = 2 + rnd.next() * 2.6 + k * 5;
-      const y = cy - 1 - rnd.next() * 15;
+      const ang = rnd.next() * Math.PI * 2, r = 2.6 + rnd.next() * 2.2 + k * 5;
+      const y = cy + 1 - rnd.next() * 16;
       const tx = -Math.sin(ang), tz = Math.cos(ang);
-      this.fx.emit({ pos: { x: Math.cos(ang) * r, y, z: LAND.z + Math.sin(ang) * r }, vel: { x: tx * 5, y: 15, z: tz * 5 }, count: 1, life: [0.35, 0.8], size: [0.05, 0.09], sprite: ['streak', 'dot3', 'grain1'], color: TSAND, stretch: 0.05, drag: 0.3 });
+      this.fx.emit({ pos: { x: Math.cos(ang) * r, y, z: LAND.z + Math.sin(ang) * r }, vel: { x: tx * 6, y: 15, z: tz * 6 }, count: 1, life: [0.4, 0.9], size: [0.06, 0.13], sprite: ['streak', 'dot3', 'dot4', 'grain1'], color: TSAND, stretch: 0.05, drag: 0.3 });
     }
-    if (rnd.next() < dt * 26 * dens) {
-      const ang = rnd.next() * Math.PI * 2, r = 3.2 + rnd.next() * 3 + k * 5;
-      this.fx.emit({ pos: { x: Math.cos(ang) * r, y: cy - 4 - rnd.next() * 10, z: LAND.z + Math.sin(ang) * r }, vel: { x: -Math.sin(ang) * 3, y: 11, z: Math.cos(ang) * 3 }, count: 1, life: [0.8, 1.4], size: [1.6, 3.4], sprite: ['puff0', 'puff2', 'cloud1'], color: [0x2a2018, 0x3a2c1e, 0x4a3826], alpha: 0.55, rot: 3, rotSpeed: 1.2 });
+    // the sand walls proper: big clouds turning round the shaft
+    const m = Math.floor(dt * 70 * dens) + (rnd.next() < (dt * 70 * dens) % 1 ? 1 : 0);
+    for (let i = 0; i < m; i++) {
+      const ang = rnd.next() * Math.PI * 2, r = 3.4 + rnd.next() * 2.4 + k * 5;
+      this.fx.emit({ pos: { x: Math.cos(ang) * r, y: cy - 2 - rnd.next() * 13, z: LAND.z + Math.sin(ang) * r }, vel: { x: -Math.sin(ang) * 4, y: 12, z: Math.cos(ang) * 4 }, count: 1, life: [0.9, 1.5], size: [1.8, 3.6], sprite: ['puff0', 'puff2', 'cloud1', 'cloud2'], color: [0x5a4630, 0x6a5238, 0x7a5e40, 0x4a3826], alpha: 0.62, rot: 3, rotSpeed: 1.2 });
     }
     // spirit motes, more of them the deeper we go
     if (rnd.next() < dt * (12 + 40 * k)) {

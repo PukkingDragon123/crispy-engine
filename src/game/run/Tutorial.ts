@@ -4,14 +4,24 @@
 // to actually do it, with a short spoken line and a floating 3D prompt (Alagard)
 // naming the keys:
 //   1. push (tap SHIFT, on the beat), carve (A / D) and tuck (hold SPACE)
-//   2. hold SPACE to charge a jump, release, and land it
-//   3. aim (RMB) and shoot (LMB) three skull targets she raises from the sand
-//   4. reload (R) and hit the timing window (R again) for venom rounds
-//   5. kick (F)
-//   6. grapple (Q) the scorpion totem she raises
+//   2. drift (hold SHIFT through a carve) and sling out of it
+//   3. hold SPACE to charge a jump, release, and land it
+//   4. a trick in the air (SHIFT + W A S D), landed
+//   5. aim (RMB) and shoot (LMB) three skull targets she raises: go for heads
+//   6. reload (R) with Pinch's timing ring (R again) for venom rounds
+//   7. kick (F)
+//   8. the QTE dodge ring: she hurls a spear of sand, SPACE as the ring closes
+//   9. grapple (Q) the scorpion totem she raises
+//  10. switching guns (3 / 4 / 5) when he carries more than one
+//  11. the tarot: she lends THE SUN, cast it (G) and empower it on its ring
+//  12. the soul jar: she fills it, he unleashes Serket's Wrath (Z)
+//  13. digging: she buries a glint, he digs it up (hold T)
+//  14. the 30 s break between waves and ringing the bell (told)
+//  15. the trail ledger and the shop compass; TAB opens the full ledger
 // then "a hundred waves stand between you and your name", she leaves, and the
-// run begins. Hold BACKSPACE (or click SKIP) to skip. On a touch screen every
-// goal and line names the gestures instead of the keys (ui/TouchControls).
+// run begins. Every step can be passed with N (or the "next step" label), and
+// hold BACKSPACE (or click SKIP) to skip the whole lesson. On a touch screen
+// every goal and line names the gestures instead of the keys (ui/TouchControls).
 //
 // API: `new Tutorial({ ctx, player, cam })`, then every frame `update(dt)` until
 // `done`, then `dispose()`. It never touches the wave director: the caller starts
@@ -30,6 +40,8 @@ import { FloatText3D } from '../fx/FloatText3D';
 import { Voice } from '../audio/Voice';
 import { GlyphRings, SandVortex, SerketSpirit, guideSpot, spiritMotes, type SpiritPose } from '../fx/SerketSpirit';
 import { isTouchDevice } from '../ui/TouchControls';
+import { Skills } from '../player/Skills';
+import type { Dodge, DodgeResult } from '../enemies/Dodge';
 
 /** on a touch screen the lesson names the gestures (ui/TouchControls) instead of the keys */
 const TOUCH = isTouchDevice();
@@ -115,6 +127,20 @@ export class Tutorial {
   private targetsLeft = 0;
   private farT = 0;
   private lastDt = 1 / 60;
+  private drifts = 0;
+  private tricks = 0;
+  private swaps = 0;
+  private dodgeRes: DodgeResult | null = null;
+  private ledgerSeen = false;
+  private ledgerRestore: (() => void) | null = null;
+  private dig: { site: any; tr: any } | null = null;
+  private lentSun = false;
+  /** N (or the "next step" label): pass the current step */
+  private stepSkip = false;
+  private nextEl: HTMLDivElement;
+  private onNext = (e: KeyboardEvent) => {
+    if (e.code === 'KeyN' && !e.repeat) this.stepSkip = true;
+  };
 
   constructor(d: TutorialDeps) {
     this.ctx = d.ctx;
@@ -145,7 +171,10 @@ export class Tutorial {
     this.unsub.push(
       ev.on('melee', () => this.melee++),
       ev.on('perfectReload', () => (this.perfect = true)),
-      ev.on('propShot', (c: Collider, p: THREE.Vector3) => this.onPropShot(c, p))
+      ev.on('propShot', (c: Collider, p: THREE.Vector3) => this.onPropShot(c, p)),
+      ev.on('driftBoost', () => this.drifts++),
+      ev.on('trick', () => this.tricks++),
+      ev.on('weaponSwap', () => this.swaps++)
     );
     // skipping: hold BACKSPACE, or click
     this.skipEl = document.createElement('div');
@@ -158,6 +187,26 @@ export class Tutorial {
     this.ctx.engine.overlay.append(this.skipEl);
     window.addEventListener('keydown', this.onKey);
     window.addEventListener('keyup', this.onKey);
+    // passing a single step
+    this.nextEl = document.createElement('div');
+    this.nextEl.style.cssText = "position:absolute;right:3vw;top:calc(3vh + 34px);font-family:'Alagard';font-size:14px;color:#e8fff2;opacity:.55;z-index:9;pointer-events:auto;cursor:pointer;padding:6px 12px;text-shadow:0 2px 0 #0a2a1a";
+    this.nextEl.textContent = say('N: next step  >', 'tap here: next step  >');
+    this.nextEl.onpointerdown = (e) => {
+      e.stopPropagation();
+      this.stepSkip = true;
+    };
+    this.ctx.engine.overlay.append(this.nextEl);
+    window.addEventListener('keydown', this.onNext);
+    // the ledger: notice when he opens it (the scene pauses the lesson while it is up)
+    const L = (this.ctx.engine.current as any)?.ledger as { toggle(v?: boolean): void; open: boolean } | undefined;
+    if (L?.toggle) {
+      const orig = L.toggle;
+      L.toggle = (v?: boolean) => {
+        if (v ?? !L.open) this.ledgerSeen = true;
+        orig.call(L, v);
+      };
+      this.ledgerRestore = () => (L.toggle = orig);
+    }
     this.co = this.script();
   }
 
@@ -184,15 +233,35 @@ export class Tutorial {
       'neutral',
       'point'
     );
-    yield () => {
+    yield this.until(() => {
       this.check(0, this.rideDist > 26);
       this.check(1, this.carveT > 0.8);
       this.check(2, this.tuckT > 1.0);
       return this.goals.every((g) => g.done);
-    };
+    });
     yield 0.5;
     this.clearGoals();
     yield* this.line('Ha! The sand still remembers you.', 'laugh', 'open');
+
+    // 2. drift and sling out of it
+    this.drifts = 0;
+    this.setGoals(TOUCH ? ['DRIFT   flick your left thumb sideways', 'SLING   ease it back'] : ['DRIFT   hold SHIFT through an A / D carve', 'SLING   let go of SHIFT']);
+    yield* this.line(
+      say('Hold your foot down through a hard carve and the board slides out sideways. Let go, and the sand slings you out of it faster.', 'Flick your left thumb sideways and the board slides out into a drift. Ease it back, and the sand slings you out of it faster.'),
+      'neutral',
+      'point'
+    );
+    yield this.until(() => {
+      if (this.player.board.drifting) this.check(0, true);
+      if (this.drifts > 0) {
+        this.check(0, true);
+        this.check(1, true);
+      }
+      return this.drifts > 0;
+    });
+    yield 0.4;
+    this.clearGoals();
+    yield* this.line('Now you ride like you mean it.', 'happy', 'open');
 
     // 2. charge a jump and land it
     this.jumpCharged = false;
@@ -200,7 +269,7 @@ export class Tutorial {
     const jumpGoal = say('JUMP   hold SPACE ... release', 'JUMP   flick up, hold ... ease back');
     this.setGoals([jumpGoal, 'LAND IT   stay level']);
     yield* this.line(say('Now hold SPACE to coil those bones, let go to fly, and land it clean.', 'Now flick your left thumb up and hold it to coil those bones, ease back to fly, and land it clean.'), 'neutral', 'beckon');
-    yield () => {
+    yield this.until(() => {
       if (this.jumpCharged) this.check(0, true);
       if (this.landed) {
         if (this.landed.quality === 'bail') {
@@ -212,10 +281,29 @@ export class Tutorial {
         } else this.check(1, true);
       }
       return this.goals.every((g) => g.done);
-    };
+    });
     yield 0.4;
     this.clearGoals();
     yield* this.line('Graceful. For a corpse.', 'smug', 'present');
+
+    // 4. a trick in the air
+    this.tricks = 0;
+    this.setGoals(TOUCH ? ['TRICK   in the air, flick your left thumb', 'LAND IT   clean'] : ['TRICK   in the air, hold SHIFT + W A S D', 'LAND IT   clean']);
+    yield* this.line(
+      say('Style pays. Up in the air, hold SHIFT and lean with W A S D to spin and flip. Land it and the bounty board takes notice.', 'Style pays. Up in the air, flick your left thumb sideways to spin, up or down to flip. Land it and the bounty board takes notice.'),
+      'smug',
+      'beckon'
+    );
+    yield this.until(() => {
+      if (this.tricks > 0) {
+        this.check(0, true);
+        this.check(1, true);
+      }
+      return this.tricks > 0;
+    });
+    yield 0.4;
+    this.clearGoals();
+    yield* this.line('Show-off. I love it.', 'laugh', 'open');
 
     // 3. aim and shoot: three skulls rise out of the sand
     sp.pose = 'raise';
@@ -224,20 +312,24 @@ export class Tutorial {
     yield 1.0;
     this.setGoals(TOUCH ? ['AIM   drag right, then hold still', 'SHOOT   keep the sights on a skull', 'SKULLS   0 / 3'] : ['AIM   hold RIGHT MOUSE', 'SHOOT   LEFT MOUSE', 'SKULLS   0 / 3']);
     yield* this.line(
-      say('Three old skulls with bad attitudes. Aim with the right mouse, shoot with the left.', 'Three old skulls with bad attitudes. Drag your right thumb to aim and hold it still. Keep the sights on one and the gun speaks for itself.'),
+      say(
+        'Three old skulls with bad attitudes. Aim with the right mouse, shoot with the left. On anything with a head, go for the head: headshots hit hardest.',
+        'Three old skulls with bad attitudes. Drag your right thumb to aim and hold it still; keep the sights on one and the gun speaks for itself. On anything with a head, go for the head.'
+      ),
       'stern',
       'point'
     );
-    yield () => {
+    yield this.until(() => {
       if (this.player.aiming) this.check(0, true);
       const hit = 3 - this.targetsLeft;
       if (hit > 0) this.check(1, true);
       this.retext(2, `SKULLS   ${hit} / 3`, hit >= 3);
       this.keepTargetsNear();
       return this.targetsLeft <= 0;
-    };
+    });
     yield 0.5;
     this.clearGoals();
+    this.sinkAll();
     yield* this.line('Three for three. Sethos ought to be worried.', 'happy', 'open');
 
     // 4. reload with the timing ring
@@ -246,11 +338,14 @@ export class Tutorial {
     this.player.ammo = Math.min(this.player.ammo, 1);
     this.setGoals(TOUCH ? ['RELOAD   tap the cylinder', 'VENOM ROUNDS   tap again in the bright window'] : ['RELOAD   R', 'VENOM ROUNDS   R again in the bright window']);
     yield* this.line(
-      say('Your cylinder is nearly dry. Press R, and when the ring flashes in the window, press R again.', 'Your cylinder is nearly dry. Tap it, and when the ring flashes in the window, tap it again.'),
+      say(
+        'Your cylinder is nearly dry. Press R and Pinch spins it for you; when his ring flashes in the bright window, press R again.',
+        'Your cylinder is nearly dry. Tap it and Pinch spins it for you; when his ring flashes in the bright window, tap it again.'
+      ),
       'neutral',
       'present'
     );
-    yield () => {
+    yield this.until(() => {
       const R = this.player.reload;
       if (R.active) this.check(0, true);
       if (this.wasReloading && !R.active && !this.perfect) {
@@ -263,7 +358,7 @@ export class Tutorial {
       this.wasReloading = R.active;
       if (this.perfect) this.check(1, true);
       return this.perfect || this.reloads >= 3;
-    };
+    });
     yield 0.5;
     this.clearGoals();
     yield* this.line(this.perfect ? 'Venom rounds. My own recipe. Mind the aftertaste.' : 'Close enough. Practice makes poison.', 'smug', 'idle');
@@ -272,13 +367,16 @@ export class Tutorial {
     this.melee = 0;
     this.setGoals([say('KICK   F', 'KICK   swipe your right thumb down')]);
     yield* this.line(say('Something too close for lead? Kick it. F.', 'Something too close for lead? Kick it. Swipe your right thumb down.'), 'stern', 'beckon');
-    yield () => {
+    yield this.until(() => {
       this.check(0, this.melee > 0);
       return this.melee > 0;
-    };
+    });
     yield 0.4;
     this.clearGoals();
     yield* this.line('Lovely form. Very... bony.', 'laugh', 'open');
+
+    // 8. the QTE dodge ring: she hurls a spear of sand at him
+    yield* this.dodgeLesson();
 
     // 6. grapple the totem
     sp.pose = 'raise';
@@ -286,15 +384,24 @@ export class Tutorial {
     yield 1.0;
     this.setGoals([say('GRAPPLE   aim at the totem, press Q', 'GRAPPLE   aim at the totem, swipe up')]);
     yield* this.line(say('Last trick. Aim at my totem and hook it with Q.', 'Last trick. Aim at my totem and swipe your right thumb up to hook it.'), 'neutral', 'point');
-    yield () => {
+    yield this.until(() => {
       const hooked = this.player.board.grapple.active;
       this.check(0, hooked);
       this.keepTargetsNear();
       return hooked;
-    };
+    });
     yield 1.2;
     this.clearGoals();
     this.sinkAll();
+    yield* this.line('Hooked. Nothing out here outruns you now.', 'happy', 'open');
+
+    // 10. guns, 11. the tarot, 12. the soul jar, 13. digging, 14. the break and the bell, 15. the ledger
+    yield* this.gunsLesson();
+    yield* this.tarotLesson();
+    yield* this.ultLesson();
+    yield* this.digLesson();
+    yield* this.breakLesson();
+    yield* this.ledgerLesson();
     yield* this.line(say("There. You're ready, or close enough to fake it.", "There. You're ready, or close enough to fake it. When the cards wake, tap them."), 'happy', 'open');
 
     // farewell
@@ -302,6 +409,267 @@ export class Tutorial {
     yield* this.line('Sethos waits at the eye of the storm. A hundred waves stand between you and your name.', 'stern', 'open', 1.6);
     yield* this.line('Ride well, bone-rider. I will be watching.', 'happy', 'present', 1.0);
     yield* this.depart(false);
+  }
+
+  // ------------------------------------------------------------------ the newer lessons
+  /** a wait that the player can pass with N / the "next step" label */
+  private until(fn: () => boolean): () => boolean {
+    return () => {
+      if (fn()) return true;
+      if (!this.stepSkip) return false;
+      this.stepSkip = false;
+      this.speech?.show(false);
+      return true;
+    };
+  }
+
+  private *dodgeLesson(): Script {
+    const dg = (this.ctx.enemies as unknown as { dodge?: Dodge }).dodge;
+    if (!dg) return;
+    this.setGoals([say('DODGE   SPACE as the ring closes', 'DODGE   do what the ring says')]);
+    yield* this.line(
+      say(
+        'The big brutes wind up before they strike. Time slows and a ring closes on you: hit SPACE as it meets the mark and you slip the blow, with a counter waiting.',
+        'The big brutes wind up before they strike. Time slows and a ring closes on you: do what it says as it meets the mark, and you slip the blow with a counter waiting.'
+      ),
+      'stern',
+      'raise'
+    );
+    let ok = false;
+    for (let tries = 0; tries < 3 && !ok && !this.stepSkip; tries++) {
+      // she draws a spear of sand out of the dune ahead of him
+      const f = this.cam.forward();
+      const from = new THREE.Vector3(this.player.pos.x + f.x * 7 + f.z * 2, 0, this.player.pos.z + f.z * 7 - f.x * 2);
+      from.y = this.ground(from.x, from.z);
+      this.spirit.pose = 'raise';
+      this.spirit.flick();
+      this.ctx.sfx('spectral_scorpion', from, 0.6, 1.3);
+      this.ctx.fx.sandBurst(from, 1.0);
+      spiritMotes(this.ctx.particles, from, 12, 0.6, 2);
+      yield 0.5;
+      this.dodgeRes = null;
+      void dg.offer({ from, label: 'DODGE!' }).then((r) => (this.dodgeRes = r));
+      yield () => this.dodgeRes !== null || this.stepSkip;
+      if (this.stepSkip) break;
+      const r = this.dodgeRes as DodgeResult | null;
+      if (r === 'good' || r === 'perfect') {
+        ok = true;
+        this.check(0, true);
+      } else if (r === 'none') yield 1.5; // the ring was busy: try again shortly
+      else if (r === 'fail') {
+        this.ctx.fx.sandBurst(this.player.pos, 0.8);
+        this.quip(tries === 0 ? 'Too slow. That one was made of sand. The next won\'t be. Again.' : 'Watch the ring, not me. Again.');
+        yield 2.0;
+      }
+    }
+    this.stepSkip = false;
+    yield 0.4;
+    this.clearGoals();
+    yield* this.line(ok ? 'Smooth as a sidewinder.' : 'You will learn it when it matters. Probably.', ok ? 'happy' : 'smug', 'open');
+  }
+
+  private *gunsLesson(): Script {
+    const carried = this.player.weapons.carried;
+    if (carried.length < 2) {
+      yield* this.line(
+        say(
+          'Find a shotgun or tommy-gun blueprint and the gun rides on your back. Then 3, 4 and 5 draw your guns, or roll the mouse wheel.',
+          'Find a shotgun or tommy-gun blueprint and the gun rides on your back. Then flick the floating cylinder sideways, or tap a gun on the strip, to draw it.'
+        ),
+        'neutral',
+        'present'
+      );
+      return;
+    }
+    this.swaps = 0;
+    this.setGoals([say('SWITCH GUNS   3 / 4 / 5 or the mouse wheel', 'SWITCH GUNS   flick the cylinder sideways')]);
+    yield* this.line(say('You carry more than one iron. 3, 4 and 5 draw them, or roll the wheel.', 'You carry more than one iron. Flick the floating cylinder sideways, or tap a gun on the strip, to draw it.'), 'neutral', 'present');
+    yield this.until(() => {
+      this.check(0, this.swaps > 0);
+      return this.swaps > 0;
+    });
+    yield 0.4;
+    this.clearGoals();
+    yield* this.line('Right tool, right corpse.', 'smug', 'open');
+  }
+
+  private *tarotLesson(): Script {
+    const sk = Skills.current;
+    if (!sk) return;
+    const lent = !sk.learned.has('G');
+    yield* this.line(
+      'Rank up and the tarot wakes: cards of my power, each a skill of your own. Here, borrow my Sun for a moment.',
+      'happy',
+      'raise'
+    );
+    if (lent) {
+      sk.learn('G');
+      this.lentSun = true;
+    }
+    sk.bombCharges = 2;
+    const empowered = () => {
+      const a = sk as unknown as { nextBombPower?: number; bombs?: { power?: number }[] };
+      return (a.nextBombPower ?? 1) > 1 || !!a.bombs?.some((b) => (b.power ?? 0) > 1);
+    };
+    this.setGoals(TOUCH ? ['CAST   tap THE SUN card', 'EMPOWER   tap it again as the jade ring meets the sight'] : ['CAST   G   (THE SUN)', 'EMPOWER   G again as the jade ring meets the sight']);
+    yield* this.line(
+      say(
+        'Cast it with G. A jade ring closes over your head: press G again as it meets the sight, and the cast comes out empowered.',
+        'Tap the card to cast it. A jade ring closes over your head: tap it again as it meets the sight, and the cast comes out empowered.'
+      ),
+      'neutral',
+      'point'
+    );
+    let casts = 0, last = sk.bombCharges, refills = 0;
+    yield this.until(() => {
+      if (sk.bombCharges < last) {
+        casts++;
+        this.check(0, true);
+      }
+      last = sk.bombCharges;
+      if (sk.bombCharges === 0 && refills < 2) {
+        refills++;
+        sk.bombCharges = last = 2;
+      }
+      if (empowered()) this.check(1, true);
+      return this.goals.every((g) => g.done) || casts >= 5;
+    });
+    yield 1.4;
+    this.clearGoals();
+    this.returnSun();
+    yield* this.line(lent ? 'And back up my sleeve it goes. Earn your own cards at the rank-ups.' : 'You knew that one already. Show-off.', 'smug', 'open');
+  }
+
+  private *ultLesson(): Script {
+    const cur = this.ctx.engine.current as unknown as { ult?: { active: boolean } } | null;
+    const run = this.ctx.run;
+    yield* this.line('Every kill in a streak pours a soul into your canopic jar. When it brims, I come in person. Let me fill it for you, just this once.', 'happy', 'raise');
+    run.ultCharge = 1;
+    this.ctx.sfx('ult_ready', null, 0.7);
+    spiritMotes(this.ctx.particles, this.player.center(new THREE.Vector3()), 20, 0.8, 2);
+    this.setGoals(TOUCH ? ['SOUL JAR   full', "SERKET'S WRATH   tap the soul jar"] : ['SOUL JAR   full', "SERKET'S WRATH   Z"]);
+    this.check(0, true);
+    yield* this.line(say('Now. Press Z.', 'Now. Tap the jar.'), 'stern', 'beckon');
+    let seen = false, waited = 0;
+    yield this.until(() => {
+      waited += this.lastDt;
+      if (cur?.ult?.active) seen = true;
+      if (seen || run.ultCharge < 0.5) this.check(1, true);
+      return (seen && !cur?.ult?.active) || (!seen && run.ultCharge < 0.5) || waited > 30;
+    });
+    this.stepSkip = false;
+    yield 0.6;
+    this.clearGoals();
+    yield* this.line(seen ? 'Did you feel that? That was me holding back.' : 'Keep it full, then. The dead will give you reasons.', 'laugh', 'open');
+  }
+
+  private *digLesson(): Script {
+    const tr = (this.ctx.engine.current as any)?.treasure;
+    const plant = () => {
+      if (!tr?.addSite) return null;
+      const at = this.aheadPoint(10, 1.5);
+      at.y = this.ground(at.x, at.z);
+      const z = (this.ctx.world as unknown as { zone?: { index: number; name: string } }).zone ?? { index: 0, name: 'the flats' };
+      try {
+        return tr.addSite('glint', at, z, { kind: 'gold' });
+      } catch {
+        return null;
+      }
+    };
+    const site = plant();
+    if (!site) {
+      yield* this.line(say('Brass glints in the sand and heaped mounds hide old caches. Slow down over them and hold T to dig.', 'Brass glints in the sand and heaped mounds hide old caches. Slow down, touch the spot and hold to dig.'), 'neutral', 'point');
+      return;
+    }
+    this.dig = { site, tr };
+    this.ctx.sfx('sand_rise', site.pos, 0.6);
+    this.setGoals([say('DIG   slow down on the glint, hold T', 'DIG   slow down, touch the glint and hold')]);
+    yield* this.line(
+      say(
+        'See that glint in the sand? I dropped a coin. The desert keeps everything: glints, mounds, maps with an X. Slow down over it and hold T to dig.',
+        'See that glint in the sand? I dropped a coin. The desert keeps everything: glints, mounds, maps with an X. Slow down, touch the spot and hold to dig.'
+      ),
+      'happy',
+      'point'
+    );
+    let far = 0;
+    yield this.until(() => {
+      const d = this.dig!;
+      if (d.site.done) {
+        this.check(0, true);
+        return true;
+      }
+      far = d.site.pos.distanceTo(this.player.pos) > 40 ? far + this.lastDt : 0;
+      if (far > 3) {
+        far = 0;
+        this.dropDig();
+        const s2 = plant();
+        if (!s2) return true;
+        this.dig = { site: s2, tr };
+        this.quip('Over here, bone-rider.');
+      }
+      if (Math.random() < this.lastDt * 4) spiritMotes(this.ctx.particles, d.site.pos, 1, 0.3, 1.2);
+      return false;
+    });
+    if (!this.dig?.site.done) this.dropDig();
+    this.dig = null;
+    yield 0.5;
+    this.clearGoals();
+    yield* this.line('Finders keepers. Maps lead to relics, and relics stay yours forever.', 'smug', 'open');
+  }
+
+  /** the borrowed card goes back up her sleeve */
+  private returnSun() {
+    if (!this.lentSun) return;
+    this.lentSun = false;
+    Skills.current?.learned.delete('G');
+  }
+
+  /** take back a dig spot he never dug */
+  private dropDig() {
+    const d = this.dig;
+    if (!d || d.site.done) return;
+    d.site.done = true;
+    if (d.site.inter) d.tr.d?.inter?.remove?.(d.site.inter);
+    d.site.inter = null;
+    if (d.site.obj) d.site.obj.visible = false;
+  }
+
+  private *breakLesson(): Script {
+    this.setGoals(TOUCH ? ['BREAK   30 s of quiet between waves', 'THE BELL   hold the stopwatch to call the next wave'] : ['BREAK   30 s of quiet between waves', 'THE BELL   hold T to call the next wave']);
+    yield* this.line(
+      say(
+        'When a wave falls, the sand rests for thirty seconds and your bones knit. Shop, dig, or hold T to ring the bell and call the next wave early. Greed pays, if you live.',
+        'When a wave falls, the sand rests for thirty seconds and your bones knit. Shop, dig, or hold the stopwatch to ring the bell and call the next wave early. Greed pays, if you live.'
+      ),
+      'stern',
+      'present',
+      1.4
+    );
+    this.clearGoals();
+  }
+
+  private *ledgerLesson(): Script {
+    this.ledgerSeen = false;
+    this.setGoals([say('LEDGER   TAB to open, TAB to close', 'LEDGER   tap the tin star')]);
+    yield* this.line(
+      say(
+        'Down your left side hangs the trail ledger: your rank, the next boss, the next zone, your finds. The brass compass points to Gobi, my walking turtle of a shop. TAB opens your full ledger.',
+        'Down your left side hangs the trail ledger: your rank, the next boss, the next zone, your finds. The brass compass points to Gobi, my walking turtle of a shop. Tap the tin star for your full ledger.'
+      ),
+      'neutral',
+      'point'
+    );
+    let waited = 0;
+    yield this.until(() => {
+      waited += this.lastDt;
+      this.check(0, this.ledgerSeen);
+      return this.ledgerSeen || waited > 20;
+    });
+    this.stepSkip = false;
+    yield 0.4;
+    this.clearGoals();
+    yield* this.line('Every number in there is a promise. Keep it.', 'happy', 'open');
   }
 
   /** she speaks: typed words floating by her head while her jaw moves */
@@ -364,6 +732,7 @@ export class Tutorial {
   // ------------------------------------------------------------------ goals (floating key prompts by the rider)
   private setGoals(labels: string[]) {
     this.clearGoals();
+    this.stepSkip = false;
     this.goals = labels.map((l) => ({ label: l, done: false, text: this.keyText(l, false) }));
   }
   private keyText(s: string, done: boolean) {
@@ -488,6 +857,9 @@ export class Tutorial {
     if (this.leaving || this.done) return;
     this.skipped = true;
     this.speech?.show(false);
+    this.dropDig();
+    this.dig = null;
+    this.returnSun();
     this.co = this.depart(true);
     this.wait = 0;
   }
@@ -578,7 +950,12 @@ export class Tutorial {
     for (const u of this.unsub) u();
     window.removeEventListener('keydown', this.onKey);
     window.removeEventListener('keyup', this.onKey);
+    window.removeEventListener('keydown', this.onNext);
     this.skipEl.remove();
+    this.nextEl.remove();
+    this.ledgerRestore?.();
+    this.dropDig();
+    this.returnSun();
     for (const t of this.texts) t.dispose();
     this.texts = [];
     for (const p of this.props) {

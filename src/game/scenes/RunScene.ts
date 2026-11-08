@@ -206,6 +206,8 @@ export class RunScene implements GameScene {
   treasure: TreasureHunt | null = null;
   cavePit: CavePit | null = null;
   private bountyRip: BountyRip | null = null;
+  /** the death sequence and the realm of the dead are playing (codex cards wait) */
+  private dying = false;
   oasis: OasisHeart | null = null;
   private codexRun: CodexRun | null = null;
   equipment!: Equipment;
@@ -877,6 +879,7 @@ export class RunScene implements GameScene {
     // is spent and the god only gives his final word before the desert takes the body (DeathCine).
     const final = this.run.revived;
     this.run.revived = true;
+    this.dying = true;
     this.ctx.sfx('sting_negative', null, 0.8);
     this.ctx.sfx('soul_leave', null, 0.9);
     eng.slowMo(0.15, 6);
@@ -895,6 +898,7 @@ export class RunScene implements GameScene {
     const ok = await trial.run({ kills: this.run.kills, wave: this.run.wave, final, fromReaping: true });
     eng.post.setSceneCamera(this.scene, this.camera);
     this.trial = null;
+    this.dying = false;
     trial.dispose();
     pu.uDesat.value = 0;
     eng.paused = false;
@@ -1038,7 +1042,7 @@ export class RunScene implements GameScene {
       return;
     }
     // codex discoveries wait until cutscenes, staged encounters and the rank-up are over
-    this.codexRun?.update(rdt, this.introOn || this.picker.cinematic || Cinema.busy() || cineFlags.choice);
+    this.codexRun?.update(rdt, this.introOn || this.picker.cinematic || Cinema.busy() || cineFlags.choice || this.dying);
     const e = this.engine;
     this.run.time += dt;
     // pause toggle (simple until poster scene)

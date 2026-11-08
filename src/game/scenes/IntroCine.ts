@@ -1,11 +1,8 @@
-// Opening cinematic (NEW RUN, about 85 s; SPACE / ESC / the SKIP label skips):
-//   0. COLD OPEN (cine/ColdOpen.ts, ~12.5 s) - Sundown staggers out of a saloon
-//      toward the lens in slow motion while it blows up behind him (voxel
-//      fireball, shattered building, burning debris raining, a shock ring through
-//      the sand), the wagon goes up too, and "dustUP" bursts out of the sand in
-//      voxel-cast gold. He looks up into the lens, turns side-on and shoots it:
-//      a bullet hole punches through the glass (cine/LensShot.ts), time freezes,
-//      and the view flies into the hole until it burns white.
+// Opening cinematic (NEW RUN, about a minute; SPACE / ESC / the SKIP label skips):
+//   0. COLD OPEN (cine/ColdOpen.ts, ~4.5 s) - Sundown staggers away from the
+//      lens out in the dunes, stops, turns round and shoots it: a bullet hole
+//      punches through the glass (cine/LensShot.ts), time freezes, and the view
+//      flies into the hole until it burns white.
 //      0b. Out of the white: the blinding hot desert sun, the air boiling, the
 //      signpost and its flapping sheet against the glare, and a drunk skeleton
 //      silhouette staggering out of the sun toward it.
@@ -708,7 +705,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     await runFor(hold + line.length * 0.012, () => {});
     t.show(false);
     speaking = null;
-    await runFor(0.25, () => {});
+    await runFor(0.15, () => {});
   };
   /** three floating answers beside Sundown; resolves with the chosen index */
   const ask = async (opts: string[]) => {
@@ -766,7 +763,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
       eng.audio.play('whoosh_big', { volume: 0.5, pitch: 0.4 });
       eng.audio.play('sand_spray', { volume: 0.4, pitch: 0.7 });
       let cut = true;
-      await runFor(2.9, (k, t) => {
+      await runFor(2.3, (k, t) => {
         actor.root.position.lerpVectors(far, actorPos, k);
         lens.white = 1 - (1 - Math.pow(1 - Math.min(1, t / 1.0), 3));
         lens.glare = 0.9 - 0.25 * k;
@@ -795,7 +792,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     const from = actor.root.position.clone();
     const stop = Q.clone().addScaledVector(nP, 2.4);
     stop.y = gy(stop);
-    await runFor(4.6, (k, t) => {
+    await runFor(3.4, (k, t) => {
       const e = ease(k);
       // the heat haze and the glare settle as the eye adjusts
       lens.white = 0;
@@ -804,14 +801,14 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
       lens.blaze = Math.max(0, 0.15 - t * 0.12);
       if (hot && golden && t < 2.2) env.lerpPreset?.(hot, golden, ease(t / 2.2));
       shot(pc.clone().addScaledVector(nP, 1.05 - e * 0.32).addScaledVector(lat, -0.22 + e * 0.08).add(new THREE.Vector3(0, 0.05 - e * 0.12, 0)), pc.clone().add(new THREE.Vector3(0, -0.06 * e, 0)), 38 - e * 4, true);
-      actor.root.position.lerpVectors(from, stop, Math.min(1, t / 4.4));
-      if (t > 2.0 && t < 2.05) eng.audio.play('paper_flutter', { volume: 0.5, pitch: 1.2 });
+      actor.root.position.lerpVectors(from, stop, Math.min(1, t / 3.25));
+      if (t > 1.5 && t < 1.55) eng.audio.play('paper_flutter', { volume: 0.5, pitch: 1.2 });
     });
     if (hot && golden) env.apply?.(golden);
     Object.assign(lens, { shimmer: 0, glare: 0, blaze: 0, white: 0 });
     walkAmt = 0;
     // the reward line, then up to the face
-    await runFor(1.8, (k) => {
+    await runFor(1.3, (k) => {
       const e = ease(k);
       const lookAt = pc.clone().add(new THREE.Vector3(0, -PH * 0.36 + e * PH * 0.5, 0));
       shot(pc.clone().addScaledVector(nP, 0.68).addScaledVector(lat, -0.12).add(new THREE.Vector3(0, -0.2 + e * 0.32, 0)), lookAt, 34, true);
@@ -821,18 +818,18 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     ap0.y = gy(ap0);
     shot(ap0.clone().addScaledVector(nP, 0.72).addScaledVector(lat, 0.8).add(new THREE.Vector3(0, shoulderY + 0.12, 0)), pc.clone().addScaledVector(lat, 0.05), 44, false);
     walkAmt = 0.7;
-    await runFor(0.8, (k) => actor.root.position.lerpVectors(stop, ap0, ease(k)));
+    await runFor(0.6, (k) => actor.root.position.lerpVectors(stop, ap0, ease(k)));
     walkAmt = 0;
     armPose = 'reach';
     armSpeed = 4;
     actor.setExpression('focus');
     eng.audio.play('skeleton_rattle', { volume: 0.4 });
-    await runFor(1.0, () => {});
+    await runFor(0.6, () => {});
     if (poster && !skipped) {
       poster.grab(handW.clone());
       eng.audio.play('paper_flutter', { volume: 0.8, pitch: 0.8 });
     }
-    await runFor(0.45, () => {});
+    await runFor(0.3, () => {});
     // RIP
     armPose = 'yank';
     armSpeed = 14;
@@ -842,21 +839,21 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     eng.audio.play('whoosh', { volume: 0.7, pitch: 1.4 });
     d.particles.emit({ pos: posterTop.clone().addScaledVector(nP, 0.05), count: 14, spread: 1.4, up: 0.8, life: [0.6, 1.3], size: [0.04, 0.025], sprite: ['linen', 'grain0'], color: [0xf2e2bc, 0xd8c08e], gravity: 3, drag: 1.5 });
     cam.addTrauma(0.18);
-    await runFor(0.7, () => {});
+    await runFor(0.45, () => {});
     // he reads it, then folds it into his coat; Pinch has opinions
     armPose = 'read';
     armSpeed = 4;
     headLook = 1;
     const ap1 = actor.root.position.clone();
     shot(ap1.clone().addScaledVector(lat, 1.9).addScaledVector(nP, -1.1).add(new THREE.Vector3(0, 1.45, 0)), ap1.clone().add(new THREE.Vector3(0, 1.35, 0)).addScaledVector(nP, -0.25), 40, false);
-    await runFor(1.6, () => {});
+    await runFor(1.0, () => {});
     actor.setExpression('smug');
     eng.audio.play('scorpion_chitter', { volume: 0.8 });
     await say('pinch', '*click click*  (a million!)', 0.4);
     await say('sundown', "A million on my skull, and Sethos signed it himself. Reckon I'll deliver it personal.", 0.5);
     armPose = 'tuck';
     eng.audio.play('page_turn', { volume: 0.6 });
-    await runFor(0.8, (k) => poster && (poster.fold = ease(k)));
+    await runFor(0.6, (k) => poster && (poster.fold = ease(k)));
     if (poster) poster.visible = false;
     headLook = 0;
 
@@ -878,20 +875,20 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     const sub = text('where the sand remembers every bone', mid.clone().addScaledVector(sunH, 34).add(new THREE.Vector3(0, 10.4, 0)), { size: 0.85, color: '#fff3d6', glow: '#ffb070', cps: 40, wrap: 60, hdr: 1.3 });
     sub.show(false);
     eng.audio.play('whoosh_big', { volume: 0.5, pitch: 0.6 });
-    await runFor(4.4, (k, t) => {
+    await runFor(3.2, (k, t) => {
       actor.root.position.lerpVectors(walkFrom, walkTo, k * 0.42);
-      if (t > 1.4) sub.show(true);
+      if (t > 1.0) sub.show(true);
       const cpos = mid.clone().addScaledVector(sunH, -9.5 + k * 1.2).addScaledVector(fwd, 4 - k * 2).add(new THREE.Vector3(0, 0.7, 0));
       shot(cpos, actor.root.position.clone().add(new THREE.Vector3(0, 1.4 + (1 - k) * 2.5, 0)).addScaledVector(sunH, 6), 36, true);
     });
     title.show(false);
     sub.show(false);
     // tracking alongside, low: the gun spins, boots kick sand, Pinch rides
-    await runFor(4.2, (k, t) => {
+    await runFor(3.2, (k, t) => {
       actor.root.position.lerpVectors(walkFrom, walkTo, 0.42 + k * 0.58);
-      spinRate = (t > 0.6 && t < 2.2) || (t > 2.9 && t < 3.9) ? 16 : 0;
-      if (t > 0.6 && t < 0.65) eng.audio.play('rev_spin', { volume: 0.7 });
-      if (t > 2.9 && t < 2.95) eng.audio.play('rev_spin', { volume: 0.7, pitch: 1.1 });
+      spinRate = (t > 0.4 && t < 1.6) || (t > 2.1 && t < 2.9) ? 16 : 0;
+      if (t > 0.4 && t < 0.45) eng.audio.play('rev_spin', { volume: 0.7 });
+      if (t > 2.1 && t < 2.15) eng.audio.play('rev_spin', { volume: 0.7, pitch: 1.1 });
       if (spinRate === 0) spin += (Math.round(spin / (Math.PI * 2)) * Math.PI * 2 - spin) * 0.25;
       const ap = actor.root.position;
       const cp = ap.clone().addScaledVector(fwd, 3.4 - k * 0.6).addScaledVector(sunH, 1.9).add(new THREE.Vector3(0, 0.85, 0));
@@ -914,7 +911,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     // the sigil traces itself into the sand; the first grains lift
     eng.audio.play('divine_chime', { volume: 0.7 });
     eng.audio.play('sand_rise', { volume: 0.9 });
-    await runFor(2.6, (k) => {
+    await runFor(1.8, (k) => {
       sigil.reveal = ease(k);
       vortex.intensity = k * 0.5;
       vortex.height = 2 + k * 2;
@@ -928,7 +925,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     eng.audio.play('spectral_scorpion', { volume: 0.5, pitch: 0.7 });
     actor.setExpression('focus');
     headLook = -1;
-    await runFor(2.6, (k) => {
+    await runFor(2.0, (k) => {
       vortex.intensity = 0.5 + k * 0.7;
       vortex.height = 4 + k * 4;
       rings.appear = ease(Math.min(1, k * 1.3));
@@ -940,7 +937,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     // her body forms out of the sand, from the heart outward
     eng.audio.play('divine_power', { volume: 0.7 });
     eng.audio.play('sand_rise', { volume: 0.8, pitch: 1.2 });
-    await runFor(3.4, (k) => {
+    await runFor(2.6, (k) => {
       const e = ease(k);
       vortex.gather = e;
       spirit.form = Math.min(1, e * 1.05);
@@ -967,7 +964,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     spirit.snip();
     const low = soulAt.clone().addScaledVector(fwd, -7.2).addScaledVector(side, -2.6);
     low.y = world.groundAt(low.x, low.z) + 0.75;
-    await runFor(1.8, (k) => {
+    await runFor(1.4, (k) => {
       const e = ease(k);
       spirit.spirit = e;
       spirit.glow = 0.4 + e * 0.6;
