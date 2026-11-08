@@ -31,9 +31,10 @@
 - Not cartoony. Sundown matches the user's skeleton reference exactly.
 - Very high voxel counts everywhere. Fluid, procedural animation.
 - Enemy skill names reference Rolling Stones / Guns N' Roses / Beatles songs.
-- UI (latest note): detailed, stylized 2D pixel-art UI that reads as UI, not as photographed 3D or texture.
-  Moderate pixel resolution (not high-res), hand-authored pixel sprites for frames, icons, bars and badges are allowed
-  here and must be polished and consistent. Not everything 3D: "more 2D but stylized".
+- UI (latest note): the lower HUD stays live 3D: the soul jar, the heart, the revolver cylinder and bullets, the
+  tarot cards. Never replace those with 2D. The rest (bounty plank, wave plaque, notes, toasts, ledger, codex card,
+  prompts) is detailed, stylized 2D pixel art that reads as UI, not photographed 3D or texture: moderate pixel
+  resolution, hand-authored pixel sprites allowed there, polished and consistent.
 - World: near terrain, ruins and buildings read as big blocks with crisp pixel-art textures; pixel-art foliage sprites.
 - Guns: very high resolution models.
 - Model details: `src/game/models/CONTRACT.md`.
