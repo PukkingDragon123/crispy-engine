@@ -78,6 +78,8 @@ export class Engine {
   paused = false;
   /** the loading screen, if the game installed one */
   loader: LoadingCover | null = null;
+  /** the loading screen hides the view: skip drawing the scene (its GPU time goes to the build and the hourglass) */
+  private covered = false;
   onAfterUpdate: ((dt: number, rdt: number) => void)[] = [];
   private emptyScene = new THREE.Scene();
   private emptyCam = new THREE.PerspectiveCamera();
@@ -142,7 +144,10 @@ export class Engine {
     const flag = (s as { ready?: boolean }).ready;
     const load = !!this.loader && (o.loading ?? flag === false) !== false;
     if (fade > 0 && this.current) await this.fadeOut(fade, color);
-    if (load) await this.loader!.show(typeof o.loading === 'string' ? o.loading : undefined);
+    if (load) {
+      await this.loader!.show(typeof o.loading === 'string' ? o.loading : undefined);
+      this.covered = true;
+    }
     this.current?.exit?.();
     this.tweens.clear();
     this.current = s;
@@ -155,7 +160,10 @@ export class Engine {
     // some scenes finish building over later frames
     if (load) while ((s as { ready?: boolean }).ready === false && this.current === s) await this.nextFrame();
     if (fade > 0 || this.loader?.shown) void this.fadeIn(fade, light(color));
-    else this.fadeEl.style.opacity = '0';
+    else {
+      this.covered = false;
+      this.fadeEl.style.opacity = '0';
+    }
   }
 
   /** resolves after the engine has rendered `n` more frames */
@@ -177,11 +185,15 @@ export class Engine {
       const start = parseFloat(this.fadeEl.style.opacity || '0');
       this.tweens.run(t, (k) => (this.fadeEl.style.opacity = String(start + (1 - start) * k)), Ease.inOutQuad, { real: true, done: res });
     });
-    if (o.loading && this.loader) await this.loader.show(typeof o.loading === 'string' ? o.loading : undefined);
+    if (o.loading && this.loader) {
+      await this.loader.show(typeof o.loading === 'string' ? o.loading : undefined);
+      this.covered = true;
+    }
   }
   /** fade back in; if the loading screen is up, the first frames render (and compile) behind it first */
   async fadeIn(t = 0.5, holdColor = false) {
     const L = this.loader;
+    this.covered = false;
     if (L?.shown) {
       await this.nextFrame(3);
       // a light fade colour (a white-out) shows between the hourglass and the scene
@@ -248,8 +260,10 @@ export class Engine {
         this.current.update(dt, rdt);
         for (const f of this.onAfterUpdate) f(dt, rdt);
         this.audio.setListener(this.current.camera);
-        this.post.render(rdt);
-        this.current.postRender?.(this.renderer);
+        if (!this.covered) {
+          this.post.render(rdt);
+          this.current.postRender?.(this.renderer);
+        }
       }
       this.input.endFrame();
       this.frame++;

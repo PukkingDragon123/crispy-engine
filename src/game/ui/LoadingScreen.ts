@@ -121,11 +121,8 @@ export class LoadingScreen implements LoadingCover {
         void this.fallback();
       };
       w.postMessage({ type: 'init', canvas: off, ...this.size() }, [off]);
+      // no WebGL in workers here: the worker answers with an error and the hourglass draws on this thread
       this.worker = w;
-      // a worker that never draws (no WebGL there): fall back
-      setTimeout(() => {
-        if (!this.ready && this.worker === w) void this.fallback();
-      }, 12000);
       return true;
     } catch (e) {
       console.warn('[loading] no offscreen hourglass', e);
@@ -180,8 +177,8 @@ export class LoadingScreen implements LoadingCover {
         this.localRaf = 0;
         return;
       }
-      this.value = this.local.tick((now - last) / 1000);
-      last = now;
+      this.value = this.local.tick(Math.max(0, now - last) / 1000);
+      last = Math.max(last, now);
       this.onReady();
       this.drawUi();
       this.localRaf = requestAnimationFrame(f);

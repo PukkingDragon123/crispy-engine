@@ -594,7 +594,7 @@ export class ThothHall {
   async open() {
     const eng = this.engine;
     eng.audio.play('book_open', { volume: 0.6, pitch: 0.85 });
-    await eng.fadeOut(0.35);
+    await eng.fadeOut(0.35, '#000', { loading: "Opening Thoth's Hall" });
     try {
       this.build();
     } catch (e) {

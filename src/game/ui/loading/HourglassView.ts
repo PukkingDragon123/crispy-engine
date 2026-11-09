@@ -155,7 +155,7 @@ void main(){
   float head = step(aT, 0.001);
   float sz = (mix(3.2, 1.1, aT) + head * 1.2) * (7.5 / -mv.z);
   gl_PointSize = max(1.0, floor(sz * uPx + 0.5));
-  vec3 hc = mix(vec3(0.55, 1.35, 0.95), vec3(0.95, 0.7, 1.35), aHue);
+  vec3 hc = mix(vec3(0.32, 1.05, 0.68), vec3(0.8, 0.55, 1.2), aHue);
   vec3 tc = mix(vec3(0.02, 0.32, 0.19), vec3(0.18, 0.04, 0.36), aHue);
   vCol = mix(hc, tc, pow(aT, 0.5));
   vHead = head;
@@ -605,7 +605,7 @@ export class HourglassView {
   }
 
   tick(dt: number) {
-    dt = Math.min(dt, 0.1);
+    dt = Math.max(0, Math.min(dt, 0.1));
     this.time += dt;
     const t = this.time;
     // progress
@@ -615,6 +615,7 @@ export class HourglassView {
     }
     const maxRate = this.mode === 'finish' ? 1.6 : 0.5;
     this.shown += Math.min(maxRate * dt, Math.max(0, this.target - this.shown) * (1 - Math.exp(-dt * 4)));
+    this.shown = Math.max(0, Math.min(1, this.shown));
     const p = this.shown;
 
     // sand volumes -> surface heights

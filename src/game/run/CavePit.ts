@@ -422,7 +422,7 @@ export class CavePit {
   private async descend(p: Pit) {
     const { ctx } = this.h;
     const eng = ctx.engine;
-    await eng.fadeOut(0.25, '#000');
+    await eng.fadeOut(0.25, '#000', { loading: 'Sinking below the sand' });
     const carry = this.h.carry();
     const stage = new CaveScene(eng, { carry, look: this.h.look, gun: this.h.gun, seed: ((this.h.seed ?? 1) * 7 + Math.round(p.x + p.z)) % 9973, onExit: (out) => (this.pendingExit = out) });
     stage.camera.aspect = eng.width / eng.height;

@@ -1027,7 +1027,7 @@ export class RunScene implements GameScene {
     };
     // a true death: the killing blow in slow motion, the sky wheels through the days, he wakes at home
     if (!won && !this.player.alive) {
-      eng.tweens.after(1.4, () => void eng.setScene(new DeathCine(eng, deathCineFromRun(this, res)), 0.35, '#fff3dc'), true);
+      eng.tweens.after(1.4, () => void eng.setScene(new DeathCine(eng, deathCineFromRun(this, res)), 0.35, '#fff3dc', { loading: false }), true);
       return;
     }
     eng.tweens.after(2.6, () => {
