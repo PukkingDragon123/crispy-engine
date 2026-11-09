@@ -11,7 +11,8 @@
 // of sand, Gobi turns his porch to you while the camera cranes past the
 // TRADING POST sign and down to Ozymandias, who ducked at the racket, peeks
 // out and greets you in floating Alagard text. Then you talk: a few answers
-// float beside him as 3D plaques (click or 1-5). "Show me your wares" lowers
+// come up as a short 2D pixel-art list (three: the wares, a haggle once per
+// restock, ride on; click, tap or 1-3; he chatters while you choose). "Show me your wares" lowers
 // the gangplank; Ozymandias goes in ahead, and the camera follows the hunter
 // (a walking copy of his rig, his board parked at the foot) up the plank and
 // in at the door. Inside, from the doorway: he stands behind his counter with
@@ -26,12 +27,16 @@
 // re-arms once you have ridden off and stayed away a few seconds; never with
 // enemies within 15 m or during a boss fight. The world is paused throughout.
 //
-// Inside, the wares are set out on his display stall (ui/ShopShelf.ts): they fly
-// out of his basket and land on its two steps, each over a manila price tag
-// inked with the price and what it does. Hovering (or pressing its number)
-// lifts a ware and floats a card beside it in Alagard: what it is, what it
+// Inside is his den (ui/ShopShelf.ts denModel, fine voxels: counter, scale and
+// till, crowded shelves, stove, herbs, lanterns, the turtle's ribs overhead, dust
+// motes in the lamplight). The wares are set out on his display stall: they fly
+// out of his basket and land on its two steps, each with a 2D pixel-art price
+// tag hanging under it (ui/ShopUI.ts). Hovering (or pressing its number)
+// lifts a ware and shows a pixel parchment card beside it: what it is, what it
 // does, what it means for you right now (your pockets, your health, the gear it
-// would replace), the price. Buying counts the coins across into his claws one
+// would replace), the price. He talks while you browse: about what you hover,
+// your gear, purse, health and bounty, the next boss, the wave, the weather,
+// his long life. Buying counts the coins across into his claws one
 // by one, hands the ware over, flips its tag to SOLD and gets a word from him.
 // The stock holds for a restock period (fresh after every boss wave, StockBook):
 // one ware is the day's deal, and once a period you can try to haggle on the
@@ -44,7 +49,6 @@
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Input } from '../../engine/Input';
-import { touchText } from './TouchControls';
 import type { CameraRig, CineShot } from '../player/CameraRig';
 import { RigInstance } from '../../engine/voxel/Rig';
 import type { Collider } from '../world/Colliders';
@@ -59,7 +63,9 @@ import { Ease } from '../../engine/Tween';
 import { FloatText3D } from '../fx/FloatText3D';
 import { Voice } from '../audio/Voice';
 import { ShopBeacon, type BeaconInfo } from '../run/ShopBeacon';
-import { stallModel, stallTopAt, PriceTag, type Stall } from './ShopShelf';
+import { stallModel, stallTopAt, denGeometry, DEN, type Stall } from './ShopShelf';
+import { ShopUI, PixelTag } from './ShopUI';
+import { bossAt } from './ProgressLadder';
 import { GEAR, SLOT_INFO, type GearId } from '../player/Equipment';
 import { RARITY } from '../run/Upgrades';
 import { GobiAnim } from '../models/creatures/turtleHouse';
@@ -81,6 +87,8 @@ export interface MerchantHooks {
    * the walker) and the root his board pose is written to
    */
   hunter?: { rig: RigInstance; gun?: RigInstance | null; root?: THREE.Object3D };
+  /** the hunter's health now and at most (he remarks on it) */
+  hp?: () => [number, number];
 }
 
 const ARRIVE_R = 13; // ride inside this to be greeted
@@ -187,11 +195,21 @@ const LINES_C: typeof LINES = {
 const TALK: { q: string; a: string[]; go?: 'enter' | 'bye'; haggle?: true }[] = [
   { q: 'Show me your wares.', a: ['Come in, come in. Wipe your bones.', 'Hrrm. Come up. Mind the step, Gobi is ticklish.', 'Inside, then. The kettle is on.'], go: 'enter' },
   { q: 'Can you do better on the price?', a: [], haggle: true },
-  { q: 'Who are you?', a: ['Ozymandias, merchant of the walking road. Nine hundred years on this shell.', 'Ozymandias. I sell, Gobi walks. Since the pyramids were pointy.'] },
-  { q: 'Why is a tree growing on your turtle?', a: ['Gobi swallowed an acacia seed in the old kingdom. Now it shades us both.', 'It came up through the porch one spring. We let it stay.'] },
-  { q: 'Is it safe out here?', a: ['When outlaws come, Gobi digs in and I bar the shutters. Sand is a fine door.', 'Safe as sand. If Gobi starts digging, you start riding.'] },
-  { q: 'Just passing through.', a: ['Then pass slowly. Safe roads, little bones.', 'Hrrm. The road will bring you back. It always does.'], go: 'bye' },
+  { q: 'Ride on.', a: ['Then pass slowly. Safe roads, little bones.', 'Hrrm. The road will bring you back. It always does.'], go: 'bye' },
 ];
+/** what he tells you unasked: his story, the tree, the road (it used to be porch questions) */
+const LORE = [
+  'Ozymandias, merchant of the walking road. Nine hundred years on this shell.',
+  'I sell, Gobi walks. We have done it since the pyramids were pointy.',
+  'Gobi swallowed an acacia seed in the old kingdom. Now it shades us both.',
+  'When outlaws come, Gobi digs in and I bar the shutters. Sand is a fine door.',
+  'If Gobi starts digging, you start riding. That is the only rule out here.',
+  'Every jar on that shelf has a story. Most of them end badly.',
+  'Hrrm. My knees are older than that dune.',
+];
+/** small noises while he waits */
+const GRUMBLE = ['Hrrm.', 'Hrrm. Where did I put my spectacles.', 'Mmm. Mmm-hm.', 'Gobi, stop swaying.', 'Dust. Always dust.'];
+const WEATHER = ['Hot today. It is always hot today.', 'Wind from the east. Prices go up when it blows from the east.', 'Smell that? Storm coming. Or Gobi.', 'The sand sings at night. Do not sing back.'];
 /** Ozymandias on prices and stock */
 const OZ = {
   haggleWin: ['Hrrm. For an honest skull... fifteen off everything. Until the caravan comes.', 'You drive a hard bargain for a man with no stomach. Fifteen off.', 'Gobi likes you. Fine. Fifteen off, and not a copper more.'],
@@ -226,6 +244,7 @@ const COMMENT: Record<string, string[]> = {
   heal: ['Fresh from my camel. Do not ask.', 'Heals everything but pride.', 'It is warm. That is not a good sign.'],
   card: ['Your fortune, sealed in wax.', 'Pick one, regret the other two.', 'The cards like you. Mostly.'],
   _: ['A fine thing, that.', 'Old, but so am I.', 'Lovely, isn\'t it?'],
+  _gear: ['Good work, that. Better than what you have on, I think.', 'A dead gunslinger sold me that. He did not need it.', 'Try it on. No, do not try it on. Buy it first.', 'Made to last. Unlike its last owner.'],
 };
 
 /**
@@ -919,6 +938,30 @@ class Turtle {
     }
   }
 
+  /**
+   * The merchant's den round the stall (counter, shelves, stove, herbs, lanterns,
+   * the turtle's ribs overhead): a big fine-voxel model, built the first time the
+   * hunter comes near (not at the start of the ride).
+   */
+  ensureDen() {
+    const sh = this.n.shell, off = this.rest.shell;
+    if (this.den || !sh || !off) return;
+    try {
+      const fl = this.meta.porch?.[1] ?? 3.0;
+      const den = new THREE.Mesh(denGeometry(), this.rig.material);
+      den.castShadow = true;
+      den.receiveShadow = true;
+      den.name = 'ozy_den';
+      den.position.set(-off.x, fl - off.y + 0.001, -off.z);
+      sh.add(den);
+      this.den = den;
+    } catch (e) {
+      console.warn('[shop] den', e);
+      this.den = new THREE.Object3D();
+    }
+  }
+  private den: THREE.Object3D | null = null;
+
   get hidden() {
     return this.mode === 'hiding' || this.mode === 'hidden';
   }
@@ -1562,7 +1605,7 @@ interface Body {
   /** landing squash 0..1 */
   land: number;
   /** its price tag on the stall (null on the rug) */
-  tag: PriceTag | null;
+  tag: PixelTag | null;
   /** the order it stands in (number keys) */
   idx: number;
 }
@@ -1612,7 +1655,8 @@ interface Visit {
   asked: Set<number>;
   /** what is on offer to say right now (haggling drops out once tried) */
   opts: typeof TALK;
-  plaques: FloatText3D[];
+  /** the choices are up (drawn by the pixel UI) */
+  choices: boolean;
   plaqueT: number;
   showAt: number;
   hover: number;
@@ -1688,8 +1732,11 @@ export class Shop {
   /** touch: the ware the first tap picked (a second tap on it buys) */
   private touchPick: Body | null = null;
   private hoverLock = 0;
-  private tip: HTMLDivElement;
-  private bar: HTMLDivElement;
+  /** the shop's 2D pixel-art UI: price tags, the ware card, the porch choices, the hint strip */
+  private ui: ShopUI;
+  /** seconds until he says something unasked */
+  private chatT = 6;
+  private chatN = 0;
   private done: (() => void) | null = null;
   private t = 0;
   private phase: 'off' | 'arrive' | 'browse' | 'leave' | 'visit' = 'off';
@@ -1752,9 +1799,8 @@ export class Shop {
   private worn = new Map<string, string>();
   /** the stall the wares stand on (indoors), and their price tags */
   private stall: Stall | null = null;
-  private tags: PriceTag[] = [];
+  private tags: PixelTag[] = [];
   /** the hovered ware's card: name, what it does, what it means for you, the price */
-  private card: FloatText3D[] = [];
   private cardFor: Body | null = null;
   /** a number key picked the ware: the mouse leaves it be until it moves */
   private kbHold = false;
@@ -1762,12 +1808,8 @@ export class Shop {
 
   constructor(private ctx: Ctx, private input: Input, private cam: CameraRig) {
     ctx.scene.add(this.group);
-    this.tip = document.createElement('div');
-    this.tip.style.cssText = "position:absolute;z-index:7;pointer-events:none;display:none;min-width:200px;max-width:280px;padding:10px 14px;background:#e8d4a4;border:3px solid #5a3418;box-shadow:0 4px 0 #2a1408;font-family:'Alagard';color:#2a1a10;font-size:15px;line-height:1.25;image-rendering:pixelated";
-    this.bar = document.createElement('div');
-    this.bar.style.cssText = "position:absolute;left:50%;bottom:6vh;transform:translateX(-50%);z-index:7;pointer-events:none;display:none;font-family:'Alagard';font-size:20px;color:#fff3d6;text-shadow:0 3px 0 #2a1810,0 0 10px #000;text-align:center";
-    ctx.engine.overlay.appendChild(this.tip);
-    ctx.engine.overlay.appendChild(this.bar);
+    this.ui = new ShopUI(ctx.engine.overlay, input, ctx.camera);
+    this.ui.onHover = () => ctx.sfx('ui_hover', null, 0.3, 1.1);
     this.unsub.push(ctx.events.on('shot', () => this.onGunfire()));
     this.unsub.push(ctx.events.on('explosion', (p: { x: number; y: number; z: number }, r: number) => this.onBlast(p, r ?? 3)));
     this.unsub.push(ctx.events.on('propShot', (_c: unknown, p: THREE.Vector3) => p && this.onBlast(p, -4)));
@@ -1804,7 +1846,10 @@ export class Shop {
     }
     if (p instanceof Turtle && hooks) p.hooks = hooks;
     const h = Math.min(dt, 1 / 20);
-    if (p instanceof Turtle) this.beacons.get(p)?.update(h, hunter ?? null, p.hidden);
+    if (p instanceof Turtle) {
+      this.beacons.get(p)?.update(h, hunter ?? null, p.hidden);
+      if (hunter && hunter.distanceTo(p.root.position) < 70) p.ensureDen();
+    }
     if (this.owns(p)) return; // the shop / its arrival scene drives her
     if (h <= 0) return;
     const d = hunter ? hunter.distanceTo(rig.root.position) : 99;
@@ -2230,7 +2275,7 @@ export class Shop {
     eng.paused = true;
     eng.input.setWantLock(false);
     this.visit = {
-      g, hooks, phase: 'talk', t: 0, asked: new Set(), opts: this.talkOptions(), plaques: [], plaqueT: 0, showAt: 0.4, hover: -1, go: null, goAt: 0,
+      g, hooks, phase: 'talk', t: 0, asked: new Set(), opts: this.talkOptions(), choices: false, plaqueT: 0, showAt: 0.4, hover: -1, go: null, goAt: 0,
       actor: null, path: [], wp: [], cum: [0], s: 0, walkPh: 0, walkAmt: 0, lastStep: 0, yaw: 0, standYaw: 0, heading: 0, breath: 0,
       base: { pos: this.shot.pos.clone(), look: this.shot.look.clone(), fov: this.shot.fov },
       cp: new THREE.Vector3(), cl: new THREE.Vector3(), doorAt: -1, from: { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 50 }, outAt: -1, ozGo: false, skip: false,
@@ -2239,7 +2284,7 @@ export class Shop {
     this.speechForce = 1;
     this.beacons.get(g)?.visited();
     this.talkBar(this.visit!);
-    this.bar.style.display = 'block';
+    this.chatT = 6;
   }
 
   /** what he can be asked right now (the haggle once a restock period) */
@@ -2247,7 +2292,7 @@ export class Shop {
     return TALK.filter((c) => !c.haggle || this.book.haggle === 'none');
   }
   private talkBar(v: Visit) {
-    this.bar.innerHTML = touchText(`click or press 1-${v.opts.length} to answer &nbsp;·&nbsp; ESC to ride on`);
+    this.ui.hint = this.input.touchDevice ? { keys: [['TAP', 'answer']] } : { keys: [[`1-${v.opts.length}`, 'answer'], ['ESC', 'ride on']] };
   }
 
   private updateVisit(h: number) {
@@ -2286,10 +2331,12 @@ export class Shop {
     this.handheld(1);
     g.lookAt = this.hunter ? _w.copy(this.hunter).add(_a.set(0, 1.5, 0)) : null;
     // the answers come up once he has said his piece
-    if (!v.plaques.length && !v.go && v.t >= v.showAt && (!this.speech || this.speech.done) && !this.pendingLine) this.showChoices(v);
+    if (!v.choices && !v.go && v.t >= v.showAt && (!this.speech || this.speech.done) && !this.pendingLine) this.showChoices(v);
     this.placeChoices(v, h);
+    // while you make up your mind, he talks
+    if (v.choices && !v.go) this.chatter(h, false);
     let pick = -1;
-    if (v.plaques.length && v.t - v.plaqueT > 0.3) {
+    if (v.choices && v.t - v.plaqueT > 0.3) {
       for (let k = 0; k < v.opts.length; k++) if (inp.wasPressed('Digit' + (k + 1)) || inp.wasPressed('Numpad' + (k + 1))) pick = k;
       if (v.hover >= 0 && inp.wasPressed('Mouse0')) pick = v.hover;
     }
@@ -2304,45 +2351,15 @@ export class Shop {
   private showChoices(v: Visit) {
     v.plaqueT = v.t;
     v.opts = this.talkOptions();
+    v.choices = true;
     this.talkBar(v);
-    const halfH = 1.4 * Math.tan((this.shot.fov * Math.PI) / 360);
-    v.plaques = v.opts.map((c, i) => {
-      const old = v.asked.has(TALK.indexOf(c)) && !c.go;
-      const ft = new FloatText3D(`${i + 1}.  ${c.q}`, { size: halfH * 0.085, px: 44, cps: 70, wrap: 60, align: 'left', hdr: old ? 0.8 : 1.2, color: old ? '#cdbb98' : '#fff3d6', glow: old ? '#6a4a28' : '#ffb070' });
-      ft.mesh.renderOrder = 991;
-      this.ctx.scene.add(ft.mesh);
-      return ft;
-    });
+    this.ui.talk = { opts: v.opts.map((c) => c.q), old: v.opts.map((c) => v.asked.has(TALK.indexOf(c)) && !c.go) };
     this.ctx.sfx('card_flip', null, 0.25, 0.9);
   }
 
-  /** the answers float in a column on the open side of the frame, a little in front of the lens */
-  private placeChoices(v: Visit, h: number) {
-    if (!v.plaques.length) return;
-    const cam = this.ctx.camera;
-    const pos = this.shot.pos;
-    const fwd = _a.subVectors(this.shot.look, pos).normalize();
-    const right = _b.crossVectors(fwd, UP).normalize();
-    const up = _c.crossVectors(right, fwd);
-    const D = 1.4, halfH = D * Math.tan((this.shot.fov * Math.PI) / 360);
-    const halfW = halfH * (this.ctx.engine.width / Math.max(1, this.ctx.engine.height));
-    // hover: the plaque under the cursor
-    this.ray.setFromCamera(_ndc.set(this.input.ndcX, this.input.ndcY), cam);
-    let hov = -1;
-    v.plaques.forEach((ft, i) => {
-      ft.mesh.updateMatrixWorld();
-      if (ft.visibleAmount > 0.5 && this.ray.intersectObject(ft.mesh, false).length) hov = i;
-    });
-    if (hov >= 0 && hov !== v.hover) this.ctx.sfx('ui_hover', null, 0.3, 1.1);
-    v.hover = hov;
-    v.plaques.forEach((ft, i) => {
-      ft.hover = damp(ft.hover, i === hov ? 1 : 0, 12, h);
-      const w = ft.mesh.scale.x / Math.max(0.5, (1 + ft.hover * 0.12) * (0.92 + 0.08 * ft.visibleAmount));
-      ft.anchor.copy(pos).addScaledVector(fwd, D).addScaledVector(right, -0.9 * halfW + w * 0.5 + ft.hover * 0.025).addScaledVector(up, (0.26 - i * 0.18) * halfH);
-      ft.update(h, cam);
-      // pinned in their column (no float bob: the rows would touch), just a breath of drift
-      ft.mesh.position.copy(ft.anchor).addScaledVector(up, Math.sin(v.t * 1.3 + i) * 0.004);
-    });
+  /** the pixel UI hit-tests the rows; a new row under the pointer ticks */
+  private placeChoices(v: Visit, _h: number) {
+    v.hover = v.choices ? this.ui.talkHover : -1;
   }
 
   private choose(v: Visit, i: number) {
@@ -2350,12 +2367,10 @@ export class Shop {
     const c = v.opts[i];
     if (!c) return;
     v.asked.add(TALK.indexOf(c));
-    for (const ft of v.plaques) {
-      ft.show(false);
-      this.fading.push(ft);
-    }
-    v.plaques = [];
+    v.choices = false;
+    this.ui.talk = null;
     v.hover = -1;
+    this.chatT = 7;
     this.ctx.sfx('ui_click', null, 0.45);
     if (c.haggle) {
       // once a restock: he knocks fifteen off everything, or he will not budge
@@ -2385,7 +2400,7 @@ export class Shop {
     v.doorAt = -1;
     v.ozGo = false;
     v.skip = false;
-    this.bar.style.display = 'none';
+    this.ui.hint = null;
     g.setRamp(true);
     g.lookAt = null;
     this.speechForce = 0;
@@ -2646,7 +2661,7 @@ export class Shop {
     v.phase = 'bye';
     v.t = 0;
     v.go = null;
-    this.bar.style.display = 'none';
+    this.ui.hint = null;
     v.g.wave(2.0);
     this.ridingPose(this.camHome);
     v.from.pos.copy(this.shot.pos);
@@ -2673,7 +2688,7 @@ export class Shop {
     const eng = this.ctx.engine, g = v.g;
     if (v.actor) v.actor.root.removeFromParent();
     if (v.hooks.hunter) v.hooks.hunter.rig.root.visible = true;
-    for (const ft of v.plaques) ft.dispose();
+    this.ui.talk = null;
     if (this.bodies.length) this.clearWares();
     this.clearShelf();
     g.indoor = false;
@@ -2691,8 +2706,8 @@ export class Shop {
     this.restoreGrade();
     this.holdLight(0);
     this.clearSpeech();
-    this.tip.style.display = 'none';
-    this.bar.style.display = 'none';
+    this.ui.hint = null;
+    this.ui.card = null;
     eng.input.enabled = true;
     eng.input.setWantLock(true);
     eng.paused = false;
@@ -2734,8 +2749,8 @@ export class Shop {
     this.bodies = [];
     if (this.rug) this.group.remove(this.rug);
     this.clearShelf();
-    this.tip.style.display = 'none';
-    this.bar.style.display = 'none';
+    this.ui.hint = null;
+    this.ui.card = null;
     this.hovered = null;
   }
 
@@ -2749,7 +2764,7 @@ export class Shop {
   }
 
   /** a ware's price tag: today's price, what it does, deal / sold / too dear */
-  private inkTag(tag: PriceTag, w: Ware) {
+  private inkTag(tag: PixelTag, w: Ware) {
     const price = this.book.price(w);
     tag.set({ price, short: this.shortOf(w), was: price !== w.price ? w.price : null, deal: w.id === this.book.deal, sold: this.book.sold.has(w.id), dear: this.ctx.run.gold < price });
   }
@@ -2835,6 +2850,7 @@ export class Shop {
     }
     const g = this.group;
     this.clearShelf(); // (a visit's tags never outlive it)
+    if (her instanceof Turtle) her.ensureDen();
     const stallObj = this.indoor && her instanceof Turtle ? her.stallObj : null;
     this.stall = stallObj ? stallModel() : null;
     if (stallObj) {
@@ -2906,12 +2922,12 @@ export class Shop {
       return { tier: S!.tiers[top ? 1 : 0], x: (k - (n - 1) / 2) * S!.slotStep };
     };
     if (S) {
-      const tagMat = (her as Turtle).rig.material;
       shelf.forEach((w, i) => {
         const { tier, x } = slotOf(i);
-        const tag = new PriceTag(tagMat);
-        tag.root.position.set(x, tier.tackY, tier.tackZ - 0.012); // clear of the lip and the kilim's fold
-        g.add(tag.root);
+        const tag = this.ui.tag();
+        // pinned to the lip under its slot (kept current: see update)
+        tag.anchor.set(x, tier.top - 0.012, tier.z0 - 0.012); // the front edge of its step
+        g.localToWorld(tag.anchor);
         this.tags.push(tag);
         this.inkTag(tag, w);
         if (this.book.sold.has(w.id)) tag.shown = tag.want = 1;
@@ -2979,7 +2995,6 @@ export class Shop {
     this.cam.setCine(this.shot, false);
     eng.letterbox(true, 0.4);
     this.updateBar();
-    this.bar.style.display = 'block';
     this.phase = 'browse';
     if (!this.greeted) {
       this.greeted = true;
@@ -3172,11 +3187,18 @@ export class Shop {
 
   private updateBar() {
     const bk = this.book, n = this.bodies.length;
-    const keys = n > 1 ? `click a ware or 1-${n} &nbsp;·&nbsp; click / Enter buys` : 'click to buy';
-    const off = bk.haggle === 'won' ? ' &nbsp;<span style="color:#b8f07a">fifteen off today</span>' : '';
-    const restock = this.stall ? `<div style="font-size:15px;color:#c9a97c;margin-top:4px">fresh stock after the wave ${bk.nextRestock} boss &nbsp;·&nbsp; right-click shoots</div>` : '<div style="font-size:15px;color:#c9a97c;margin-top:4px">right-click shoots</div>';
-    this.bar.innerHTML = touchText(`<span style="color:#ffd36b">${Math.floor(this.ctx.run.gold)} gold</span>${off} &nbsp;·&nbsp; ${keys} &nbsp;·&nbsp; ESC leaves${restock}`);
+    const touch = this.input.touchDevice;
+    const keys: [string, string][] = touch
+      ? [['TAP', 'look'], ['TAP AGAIN', 'buy'], ['BACK', 'leave']]
+      : [...(n > 1 ? [[`1-${n}`, 'pick'] as [string, string]] : []), ['ENTER', 'buy'], ['ESC', 'leave']];
+    this.ui.hint = {
+      gold: Math.floor(this.ctx.run.gold),
+      extra: bk.haggle === 'won' ? 'fifteen off' : undefined,
+      keys,
+      foot: this.stall ? `fresh stock after the wave ${bk.nextRestock} boss${touch ? '' : '  ·  right-click shoots'}` : undefined,
+    };
   }
+
 
   dispose() {
     if (this.visit) this.endVisit();
@@ -3186,8 +3208,7 @@ export class Shop {
     this.beacons.clear();
     for (const u of this.unsub) u();
     this.unsub = [];
-    this.tip.remove();
-    this.bar.remove();
+    this.ui.dispose();
     this.rugSpot?.m.dispose();
     for (const p of this.puppets.values()) if (p instanceof Turtle) p.dispose();
   }
@@ -3199,8 +3220,8 @@ export class Shop {
     this.pt = 0;
     this.leaveSplit = false;
     this.hovered = null;
-    this.tip.style.display = 'none';
-    this.bar.style.display = 'none';
+    this.ui.hint = null;
+    this.ui.card = null;
     this.pendingLine = null;
     this.ridingPose(this.camHome);
     if (this.her && !this.her.hidden) {
@@ -3233,8 +3254,8 @@ export class Shop {
     this.bodies = [];
     if (this.rug) this.group.remove(this.rug);
     this.clearShelf();
-    this.tip.style.display = 'none';
-    this.bar.style.display = 'none';
+    this.ui.hint = null;
+    this.ui.card = null;
     this.cam.setCine(null);
     eng.letterbox(false, 0.4);
     this.restoreGrade();
@@ -3343,6 +3364,7 @@ export class Shop {
 
   // ---------------------------------------------------------------- per frame
   update(rdt: number) {
+    this.ui.draw(Math.min(rdt, 0.05)); // (last frame's state; empty when the shop is shut)
     if (!this.active && !this.arrival) return;
     const h = Math.min(rdt, 0.05);
     const ctx = this.ctx;
@@ -3400,11 +3422,21 @@ export class Shop {
     }
     if (hb && hb.gaze > 0.35 && !this.commented.has(hb) && this.speechT < 0.8 && !this.pendingLine && her && her.mode === 'out') {
       this.commented.add(hb);
-      const pool = COMMENT[hb.ware.id] ?? COMMENT._;
+      const pool = COMMENT[hb.ware.id] ?? (hb.ware.id.startsWith('gear_') ? COMMENT._gear : COMMENT._);
       let i = Math.floor(rnd.next() * pool.length);
       if (i === this.lastComment.get(hb.ware.id)) i = (i + 1) % pool.length;
       this.lastComment.set(hb.ware.id, i);
       this.speak(pool[i]);
+      this.chatT = Math.max(this.chatT, 5);
+    }
+    // nothing in hand: he talks anyway
+    if (this.phase === 'browse' && !hb && this.pt > 4) this.chatter(h, true);
+    // dust motes turning in the lamplight
+    if (this.indoor && her instanceof Turtle && rnd.chance(h * 7)) {
+      const A = DEN.air, fl = her.meta.porch?.[1] ?? 3.0;
+      const L = DEN.lamps[rnd.next() < 0.5 ? 0 : 1];
+      const m = her.toWorld([L[0] + (rnd.next() - 0.5) * 1.1, fl + Math.min(A.y1, Math.max(A.y0, L[1] - 0.2 - rnd.next() * 1.0)), L[2] + (rnd.next() - 0.5) * 1.1], _v);
+      ctx.particles.emit({ pos: { x: m.x, y: m.y, z: m.z }, count: 1, vel: { x: (rnd.next() - 0.5) * 0.04, y: 0.015, z: (rnd.next() - 0.5) * 0.04 }, spread: 0.02, life: [3.5, 6], size: [0.014, 0.008], sprite: 'glow8', additive: true, color: 0xffd9a0, alpha: 0.55, drag: 0.3, fadeIn: 1.2 });
     }
     // the coins land in her claws
     if (this.coinsAt >= 0) {
@@ -3578,73 +3610,76 @@ export class Shop {
     this.ctx.sfx('card_hover', null, 0.5);
   }
 
-  private clearCard() {
-    for (const f of this.card) {
-      f.show(false);
-      this.fading.push(f);
+  /**
+   * He talks unasked: about your health, your purse, your gear, your bounty and
+   * the next boss, the wave, the weather, his long life; or he just grumbles.
+   * Every 7-12 s of quiet, never over another line.
+   */
+  private chatter(h: number, browse: boolean) {
+    const her = this.her;
+    if (!her || her.mode !== 'out' || this.speech || this.pendingLine) return;
+    this.chatT -= h;
+    if (this.chatT > 0) return;
+    this.chatT = 7 + rnd.next() * 5;
+    const l = this.chatLine(browse);
+    this.speak(l[0], l[1]);
+    this.chatN++;
+  }
+
+  private chatLine(browse: boolean): [string, 'neutral' | 'laugh' | 'squinty'] {
+    const run = this.ctx.run;
+    const ctxLines: [string, 'neutral' | 'laugh' | 'squinty'][] = [];
+    const hp = (this.visit?.hooks ?? (this.her instanceof Turtle ? this.her.hooks : null))?.hp?.();
+    if (hp && hp[0] < hp[1] * 0.5) ctxLines.push(['You are leaking, little bones. The tonic is on the shelf.', 'squinty']);
+    if (run.gold > 300) ctxLines.push(['You jingle like a sultan. I like that in a customer.', 'laugh']);
+    else if (run.gold < 25) ctxLines.push(['Your purse is lighter than your skull. Looking is free.', 'squinty']);
+    const worn = [...this.worn.values()];
+    if (worn.length) {
+      const g = GEAR[rnd.pick(worn) as GearId];
+      if (g) ctxLines.push([`That ${g.name.toLowerCase()} suits you. Mostly.`, 'laugh']);
+    } else ctxLines.push(['Riding out with nothing on but bones? Bold. Gear helps.', 'squinty']);
+    if (run.rank > 1) ctxLines.push([`Rank ${run.rank}. The posters will need a bigger picture of you.`, 'laugh']);
+    if (run.totalBounty > 150) ctxLines.push([`${Math.round(run.totalBounty)} in bounty this ride. The outlaws whisper about you.`, 'neutral']);
+    const w = Math.max(1, run.wave);
+    const bw = Math.ceil((w + (w % 5 === 0 ? 1 : 0)) / 5) * 5;
+    ctxLines.push([`${bossAt(bw).name} waits at wave ${bw}. Buy something sturdy.`, 'squinty']);
+    if (run.wave > 0) ctxLines.push([`Wave ${run.wave}. ${rnd.pick(['The sand is restless.', 'Gobi felt it in his toes.', 'Busy season for the undertaker.'])}`, 'neutral']);
+    if (browse && this.book.deal) {
+      const d = this.book.wares.find((x) => x.id === this.book.deal);
+      if (d && !this.book.sold.has(d.id)) ctxLines.push([`The ${d.name.toLowerCase()} is cheap today. Do not tell Gobi.`, 'laugh']);
     }
-    this.card = [];
+    const r = rnd.next();
+    if (r < 0.45 && ctxLines.length) return rnd.pick(ctxLines);
+    if (r < 0.68) return [LORE[this.chatN % LORE.length], 'neutral'];
+    if (r < 0.84) return [rnd.pick(WEATHER), 'neutral'];
+    return [rnd.pick(GRUMBLE), 'squinty'];
+  }
+
+  private clearCard() {
+    this.ui.card = null;
     this.cardFor = null;
   }
 
   /**
-   * The hovered ware's card, floating beside it in Alagard: its name, what it
-   * does, what it means for you (green: a gain; red: a snag), and the price
+   * The lifted ware's card (2D pixel art, beside it on screen): its name, what
+   * it does, what it means for you (green: a gain; red: a snag), and the price
    * (the deal and the haggle shown, red when you are short).
    */
-  private updateCard(h: number) {
+  private updateCard(_h: number) {
     const hb = this.hovered;
     const b = hb && hb.state === 'held' && this.phase === 'browse' ? hb : null;
-    if (b !== this.cardFor) {
-      this.clearCard();
-      this.cardFor = b;
-      if (b) this.makeCard(b);
-    }
-    if (!b || !this.card.length) {
-      this.tip.style.display = 'none';
+    this.cardFor = b;
+    if (!b) {
+      this.ui.card = null;
       return;
     }
-    const cam = this.ctx.camera;
-    const at = this.group.localToWorld(_l.copy(b.rest));
-    at.y += 0.12;
-    const dist = at.distanceTo(cam.position);
-    // on the open side of the ware, a hand's breadth in front of it (toward the lens)
-    const nx = _b.copy(at).project(cam).x;
-    const side = nx > 0.05 ? -1 : 1;
-    const right = _a.set(1, 0, 0).applyQuaternion(cam.quaternion);
-    const up = _c.set(0, 1, 0).applyQuaternion(cam.quaternion);
-    const fwd = _w.subVectors(cam.position, at).normalize();
-    const wMax = Math.max(...this.card.map((f) => f.mesh.scale.x));
-    const totalH = this.card.reduce((a, f) => a + f.mesh.scale.y, 0);
-    let y = totalH * 0.5 + 0.02;
-    for (const f of this.card) {
-      const fh = f.mesh.scale.y;
-      f.anchor.copy(at).addScaledVector(fwd, dist * 0.12).addScaledVector(right, side * (0.16 + wMax * 0.5)).addScaledVector(up, y - fh * 0.5);
-      y -= fh * 0.92;
-      f.update(h, cam);
-      f.mesh.position.copy(f.anchor); // pinned in their column (no float bob)
-    }
-  }
-
-  private makeCard(b: Body) {
     const w = b.ware;
-    const cam = this.ctx.camera;
-    const at = this.group.localToWorld(_l.copy(b.rest));
-    const sz = clamp(at.distanceTo(cam.position) * 0.043, 0.05, 0.12);
+    const p = this.group.localToWorld(_l.copy(b.p)).project(this.ctx.camera);
     const price = this.book.price(w), gold = Math.floor(this.ctx.run.gold);
-    const note = this.noteOf(w);
     let pl = `${price} gold`;
-    if (price !== w.price) pl += w.id === this.book.deal ? `  (today's deal, was ${w.price})` : `  (haggled, was ${w.price})`;
-    if (gold < price) pl += `  · you have ${gold}`;
-    const mk = (text: string, size: number, color: string, glow: string, wrap = 34) => {
-      const f = new FloatText3D(text, { size, px: 44, cps: 140, wrap, hdr: 1.15, color, glow });
-      f.mesh.renderOrder = 992;
-      this.ctx.scene.add(f.mesh);
-      return f;
-    };
-    this.card = [mk(w.name, sz * 1.3, '#ffd36b', '#ff9a40', 26), mk(w.desc, sz, '#fff3d6', '#b07040')];
-    if (note) this.card.push(mk(note.text, sz * 0.95, note.good ? '#b8f07a' : note.bad ? '#ff9a7a' : '#e8d6b0', note.good ? '#3a7a20' : note.bad ? '#8a2a18' : '#7a5a30'));
-    this.card.push(mk(pl, sz * 1.05, gold < price ? '#ff8a6a' : '#ffd36b', '#a05a20', 44));
+    if (price !== w.price) pl += w.id === this.book.deal ? ` (deal, was ${w.price})` : ` (was ${w.price})`;
+    if (gold < price) pl += ` · you have ${gold}`;
+    this.ui.card = { x: (p.x * 0.5 + 0.5) * this.ctx.engine.width, y: (-p.y * 0.5 + 0.5) * this.ctx.engine.height, name: w.name, desc: w.desc, note: this.noteOf(w), price: pl, dear: gold < price };
   }
 
   // ---------------------------------------------------------------- rigid bodies

@@ -180,78 +180,9 @@ function buildHouse(m: VoxelModel) {
   ell(m, P(2.25, floor + 0.55, -1.15), [U(0.22), U(0.16), U(0.22)], (x, y, z) => (h01(x, y, z, 3) > 0.85 ? 0xe86a8a : LEAF.b), { keep: (lx, ly) => ly > -0.3 || lx > 0.4 });
   // brackets under the porch, down to the shell
   for (const z of [H.porchZ0 + 0.2, -0.62, 0.78]) cap(m, P(px - 0.1, floor - 0.1, z), P(1.75, domeY(1.75, z) - 0.05, z), U(0.07), U(0.06), WOOD.shade);
-  // ---- inside: counter, shelves, stove, rugs, lantern, curios
-  // the counter runs along the side wall; Ozman stands behind it with the window at his back.
-  // Panelled ends, a thick top with an overhang, and a woven kilim draped over its front
-  const cx0 = -1.05, cx1 = -0.7, cz0 = -0.6, cz1 = 0.6, ctop = floor + 0.9;
-  const ix0 = Math.floor(U(cx0)), ix1 = Math.floor(U(cx1)), iz0 = Math.floor(U(cz0)), iz1 = Math.ceil(U(cz1));
-  const iy0 = Math.floor(U(floor)), iyt = Math.floor(U(ctop));
-  for (let x = ix0; x <= ix1; x++)
-    for (let z = iz0; z <= iz1; z++)
-      for (let y = iy0; y < iyt; y++) {
-        const front = x === ix1, end = z === iz0 || z === iz1;
-        if (!front && !end) continue;
-        const Y = M(y);
-        let c: number = WOOD.shade;
-        if (Y < floor + 0.12) c = WOOD.dark; // kick board
-        else if (end) {
-          const frame = x === ix0 || x === ix1 || y <= iy0 + 2 || y >= iyt - 2;
-          c = frame ? WOOD.dark : (y + x) % 5 === 0 ? WOOD.shade : WOOD.base;
-        }
-        m.set(x, y, z, c);
-      }
-  for (let x = ix0; x <= ix1 + 1; x++)
-    for (let z = iz0 - 1; z <= iz1 + 1; z++) {
-      const edge = x === ix1 + 1 || z === iz0 - 1 || z === iz1 + 1;
-      m.set(x, iyt, z, edge ? WOOD.base : h01(x, 7, z, 3) > 0.85 ? WOOD.shade : WOOD.hi);
-      m.set(x, iyt - 1, z, WOOD.dark);
-    }
-  // the kilim: diamonds and bands, soft folds, a zig-zag hem with tassels
-  const KIL = [0x8e2a20, 0xb8432e, 0x2f4a7a, 0xd9a53a, 0xe8d6b0];
-  const yHem = Math.floor(U(floor + 0.2));
-  for (let z = iz0 + 1; z <= iz1 - 1; z++) {
-    const fold = Math.sin(z * 0.9) > 0.55 ? 1 : 0;
-    const zig = Math.abs((((z - iz0) % 4) + 4) % 4 - 2);
-    for (let y = yHem + zig; y < iyt - 1; y++) {
-      const dz = (((z - iz0) % 8) + 8) % 8 - 4, dy = (((y - yHem) % 8) + 8) % 8 - 4;
-      const d = Math.abs(dz) + Math.abs(dy);
-      const band = y >= iyt - 3 || y <= yHem + zig + 1;
-      const c = band ? KIL[2] : d <= 1 ? KIL[3] : d === 2 ? KIL[4] : d === 3 ? KIL[2] : (y >> 1) % 2 ? KIL[0] : KIL[1];
-      m.set(ix1 + 1 + fold, y, z, c, VF.SOFTAO);
-    }
-    if ((z - iz0) % 3 === 1) for (let k = 1; k <= 2; k++) m.set(ix1 + 1, yHem + zig - k, z, KIL[4], VF.SOFTAO);
-  }
-  // a basket on the counter (the wares come out of it), brass scales, a cash tin
-  vessel(m, P(-0.88, floor + 0.95, -0.35), [2.6, 3.0, 3.1, 3.2, 3.2], (row, x, z, a) => (row === 4 ? WOOD.dark : (Math.floor((a + 4) * 4) + row) % 2 ? 0xc8a060 : 0xa8803e), { seed: 5, hollowTop: 1 });
-  cap(m, P(-0.88, floor + 0.96, 0.36), P(-0.88, floor + 1.25, 0.36), U(0.025), U(0.02), 0xc8a050, { fl: VF.METAL });
-  cap(m, P(-0.88, floor + 1.25, 0.21), P(-0.88, floor + 1.25, 0.51), U(0.02), U(0.02), 0xc8a050, { fl: VF.METAL });
-  for (const z of [0.21, 0.51]) vessel(m, P(-0.88, floor + 1.08, z), [1.4, 0.9], () => 0xb08a40, { seed: 6, fl: VF.METAL });
-  ell(m, P(-0.86, floor + 1.0, 0.05), [U(0.09), U(0.05), U(0.12)], 0x5a6a7a, { fl: VF.METAL });
-  // shelves on the back wall, with jars, bottles and books
-  for (const sy of [4.1, 4.7]) {
-    for (let x = Math.floor(U(-1.0)); x <= Math.ceil(U(1.3)); x++) for (let z = Math.floor(U(-1.48)); z <= Math.floor(U(-1.26)); z++) m.set(x, Math.floor(U(sy)), z, WOOD.shade);
-    for (let x = -0.95; x < 1.25; x += 0.17 + h01(U(x), U(sy), 1) * 0.08) {
-      const k = h01(U(x), U(sy), 2);
-      const base = P(x, sy + VS, -1.37);
-      if (k < 0.45) vessel(m, base, k < 0.2 ? [1.2, 1.4, 1.4, 1.2, 0.8, 0.5] : [1.5, 1.8, 1.8, 1.5, 1.0], (row) => (row > 3 ? 0x8a6a4a : [0x6a9a7e, 0x9a5a3a, 0xc8a04a, 0x5a7aa0][Math.floor(k * 16) % 4]), { seed: Math.floor(k * 100), fl: k < 0.2 ? VF.SOFTAO : undefined });
-      else for (let b = 0; b < 3; b++) for (let y = 0; y < 3 + (b % 2); y++) m.set(Math.floor(U(x)) + b, Math.floor(U(sy)) + 1 + y, Math.floor(U(-1.37)), [0x8a2a20, 0x2f4a7a, 0x3f6a4a, 0xc8903a][(b + Math.floor(k * 10)) % 4]);
-    }
-  }
-  // the stove in the back-left corner, embers glowing in its belly
-  vessel(m, P(-1.35, floor, -1.15), [2.2, 2.6, 3.4, 3.8, 3.8, 3.6, 3.2, 2.6, 2.0, 1.6], (row, x, z) => (row === 4 && x * 0.7 + z > U(-1.35) * 0.7 + U(-1.15) + 2 ? 0xff8a3a : row < 2 ? IRON.hi : IRON.base), { seed: 11 });
-  for (let i = 0; i < 4; i++) m.set(Math.floor(U(-1.2)) + (i & 1), Math.floor(U(floor + 0.36)) + (i >> 1), Math.floor(U(-1.0)), 0xffb04a, VF.EMISSIVE | VF.GLOW);
-  // a woven doormat inside the door
-  for (let x = Math.floor(U(1.05)); x <= Math.floor(U(1.34)); x++)
-    for (let z = Math.floor(U(-0.25)); z <= Math.ceil(U(0.45)); z++) m.set(x, Math.floor(U(floor)), z, (x + z) % 5 === 0 ? 0xe8d6b0 : Math.abs(M(z) - 0.1) < 0.08 ? 0x2f4a7a : 0xa83a2a, VF.SOFTAO);
-  // a tapestry on the inside of the front wall, a cow skull by the side window
-  for (let x = Math.floor(U(0.1)); x <= Math.ceil(U(0.9)); x++)
-    for (let y = Math.floor(U(3.5)); y <= Math.ceil(U(4.75)); y++) m.set(x, y, Math.floor(U(H.z1)) - 1, (Math.floor(M(y) / 0.1) + Math.floor(M(x) / 0.1)) % 3 === 0 ? 0xd9a53a : Math.floor(M(y) / 0.2) % 2 ? 0x8e2a20 : 0x2f4a7a, VF.SOFTAO);
-  ell(m, P(H.x0 + 0.12, 4.85, 0.62), [U(0.1), U(0.13), U(0.12)], 0xe8dcc0);
-  for (const s of [-1, 1]) cap(m, P(H.x0 + 0.14, 4.92, 0.62 + s * 0.08), P(H.x0 + 0.2, 5.05, 0.62 + s * 0.3), U(0.035), U(0.015), 0xe8dcc0);
-  // the inside lantern on the ridge beam, warm
-  cap(m, P(-0.85, 5.4, -1.45), P(-0.85, 5.4, 1.15), U(0.07), U(0.07), WOOD.dark);
-  line(m, [P(-0.85, 5.4, 0.15), P(-0.85, 5.1, 0.15)], IRON.base);
-  vessel(m, P(-0.85, 4.75, 0.15), [1.8, 2.1, 2.1, 2.0, 1.4], (row) => (row === 0 || row === 4 ? IRON.base : 0xffc66a), { fl: VF.EMISSIVE | VF.SOFTAO, seed: 2 });
+  // ---- inside: the merchant's den (counter, scale and till, shelves of curios, stove, herbs, lanterns, rugs, the
+  // shell's ribs under the roof) is a separate fine-voxel model, ui/ShopShelf.ts denModel(), that the shop hangs on
+  // the shell at this house's floor; the counter, basket, Ozman's place and the stovepipe keep the positions below
 }
 
 // ------------------------------------------------------------------ the acacia

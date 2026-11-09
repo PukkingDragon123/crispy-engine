@@ -145,6 +145,7 @@ export class Missions {
       board: d.player.board,
       stock: () => this.wares(),
       busy: () => this.busy || d.choice.active || !d.player.alive,
+      hp: () => [d.player.hp, d.player.maxHp],
       ...extra,
     };
   }
