@@ -1,10 +1,15 @@
 // "Sundown" HD — the player: a half-dead punk cowboy, rebuilt at 1/54 m with a
 // bespoke builder. (The API keeps its old names: skeletonCowboyRig & co.)
 //
-// DESIGN UNITS: every shape is authored in u = 1/36 m (the legacy humanoid grid,
-// see skeleton.ts J) and rasterised onto the 1/54 grid (S = 1.5 voxels per u) by
-// the sculpt kit (sculpt.ts). Joints / pivots / sockets are exactly the legacy
-// joints * S, so animation, the board stance, cameras and cloth anchors still fit.
+// DESIGN UNITS: every shape is authored in design units u on the legacy humanoid layout (see
+// skeleton.ts J) and rasterised by the sculpt kit (sculpt.ts) at S = 1.5 voxels per unit.
+// REALISTIC PROPORTIONS: the body is not rasterised on that cartoon layout any more. Each body part
+// goes through a Warp (torso/pelvis, each arm, each leg) onto a realistic adult figure: about 7.4
+// heads, 1.83 m to the crown, legs half his height, arms to mid-thigh, a real neck, man-sized hands
+// and boots. The head family (head, jaw, eyes, brows, hat, hair, mask, glasses) is not warped: its
+// voxels are exactly as sculpted, on a grid (1/114 m) fine enough that the same head is a realistic
+// 25 cm. Joints / pivots / sockets are the legacy joints mapped through the same warps, so every
+// animation that works in joint angles still fits.
 // Mirror plane: geometric x = 0. Character LEFT = +X, faces +Z, origin on the ground.
 //
 // Half zombie, half human. His LEFT half lives: sun-dark weathered skin, a strong
@@ -34,14 +39,15 @@ import { defaultExpressions } from '../toon/humanoid';
 import { SUNDOWN_EXPRESSIONS } from './skeleton';
 import { frogWigHat, FROG_WIG_TOP } from '../enemies/frog';
 import type { CowboyLook, HatId, OutfitId } from './skeleton';
-import { Sc, Col, clamp, lerp, sstep, vadd, vsub, vmul, vdot, vcross, vlen, vnorm, distPoly, spline, resample, shadeRamps, splitOff } from './sculpt';
+import { Sc, Warp, Col, clamp, lerp, sstep, vadd, vsub, vmul, vdot, vcross, vlen, vnorm, distPoly, spline, resample, shadeRamps, splitOff } from './sculpt';
 import { SKIN, STUB, STUB_DOT, SCAR, LIP, NAIL, BROWHAIR, HEYE, ROT, BRUISE, MEAT, SINEW, CAVITY, THREAD_BLK, HAIR, HAIR_ALT, HAIR_TIP, HAIR_GREY, rng, vhash, dedupe, skinOver, rotEdgeCol, blotch, markBone, boneEdgeCol, stitch, strand, splitY } from './fleshKit';
 import { installHairSway, type HairChain } from './hairSway';
 
 /** metres per voxel of the HD player build */
-export const SUNDOWN_HD_VS = 1 / 54;
-const S = 54 / 36; // voxels per design unit
-const U = 1 / 36; // metres per design unit
+export const SUNDOWN_HD_VS = 1 / 114;
+const S = 1.5; // voxels per design unit
+/** metres per output unit (one design unit of the unwarped head family) */
+const UH = S * SUNDOWN_HD_VS;
 const ramp = (base: number, shade: number, hi: number, dark: number): Ramp => ({ base, shade, hi, dark });
 
 // ================================================================== PALETTE
@@ -85,7 +91,50 @@ const J: Record<string, V3> = {
 const SKULL_TOP = 63;
 const mg = (p: V3): V3 => [-p[0], p[1], p[2]];
 const vx = (p: V3): V3 => [p[0] * S, p[1] * S, p[2] * S];
-const sc = (name: string) => new Sc(name, S);
+
+// ================================================================== PROPORTION WARPS (design layout -> realistic figure, output units)
+/** the head family sits HEAD_DY output units above its design height (an integer number of voxels: 120) */
+const HEAD_DY = 80;
+/** horizontal scale of the trunk (output units per design unit): width, and a slimmer depth */
+const BODY_K = 1.9;
+const BODY_KZ = 1.7;
+/** design z = 0 (the limb axes) in output space; keeps the neck (design z -1.5) right under the head */
+const Z0 = -1.5 + 1.5 * BODY_KZ;
+/** height map of the trunk and legs: ankle 9 cm, knee 53 cm, hip 95 cm, waist 1.11 m, shoulder joint 1.52 m, a sloped
+ *  trapezius and a real neck (the cartoon layout had the chin sunk between the shoulders), chin 1.64 m, crown 1.89 m */
+const Y_BODY: [number, number][] = [[0, 0], [3, 6.6], [15.5, 40.5], [24, 72], [29.5, 84.5], [42.5, 115.5], [44, 119], [46, 126], [52, 140]];
+/** height map of the hanging arm: elbow 1.18 m, wrist 0.91 m, grip 0.80 m, fingertips at mid-thigh */
+const Y_ARM: [number, number][] = [[15, 48.5], [21.5, 61.1], [25.6, 69], [33, 90], [42.5, 115.5], [52, 138.8]];
+/** the trunk; it narrows into a real neck above the shoulders (the popped collar closes round it) */
+const W_BODY = new Warp(Y_BODY, [[43, BODY_K], [45.6, 1.55]], [[43, BODY_KZ], [45.6, 1.5]], 0, 0, -1.5, -1.5);
+/** arms: a fuller, longer arm round the shoulder axis; the hand narrows to a real hand below the wrist, the
+ *  shoulder cap (stump, pauldron) a little above it */
+const W_ARM = (s: number) => new Warp(Y_ARM, [[24.2, 1.35], [25.6, 2.3], [41, 2.3], [43.5, 2.0]], [[24.2, 1.55], [25.6, 2.3], [41, 2.3], [43.5, 2.0]], s * 8, s * 8 * BODY_K, 0, Z0);
+/** legs: long thighs, a little more girth below the hip, man-sized boots */
+const W_LEG = (s: number) => new Warp(Y_BODY, [[0, 2.3]], [[0, 2.3]], s * 4, s * 4 * BODY_K, 0, Z0);
+const WA_L = W_ARM(1), WA_R = W_ARM(-1), WL_L = W_LEG(1), WL_R = W_LEG(-1);
+/** the warp new sculpts are made with (null: the unwarped head family) */
+let WARP: Warp | null = null;
+const sc = (name: string) => new Sc(name, S, WARP);
+function warped<T>(w: Warp | null, f: () => T): T {
+  const prev = WARP;
+  WARP = w;
+  try {
+    return f();
+  } finally {
+    WARP = prev;
+  }
+}
+/** design point -> output point through w (null: the head family, lifted by HEAD_DY) */
+const toOut = (w: Warp | null, p: V3): V3 => (w ? w.fwd(p) : [p[0], p[1] + HEAD_DY, p[2]]);
+/** dedupe a body model against a head-family model (which sits HEAD_DY * S voxels higher in rig space) */
+function dedupeLifted(body: VoxelModel, headFam: VoxelModel) {
+  const dy = HEAD_DY * S, del: V3[] = [];
+  body.forEach((x, y, z) => {
+    if (headFam.has(x, y - dy, z)) del.push([x, y, z]);
+  });
+  for (const [x, y, z] of del) body.del(x, y, z);
+}
 const pw = (v: number, p: number) => Math.pow(Math.abs(v), p);
 
 // ================================================================== BODY ENVELOPES (garments are shells around these)
@@ -993,7 +1042,7 @@ function torsoBody(m: Sc) {
   for (const s of [1, -1]) f.path([[s * 1.3, 43.0, 2.95], [s * 3.6, 43.45, 2.75], [s * 5.9, 43.55, 1.2], [s * 7.0, 43.25, 0.05]], () => 0.5, SKIN.base); // collarbones
   const depth = (x: number, y: number, z: number) => Math.min(rhoOf(e, x, Math.min(y, 44.4), z), y > 42.6 ? Math.hypot(x / 2.6, (z - neckZ(y)) / 2.4) : 9);
   f.m.forEach((i, j, l) => {
-    const x = cen(i), y = cen(j), z = cen(l);
+    const [x, y, z] = f.at(i, j, l);
     const d = torsoRotSdf(x, y, z);
     if (d < 0) {
       // the torn-open cavity: only a dark inner wall is left behind the bones
@@ -1009,7 +1058,7 @@ function torsoBody(m: Sc) {
   const bn = sc('torso_bones');
   torsoBones(bn, true);
   bn.m.forEach((i, j, l, c, fl) => {
-    const d = torsoRotSdf(cen(i), cen(j), cen(l));
+    const d = torsoRotSdf(...bn.at(i, j, l));
     if (d < 0.2) m.m.set(i, j, l, boneEdgeCol(c, d), fl);
   });
   // sinew strung across the open chest, a flap of skin hanging into it, the neck muscle torn loose
@@ -1032,7 +1081,7 @@ function bellyBody(m: Sc) {
   f.region([-7, 25.2, -6], [7, WAIST_CUT, 4.5], (x, y, z) => y < WAIST_CUT && Math.pow(Math.abs(x) / hxy(y), 2.5) + Math.pow(Math.abs(z + 1.0) / 3.95, 2.5) <= 1, SKIN.base);
   const sdf = (x: number, y: number, z: number) => ell3(x, y, z, [-5.4, 28.0, 0.8], [2.4, 1.9, 3.2]) + 0.25 * Math.sin(y * 3.1 + z * 1.3);
   f.m.forEach((i, j, l) => {
-    const x = cen(i), y = cen(j), z = cen(l);
+    const [x, y, z] = f.at(i, j, l);
     const d = sdf(x, y, z);
     if (d < 0) {
       if (Math.pow(Math.abs(x) / hxy(y), 2.5) + Math.pow(Math.abs(z + 1.0) / 3.95, 2.5) < 0.55) m.m.set(i, j, l, CAVITY);
@@ -1050,8 +1099,8 @@ function bellyBody(m: Sc) {
   const bones = sc('belly_bones');
   pelvisBones(bones, -100);
   bones.m.forEach((i, j, l, c, fl) => {
-    const d = sdf(cen(i), cen(j), cen(l));
-    if (d < 0.2 && cen(j) > 25.3) m.m.set(i, j, l, boneEdgeCol(c, d), fl);
+    const p = bones.at(i, j, l), d = sdf(...p);
+    if (d < 0.2 && p[1] > 25.3) m.m.set(i, j, l, boneEdgeCol(c, d), fl);
   });
   for (let y = 28.7; y >= 27.0; y -= 1.05) {
     const x = lerp(-1.75, -1.55, (29.2 - y) / 2);
@@ -1093,7 +1142,7 @@ function deadUpperArm(m: Sc, s: number) {
   upperArmFlesh(f, s, ROT.base);
   const hole = (x: number, y: number, z: number) => ((y - 37.0) / 2.1) ** 2 + ((z - 0.35) / 1.25) ** 2 + 0.16 * Math.sin(y * 4 + z * 3) < 1 && s * x > 8.3;
   f.m.forEach((i, j, l) => {
-    const x = cen(i), y = cen(j), z = cen(l);
+    const [x, y, z] = f.at(i, j, l);
     if (hole(x, y, z)) {
       if (Math.hypot(x - s * 8.05, z) < 0.95) m.m.set(i, j, l, CAVITY);
       return;
@@ -2294,6 +2343,9 @@ function sunglasses(vl: EyeVar, vr: EyeVar) {
  * Mesh it with `pivot` and add it to the rig's `fore_r` node at the origin.
  */
 export function forearmWrapModel(kind: 'trail' | 'embalm' = 'trail'): { model: VoxelModel; voxelSize: number; pivot: V3 } {
+  return warped(WA_R, () => forearmWrap(kind));
+}
+function forearmWrap(kind: 'trail' | 'embalm'): { model: VoxelModel; voxelSize: number; pivot: V3 } {
   const m = sc('wrap_' + kind);
   const L = kind === 'embalm' ? ramp(0xdcc690, 0xbea66c, 0xf0dcaa, 0x8a7444) : ramp(0xeee4cc, 0xd2c4a2, 0xfff6e2, 0xa89a78);
   const cx = -8.5, cz = -0.1, y0 = 27.7, y1 = 31.6, R = 1.22, pitch = 0.82;
@@ -2311,7 +2363,7 @@ export function forearmWrapModel(kind: 'trail' | 'embalm' = 'trail'): { model: V
   // the tucked-in end, slightly loose
   m.cap([cx - R - 0.2, y0 + 0.9, cz + 0.6], [cx - R - 0.45, y0 - 0.2, cz + 0.9], 0.36, 0.26, L.base);
   shadeRamps(m.m, [L], true);
-  return { model: m.m, voxelSize: SUNDOWN_HD_VS, pivot: vx(mg(J.elbow)) };
+  return { model: m.m, voxelSize: SUNDOWN_HD_VS, pivot: vx(WA_R.fwd(mg(J.elbow))) };
 }
 
 // ================================================================== RIG
@@ -2331,11 +2383,13 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   const LK = LOOKS[o] ?? LOOKS.punk;
   // no loose hair under a headdress that is itself the hair (nemes, the frog wig)
   const hairy = look.hat !== 'nemes' && look.hat !== 'wig';
+  WARP = null;
   const hd = buildHead(hairy);
   const punk = o === 'punk';
   const coatish = o === 'duster' || o === 'sheriff';
 
-  // ---- torso: the half-dead body first, garments over it
+  // ---- torso: the half-dead body first, garments over it (trunk warp)
+  WARP = W_BODY;
   const torso = sc('torso');
   torsoBody(torso);
   if (punk) punkTorso(torso);
@@ -2350,7 +2404,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   }
   // the outlaw mask (default on every outfit) is the bandana pulled up over the face; without it he wears it round the neck
   const masked = look.mask !== false;
-  const mask = masked ? outlawMask(o) : null;
+  const mask = masked ? warped(null, () => outlawMask(o)) : null;
   if (!masked && o !== 'sheriff' && o !== 'pharaoh') bandana(torso, LK.band);
   const [senv, soff] = STRAP_OFF[o] ?? STRAP_OFF.punk;
   sling(torso, senv, soff);
@@ -2369,24 +2423,27 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     shadeRamps(pelvis.m, [BN, SKIN, LK.belt, ...(TR ? [TR] : [])], true);
   }
 
-  // ---- arms: the living left, the dead right
-  const armL = sc('arm_l'), armR = sc('arm_r'), foreL = sc('fore_l'), foreR = sc('fore_r');
+  // ---- arms: the living left, the dead right (each through its own arm warp)
+  WARP = WA_L;
+  const armL = sc('arm_l'), foreL = sc('fore_l');
+  WARP = WA_R;
+  const armR = sc('arm_r'), foreR = sc('fore_r');
   if (punk) {
-    punkArmL(armL);
-    punkArmR(armR);
-    punkForeL(foreL);
-    punkForeR(foreR);
+    warped(WA_L, () => (punkArmL(armL), punkForeL(foreL)));
+    warped(WA_R, () => (punkArmR(armR), punkForeR(foreR)));
   } else {
-    livingUpperArm(armL, 1);
-    deadUpperArm(armR, -1);
-    livingForearm(foreL, 1);
-    livingHand(foreL, 1);
-    deadForearm(foreR, -1);
-    hand(foreR, -1, true);
-    if (coatish) {
-      upperSleeve(armL, 1, LK.coat, LK.trim);
-      upperSleeve(armR, -1, LK.coat, LK.trim);
-    }
+    warped(WA_L, () => {
+      livingUpperArm(armL, 1);
+      livingForearm(foreL, 1);
+      livingHand(foreL, 1);
+      if (coatish) upperSleeve(armL, 1, LK.coat, LK.trim);
+    });
+    warped(WA_R, () => {
+      deadUpperArm(armR, -1);
+      deadForearm(foreR, -1);
+      hand(foreR, -1, true);
+      if (coatish) upperSleeve(armR, -1, LK.coat, LK.trim);
+    });
     if (o === 'pharaoh')
       for (const [m, s, y, ax, r0, r1] of [[armL, 1, 37.8, 8.0, 1.62, 2.05], [armR, -1, 37.8, 8.0, 1.62, 2.05], [foreL, 1, 28.2, 8.5, 1.3, 1.7], [foreR, -1, 28.2, 8.5, 0.75, 1.35]] as [Sc, number, number, number, number, number][])
         m.region([s * ax - 2.2, y - 0.6, -2.2], [s * ax + 2.2, y + 0.6, 2.2], (x, yy, z) => {
@@ -2397,22 +2454,24 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   }
 
   // ---- legs: trousers into boots (jeans for the punk), linen wraps and sandals for the pharaoh
-  const thighL = sc('thigh_l'), thighR = sc('thigh_r'), shinL = sc('shin_l'), shinR = sc('shin_r');
-  if (punk) {
-    punkThigh(thighL, 1);
-    punkThigh(thighR, -1);
-    punkShin(shinL, 1);
-    punkShin(shinR, -1);
-  } else
-    for (const [th, sh, s] of [[thighL, shinL, 1], [thighR, shinR, -1]] as [Sc, Sc, number][]) {
-      if (o === 'pharaoh' || !TR) wrappedLeg(th, sh, s);
+  WARP = WL_L;
+  const thighL = sc('thigh_l'), shinL = sc('shin_l');
+  WARP = WL_R;
+  const thighR = sc('thigh_r'), shinR = sc('shin_r');
+  for (const [th, sh, s, w] of [[thighL, shinL, 1, WL_L], [thighR, shinR, -1, WL_R]] as [Sc, Sc, number, Warp][])
+    warped(w, () => {
+      if (punk) {
+        punkThigh(th, s);
+        punkShin(sh, s);
+      } else if (o === 'pharaoh' || !TR) wrappedLeg(th, sh, s);
       else {
         trouserThigh(th, s, TR);
         trouserShin(sh, s, TR, LK.boot);
         shadeRamps(th.m, [TR], true);
         shadeRamps(sh.m, [TR, LK.boot], true);
       }
-    }
+    });
+  WARP = null; // everything below is the unwarped head family (or picks its warp explicitly)
 
   const hat = buildHat(look.hat, o);
   const topY = HAT_TOP[look.hat];
@@ -2442,8 +2501,8 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     dedupe(hd.brow_r, g);
   }
   for (const lk of hair?.locks ?? []) for (const other of [head, jaw, mask?.head, hd.brow_l]) dedupe(lk.model, other);
-  dedupe(torso.m, head);
-  dedupe(torso.m, jaw);
+  dedupeLifted(torso.m, head);
+  dedupeLifted(torso.m, jaw);
   dedupe(pelvis.m, torso.m);
   for (const [a, f] of [[armL, foreL], [armR, foreR]] as [Sc, Sc][]) {
     dedupe(a.m, torso.m);
@@ -2463,8 +2522,15 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     if (expressions[name] && (l !== 'normal' || r !== 'normal')) expressions[name].parts = { eye_l: eye('l', l), eye_r: eye('r', r), ...(shades ? { glasses: glassesOf(l, r) } : {}) };
 
   const parts: PartSpec[] = [];
+  /** the warp each part was sculpted through (absent: the unwarped head family) */
+  const PW: Record<string, Warp> = { pelvis: W_BODY, torso: W_BODY, coat: W_BODY, arm_l: WA_L, fore_l: WA_L, arm_r: WA_R, fore_r: WA_R, thigh_l: WL_L, shin_l: WL_L, thigh_r: WL_R, shin_r: WL_R };
+  /** a part-space point: through the part's warp, or as sculpted for the head family */
+  const at = (part: string, p: V3): V3 => vx(PW[part] ? PW[part].fwd(p) : p);
   const P = (name: string, model: VoxelModel, joint: V3, parent?: string) => {
-    if (model.count > 0) parts.push({ name, model, pivot: vx(joint), attach: vx(joint), parent });
+    if (model.count === 0) return;
+    // the head family hangs off the torso lifted by HEAD_DY; inside it, nothing moves
+    const attach = parent && !PW[name] && PW[parent] ? vx(toOut(null, joint)) : at(name, joint);
+    parts.push({ name, model, pivot: at(name, joint), attach, parent });
   };
   P('pelvis', pelvis.m, J.pelvis);
   P('torso', torso.m, J.waist, 'pelvis');
@@ -2488,14 +2554,14 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   P('shin_r', shinR.m, mg(J.knee), 'thigh_r');
   let skirt: ReturnType<typeof dusterSkirt> | null = null;
   if (coatish) {
-    skirt = dusterSkirt(LK.coat, LK.trim);
+    skirt = warped(W_BODY, () => dusterSkirt(LK.coat, LK.trim));
     P('coat', skirt.m.m, [0, 29.5, -6.5], 'pelvis');
   }
-  if (o === 'pharaoh') P('coat', shendyt().m, [0, 28.5, -5.5], 'pelvis');
+  if (o === 'pharaoh') P('coat', warped(W_BODY, () => shendyt()).m, [0, 28.5, -5.5], 'pelvis');
   const hairChains = (hair?.chains ?? []).filter((c) => c.parts.every((n) => parts.some((p) => p.name === n)));
 
   const poncho = o === 'poncho';
-  const sock = (part: string, at: V3, rot?: V3): SocketSpec => ({ part, at: vx(at), rot });
+  const sock = (part: string, p: V3, rot?: V3): SocketSpec => ({ part, at: at(part, p), rot });
   const backZu = punk ? backZ(PUNK_ENV, 0, 39, PUNK_T) : backZ(senv, 0, 39, soff - 0.5);
   const sockets: Record<string, SocketSpec> = {
     hand_r: sock('fore_r', mg(J.hand)),
@@ -2536,7 +2602,8 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
             coat_anchor_front: sock('pelvis', [0, 22, 3]),
           }),
   };
-  const mm = (p: V3) => [p[0] * U, p[1] * U, p[2] * U];
+  /** design point -> rig-space metres (through the trunk warp, or lifted for the head family) */
+  const mm = (p: V3, w: Warp | null = null) => toOut(w, p).map((v) => v * UH);
   const clothCoat = coatish || poncho;
   return {
     name: `cowboy_${look.hat}_${look.outfit}${mask ? '' : '_nomask'}${shades ? '' : '_noshades'}`,
@@ -2546,18 +2613,19 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     meta: {
       look,
       hd: true,
-      height: topY * U,
-      skullTop: (SKULL_TOP + 0.5) * U,
-      hatTop: topY * U,
+      height: (topY + HEAD_DY) * UH,
+      skullTop: (SKULL_TOP + 0.5 + HEAD_DY) * UH,
+      hatTop: (topY + HEAD_DY) * UH,
+      chinY: (44.4 + HEAD_DY) * UH,
       radius: 0.32,
-      hipY: J.hip[1] * U,
-      kneeY: J.knee[1] * U,
-      shoulderY: J.shoulder[1] * U,
-      elbowY: J.elbow[1] * U,
-      handY: J.hand[1] * U,
-      upperArmLen: (J.shoulder[1] - J.elbow[1]) * U,
-      foreArmLen: (J.elbow[1] - J.hand[1]) * U,
-      legLen: J.hip[1] * U,
+      hipY: W_BODY.Y(J.hip[1]) * UH,
+      kneeY: W_BODY.Y(J.knee[1]) * UH,
+      shoulderY: W_BODY.Y(J.shoulder[1]) * UH,
+      elbowY: WA_L.Y(J.elbow[1]) * UH,
+      handY: WA_L.Y(J.hand[1]) * UH,
+      upperArmLen: (WA_L.Y(J.shoulder[1]) - WA_L.Y(J.elbow[1])) * UH,
+      foreArmLen: (WA_L.Y(J.elbow[1]) - WA_L.Y(J.hand[1])) * UH,
+      legLen: W_BODY.Y(J.hip[1]) * UH,
       facePivots: { eye_l: mm(J.eye), eye_r: mm(mg(J.eye)), brow_l: mm(J.brow), brow_r: mm(mg(J.brow)), jaw: mm(J.jaw) },
       // modelled eyeballs with glowing Serket-green pupils (no 2D overlay)
       eyeColor: EYE.core,
@@ -2568,7 +2636,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
       cloth: {
         coat: clothCoat ? [LK.coat.base, LK.coat.shade, LK.trim.base] : undefined,
         coatStyle: poncho ? 'poncho' : clothCoat ? 'tails' : undefined,
-        coatLen: o === 'sheriff' ? 0.56 : o === 'duster' ? 0.5 : poncho ? 0.3 : 0,
+        coatLen: o === 'sheriff' ? 0.7 : o === 'duster' ? 0.62 : poncho ? 0.36 : 0,
         coatWidth: poncho ? 0.6 : 0.5,
         bandana: mask ? [mask.R.base, mask.R.shade] : o !== 'sheriff' && o !== 'pharaoh' ? [LK.band.base, LK.band.shade] : undefined,
         bandanaLen: mask ? 0.2 : 0.16,

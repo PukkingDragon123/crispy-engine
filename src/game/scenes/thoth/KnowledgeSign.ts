@@ -10,10 +10,20 @@
 // Hover: the glyphs and the light flare, the door swings a little wider, the books stir. Click: the
 // door swings open and a shower of glyphs bursts out (MenuScene then opens the hall).
 //
-//   const sign = new KnowledgeSign(particles);  scene.add(sign.group);  sign.group.position...
+// SEALED (until the first ride is over, the same gate as the hideout): the leaves stand shut and dark,
+// bound by two hemp cords crossed over them from bronze pegs in the jambs, and where the cords cross a
+// lump of Nile clay is pressed over the knot and stamped with Thoth's ibis (the necropolis seal of the
+// old tombs). No light, no books, only sand sifting off the cornice. Hover: the stamped ibis glimmers
+// and the leaves knock against the cords as if something behind them stirred. awaken(): the ground
+// hums, the glyph columns stutter alight from the steps up, the clay cracks and falls in pieces, the
+// cords drop, and the leaves swing in on the cold blue light.
+//
+//   const sign = new KnowledgeSign(particles, { sealed });  scene.add(sign.group);  sign.group.position...
 //   sign.update(dt, hot)   (hot 0..1)
 //   sign.proxy             an invisible box for raycasts
 //   sign.burst()           the click
+//   sign.knock()           a click while sealed: the leaves strain against the cords
+//   sign.awaken(onDone)    the first visit after the first ride
 import * as THREE from 'three';
 import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
 import { buildRigGeo, RigInstance, RigSpec } from '../../../engine/voxel/Rig';
@@ -22,6 +32,7 @@ import { noise, hash2, hash3 } from '../../../engine/math/rand';
 import { mixRGB } from '../../models/props/helpers';
 import type { Particles } from '../../fx/Particles';
 import { flyingBookRig, GLYPH_BITMAPS } from './HallModels';
+import { buildVoxelGeometry } from '../../../engine/voxel/Mesher';
 
 const VS = 1 / 48;
 /** model y of the threshold above the ground (the outcrop is raised on its buried steps) */
@@ -346,6 +357,122 @@ function templeDoorRig(): RigSpec {
   };
 }
 
+// ============================================================================ the seal (1/96)
+const V2 = VS / 2;
+const HEMP = { hi: 0xd8bc84, base: 0xb8965c, shade: 0x8a6a3a, dark: 0x5a4224 };
+const CLAY = [0x7e4428, 0x8e5030, 0x744026, 0x965a36];
+const CLAY_HI = 0xb06e44, CLAY_DARK = 0x4e2a16;
+/** the cords' pegs (1/96, frame space) and where they cross */
+const PEG_X = (OW + 4) * 2, PEG_Y0 = 12 * 2, PEG_Y1 = (OH - 12) * 2, PEG_Z = 13;
+const SAG = 5;
+const SEAL_C: [number, number, number] = [0, (PEG_Y0 + PEG_Y1) / 2 - SAG, PEG_Z + 2];
+
+/** a twisted two-strand hemp cord from a to b (1/96 voxels), sagging in the middle */
+function cord(m: VoxelModel, a: [number, number, number], b: [number, number, number], sag: number, seed: number) {
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+  const d = [(b[0] - a[0]) / len, (b[1] - a[1]) / len, (b[2] - a[2]) / len];
+  // a frame round the cord: u across it in the door plane, w out of it
+  const u = [-d[1], d[0], 0];
+  const r = 1.7;
+  for (let s = 0; s <= len; s += 0.45) {
+    const t = s / len;
+    const c = [a[0] + d[0] * s, a[1] + d[1] * s - sag * 4 * t * (1 - t), a[2] + d[2] * s];
+    for (let dx = -2; dx <= 2; dx++)
+      for (let dy = -2; dy <= 2; dy++)
+        for (let dz = -2; dz <= 2; dz++) {
+          const x = Math.round(c[0] + dx), y = Math.round(c[1] + dy), z = Math.round(c[2] + dz);
+          const ox = x - c[0], oy = y - c[1], oz = z - c[2];
+          const along = ox * d[0] + oy * d[1] + oz * d[2];
+          const qx = ox - d[0] * along, qy = oy - d[1] * along, qz = oz - d[2] * along;
+          const rr = Math.hypot(qx, qy, qz);
+          if (rr > r) continue;
+          // the twist: two strands wound round each other, a dark groove between them
+          const ang = Math.atan2(qz, qx * u[0] + qy * u[1]);
+          const tw = Math.sin(ang * 2 + (s + along) * 1.25 + seed);
+          let col = tw > 0.25 ? HEMP.base : tw < -0.25 ? HEMP.shade : HEMP.dark;
+          if (qz > 0.6 && tw > 0.5) col = HEMP.hi;
+          if (hash3(x, y, z + seed) < 0.06) col = HEMP.dark; // a frayed fibre
+          m.set(x, y, z, col);
+        }
+  }
+}
+
+/** the clay seal pressed over the knot, in four pieces along its cracks (1/96, centred on SEAL_C) */
+function sealPieces(): VoxelModel[] {
+  const parts = [0, 1, 2, 3].map((k) => new VoxelModel('thoth_seal_' + k));
+  const R = 18, T = 8;
+  for (let y = -R - 2; y <= R + 2; y++)
+    for (let x = -R - 2; x <= R + 2; x++) {
+      const a = Math.atan2(y, x);
+      // a lumpy, thumb-pressed outline, a little taller than wide
+      const rim = R + noise.n2(Math.cos(a) * 1.7 + 3, Math.sin(a) * 1.7) * 2.2 + Math.sin(a * 9) * 0.5;
+      const rr = Math.hypot(x, y * 0.92);
+      if (rr > rim) continue;
+      const e = rr / rim;
+      // domed face, the edge squeezed up into a rolled lip by the thumb
+      const dome = Math.round(T * Math.sqrt(Math.max(0, 1 - e * e)) * 0.75 + (e > 0.78 ? 1.6 : 0));
+      // the cracks: four jagged lines out from near the middle
+      const ca = a + noise.n2(rr * 0.25, 7) * 0.45 + 0.4;
+      const sector = ((Math.floor(ca / (Math.PI / 2)) % 4) + 4) % 4;
+      const nearCrack = Math.abs(((ca / (Math.PI / 2)) % 1 + 1) % 1 - 0.5) > 0.47 && e > 0.2;
+      for (let z = -2; z <= dome; z++) {
+        let c = CLAY[Math.floor(hash3(x, y, z) * 4)];
+        if (noise.n2(x * 0.3, y * 0.3) > 0.45) c = mixRGB(c, CLAY_HI, 0.35);
+        if (z === dome && e > 0.8) c = mixRGB(c, CLAY_HI, 0.5); // the lip catches the light
+        if (z === dome && hash3(x, y, 5) < 0.05) c = mixRGB(c, SAND.base, 0.6); // dust in the pores
+        let f: number = VF.SOLID;
+        if (z === dome) {
+          // the stamp: Thoth's ibis pressed in (3 voxels a cell), the clay pushed down where the die bit
+          const inDie = x >= -10 && x < 11 && y > -14 && y <= 13;
+          const gx = Math.floor((x + 10) / 3), gy = Math.floor((13 - y) / 3);
+          if (inDie && glyphOn(0, gx, gy)) continue;
+          if (inDie && (glyphOn(0, gx, gy + 1) || glyphOn(0, gx - 1, gy))) c = mixRGB(c, CLAY_HI, 0.4);
+          // the die's square border and thumb dints round the lip
+          if (Math.abs(Math.abs(x - 0.5) - 13) < 0.6 && Math.abs(y) < 16) c = CLAY_DARK;
+          if (Math.abs(Math.abs(y) - 16) < 0.6 && Math.abs(x - 0.5) < 13.5) c = CLAY_DARK;
+          if (e > 0.82 && Math.sin(a * 7 + 1) > 0.8) c = mixRGB(c, CLAY_DARK, 0.4);
+          if (nearCrack) c = CLAY_DARK;
+        }
+        parts[sector].set(x, y, z, c, f);
+      }
+      // the impression's floor: one voxel down, glinting faintly with what sleeps behind the door
+      const gx = Math.floor((x + 10) / 3), gy = Math.floor((13 - y) / 3);
+      if (x >= -10 && x < 11 && y > -14 && y <= 13 && glyphOn(0, gx, gy)) parts[sector].set(x, y, dome - 1, mixRGB(0x2a4a8a, CLAY_DARK, 0.3), VF.SOLID | VF.EMISSIVE);
+    }
+  return parts;
+}
+
+/** the bronze pegs the cords are tied off on (1/96) */
+function pegs(): VoxelModel {
+  const m = new VoxelModel('thoth_seal_pegs');
+  for (const sx of [-1, 1])
+    for (const py of [PEG_Y0, PEG_Y1]) {
+      const x0 = sx * PEG_X;
+      for (let z = 9; z <= PEG_Z + 3; z++)
+        for (let dy = -2; dy <= 2; dy++)
+          for (let dx = -2; dx <= 2; dx++) {
+            const head = z >= PEG_Z + 2;
+            const r = head ? 2.4 : 1.3;
+            if (Math.hypot(dx, dy) > r) continue;
+            const lit = dx * -0.6 + dy * 0.8;
+            m.set(x0 + dx, py + dy, z, head ? (lit > 0.5 ? BRONZE.hi : BRONZE.base) : hash2(dx, z) < 0.3 ? BRONZE.verd : BRONZE.shade, VF.METAL);
+          }
+      // the cord wrapped twice round the peg
+      for (let k = 0; k < 2; k++) for (let a = 0; a < 16; a++) {
+        const th = (a / 16) * Math.PI * 2;
+        m.set(x0 + Math.round(Math.cos(th) * 2.2), py + Math.round(Math.sin(th) * 2.2), PEG_Z - k, a % 4 < 2 ? HEMP.base : HEMP.shade);
+      }
+    }
+  return m;
+}
+
+interface Bit {
+  m: THREE.Object3D;
+  v: THREE.Vector3;
+  w: THREE.Vector3;
+  t: number;
+}
+
 interface Book {
   rig: RigInstance;
   t: number;
@@ -371,8 +498,20 @@ export class KnowledgeSign {
   private open = 1.15;
   /** the gap the light pours out of (group space) */
   private gap = new THREE.Vector3(0.12, (LIFT + 34) * VS, -0.05);
+  /** shut and bound until the first ride is over */
+  sealed: boolean;
+  /** seconds into the awakening (-1: not waking) */
+  private wakeT = -1;
+  private onAwake: (() => void) | null = null;
+  private seal: { group: THREE.Group; clay: THREE.Mesh[]; cords: THREE.Mesh[]; geos: THREE.BufferGeometry[] } | null = null;
+  private bits: Bit[] = [];
+  private strain = 0;
+  /** 0 dark and shut .. 1 awake: blends every light and the leaves' rest */
+  private life = 1;
 
-  constructor(private particles: Particles) {
+  constructor(private particles: Particles, o: { sealed?: boolean } = {}) {
+    this.sealed = !!o.sealed;
+    this.life = this.sealed ? 0 : 1;
     this.mat = makeVoxelMaterial({ emissiveStrength: 1 });
     this.door = new RigInstance(buildRigGeo(templeDoorRig(), 'thoth_door'), { material: this.mat, castShadow: true });
     this.group.add(this.door.root);
@@ -395,6 +534,158 @@ export class KnowledgeSign {
     this.spill = new THREE.PointLight(0x5ab0ff, 0, 3, 2);
     this.spill.position.set(0.1, (LIFT + 10) * VS, -0.35);
     this.group.add(this.spill);
+    if (this.sealed) this.buildSeal();
+  }
+
+  /** the cords, their pegs and the clay seal, on the frame */
+  private buildSeal() {
+    const g = new THREE.Group();
+    const geos: THREE.BufferGeometry[] = [];
+    const mesh = (m: VoxelModel, pivot: [number, number, number]) => {
+      const geo = buildVoxelGeometry(m, { voxelSize: V2, pivot });
+      geos.push(geo);
+      const me = new THREE.Mesh(geo, this.mat);
+      me.castShadow = true;
+      me.receiveShadow = true;
+      me.position.set(pivot[0] * V2, pivot[1] * V2, pivot[2] * V2);
+      g.add(me);
+      return me;
+    };
+    mesh(pegs(), [0, 0, 0]);
+    const cords: THREE.Mesh[] = [];
+    // each cord in two halves (peg to the knot), so they fall away apart when the clay breaks
+    const C = SEAL_C;
+    for (const [a, sag] of [[[-PEG_X, PEG_Y1, PEG_Z], 2], [[PEG_X, PEG_Y0, PEG_Z], 1.5], [[PEG_X, PEG_Y1, PEG_Z], 2], [[-PEG_X, PEG_Y0, PEG_Z], 1.5]] as const) {
+      const m = new VoxelModel('thoth_cord');
+      cord(m, [a[0], a[1], a[2]], [C[0], C[1], C[2] - 1], sag, a[0] * 0.1 + a[1] * 0.07);
+      cords.push(mesh(m, [(a[0] + C[0]) / 2, (a[1] + C[1]) / 2, (a[2] + C[2]) / 2]));
+    }
+    const clay = sealPieces().map((m) => {
+      const b = m.bounds();
+      return mesh(m, [(b.minX + b.maxX + 1) / 2, (b.minY + b.maxY + 1) / 2, (b.minZ + b.maxZ + 1) / 2]);
+    });
+    // the clay pieces were built round the seal's own centre: shift them onto the knot
+    for (const c of clay) c.position.add(new THREE.Vector3(C[0] * V2, C[1] * V2, C[2] * V2));
+    const frame = this.door.nodes['frame'];
+    (frame ?? this.door.root).add(g);
+    this.seal = { group: g, clay, cords, geos };
+  }
+
+  /** a click on the sealed door: the leaves strain against the cords, the clay ticks */
+  knock() {
+    this.strain = 1;
+  }
+
+  /** the first visit after the first ride: hum, glyphs stutter alight, the seal cracks, the leaves swing in */
+  awaken(onDone?: () => void) {
+    if (!this.sealed || this.wakeT >= 0) return;
+    this.wakeT = 0;
+    this.onAwake = onDone ?? null;
+  }
+
+  /** the clay breaks: every piece is flung off and tumbles down the steps */
+  private breakSeal() {
+    const S = this.seal;
+    if (!S) return;
+    this.group.updateMatrixWorld(true);
+    const fling = (m: THREE.Object3D, v: THREE.Vector3, w: THREE.Vector3) => {
+      this.group.attach(m);
+      this.bits.push({ m, v, w, t: 0 });
+    };
+    S.clay.forEach((c, i) => {
+      const out = c.position.clone().sub(new THREE.Vector3(SEAL_C[0] * V2, SEAL_C[1] * V2, 0)).setZ(0).normalize();
+      fling(c, new THREE.Vector3(out.x * 0.5 + (Math.random() - 0.5) * 0.15, 0.35 + out.y * 0.3 + Math.random() * 0.2, 0.55 + Math.random() * 0.3), new THREE.Vector3((Math.random() - 0.5) * 9, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 9 + (i - 1.5) * 2));
+    });
+    S.cords.forEach((c, i) => fling(c, new THREE.Vector3((i % 2 ? -1 : 1) * 0.05, -0.1, 0.18 + Math.random() * 0.1), new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, (i % 2 ? 1 : -1) * (1 + Math.random()))));
+    const p = this.group.localToWorld(new THREE.Vector3(SEAL_C[0] * V2, SEAL_C[1] * V2 + LIFT * VS, SEAL_C[2] * V2 + 0.05));
+    this.particles.emit({ pos: p, count: 22, spread: 0.5, up: 0.6, life: [0.5, 1.1], size: [0.03, 0.015], sprite: ['grain0', 'grain1', 'grain2', 'grain3'], color: [0x8e5030, 0xb06e44, 0x6a3820], gravity: 5, drag: 1, jitter: 0.4 });
+    this.particles.emit({ pos: p, count: 4, spread: 0.3, up: 0.25, life: [0.7, 1.2], size: [0.18, 0.45], sprite: ['puff0', 'puff1', 'puff2'], color: 0xc8a070, alpha: 0.45, drag: 2, rot: 6, rotSpeed: 1 });
+    this.particles.emit({ pos: p, count: 30, spread: 1.2, up: 0.9, life: [0.6, 1.3], size: [0.07, 0.015], sprite: ['ankh', 'eye', 'feather', 'scarab', 'star4'], color: [0xbfe0ff, 0xffe08a, 0xffffff], additive: true, drag: 1.4 });
+  }
+
+  /** where a falling piece comes to rest (group space): the threshold, then the buried steps */
+  private groundAt(z: number) {
+    const vz = z / VS;
+    if (vz < 7) return (LIFT + 0.5) * VS;
+    const s = Math.min(2, Math.floor((vz - 7) / 7));
+    return (LIFT - 4 - s * 5 + 0.5) * VS;
+  }
+
+  private updateBits(dt: number) {
+    for (const b of this.bits) {
+      b.t += dt;
+      b.v.y -= 6 * dt;
+      b.m.position.addScaledVector(b.v, dt);
+      b.m.rotation.x += b.w.x * dt;
+      b.m.rotation.y += b.w.y * dt;
+      b.m.rotation.z += b.w.z * dt;
+      const g = this.groundAt(b.m.position.z);
+      if (b.m.position.y < g) {
+        if (b.v.y < -0.6) {
+          const wp = this.group.localToWorld(b.m.position.clone());
+          this.particles.emit({ pos: wp, count: 5, spread: 0.3, up: 0.3, life: [0.4, 0.8], size: [0.025, 0.015], sprite: ['grain0', 'grain1', 'grain2'], color: [0xf0d29a, 0xe0b06e, 0x8e5030], gravity: 5, jitter: 0.3 });
+        }
+        b.m.position.y = g;
+        b.v.y = Math.abs(b.v.y) * 0.3;
+        b.v.x *= 0.55;
+        b.v.z *= 0.75;
+        b.w.multiplyScalar(0.5);
+      }
+      // a moment on the steps, then the sand takes them
+      const k = Math.min(1, Math.max(0, (b.t - 2.8) / 1.0));
+      if (k > 0) b.m.position.y = g - k * 0.12;
+      if (k >= 1) b.m.visible = false;
+    }
+    if (this.bits.length && this.bits.every((b) => !b.m.visible)) {
+      for (const b of this.bits) b.m.removeFromParent();
+      this.bits = [];
+    }
+  }
+
+  /** the awakening, beat by beat (wakeT seconds in) */
+  private updateWake(dt: number) {
+    const w0 = this.wakeT;
+    const w = (this.wakeT += dt);
+    const at = (s: number) => w0 < s && w >= s;
+    const audio = (window as any).__engine?.audio;
+    const play = (n: string, volume: number, pitch = 1) => audio?.play(n, { volume, pitch });
+    const fp = (x: number, y: number, z: number) => this.group.localToWorld(new THREE.Vector3(x, y, z));
+    if (at(0)) {
+      play('quake_rumble', 0.35, 1.4);
+      this.strain = 0.8;
+    }
+    // sand sifts off the cornice while the ground hums
+    if (w < 1.6 && Math.random() < dt * 30) {
+      const p = fp((Math.random() - 0.5) * 76 * VS, (LIFT + 103) * VS, 0.12);
+      this.particles.emit({ pos: p, count: 1, spread: 0.02, life: [0.8, 1.3], size: [0.025, 0.02], sprite: ['grain0', 'grain1', 'grain2'], color: [0xeac28a, 0xdcae70], gravity: 4, jitter: 0.1 });
+    }
+    // the glyph columns stutter alight from the steps up: motes climb the jambs
+    if (w > 0.35 && w < 1.75 && Math.random() < dt * 40) {
+      const k = (w - 0.35) / 1.4;
+      const sx = Math.random() < 0.5 ? -1 : 1;
+      const p = fp(sx * (OW + 6.5) * VS, (LIFT + 4 + k * 76 + (Math.random() - 0.5) * 6) * VS, 6.5 * VS);
+      this.particles.emit({ pos: p, count: 1, spread: 0.03, up: 0.05, life: [0.5, 0.9], size: [0.06, 0.01], sprite: ['spark', 'star4', 'ankh', 'eye'], color: [0x9ad8ff, 0xffe08a], additive: true, drag: 1 });
+    }
+    for (const s of [0.45, 0.8, 1.15, 1.45]) if (at(s)) play('divine_whisper', 0.25, 1.0 + s * 0.3);
+    if (at(1.75)) {
+      play('rock_crumble', 0.55, 1.25);
+      play('chest_unlock', 0.5, 0.8);
+      this.breakSeal();
+    }
+    if (at(2.0)) {
+      play('door_creak', 0.7, 0.85);
+      this.sealed = false;
+    }
+    if (at(2.3)) {
+      play('divine_chime', 0.6, 1.0);
+      this.burst();
+    }
+    if (w > 3.4) {
+      this.wakeT = -1;
+      const cb = this.onAwake;
+      this.onAwake = null;
+      cb?.();
+    }
   }
 
   /** a click: the door swings wide and a shower of glyphs and light bursts out */
@@ -411,21 +702,29 @@ export class KnowledgeSign {
     this.hot += (hot - this.hot) * (1 - Math.exp(-dt * 6));
     const h = this.hot;
     this.group.updateMatrixWorld(true);
+    if (this.wakeT >= 0) this.updateWake(dt);
+    if (this.bits.length) this.updateBits(dt);
+    if (this.sealed || this.life < 1) {
+      this.updateSealed(dt, h);
+      if (this.sealed) return;
+    }
+    const L = this.life;
     // the right leaf breathes on its hinge (as if a draught pulled at it); hover swings it wider, the click wide open
-    const want = 1.15 + h * 0.25 + Math.sin(t * 0.7) * 0.04 + (this.burstT >= 0 ? 0.3 : 0);
-    this.open += (want - this.open) * (1 - Math.exp(-dt * (this.burstT >= 0 ? 6 : 2.5)));
+    const want = (1.15 + h * 0.25 + Math.sin(t * 0.7) * 0.04 + (this.burstT >= 0 ? 0.3 : 0)) * L;
+    this.open += (want - this.open) * (1 - Math.exp(-dt * (this.burstT >= 0 ? 6 : L < 1 ? 3.2 : 2.5)));
     const nr = this.door.nodes['leaf_r'], nl = this.door.nodes['leaf_l'];
     if (nr) nr.rotation.y = -this.open;
-    if (nl) nl.rotation.y = 0.22 + h * 0.08 + Math.sin(t * 0.9 + 1) * 0.012 + (this.burstT >= 0 ? 0.4 : 0);
+    if (nl) nl.rotation.y = (0.22 + h * 0.08 + Math.sin(t * 0.9 + 1) * 0.012 + (this.burstT >= 0 ? 0.4 : 0)) * Math.min(1, this.open / 1.15);
     if (this.burstT >= 0) {
       this.burstT += dt;
       if (this.burstT > 1.4) this.burstT = -1;
     }
     // glyphs and light: a slow pulse, flaring on hover
     const pulse = 0.5 + 0.5 * Math.sin(t * 1.6) * Math.sin(t * 0.43 + 1);
-    (this.mat.userData.emissiveStrength as { value: number }).value = 0.95 + pulse * 0.25 + h * 0.9 + (this.burstT >= 0 ? 0.8 : 0);
-    this.light.intensity = 2.4 + pulse * 0.8 + h * 3.2 + (this.burstT >= 0 ? 3 : 0) + Math.sin(t * 7.3) * 0.08;
-    this.spill.intensity = 1.6 + h * 1.6;
+    (this.mat.userData.emissiveStrength as { value: number }).value = (0.95 + pulse * 0.25 + h * 0.9 + (this.burstT >= 0 ? 0.8 : 0)) * L;
+    this.light.intensity = (2.4 + pulse * 0.8 + h * 3.2 + (this.burstT >= 0 ? 3 : 0) + Math.sin(t * 7.3) * 0.08) * L;
+    this.spill.intensity = (1.6 + h * 1.6) * L;
+    if (L < 1) return;
     const gp = this.group.localToWorld(this.gap.clone());
     // light dust drifting out of the gap, glyph motes now and then, a soft glow held in the doorway
     if (Math.random() < dt * (7 + h * 16)) {
@@ -477,7 +776,53 @@ export class KnowledgeSign {
     }
   }
 
+  /** shut and dark; on hover the stamped ibis glimmers and the leaves knock against the cords. Also
+   *  runs the light coming up while the door wakes (life 0 .. 1). */
+  private updateSealed(dt: number, h: number) {
+    const t = this.t;
+    const w = this.wakeT;
+    // the life comes back in stutters, like a lamp that will not catch, then holds
+    if (w >= 0) {
+      const k = Math.min(1, Math.max(0, (w - 0.35) / 1.5));
+      const stutter = k < 1 ? (Math.sin(w * 31) > 0.2 - k * 1.2 ? 1 : 0.15) : 1;
+      this.life = Math.min(1, k * stutter * 0.6 + Math.max(0, (w - 2.0) / 1.2) * 0.4);
+    } else if (!this.sealed) this.life = Math.min(1, this.life + dt * 0.5);
+    this.strain = Math.max(0, this.strain - dt * 1.5);
+    const s = this.strain;
+    const knock = Math.sin(t * 34) * s * 0.045 + Math.max(0, Math.sin(t * 2.3) - 0.97) * h * 0.4;
+    if (this.sealed) {
+      const nr = this.door.nodes['leaf_r'], nl = this.door.nodes['leaf_l'];
+      // the leaves are drawn shut against the cords; a heartbeat behind them on hover
+      if (nr) nr.rotation.y = -(0.02 + knock + h * 0.012 * Math.max(0, Math.sin(t * 5)));
+      if (nl) nl.rotation.y = 0.02 + knock * 0.7;
+      this.open = -nr!.rotation.y;
+      if (this.seal) {
+        for (const [i, c] of this.seal.clay.entries()) c.rotation.z = Math.sin(t * 41 + i) * s * 0.05;
+        this.seal.group.position.x = Math.sin(t * 47) * s * 0.004;
+      }
+    }
+    // a faint glimmer in the stamped ibis and the glyphs while it sleeps (brighter on hover), the full light as it wakes
+    const glimmer = (0.04 + h * 0.18 * (0.6 + 0.4 * Math.sin(t * 3.1))) * (1 - this.life);
+    (this.mat.userData.emissiveStrength as { value: number }).value = glimmer + this.life * 1.1;
+    // asleep, the whole door sits in a dusky shade; it warms back up as it wakes
+    const dusk = 1 - this.life;
+    this.mat.userData.tint.value.setRGB(1 - dusk * 0.16, 1 - dusk * 0.19, 1 - dusk * 0.14);
+    this.light.intensity = this.life * 2.6;
+    this.spill.intensity = this.life * 1.8;
+    // sand sifts off the cornice now and then; on hover a breath of cold air leaks round the leaves
+    if (Math.random() < dt * 0.6) {
+      const p = this.group.localToWorld(new THREE.Vector3((Math.random() - 0.5) * 70 * VS, (LIFT + 103) * VS, 0.12));
+      this.particles.emit({ pos: p, count: 3, spread: 0.04, life: [0.8, 1.4], size: [0.022, 0.016], sprite: ['grain0', 'grain1', 'grain2'], color: [0xeac28a, 0xdcae70], gravity: 4, jitter: 0.1 });
+    }
+    if (this.sealed && Math.random() < dt * (h * 6 + s * 10)) {
+      const p = this.group.localToWorld(new THREE.Vector3((Math.random() - 0.5) * 0.06, (LIFT + 4 + Math.random() * 70) * VS, 0.1));
+      const out = new THREE.Vector3((Math.random() - 0.5) * 0.1, 0.03, 0.12).applyQuaternion(this.group.quaternion);
+      this.particles.emit({ pos: p, vel: out, count: 1, life: [1.2, 2], size: [0.03, 0.012], sprite: 'dot2', color: 0x9ad0ff, additive: true, alpha: 0.6, drag: 0.5, fadeIn: 0.3 });
+    }
+  }
+
   dispose() {
+    this.seal?.geos.forEach((g) => g.dispose());
     this.proxy.geometry.dispose();
     this.door.dispose();
     this.mat.dispose();

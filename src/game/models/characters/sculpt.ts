@@ -80,17 +80,157 @@ export function resample(pts: V3[], step: number): { p: V3; t: V3 }[] {
   return out;
 }
 
+/** monotone cubic (Fritsch-Carlson) through keys [x, y] with x and y strictly increasing; linear outside */
+function pchip(keys: [number, number][]) {
+  const n = keys.length, xs = keys.map((k) => k[0]), ys = keys.map((k) => k[1]);
+  const d: number[] = [];
+  for (let i = 0; i < n - 1; i++) d.push((ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]));
+  const m: number[] = [d[0]];
+  for (let i = 1; i < n - 1; i++) m.push(d[i - 1] * d[i] <= 0 ? 0 : (2 * d[i - 1] * d[i]) / (d[i - 1] + d[i]));
+  m.push(d[n - 2]);
+  return (x: number) => {
+    if (x <= xs[0]) return ys[0] + (x - xs[0]) * m[0];
+    if (x >= xs[n - 1]) return ys[n - 1] + (x - xs[n - 1]) * m[n - 1];
+    let i = 0;
+    while (x > xs[i + 1]) i++;
+    const h = xs[i + 1] - xs[i], t = (x - xs[i]) / h, t2 = t * t, t3 = t2 * t;
+    return (2 * t3 - 3 * t2 + 1) * ys[i] + (t3 - 2 * t2 + t) * h * m[i] + (-2 * t3 + 3 * t2) * ys[i + 1] + (t3 - t2) * h * m[i + 1];
+  };
+}
+/** smoothstep-blended factor keyed by design height: keys [y, k], y increasing */
+function keyed(keys: [number, number][]) {
+  return (y: number) => {
+    if (y <= keys[0][0]) return keys[0][1];
+    for (let i = 1; i < keys.length; i++)
+      if (y <= keys[i][0]) {
+        const a = keys[i - 1], b = keys[i];
+        return lerp(a[1], b[1], sstep((y - a[0]) / (b[0] - a[0])));
+      }
+    return keys[keys.length - 1][1];
+  };
+}
+
+/**
+ * A separable re-proportioning of design space, so a model authored on one set of proportions can be
+ * rasterised on another at full resolution (every voxel of the output grid is tested through the
+ * inverse map, so shapes stay smooth instead of being stretched cell by cell):
+ *   y' = Y(y) (monotone cubic through `ys`), x' = X0 + (x - x0) kx(y), z' = Z0 + (z - z0) kz(y).
+ * Output coordinates are in the same "unit" sense as design space (voxel index = out * k - 0.5).
+ */
+export class Warp {
+  readonly Y: (y: number) => number;
+  readonly kx: (y: number) => number;
+  readonly kz: (y: number) => number;
+  constructor(ys: [number, number][], kx: [number, number][], kz: [number, number][], readonly x0: number, readonly X0: number, readonly z0: number, readonly Z0: number) {
+    this.Y = pchip(ys);
+    this.kx = keyed(kx);
+    this.kz = keyed(kz);
+  }
+  /** inverse of Y (bisection; Y is strictly increasing) */
+  private memo = new Map<number, number>();
+  invY(v: number) {
+    const hit = this.memo.get(v);
+    if (hit !== undefined) return hit;
+    const r = this.solveY(v);
+    if (this.memo.size < 1e5) this.memo.set(v, r);
+    return r;
+  }
+  private solveY(v: number) {
+    let a = -400, b = 400;
+    for (let i = 0; i < 48; i++) {
+      const c = (a + b) / 2;
+      if (this.Y(c) < v) a = c;
+      else b = c;
+    }
+    return (a + b) / 2;
+  }
+  fwd(p: V3): V3 {
+    return [this.X0 + (p[0] - this.x0) * this.kx(p[1]), this.Y(p[1]), this.Z0 + (p[2] - this.z0) * this.kz(p[1])];
+  }
+  inv(q: V3): V3 {
+    const y = this.invY(q[1]);
+    return [this.x0 + (q[0] - this.X0) / this.kx(y), y, this.z0 + (q[2] - this.Z0) / this.kz(y)];
+  }
+  /** output-space bounds of a design-space box */
+  bounds(lo: V3, hi: V3): [V3, V3] {
+    let kx0 = 1e9, kx1 = -1e9, kz0 = 1e9, kz1 = -1e9;
+    for (let s = 0; s <= 12; s++) {
+      const y = lerp(lo[1], hi[1], s / 12), a = this.kx(y), b = this.kz(y);
+      kx0 = Math.min(kx0, a);
+      kx1 = Math.max(kx1, a);
+      kz0 = Math.min(kz0, b);
+      kz1 = Math.max(kz1, b);
+    }
+    const ext = (v0: number, v1: number, c0: number, C0: number, k0: number, k1: number): [number, number] => {
+      const c = [(v0 - c0) * k0, (v0 - c0) * k1, (v1 - c0) * k0, (v1 - c0) * k1];
+      return [C0 + Math.min(...c), C0 + Math.max(...c)];
+    };
+    const [xa, xb] = ext(lo[0], hi[0], this.x0, this.X0, kx0, kx1);
+    const [za, zb] = ext(lo[2], hi[2], this.z0, this.Z0, kz0, kz1);
+    return [[xa, this.Y(lo[1]), za], [xb, this.Y(hi[1]), zb]];
+  }
+}
+
 export class Sc {
   m: VoxelModel;
-  constructor(name: string, readonly k: number) {
+  constructor(name: string, readonly k: number, readonly w: Warp | null = null) {
     this.m = new VoxelModel(name);
+  }
+  /** a scratch sculpt on the same grid and warp */
+  sub(name: string) {
+    return new Sc(name, this.k, this.w);
   }
   /** voxel index -> design-space centre */
   c(i: number) {
     return (i + 0.5) / this.k;
   }
+  /** voxel index triple -> design-space point of its centre (through the warp, if any) */
+  at(i: number, j: number, l: number): V3 {
+    const k = this.k, q: V3 = [(i + 0.5) / k, (j + 0.5) / k, (l + 0.5) / k];
+    return this.w ? this.w.inv(q) : q;
+  }
+  /** design-space point -> output-space point (voxel index = out * k - 0.5) */
+  out(p: V3): V3 {
+    return this.w ? this.w.fwd(p) : p;
+  }
+  /** warped region: walk the output grid, test each centre mapped back into design space */
+  private wregion(lo: V3, hi: V3, inside: (x: number, y: number, z: number) => boolean, col: Col, o: Op) {
+    const k = this.k, m = this.m, mode = o.mode ?? 'set', w = this.w!;
+    const [olo, ohi] = w.bounds(lo, hi);
+    const i0 = Math.floor(olo[0] * k - 1.5), i1 = Math.ceil(ohi[0] * k + 0.5);
+    const j0 = Math.floor(olo[1] * k - 1.5), j1 = Math.ceil(ohi[1] * k + 0.5);
+    const l0 = Math.floor(olo[2] * k - 1.5), l1 = Math.ceil(ohi[2] * k + 0.5);
+    const tol = 0.5 / k;
+    const xl = lo[0] - tol, xh = hi[0] + tol, yl = lo[1] - tol, yh = hi[1] + tol, zl = lo[2] - tol, zh = hi[2] + tol;
+    for (let j = j0; j <= j1; j++) {
+      const y = w.invY((j + 0.5) / k);
+      if (y < yl || y > yh) continue;
+      const kx = w.kx(y), kz = w.kz(y);
+      for (let i = i0; i <= i1; i++) {
+        const x = w.x0 + ((i + 0.5) / k - w.X0) / kx;
+        if (x < xl || x > xh) continue;
+        for (let l = l0; l <= l1; l++) {
+          const z = w.z0 + ((l + 0.5) / k - w.Z0) / kz;
+          if (z < zl || z > zh || !inside(x, y, z)) continue;
+          if (mode === 'carve') {
+            m.del(i, j, l);
+            continue;
+          }
+          const has = m.has(i, j, l);
+          if (mode === 'paint' && !has) continue;
+          if (mode === 'under' && has) continue;
+          const c = typeof col === 'number' ? col : col(x, y, z);
+          if (c === null || c === undefined) continue;
+          if (mode === 'paint') m.paintAt(i, j, l, c, o.flags);
+          else m.set(i, j, l, c, o.flags ?? VF.SOLID);
+        }
+      }
+    }
+    return this;
+  }
   /** visit every voxel whose centre lies in the box and inside(), applying col with the given mode */
   region(lo: V3, hi: V3, inside: (x: number, y: number, z: number) => boolean, col: Col, o: Op = {}) {
+    if (this.w) return this.wregion(lo, hi, inside, col, o);
     const k = this.k, m = this.m, mode = o.mode ?? 'set';
     const i0 = Math.floor(lo[0] * k - 0.5), i1 = Math.ceil(hi[0] * k - 0.5);
     const j0 = Math.floor(lo[1] * k - 0.5), j1 = Math.ceil(hi[1] * k - 0.5);
@@ -210,9 +350,10 @@ export class Sc {
   /** paint the voxels that face into an empty `hole` (socket walls, nostrils, rips) */
   walls(lo: V3, hi: V3, hole: (x: number, y: number, z: number) => boolean, col: Col, flags?: number) {
     const k = this.k, m = this.m;
-    const i0 = Math.floor(lo[0] * k - 0.5), i1 = Math.ceil(hi[0] * k - 0.5);
-    const j0 = Math.floor(lo[1] * k - 0.5), j1 = Math.ceil(hi[1] * k - 0.5);
-    const l0 = Math.floor(lo[2] * k - 0.5), l1 = Math.ceil(hi[2] * k - 0.5);
+    const [olo, ohi] = this.w ? this.w.bounds(lo, hi) : [lo, hi];
+    const i0 = Math.floor(olo[0] * k - 0.5), i1 = Math.ceil(ohi[0] * k - 0.5);
+    const j0 = Math.floor(olo[1] * k - 0.5), j1 = Math.ceil(ohi[1] * k - 0.5);
+    const l0 = Math.floor(olo[2] * k - 0.5), l1 = Math.ceil(ohi[2] * k - 0.5);
     const todo: [number, number, number, number][] = [];
     const N: V3[] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
     for (let i = i0; i <= i1; i++)
@@ -223,13 +364,13 @@ export class Sc {
           for (const n of N) {
             const a = i + n[0], b = j + n[1], c = l + n[2];
             if (m.has(a, b, c)) continue;
-            if (hole((a + 0.5) / k, (b + 0.5) / k, (c + 0.5) / k)) {
+            if (hole(...this.at(a, b, c))) {
               wall = true;
               break;
             }
           }
           if (!wall) continue;
-          const cc = typeof col === 'number' ? col : col((i + 0.5) / k, (j + 0.5) / k, (l + 0.5) / k);
+          const cc = typeof col === 'number' ? col : col(...this.at(i, j, l));
           if (cc !== null) todo.push([i, j, l, cc]);
         }
     for (const [i, j, l, c] of todo) m.paintAt(i, j, l, c, flags);
@@ -260,10 +401,9 @@ export function shadeRamps(m: VoxelModel, ramps: Ramp[], hi = true) {
 /** split voxels out of a model into a new one (by design-space predicate) */
 export function splitOff(src: Sc, name: string, pred: (x: number, y: number, z: number) => boolean) {
   const out = new VoxelModel(name);
-  const k = src.k;
   const del: [number, number, number][] = [];
   src.m.forEach((i, j, l, c, f) => {
-    if (!pred((i + 0.5) / k, (j + 0.5) / k, (l + 0.5) / k)) return;
+    if (!pred(...src.at(i, j, l))) return;
     out.set(i, j, l, c, f);
     del.push([i, j, l]);
   });

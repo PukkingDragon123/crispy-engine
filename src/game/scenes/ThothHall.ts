@@ -192,7 +192,7 @@ export class ThothHall {
   private wantFov = 42;
   private t = 0;
   // pointer
-  private ptr = { x: -1, y: -1, down: false, sx: 0, sy: 0, moved: 0, touch: false, has: false };
+  private ptr = { x: -1, y: -1, down: false, sx: 0, sy: 0, moved: 0, touch: false, has: false, ui: false };
   private clicks: { x: number; y: number }[] = [];
   private swipe = 0;
   private hoverId = '';
@@ -712,7 +712,14 @@ export class ThothHall {
     if (!fromView) {
       const st = Research.state(e.key);
       this.talk(st === 'ready' ? say(TALK.ready) : aboutEntry(e, known), 6);
-      this.gesture(this.thoth, st === 'ready' ? 'delight' : !known ? 'think' : Math.random() < 0.3 ? 'gasp' : 'wave', 1.6);
+      const r = Math.random();
+      this.gesture(this.thoth, st === 'ready' ? 'delight' : !known ? 'think' : r < 0.25 ? 'gasp' : r < 0.5 ? 'peek' : r < 0.7 ? 'giggle' : 'wave', 1.6);
+      // his eyes go to the specimen on the pedestal first, then back to you
+      if (this.thoth?.th) {
+        this.thoth.th.glance(w.pedPos.clone().setY(w.pedPos.y + 0.6), 0.9);
+        if (st === 'ready') this.thoth.th.excite(1, 1.8);
+        else if (!known) this.thoth.th.setMood('curious', 1.8);
+      }
     }
   }
 
@@ -1124,7 +1131,7 @@ export class ThothHall {
     } catch {
       /* no voice: the words still float */
     }
-    this.thoth?.th?.talk(Math.min(5, this.speech?.duration ?? text.length / 16));
+    this.thoth?.th?.talk(Math.min(5, this.speech?.duration ?? text.length / 16), text);
     // the words float in the hall beside his head and follow him as he runs
     say3D(this.engine, text, () => (this.thoth ? this.thoth.rig.root.position.clone().add(new THREE.Vector3(0, 0.82, 0)) : null), {
       key: 'hall:thoth',
@@ -1182,17 +1189,25 @@ export class ThothHall {
     this.ptr.has = true;
     if (e.pointerType === 'touch') this.ptr.touch = true;
     else if (e.pointerType === 'mouse') this.ptr.touch = false;
+    // the living pieces of the screen (the bookmark worm, the page, the ink, the astrolabe) take their own drags
+    this.ptr.ui = !!this.ui?.pointer('down', e.clientX, e.clientY);
   }
   private pMove(e: PointerEvent) {
     this.ptr.x = e.clientX;
     this.ptr.y = e.clientY;
     this.ptr.has = true;
+    if (this.state === 'open') this.ui?.pointer('move', e.clientX, e.clientY);
     if (e.pointerType === 'mouse') this.ptr.touch = false;
     if (this.ptr.down) this.ptr.moved = Math.max(this.ptr.moved, Math.hypot(e.clientX - this.ptr.sx, e.clientY - this.ptr.sy));
   }
   private pUp(e: PointerEvent) {
     if (!this.ptr.down) return;
     this.ptr.down = false;
+    if (this.ptr.ui) {
+      this.ptr.ui = false;
+      this.ui?.pointer('up', e.clientX, e.clientY);
+      return;
+    }
     const dx = e.clientX - this.ptr.sx, dy = e.clientY - this.ptr.sy;
     if (this.ptr.moved < 14) this.clicks.push({ x: e.clientX, y: e.clientY });
     else if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.4) this.swipe = dx < 0 ? 1 : -1;
@@ -1269,6 +1284,37 @@ export class ThothHall {
       case 'errand':
         this.errandAct(arg);
         return;
+      // ---- from the screen's living pieces (HallUI)
+      case 'sel': {
+        // the page was turned by hand (dragged, or tugged by the bookmark worm)
+        const w = this.wings[this.wing];
+        if (this.view === 'wing' && w) this.select(w.sel + (+arg > 0 ? 1 : -1));
+        return;
+      }
+      case 'worm': {
+        // Inkwell the bookmark squirmed: the nearest librarian has an opinion about it
+        const w = this.worms.find((q) => q.job === (this.view === 'desk' ? 'desk' : 'jars')) ?? this.worms[0];
+        if (!w) return;
+        w.gest = { mode: 'look', t: 1.6 };
+        const lines = ['Inkwell! Stop wriggling on the page!', 'Leave Inkwell be. He is holding your place.', 'Hee. Inkwell is ticklish.', 'Inkwell, you are a bookmark, not a snack.'];
+        this.wormSay(w, lines[Math.floor(Math.random() * lines.length)]);
+        // Thoth peeks at the fuss and finds it very funny
+        this.thoth?.th?.glance(w.rig.root.position.clone().setY(w.rig.root.position.y + 0.2), 0.9);
+        this.thoth?.th?.setMood('happy', 1.4);
+        return;
+      }
+      case 'gift': {
+        // a jewel on the astrolabe: Thoth tells you about that gift
+        const i = +arg, g = GIFTS[i];
+        if (!g) return;
+        const left = g.at - Research.count();
+        const mine = i < Research.given();
+        this.talk(mine ? g.say : left > 0 ? `Ooh, that one! ${left} more stud${left > 1 ? 'ies' : 'y'} and it is yours. Feather promise!` : 'Finish a study and I give it to you right away!', 6);
+        this.gesture(this.thoth, mine ? 'delight' : 'think', 1.6);
+        if (mine) this.thoth?.th?.excite(0.8, 1.4);
+        else this.thoth?.th?.setMood(left > 0 ? 'determined' : 'excited', 1.6);
+        return;
+      }
     }
   }
 
@@ -1379,6 +1425,7 @@ export class ThothHall {
     } else if (hov === 'desk') this.tip = { text: "Thoth's desk: gifts and errands", x: this.ptr.x, y: this.ptr.y };
     else if (hov === 'thoth') this.tip = { text: 'Thoth', x: this.ptr.x, y: this.ptr.y };
     for (const c of this.clicks.splice(0)) this.act(this.pick(c.x, c.y));
+    for (const a of this.ui.takeActions()) this.act(a);
   }
 
   // ======================================================================= frame
@@ -1441,6 +1488,7 @@ export class ThothHall {
       known,
       isNew: !!f && !(f & F_READ),
       lore: e.lore,
+      total: w.sec.entries.length,
       stats: [...(e.stats ?? []), ...(kills ? [['Brought down', String(kills)] as [string, string]] : [])],
       moves: e.moves ?? [],
       weak: e.weak,
@@ -1516,12 +1564,14 @@ export class ThothHall {
     window.removeEventListener('pointerdown', this.onPDown);
     window.removeEventListener('pointermove', this.onPMove);
     window.removeEventListener('pointerup', this.onPUp);
-    this.ui?.canvas.remove();
+    this.ui?.dispose();
     document.body.style.cursor = 'default';
     for (const w of this.wings) for (const j of w.jars) this.clearJar(j);
     this.ped.obj?.removeFromParent();
     this.ped.puppet?.dispose();
     this.giftShow.p?.dispose();
+    // Thoth's animator owns his eye materials
+    this.thoth?.th?.dispose();
     for (const w of [this.thoth, ...this.worms]) w?.rig.dispose();
     this.moon?.shadow.map?.dispose();
     this.glassMat.dispose();

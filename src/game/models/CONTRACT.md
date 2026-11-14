@@ -22,7 +22,7 @@ Every old note about resolution, the pixel-art pass, ramps, outlines, textures, 
 **Look**
 - Should read as hand-made by a professional voxel artist. Every voxel is deliberate. Clean, readable, appealing,
   charming. Silhouette first.
-- Cartoon proportions for every humanoid: big head (crown to chin ≈ 28–30% of body height), short torso, slim limbs,
+- Cartoon proportions for every humanoid except Sundown (realistic, see `characters/` below): big head (crown to chin ≈ 28–30% of body height), short torso, slim limbs,
   chunky hands and feet/boots.
 - Shapes: clean boxes plus stepped bevels. Round forms (skull dome, barrels, hat crowns) are fine as clean, symmetric
   stair-stepped silhouettes. No random bumps, jitter or noisy geometry.
@@ -129,8 +129,13 @@ Sockets: `hand_r`, `hand_l`, `head_top`, `back`, `shoulder_l`, `shoulder_r`, `hi
 - `skeletonCowboyRig(look: CowboyLook): RigSpec` — `CowboyLook { hat: HatId; outfit: OutfitId }`
   - `HatId = 'stetson' | 'duck' | 'sombrero' | 'nemes' | 'tophat' | 'bandit'`
   - `OutfitId = 'bare' | 'punk' | 'duster' | 'poncho' | 'vest' | 'sheriff' | 'pharaoh'` (`punk` = the biker-jacket default look)
-  - Sundown is the HD build (`characters/sundown.ts`, 1/54 m, sculpted in 1/36 design units so every joint/socket
-    matches the legacy layout). The 1/36 `skeleton.ts` build stays only as the base for `skeletonFigure()` (enemies).
+  - Sundown is the HD build (`characters/sundown.ts`, 1/114 m) with REALISTIC adult proportions (user note,
+    overrides the cartoon humanoid layout for him only): about 7.4 heads, 1.89 m to the crown, legs half his height,
+    arms to mid-thigh, a real neck, man-sized hands and boots. Shapes are still authored on the legacy design grid;
+    each body part is rasterised through a `Warp` (sculpt.ts) onto the realistic figure, and the head family (head,
+    jaw, eyes, brows, hat, hair, mask, glasses) is unwarped. Joints/sockets go through the same warps, so read heights
+    from `meta` (hipY, kneeY, shoulderY, hatTop, chinY...) and positions from sockets/nodes, never from constants.
+    The 1/36 `skeleton.ts` build stays only as the base for `skeletonFigure()` (enemies).
   - parts: humanoid + `jaw`, `hat` (parent head), `coat` (parent pelvis), modelled `eye_l`/`eye_r` (glowing pupils).
   - socket `board_back` (torso, between the shoulder blades); mount a board with
     `attachBoardOnBack(rig, sandboardModel(id) | geometry | Object3D, opts?)` from `characters/index.ts`.

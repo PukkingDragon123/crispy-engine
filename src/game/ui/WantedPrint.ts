@@ -45,10 +45,12 @@ export function mysteryPhoto(renderer: THREE.WebGLRenderer, geo: RigGeo): HTMLCa
     root.add(r.root);
     root.updateMatrixWorld(true);
     const H = (n.head ?? r.root).getWorldPosition(new THREE.Vector3());
+    // the head pivot is the neck: frame from the chest to the crown of the hat (from the rig's own heights)
+    const top = ((geo.spec.meta?.hatTop as number) ?? H.y + 0.6) + 0.03, bot = H.y - 0.3;
+    const cy = (top + bot) / 2, fov = (2 * Math.atan(((top - bot) * 1.12) / 2 / 2.75) * 180) / Math.PI;
     const shot: Shot = {
       root,
-      // the head pivot is the neck: frame from the chest to the crown of the hat
-      cam: { pos: [H.x + 0.4, H.y + 0.44, H.z + 2.75], look: [H.x + 0.02, H.y + 0.27, H.z], fov: 20.5 },
+      cam: { pos: [H.x + 0.32, cy + 0.14, H.z + 2.75], look: [H.x + 0.02, cy, H.z], fov },
       sky: { zenith: 0x3a2c44, mid: 0xb0684a, horizon: 0xffd49a, ground: 0x6a4630, sunDir: [-0.15, 0.1, -1], sunColor: 0xffe2b0, sunSize: 0, sunGlow: 0.55, sunGain: 1.2, gain: 0.95 },
       // a high, hard sun from the front: the brim's shadow falls across the eyes, the bandana stays in the light
       key: { dir: [0.28, 1.0, 0.42], color: 0xffe2b8, intensity: 3.6, center: [H.x, H.y, H.z], radius: 1.0 },

@@ -34,7 +34,7 @@ export { ATTACHMENT_IDS } from './attachments';
 export type { AttachmentId, Attachment } from './attachments';
 
 /** voxels per metre of each family */
-export const SCALE = { sundown: 54, pinch: 72, revolver: 256, board: 32, merchant: 30, camel: 24, anubis: 20, serket: 20, attachment: 30, small: 48 };
+export const SCALE = { sundown: 114, pinch: 72, revolver: 256, board: 32, merchant: 30, camel: 24, anubis: 20, serket: 20, attachment: 30, small: 48 };
 
 const memo = <A extends unknown[], R>(fn: (...a: A) => R) => {
   const cache = new Map<string, R>();
@@ -46,7 +46,7 @@ const memo = <A extends unknown[], R>(fn: (...a: A) => R) => {
   };
 };
 
-/** Sundown, the player (HD build, 1/54 m). Default look: the punk biker jacket. */
+/** Sundown, the player (HD build, 1/114 m, realistic proportions). Default look: the punk biker jacket. */
 export const skeletonCowboyRig = memo((look: CowboyLook = { hat: 'stetson', outfit: 'punk' }): RigSpec => sundownBase(look));
 export const referenceSkeletonRig = memo((): RigSpec => refBase());
 const revCache = new Map<string, RigSpec>();

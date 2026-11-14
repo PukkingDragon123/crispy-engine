@@ -30,7 +30,7 @@ import { clamp, damp, noise } from '../../engine/math/rand';
 import { nav } from '../Nav';
 import { KnowledgeSign } from './thoth/KnowledgeSign';
 import { signBoard, chainLine, padlockBody, padlockShackle } from '../models/props/menuSigns';
-import { hideoutOpen, hideoutRevealPending, markHideoutRevealed } from '../meta/HideoutGate';
+import { hideoutOpen, hideoutRevealPending, markHideoutRevealed, hallOpen, hallRevealPending, markHallRevealed } from '../meta/HideoutGate';
 import { ThothHall } from './ThothHall';
 import { resetTutor } from '../ui/TouchTutor';
 
@@ -491,7 +491,8 @@ export class MenuScene implements GameScene {
     hang(post, sp.lanternHook, 4.2);
     // ---- THOTH'S HALL: the mysterious door in the dune, far left
     try {
-      const ks = new KnowledgeSign(this.particles);
+      // shut and sealed until the first ride is over; the first menu after it shows the door waking
+      const ks = new KnowledgeSign(this.particles, { sealed: !hallOpen() || hallRevealPending() });
       // hard by the left edge of the frame; on narrower screens it steps in so the doorway stays in view
       const aspect = this.engine.width / Math.max(1, this.engine.height);
       const kx = Math.max(KSIGN.x, CAM_T.x + 0.3 - Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * aspect * (CAM_DIST - KSIGN.z + CAM_T.z) + 0.85);
@@ -501,7 +502,9 @@ export class MenuScene implements GameScene {
       this.scene.add(ks.group);
       this.ksign = ks;
       // Thoth and his bookworms bake in a worker while the menu idles, so the hall opens at once
-      this.engine.tweens.after(2.5, () => ThothHall.prewarm(), true);
+      if (hallOpen()) this.engine.tweens.after(2.5, () => ThothHall.prewarm(), true);
+      // (after the hideout's chains, when both wake on the same visit)
+      if (hallRevealPending()) this.engine.tweens.after(this.planks.some((p) => p.lock) && hideoutRevealPending() ? 5.4 : 2.6, () => this.wakeHall(), true);
     } catch (e) {
       console.warn('[menu] knowledge sign', e);
     }
@@ -845,9 +848,28 @@ export class MenuScene implements GameScene {
     }
   }
 
+  /** the first ride is over: the clay seal on Thoth's door cracks and the door swings in */
+  private wakeHall() {
+    const ks = this.ksign;
+    if (!ks || !ks.sealed || !hallOpen() || this.leaving || this.hall) return;
+    markHallRevealed();
+    ks.awaken(() => this.say("THOTH'S HALL has woken: the door stands open"));
+  }
+
   /** the sign of knowledge: Thoth's Hall opens over the menu (the camp waits behind it) */
   private openHall() {
     if (this.hall || this.leaving) return;
+    // still sealed: the leaves strain against the cords (or, the ride done, the seal breaks now)
+    if (this.ksign?.sealed) {
+      if (hallOpen()) this.wakeHall();
+      else {
+        this.ksign.knock();
+        this.engine.audio.play('door_creak', { volume: 0.35, pitch: 1.6 });
+        this.engine.audio.play('ui_error', { volume: 0.35 });
+        this.say('Something sleeps behind this door. Ride once to wake it');
+      }
+      return;
+    }
     const eng = this.engine;
     this.ksign?.burst();
     eng.audio.play('divine_chime', { volume: 0.6 });
@@ -1024,8 +1046,8 @@ export class MenuScene implements GameScene {
     // the sign: hover lights it, a click (or Enter on it) opens the hall
     if (this.ksign) {
       if (signHit && this.ksignHot < 0.5) {
-        eng.audio.play('divine_whisper', { volume: 0.3, pitch: 1.2 });
-        this.say("THOTH'S HALL");
+        eng.audio.play('divine_whisper', { volume: 0.3, pitch: this.ksign.sealed ? 0.7 : 1.2 });
+        this.say(this.ksign.sealed ? (hallOpen() ? 'The seal is cracking...' : 'A sealed door. Something sleeps behind it') : "THOTH'S HALL");
       }
       this.ksignHot = signHit ? 1 : 0;
       this.ksign.update(dt, this.ksignHot);
