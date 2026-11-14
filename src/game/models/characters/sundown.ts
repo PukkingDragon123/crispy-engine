@@ -2650,7 +2650,7 @@ export const BOARD_BACK_SOCKET = 'board_back';
 export interface BoardBackOpts {
   /** material for a {model, voxelSize} or BufferGeometry board (default: the rig's material) */
   material?: THREE.Material;
-  /** sideways tilt across the back in radians (default 0.5: nose up over his right shoulder, clear of Pinch and his hair) */
+  /** sideways tilt across the back in radians (default 0.7: nose up over his right shoulder, clear of his head, Pinch and his hair) */
   tilt?: number;
   /** how far the board centre hangs below the socket, metres (default 0.17) */
   drop?: number;
@@ -2685,7 +2685,7 @@ export function attachBoardOnBack(rig: RigInstance, board: { model: VoxelModel; 
   const box = new THREE.Box3().setFromObject(obj);
   const holder = new THREE.Group();
   holder.name = 'board_back';
-  holder.rotation.z = opts.tilt ?? 0.5;
+  holder.rotation.z = opts.tilt ?? 0.7;
   const inner = new THREE.Group();
   inner.rotation.x = -Math.PI / 2; // board +Z (nose) -> up, deck +Y -> away from his back
   holder.add(inner);
