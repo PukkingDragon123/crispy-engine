@@ -156,3 +156,40 @@ export function unlockShelf(base: Ware[], d: ShelfDeps): Ware[] {
   const others = rest.filter((w) => w.id !== 'heal');
   return [...items, ...heal, ...(rare ? [rare] : []), ...others];
 }
+
+/**
+ * Something unlocked after this period's shelf was built (a death, a discovery): it goes
+ * onto the shelf now, in place of an unsold consumable or the rare-ware spot, so what
+ * Ozymandias announces is really there.
+ */
+export function refreshShelf(wares: Ware[], sold: Set<string>, d: ShelfDeps) {
+  const scale = 1 + Math.max(0, d.ctx.run.wave) * 0.03;
+  for (const f of Unlocks.freshShop()) {
+    const [kind, key] = [f.slice(0, f.indexOf(':')), f.slice(f.indexOf(':') + 1)];
+    if (wares.some((w) => w.id === (kind === 'item' ? key : f))) {
+      Unlocks.markShelved(f);
+      continue;
+    }
+    if (kind === 'item' && key in ITEMS) {
+      const i = wares.map((w, k) => (w.id in ITEMS && !sold.has(w.id) ? k : -1)).filter((k) => k >= 0).pop();
+      const nw = itemWare(key as ItemId, scale, d);
+      if (i !== undefined) wares[i] = nw;
+      else wares.unshift(nw);
+    } else {
+      const nw = kind === 'ware' ? rareWare(key, scale, d) : kind === 'plan' ? planWare(key, scale, d) : null;
+      if (!nw) {
+        Unlocks.markShelved(f);
+        continue;
+      }
+      const i = wares.findIndex((w) => /^(ware|plan):/.test(w.id) && !sold.has(w.id));
+      if (i >= 0) wares[i] = nw;
+      else {
+        const at = wares.findIndex((w) => w.id === 'card');
+        wares.splice(at >= 0 ? at : wares.length, 0, nw);
+        if (wares.length > 8) wares.splice(wares.findIndex((w, k) => k > at && w.id.startsWith('gear_') && !sold.has(w.id)), 1);
+      }
+    }
+    Unlocks.markShelved(f);
+  }
+  return wares;
+}

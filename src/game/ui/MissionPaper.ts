@@ -30,6 +30,8 @@ export interface PaperQuest {
   progress?: string;
   /** e.g. "Reward: 120 bounty" */
   reward?: string;
+  /** the quest the objective tracker follows (ui/QuestTracker): its note hangs on top */
+  tracked?: boolean;
 }
 
 /** rewards the quest givers promise (used when a quest does not say) */
@@ -453,6 +455,18 @@ export class MissionPaper {
       } else {
         n.missing = 0;
         n.setQuest(q, pa.compact, fs);
+      }
+    }
+    // the tracked quest's note goes to the top of the stack (J / the plaque cycles it)
+    const tq = quests.find((q) => q.tracked);
+    if (tq) {
+      const i = this.notes.findIndex((x) => x.q.id === tq.id && !x.ending);
+      const top = this.notes.findIndex((x) => !x.ending);
+      if (i > 0 && i !== top) {
+        const [n] = this.notes.splice(i, 1);
+        this.notes.splice(Math.max(0, top), 0, n);
+        n.ruffle = Math.max(n.ruffle, 0.6);
+        uiSfx('paper_flutter', 0.35, 1.25);
       }
     }
     for (const n of this.notes) {

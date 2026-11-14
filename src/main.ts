@@ -9,6 +9,7 @@ import { loadSave, writeSave } from './game/meta/Save';
 import { SOUNDS } from './game/audio/manifest';
 import { Music } from './game/audio/Music';
 import { LoadingScreen } from './game/ui/LoadingScreen';
+import { hideoutOpen } from './game/meta/HideoutGate';
 
 const params = new URLSearchParams(location.search);
 const engine = new Engine(document.getElementById('app')!);
@@ -79,7 +80,11 @@ async function main() {
     );
   };
   nav.menu = () => void engine.setScene(new MenuScene(engine, () => nav.ride(true)), 0.6, '#000', { loading: engine.current ? 'Back to camp' : 'Gathering souls' });
-  nav.hub = () => void engine.setScene(new HubScene(engine, () => nav.ride(false), () => nav.menu()), 0.6, '#000', { loading: 'Back to the hideout' });
+  nav.hub = () => {
+    // the hideout is found on the first ride: until a run has ended, the way home leads out into the dunes
+    if (!hideoutOpen() && debug !== 'hub') return nav.ride(false);
+    void engine.setScene(new HubScene(engine, () => nav.ride(false), () => nav.menu()), 0.6, '#000', { loading: 'Back to the hideout' });
+  };
   if (debug === 'run') {
     music.setMood('explore');
     nav.ride(params.get('intro') === '1');

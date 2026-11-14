@@ -348,11 +348,12 @@ export const Research = {
     r.errand = e;
     writeSave();
   },
-  /** tell Thoth: the reward is paid (gold to the bank, an item in the satchel) */
-  turnInErrand(): Errand | null {
+  /** tell Thoth: the reward is paid (gold to the bank, an item in the satchel). In a run the errand pays
+   *  on the spot (run/ThothErrand passes the run's unbanked kills) */
+  turnInErrand(runKills?: Record<string, number>): Errand | null {
     const r = rs();
     const e = r.errand;
-    if (!e || !Research.errandMet(e)) return null;
+    if (!e || !Research.errandMet(e, runKills)) return null;
     const d = loadSave();
     d.bank += e.reward.gold;
     if (e.reward.item) r.satchel[e.reward.item] = (r.satchel[e.reward.item] ?? 0) + 1;

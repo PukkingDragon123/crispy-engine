@@ -29,6 +29,8 @@ import { Ease } from '../../engine/Tween';
 import { clamp, damp, noise } from '../../engine/math/rand';
 import { nav } from '../Nav';
 import { KnowledgeSign } from './thoth/KnowledgeSign';
+import { signBoard, chainLine, padlockBody, padlockShackle } from '../models/props/menuSigns';
+import { hideoutOpen, hideoutRevealPending, markHideoutRevealed } from '../meta/HideoutGate';
 import { ThothHall } from './ThothHall';
 import { resetTutor } from '../ui/TouchTutor';
 
@@ -54,8 +56,8 @@ const POST = { x: 2.45, z: 0.95, yaw: -0.24 };
 const CAM_T = new THREE.Vector3(0.45, 1.5, -0.7);
 const CAM_DIST = 8.4;
 const LABELS = ['NEW RUN', 'RESUME', 'HIDEOUT', 'SETTINGS'];
-/** the glowing sign of knowledge (THOTH'S HALL) floats over the dunes left of the camp */
-const KSIGN = { x: -1.95, z: 0.3, y: 1.8, yaw: 0.28 };
+/** THOTH'S HALL: a temple door half swallowed by a dune, far left of the camp (turned toward the camera) */
+const KSIGN = { x: -3.65, z: -1.3, yaw: 0.42, scale: 1 };
 const brinkZ = (x: number) => -3.1 + Math.sin(x * 0.21 + 0.6) * 0.5 + x * 0.05;
 
 const SKY_VERT = /* glsl */ `
@@ -153,6 +155,17 @@ interface Plank {
   hover: number;
   knock: number;
   wasHot: boolean;
+  /** the HIDEOUT board's chains and padlock while the hideout is still locked */
+  lock?: PlankLock;
+}
+interface PlankLock {
+  group: THREE.Group;
+  chains: THREE.Mesh[];
+  body: THREE.Mesh;
+  shackle: THREE.Mesh;
+  rattle: number;
+  /** the falling pieces once it springs (null while it holds) */
+  fall: { m: THREE.Object3D; v: THREE.Vector3; w: THREE.Vector3; t: number }[] | null;
 }
 interface Fly {
   p: THREE.Vector3;
@@ -428,8 +441,8 @@ export class MenuScene implements GameScene {
     const red = R(0xc8442a, 0xa0341e, 0xe2643e, 0x6a2010), cream = R(0xf3e2bc, 0xd8c39a, 0xfff4dc, 0xa48c66);
     LABELS.forEach((label, i) => {
       const dir: 1 | -1 = i % 2 === 0 ? -1 : 1;
-      const pm = MS.arrowPlank(label, dir, i * 7 + 3, woods[i], i === 0 ? red : cream);
-      const PS = 0.86;
+      const pm = signBoard(label, dir, i * 7 + 3, woods[i], i === 0 ? red : cream);
+      const PS = 0.78;
       const mat = makeVoxelMaterial();
       (mat.userData.emissiveStrength as { value: number }).value = 0;
       const mesh = vmesh(pm.model, pm.voxelSize, pm.pivot, mat);
@@ -447,8 +460,15 @@ export class MenuScene implements GameScene {
       g.userData.y0 = g.position.y;
       g.userData.z0 = g.position.z;
       post.add(g);
-      this.planks.push({ label, group: g, proxy, mat, restYaw, restRoll, hover: 0, knock: 0, wasHot: false });
+      const plank: Plank = { label, group: g, proxy, mat, restYaw, restRoll, hover: 0, knock: 0, wasHot: false };
+      // the hideout stays chained shut until the first ride is over
+      if (label === 'HIDEOUT' && (!hideoutOpen() || hideoutRevealPending())) {
+        plank.lock = this.buildLock(g, dir, pm.length * PS, pm.height * PS);
+        if (!hideoutOpen()) mat.color.setScalar(0.7); // still shut: the board reads dimmer
+      }
+      this.planks.push(plank);
     });
+    if (this.planks.some((p) => p.lock) && hideoutRevealPending()) this.engine.tweens.after(2.4, () => this.springLock(), true);
     // ---- lanterns: two on the gate, one on the signpost arm
     const lt = MS.hurricaneLantern();
     const lanternGeo = buildVoxelGeometry(lt.model, { voxelSize: lt.voxelSize, pivot: lt.pivot });
@@ -469,17 +489,130 @@ export class MenuScene implements GameScene {
     };
     for (const [k, h] of gt.lanternHooks.entries()) hang(gate, h, k * 2.1);
     hang(post, sp.lanternHook, 4.2);
-    // ---- THOTH'S HALL: the sign of knowledge hanging in the air over the dunes
+    // ---- THOTH'S HALL: the mysterious door in the dune, far left
     try {
       const ks = new KnowledgeSign(this.particles);
-      ks.group.position.set(KSIGN.x, this.gy(KSIGN.x, KSIGN.z) + KSIGN.y, KSIGN.z);
+      // hard by the left edge of the frame; on narrower screens it steps in so the doorway stays in view
+      const aspect = this.engine.width / Math.max(1, this.engine.height);
+      const kx = Math.max(KSIGN.x, CAM_T.x + 0.3 - Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * aspect * (CAM_DIST - KSIGN.z + CAM_T.z) + 0.85);
+      ks.group.position.set(kx, this.gy(kx, KSIGN.z) - 0.04, KSIGN.z);
       ks.group.rotation.y = KSIGN.yaw;
+      ks.group.scale.setScalar(KSIGN.scale);
       this.scene.add(ks.group);
       this.ksign = ks;
       // Thoth and his bookworms bake in a worker while the menu idles, so the hall opens at once
       this.engine.tweens.after(2.5, () => ThothHall.prewarm(), true);
     } catch (e) {
       console.warn('[menu] knowledge sign', e);
+    }
+  }
+
+  /** chains crossed over a board and a padlock where they meet (the board's group space) */
+  private buildLock(g: THREE.Group, dir: 1 | -1, len: number, h: number): PlankLock {
+    const PS = 0.78, u = PS / 96;
+    const Lv = len / u, Hv = h / u;
+    const lock = new THREE.Group();
+    const cx = dir * len * 0.46, z = 10.5 * u;
+    lock.position.set(cx, 0, z);
+    g.add(lock);
+    const chains: THREE.Mesh[] = [];
+    for (const s of [1, -1]) {
+      const ch = chainLine(-Lv * 0.36, s * Hv * 0.44, Lv * 0.32, -s * Hv * 0.4, s > 0 ? 3 : 8);
+      const mesh = vmesh(ch.model, ch.voxelSize, [0, 0, 0]);
+      mesh.scale.setScalar(PS);
+      mesh.position.set(dir * -0.02 * len, 0, s * 0.6 * u);
+      if (dir < 0) mesh.rotation.y = Math.PI;
+      lock.add(mesh);
+      chains.push(mesh);
+    }
+    const pb = padlockBody(), sh = padlockShackle();
+    const body = vmesh(pb.model, pb.voxelSize, pb.pivot);
+    body.scale.setScalar(PS * 1.5);
+    body.position.set(0, -3 * u, 6 * u);
+    body.rotation.z = 0.12;
+    const shackle = vmesh(sh.model, sh.voxelSize, sh.pivot);
+    // (inside the body's own space: model metres, before its scale)
+    shackle.position.set(-(sh.span / 2) / 96, -4 / 96, 0);
+    body.add(shackle);
+    lock.add(body);
+    return { group: lock, chains, body, shackle, rattle: 0, fall: null };
+  }
+
+  /** the first ride is over: the padlock jumps, springs open, and the chains drop off the HIDEOUT board */
+  private springLock() {
+    const p = this.planks.find((q) => q.lock && !q.lock.fall);
+    if (!p || !p.lock || !hideoutOpen()) return;
+    const L = p.lock;
+    const eng = this.engine;
+    markHideoutRevealed();
+    L.rattle = 1.4;
+    eng.audio.play('skeleton_rattle', { volume: 0.45, pitch: 1.3 });
+    eng.tweens.after(0.7, () => {
+      eng.audio.play('chest_unlock', { volume: 0.8 });
+      L.shackle.rotation.z = 0.9;
+      L.shackle.position.y += 0.03;
+      const wp = L.body.getWorldPosition(new THREE.Vector3());
+      this.particles.emit({ pos: wp, count: 26, spread: 1.4, up: 1.0, life: [0.4, 0.9], size: [0.05, 0.01], sprite: 'star4', color: [0xfff0a6, 0xffc24a, 0xffffff], additive: true, gravity: 2, drag: 1.2 });
+    }, true);
+    eng.tweens.after(0.95, () => {
+      const pieces: NonNullable<PlankLock['fall']> = [];
+      const fling = (m: THREE.Object3D, v: THREE.Vector3, w: THREE.Vector3) => {
+        this.scene.attach(m);
+        pieces.push({ m, v, w, t: 0 });
+      };
+      L.chains.forEach((c, i) => fling(c, new THREE.Vector3((i ? -0.25 : 0.3) + Math.random() * 0.1, 0.6 + Math.random() * 0.3, 0.5), new THREE.Vector3(Math.random() * 2, Math.random() * 2 - 1, (i ? 1 : -1) * (1.5 + Math.random()))));
+      fling(L.body, new THREE.Vector3(0.1, 1.1, 0.7), new THREE.Vector3(2.5, 0.8, -3));
+      L.fall = pieces;
+      p.knock = 1;
+      p.mat.color.setScalar(1);
+      eng.audio.play('loot_reveal', { volume: 0.6 });
+      const wp = p.proxy.getWorldPosition(new THREE.Vector3());
+      this.particles.emit({ pos: wp, count: 18, spread: 1.4, up: 0.6, life: [0.5, 1.1], size: [0.03, 0.02], sprite: ['grain0', 'grain1', 'grain2', 'woodchip'], color: [0xe8c890, 0xc8a070], gravity: 6, drag: 1.2, jitter: 0.5 });
+      this.particles.emit({ pos: wp, count: 30, spread: 1.8, up: 0.8, life: [0.6, 1.3], size: [0.07, 0.02], sprite: ['star4', 'dot2'], color: [0xffe08a, 0xffffff], additive: true, drag: 1.4 });
+      this.say('The way home is found: the HIDEOUT is open');
+    }, true);
+  }
+
+  /** the lock rattling while it holds, or its pieces tumbling into the sand */
+  private updateLock(p: Plank, dt: number) {
+    const L = p.lock!;
+    if (!L.fall) {
+      L.rattle = Math.max(0, L.rattle - dt * 1.6);
+      const r = L.rattle;
+      L.body.rotation.z = 0.12 + Math.sin(this.t * 1.7) * 0.04 * this.gust + Math.sin(this.t * 38) * r * 0.25;
+      L.body.position.x = Math.sin(this.t * 51) * r * 0.008;
+      for (const [i, c] of L.chains.entries()) c.position.y = Math.sin(this.t * 44 + i * 2) * r * 0.006;
+      return;
+    }
+    let live = 0;
+    for (const f of L.fall) {
+      f.t += dt;
+      f.v.y -= 9.8 * dt;
+      f.m.position.addScaledVector(f.v, dt);
+      f.m.rotation.x += f.w.x * dt;
+      f.m.rotation.y += f.w.y * dt;
+      f.m.rotation.z += f.w.z * dt;
+      const g = this.gy(f.m.position.x, f.m.position.z) + 0.03;
+      if (f.m.position.y < g) {
+        if (f.v.y < -1.2) {
+          this.engine.audio.play('counter_clang', { volume: 0.35, pitch: 0.8 + Math.random() * 0.4 });
+          this.particles.emit({ pos: { x: f.m.position.x, y: g, z: f.m.position.z }, count: 8, spread: 0.6, up: 0.5, life: [0.4, 0.9], size: [0.03, 0.02], sprite: ['grain0', 'grain1', 'grain2'], color: [0xf0d29a, 0xe0b06e], gravity: 5, jitter: 0.4 });
+        }
+        f.m.position.y = g;
+        f.v.y = Math.abs(f.v.y) * 0.25;
+        f.v.x *= 0.5;
+        f.v.z *= 0.5;
+        f.w.multiplyScalar(0.5);
+      }
+      // they lie a moment, then the sand takes them
+      const k = clamp((f.t - 2.4) / 0.8, 0, 1);
+      if (k > 0) f.m.position.y = g - k * 0.15;
+      if (k < 1) live++;
+      else f.m.removeFromParent();
+    }
+    if (!live) {
+      L.group.removeFromParent();
+      p.lock = undefined;
     }
   }
 
@@ -691,6 +824,18 @@ export class MenuScene implements GameScene {
         break;
       case 'HIDEOUT':
         if (this.leaving) return;
+        if (!hideoutOpen()) {
+          // still chained: it rattles, and says how to open it
+          if (p.lock) p.lock.rattle = 1;
+          eng.audio.play('skeleton_rattle', { volume: 0.4, pitch: 1.4 });
+          eng.audio.play('ui_error', { volume: 0.4 });
+          this.say('Ride once to find your way home');
+          return;
+        }
+        if (p.lock && !p.lock.fall) {
+          this.springLock();
+          return;
+        }
         this.leaving = true;
         eng.audio.play('door_creak', { volume: 0.8 });
         nav.hub();
@@ -876,7 +1021,10 @@ export class MenuScene implements GameScene {
     if (this.leaving) signHit = false;
     // the sign: hover lights it, a click (or Enter on it) opens the hall
     if (this.ksign) {
-      if (signHit && this.ksignHot < 0.5) eng.audio.play('divine_whisper', { volume: 0.3, pitch: 1.2 });
+      if (signHit && this.ksignHot < 0.5) {
+        eng.audio.play('divine_whisper', { volume: 0.3, pitch: 1.2 });
+        this.say("THOTH'S HALL");
+      }
       this.ksignHot = signHit ? 1 : 0;
       this.ksign.update(dt, this.ksignHot);
       if (signHit && !this.leaving && ((!this.kb && inp.wasPressed('Mouse0')) || (this.kb && (inp.wasPressed('Enter') || inp.wasPressed('Space') || inp.wasPressed('NumpadEnter'))))) {
@@ -887,6 +1035,10 @@ export class MenuScene implements GameScene {
     if (hit !== this.hot) {
       if (hit) {
         eng.audio.play('ui_hover', { volume: 0.45 });
+        if (hit.lock && !hit.lock.fall && !hideoutOpen()) {
+          hit.lock.rattle = Math.max(hit.lock.rattle, 0.5);
+          this.say('Ride once to find your way home');
+        }
         if (!hit.wasHot) {
           // first touch shakes a little sand off the board
           const wp = hit.proxy.getWorldPosition(new THREE.Vector3());
@@ -903,6 +1055,7 @@ export class MenuScene implements GameScene {
     }
     const t = this.t;
     for (const p of this.planks) {
+      if (p.lock) this.updateLock(p, dt);
       const on = p === hit ? 1 : 0;
       p.hover = damp(p.hover, on, 9, dt);
       p.knock = Math.max(0, p.knock - dt * 2.2);

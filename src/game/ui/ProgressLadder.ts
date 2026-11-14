@@ -25,7 +25,9 @@
 //    dug in.
 //  • FIRST-TIME TIPS: a pinned note slides out under the ledger the first time
 //    something new happens (the break, the shop, a rank-up, a boss wave coming,
-//    a zone opening, a blueprint or relic found). Each shows once, ever.
+//    a zone opening, a blueprint or relic found, the first tracked quest, the first
+//    death that paid out; other systems ask with ctx.events.emit('tip', id)). Each
+//    shows once, ever.
 //
 // RunScene hooks: construct it once the director exists, dispose it in exit. It
 // ticks itself after every engine update (engine.onAfterUpdate) and follows the
@@ -49,6 +51,7 @@ import { sprite, nine, SWAP_DIM, HUD_PAL } from './PixelUI';
 import { HUD_ART as ART } from './HudArt';
 import { Blueprints } from '../meta/Blueprints';
 import { SUBAREAS } from '../world/RegionGen';
+import { isTouchDevice } from './TouchControls';
 
 export interface LadderDeps {
   engine: Engine;
@@ -103,6 +106,8 @@ const TIPS: Record<string, [string, string, string]> = {
   zone: ['THE STORM PARTED', 'A new zone is open: new jobs,', 'new landmarks, richer loot.'],
   blueprint: ['BLUEPRINT FOUND', 'Kept forever. Fit it on the', 'workbench at the hideout.'],
   relic: ['RELIC DUG UP', 'It goes on the curio shelf', 'at home, and pays the bank.'],
+  tracker: ['THE TRACKED QUEST', 'The red pin shows the way.', isTouchDevice() ? 'Tap the plaque: track the next.' : 'J tracks the next quest.'],
+  tally: ["ANUBIS' TALLY", 'Every death pays out for good:', 'stock, cards, jobs. Keep dying.'],
 };
 function seenTips(): Set<string> {
   try {
@@ -194,6 +199,8 @@ export class ProgressLadder {
       this.want('break');
       if ((b?.next ?? 0) % 5 === 0) this.want('boss');
     });
+    // other systems ask for a tip by id (run/Progression: the tracked quest, Anubis' tally)
+    on('tip', (id: string) => TIPS[id] && this.want(id));
     this.want('ledger');
     for (let i = 0; i < 4; i++) this.rows.push({ short: '', title: '', sub: '', pop: 0, key: '', slide: 0 });
     d.engine.onAfterUpdate.push(this.tick);

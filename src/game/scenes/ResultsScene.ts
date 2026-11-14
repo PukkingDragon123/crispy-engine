@@ -527,9 +527,13 @@ export class ResultsScene implements GameScene {
         fn();
       };
       this.ui.appendChild(b);
+      return b;
     };
     btn('RIDE AGAIN', () => this.onAgain());
-    btn('HIDEOUT', () => nav.hub());
+    const home = btn('HIDEOUT', () => nav.hub());
+    // the first ride is over: the hideout opens (a small reveal once the poster is filled)
+    const firstRide = loadSave().runs === 1;
+    if (firstRide) home.style.cssText += ';opacity:0;transform:scale(.6);transition:opacity .5s ease,transform .6s cubic-bezier(.2,1.6,.4,1),box-shadow .6s ease'
     if (this.res.banked) {
       const b = document.createElement('div');
       b.style.cssText = "font-family:'Alagard';font-size:20px;color:#ffd36b;text-shadow:0 3px 0 #2a1408;align-self:center";
@@ -543,6 +547,15 @@ export class ResultsScene implements GameScene {
       await eng.tweens.wait(2.2, true);
       await this.poster.fill();
       this.ui.style.opacity = '1';
+      if (firstRide) {
+        await eng.tweens.wait(0.7, true);
+        eng.audio.play('chest_unlock', { volume: 0.7 });
+        home.style.opacity = '1';
+        home.style.transform = 'scale(1)';
+        home.style.boxShadow = '0 5px 0 #2a1408,0 0 26px 6px rgba(255,210,110,.75)';
+        home.title = 'The way home is found';
+        setTimeout(() => (home.style.boxShadow = '0 5px 0 #2a1408'), 1400);
+      }
     })();
   }
 

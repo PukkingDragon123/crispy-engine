@@ -26,6 +26,7 @@ import type { EnemyDef } from '../enemies/EnemyDefs';
 import { Puppet } from '../ui/codex/Puppet';
 import { HubScene } from './HubScene';
 import { nav } from '../Nav';
+import { loadSave } from '../meta/Save';
 import type { PosterData, RunResult } from './ResultsScene';
 
 export interface DeathCineKiller {
@@ -843,7 +844,17 @@ export class DeathCine implements GameScene {
       this.title.style.opacity = '1';
       this.title.style.transform = 'translateY(0) scale(1)';
     }
+    // after the first ride, waking at home is how the hideout is found
+    const first = loadSave().runs === 1;
+    if (first) {
+      const sub = document.createElement('div');
+      sub.textContent = 'and the way home is found';
+      sub.style.cssText = 'font-size:.3em;letter-spacing:.12em;margin-top:.5em;color:#ffe2a0;opacity:0;transition:opacity 1s ease';
+      this.title.appendChild(sub);
+      requestAnimationFrame(() => (sub.style.opacity = '1'));
+    }
     void (async () => {
+      if (first) await eng.tweens.wait(1.3, true);
       await eng.fadeOut(skipped ? 0.5 : 1.5, '#fff3dc');
       this.title.style.opacity = '0';
       await eng.setScene(new HubScene(eng, () => nav.ride(false), () => nav.menu(), { wake: { days, result: this.o.result } }), 0.9, '#fff3dc');

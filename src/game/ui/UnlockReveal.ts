@@ -50,6 +50,7 @@ function glyphFor(u: UnlockDef): PixelSprite {
 }
 
 const KIND_RIBBON: Record<string, string> = {
+  tally: "ANUBIS' TALLY",
   item: 'NEW STOCK', ware: 'RARE STOCK', plan: 'NEW STOCK', trinket: 'TRINKET PLAN', cards: 'NEW CARDS', mission: 'NEW JOB', system: 'UNLOCKED', cosmetic: 'NEW LOOK',
 };
 
@@ -72,6 +73,15 @@ class Reveal {
     this.cv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:12;image-rendering:pixelated';
     eng.overlay.appendChild(this.cv);
     eng.onAfterUpdate.push((_dt, rdt) => this.update(rdt));
+  }
+
+  /** cards that are not saved unlocks (the tally after a death that paid nothing), shown with the next batch */
+  local: UnlockDef[] = [];
+  /** show everything waiting: the saved reveals and the local cards */
+  flush() {
+    const list = [...Unlocks.takeReveal(), ...this.local];
+    this.local = [];
+    if (list.length) this.show(list);
   }
 
   show(list: UnlockDef[]) {
@@ -107,7 +117,7 @@ class Reveal {
     this.sceneT += dt;
     const covered = this.covered();
     // outside a run, pending reveals show themselves once the new scene has settled
-    if (!covered && scene && !scene.director && this.sceneT > 2.2 && !this.cur && !this.q.length && Unlocks.pendingReveal()) this.show(Unlocks.takeReveal());
+    if (!covered && scene && !scene.director && this.sceneT > 2.2 && !this.cur && !this.q.length && (Unlocks.pendingReveal() || this.local.length)) this.flush();
     if (!this.cur && !this.q.length && !this.sparks.length) {
       if (this.w) {
         this.c.clearRect(0, 0, this.w, this.h);
@@ -160,19 +170,21 @@ class Reveal {
       if (!st.model) return null;
       const geo = buildVoxelGeometry(st.model, { voxelSize: st.voxelSize, pivot: 'center' });
       const mesh = new THREE.Mesh(geo, mat);
-      return { obj: wrap(mesh), w: S, h: S, yaw: 0.7, pitch: 0.3, fill: 0.82, after: () => geo.dispose() };
+      return { obj: wrap(mesh), w: S, h: S, yaw: 0.7, pitch: 0.3, fill: 1.0, after: () => geo.dispose() };
     });
   }
 
   private paint(C: Card) {
     const c = this.c, u = C.u;
     const head = `${TRACK_TITLE[u.track]}  ${u.at}`;
-    const W = Math.min(this.w - 16, Math.max(200, Math.ceil(Math.max(pixelTextWidth(u.name, 16), pixelTextWidth(u.line, 16), pixelTextWidth(head, 16)) + 58)));
-    const H = 62;
+    const W = Math.min(this.w - 16, Math.max(210, Math.ceil(Math.max(pixelTextWidth(u.name, 16), pixelTextWidth(u.line, 16), pixelTextWidth(head, 16)) * 1.06 + 64)));
+    const H = 72;
     // in: a drop with a little overshoot; out: snapped back up past the top
     const tin = Math.min(1, C.t / 0.42), tout = Math.max(0, (C.t - C.dur) / 0.45);
     const back = (k: number) => 1 + 2.2 * Math.pow(k - 1, 3) + 1.2 * Math.pow(k - 1, 2);
-    const y0 = Math.round(Math.max(30, this.h * 0.13));
+    // in a run: just under the wave plaque; on the death / results screens: lower middle, clear of their titles
+    const inRun = !!(this.eng.current as unknown as { director?: unknown } | null)?.director;
+    const y0 = inRun ? 52 : Math.round(Math.min(this.h - H - 40, this.h * 0.58));
     const y = Math.round(-H - 20 + (y0 + H + 20) * back(tin) - (y0 + H + 40) * tout * tout);
     const x = Math.round(this.w / 2 - W / 2);
     const sway = Math.sin(C.t * 2.2) * Math.max(0, 1 - C.t * 0.5) * 1.5;
@@ -187,7 +199,7 @@ class Reveal {
     const nl = sprite(ART.nail);
     c.drawImage(nl, Math.round(x + W / 2 - nl.width / 2), y + 2);
     // the ribbon tab: what kind of unlock
-    const rt = KIND_RIBBON[u.kind] ?? 'UNLOCKED';
+    const rt = KIND_RIBBON[u.id === 'tally' ? 'tally' : u.kind] ?? 'UNLOCKED';
     const rw = Math.ceil(pixelTextWidth(rt, 16)) + 20;
     const rib = strip3(ART.ribbon_end, ART.ribbon_mid, RIBBON_R, rw, 'unlock-ribbon');
     blitC(c, rib, x + W - rw / 2 - 6, y - 4);
@@ -196,7 +208,7 @@ class Reveal {
     const niche = sprite(ART.niche);
     const nx = x + 8, ny = y + Math.round((H - niche.height) / 2) + 1;
     c.drawImage(niche, nx, ny);
-    const pic = u.model ? this.photo(u.model, 26) : null;
+    const pic = u.model ? this.photo(u.model, 28) : null;
     if (pic) blitObj(c, pic, nx + niche.width / 2, ny + niche.height / 2, 1, 1);
     else {
       const g = sprite(glyphFor(u));
@@ -207,10 +219,10 @@ class Reveal {
     const tx = nx + niche.width + 8;
     const al = Math.min(1, Math.max(0, (C.t - 0.25) * 4));
     c.globalAlpha = al;
-    pixelText(c, head, tx, y + 9, { size: 16, color: u.track === 'tally' ? '#5a2a8a' : '#8a2016', lip: '#f6e8c4' });
-    pixelText(c, u.name, tx, y + 23, { size: 16, color: '#3a1c0a' });
-    pixelText(c, u.line, tx, y + 37, { size: 16, color: '#6a4a28' });
-    if (C.of > 1) pixelText(c, `${C.idx}/${C.of}`, x + W - 10, y + H - 17, { size: 16, color: '#8a6a40', align: 'right' });
+    pixelText(c, head, tx, y + 10, { size: 16, color: u.track === 'tally' ? '#5a2a8a' : '#8a2016', lip: '#f6e8c4' });
+    pixelText(c, u.name, tx, y + 25, { size: 16, color: '#3a1c0a' });
+    pixelText(c, u.line, tx, y + 40, { size: 16, color: '#6a4a28' });
+    if (C.of > 1) pixelText(c, `${C.idx}/${C.of}`, x + W - 10, y + H - 19, { size: 16, color: '#8a6a40', align: 'right' });
     c.globalAlpha = 1;
     c.restore();
   }
@@ -248,6 +260,15 @@ export const UnlockReveal = {
     const e = eng ?? ((window as any).__engine as Engine | undefined);
     if (!inst && e?.overlay) inst = new Reveal(e);
     return inst;
+  },
+  /** a card that is not a saved unlock, shown with the next batch (outside a run, or on flush) */
+  later(u: UnlockDef) {
+    const r = UnlockReveal.ensure();
+    if (r) r.local.push(u);
+  },
+  /** show every pending card now */
+  flush() {
+    UnlockReveal.ensure()?.flush();
   },
   /** queue cards now (in a run: run/Progression decides when) */
   show(list: UnlockDef[]) {

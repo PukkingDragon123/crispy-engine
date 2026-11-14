@@ -24,7 +24,7 @@ import { buildRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { RigEyes, emote } from '../fx/FaceFx';
 import { rnd } from '../../engine/math/rand';
-import { unlockShelf } from './UnlockWares';
+import { unlockShelf, refreshShelf } from './UnlockWares';
 import { Unlocks } from '../meta/Unlocks';
 
 export interface MissionDeps {
@@ -171,15 +171,18 @@ export class Missions {
       return { have, room };
     };
     // the slow reveal (meta/Unlocks): only unlocked consumables, plus the rare-ware spot
-    return d.shop.book.stock(() =>
+    const deps = { ctx: d.ctx, player: d.player, add: (id: ItemId) => d.items.add(id), pockets };
+    const shelf = d.shop.book.stock(() =>
       unlockShelf(
         [
           ...merchantStock(d.ctx, (id) => d.items.add(id), () => d.player.heal(d.player.maxHp), () => d.card(), { pockets, hp: () => [d.player.hp, d.player.maxHp] }),
           ...(d.gearWares?.() ?? []),
         ],
-        { ctx: d.ctx, player: d.player, add: (id) => d.items.add(id), pockets }
+        deps
       )
     );
+    // unlocked since this shelf was stocked: onto it now
+    return refreshShelf(shelf, d.shop.book.sold, deps);
   }
 
   /**

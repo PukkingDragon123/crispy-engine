@@ -3,7 +3,8 @@
 //  - it shows as a mission note (paperQuest(), pushed into RunScene.questList()),
 //  - it spots the sand hippo herds and their calves for the Codex (the Hall has jars
 //    for them), and notices when a calf is picked up,
-//  - when the errand is met it says so once ("go and tell Thoth!").
+//  - when the errand is met it pays out on the spot (gold to the bank, an item into
+//    Thoth's satchel for the next ride) and says so once: no walk back to the Hall.
 // The satchel of consumables Thoth packed (research gifts, errand rewards) is handed
 // over at the start of the ride with ThothErrand.unpack().
 //
@@ -54,8 +55,11 @@ export class ThothErrand {
     if (!e || this.wasMet) return;
     if (Research.errandMet(e, this.runKills())) {
       this.wasMet = true;
-      Research.markMet();
-      this.ctx.toast("THOTH'S ERRAND DONE", '#7cf2b4', 'Go and tell Thoth in his Hall!');
+      // paid on the spot, no walk back to the Hall: his ibis carries the news, the gold goes to
+      // the bank and any item into his satchel for the next ride
+      const paid = Research.turnInErrand(this.runKills());
+      if (!paid) Research.markMet();
+      this.ctx.toast("THOTH'S ERRAND DONE", '#7cf2b4', paid ? `Thoth heard! ${Research.rewardText(paid)} sent home` : 'Go and tell Thoth in his Hall!');
       this.ctx.audio?.play?.('sting_positive', { volume: 0.6 });
     }
   }
