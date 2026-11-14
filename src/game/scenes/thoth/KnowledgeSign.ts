@@ -332,19 +332,13 @@ function leaf(side: 1 | -1): VoxelModel {
   return m;
 }
 
-function timed(f: () => VoxelModel) {
-  const t0 = performance.now();
-  const m = f();
-  console.log('[door] outcrop', Math.round(performance.now() - t0), 'ms', m.map.size, 'voxels');
-  return m;
-}
 /** the door as a rig: the outcrop and frame, and the two leaves on their hinges */
 function templeDoorRig(): RigSpec {
   return {
     name: 'thoth_door',
     voxelSize: VS,
     parts: [
-      { name: 'frame', model: timed(outcrop), pivot: [0, 0, 0], attach: [0, LIFT, 0] },
+      { name: 'frame', model: outcrop(), pivot: [0, 0, 0], attach: [0, LIFT, 0] },
       { name: 'leaf_l', model: leaf(1), pivot: [0, 0, 2], parent: 'frame', attach: [-OW, 0, -2], rest: [0, 0.22, 0] },
       { name: 'leaf_r', model: leaf(-1), pivot: [0, 0, 2], parent: 'frame', attach: [OW, 0, -2], rest: [0, -1.15, 0] },
     ],
@@ -383,7 +377,7 @@ export class KnowledgeSign {
     this.door = new RigInstance(buildRigGeo(templeDoorRig(), 'thoth_door'), { material: this.mat, castShadow: true });
     this.group.add(this.door.root);
     // the hit box: the doorway and its frame
-    const W = 76 * VS * 2, H = (106 + LIFT) * VS;
+    const W = 80 * VS, H = (106 + LIFT) * VS;
     this.proxy = new THREE.Mesh(new THREE.BoxGeometry(W, H, 0.5), new THREE.MeshBasicMaterial({ visible: false }));
     this.proxy.position.set(0, H / 2, 0.15);
     this.group.add(this.proxy);
