@@ -16,7 +16,7 @@
    - If something truly cannot come from 3D, it must be beautiful, detailed and polished 2D art, never a mess.
    - Typography (Alagard text) is the only thing drawn directly.
    - Exception, from the user's latest note: game UI is stylized 2D pixel art (see art direction below).
-3. **No 2D eyes.** Eyes are modelled, realistic eyes. Exception (user's latest note): Thoth has stylized 2D eyes.
+3. **No 2D eyes.** Eyes are modelled, realistic eyes. Exception (user's latest note): Thoth has tiny 2D pixel dot eyes (one pixel, very cute).
 4. **Beautiful, detailed, polished, alive.** If a piece looks lazy, cheap or messy, it is wrong: redo it.
 5. **No churn — credits are precious.**
    - Never remake or redesign a model or feature that is already good unless the user asks for that specific thing.
@@ -32,7 +32,7 @@
   the face, living skin on the rest; punk cowboy outfit, mask and shades kept.
 - Codex is now Thoth's Hall: Thoth is a tiny, very cute ibis-headed god, 10,000 years old but talks like a child,
   collects creatures. Latest note: Thoth is lower resolution but more stylized, like a real animated character, with
-  expressive 2D eyes; cool, funny and alive. His hall is a beautiful library run by worm librarians (bookworms): real eyeless earthworms with physics bodies.
+  simple 1-pixel 2D dot eyes; cool, funny and alive. His hall is a beautiful library run by worm librarians (bookworms): real eyeless earthworms with physics bodies.
 - Very high voxel counts everywhere. Fluid, procedural animation.
 - Enemy skill names reference Rolling Stones / Guns N' Roses / Beatles songs.
 - UI (latest note): the lower HUD stays live 3D: the soul jar, the heart, the revolver cylinder and bullets, the
