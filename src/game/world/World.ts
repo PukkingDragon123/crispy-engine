@@ -15,6 +15,8 @@ import type { StageId } from '../meta/Stage';
 import { generateNileArea } from './NileGen';
 import { NileWater, FlatWater, NILE_LOOKS, type WaterSurface, type WaterSample } from './NileWater';
 import { BURN, resetBurn } from './NileBurn';
+import { RigInstance } from '../../engine/voxel/Rig';
+import type { Collider } from './Colliders';
 
 const waterVert = /* glsl */ `
 varying vec3 vW;
@@ -77,6 +79,10 @@ export class World {
   private burnAnim: { t: number; dur: number; resolve: () => void; ox: number; oz: number } | null = null;
   private basePreset: EnvPreset | null = null;
   private _ws: WaterSample = { h: 0, depth: 0, fx: 0, fz: 0, gx: 0, gz: 0, lava: 0, molten: false, amp: 0 };
+  /** the river gate at the end of region A (bronze doors; the Sphinx guards it) */
+  private gate: { inst: RigInstance; open: number; target: number; doors: Collider[] } | null = null;
+  private gateLoading = false;
+  private disposed = false;
   activeZone = 0;
   unlockedZone = 0;
   props: { update(dt: number, focus: THREE.Vector3): void; riseFor(stampId: string, k: number): void; group: THREE.Group } | null = null;
@@ -151,6 +157,66 @@ export class World {
     this.burnState.oz = nile.arena?.z ?? S / 2;
     // region C: Ra has already burned the valley
     if (nile.burned) this.burnToLava(1);
+    if (nile.gate) nile.openGate = () => this.openRiverGate();
+  }
+
+  /**
+   * Raise the river gate once the hunter nears it: the Sphinx's own gate model (sculpted
+   * off-thread with the Sphinx, shared geometry), pylons and closed doors as colliders.
+   */
+  private riverGate(focus: THREE.Vector3) {
+    const g = this.sa.nile?.gate;
+    if (!g || this.gate || this.gateLoading) return;
+    if (Math.hypot(focus.x - g.x, focus.z - g.z) > 420 && this.unlockedZone < this.sa.zones.length - 2) return;
+    this.gateLoading = true;
+    void import('../bosses/sphinx/SphinxGeo')
+      .then((m) => m.loadSphinxGeos())
+      .then((geos) => {
+        if (this.disposed || this.gate) return;
+        const inst = new RigInstance(geos.gate, { ownMaterial: true });
+        const L = this.sa.waterLevel;
+        inst.root.position.set(g.x, L - 1, g.z);
+        inst.root.rotation.y = g.yaw;
+        this.group.add(inst.root);
+        const c = Math.cos(g.yaw), sn = Math.sin(g.yaw);
+        for (const sd of [-1, 1]) this.colliders.box(g.x + c * 16 * sd, g.z - sn * 16 * sd, 7.4, 5.6, -g.yaw, L - 1, L + 23, { data: { material: 'rock' } });
+        const doors = [this.colliders.box(g.x, g.z, 10.4, 1.1, -g.yaw, L - 1.5, L + 17, { data: { material: 'wood' } })];
+        this.gate = { inst, open: 0, target: 0, doors };
+      })
+      .catch((e) => console.warn('[nile] river gate failed', e));
+  }
+  /** the Sphinx has fallen: the bronze doors swing open and the river runs on */
+  openRiverGate() {
+    if (this.gate) this.gate.target = 1;
+    else {
+      // not raised yet: it will stand open when it is
+      const g = this.sa.nile?.gate;
+      if (g) this.onGateRaised = () => this.gate && ((this.gate.target = 1), (this.gate.open = 1));
+    }
+  }
+  private onGateRaised: (() => void) | null = null;
+  private stepGate(dt: number, fx: any) {
+    const G = this.gate;
+    if (!G) return;
+    if (this.onGateRaised) {
+      this.onGateRaised();
+      this.onGateRaised = null;
+    }
+    if (Math.abs(G.target - G.open) < 1e-3) return;
+    G.open += (G.target - G.open) * Math.min(1, dt * 0.45);
+    if (Math.abs(G.target - G.open) < 0.002) G.open = G.target;
+    G.inst.nodes['door_l'].rotation.y = G.open * 1.75;
+    G.inst.nodes['door_r'].rotation.y = -G.open * 1.75;
+    if (G.open > 0.35) for (const c of G.doors) c.enabled = false;
+    // grit and spray shaken off the doors as they grind open
+    if (fx && G.open < 0.95 && Math.random() < dt * 8) {
+      const r = G.inst.root;
+      for (const sd of [-1, 1]) {
+        const p = r.localToWorld(new THREE.Vector3(sd * 10, 1 + Math.random() * 14, 0));
+        fx.p.emit({ pos: { x: p.x, y: p.y, z: p.z }, count: 4, spread: 1.4, gravity: 9, life: [0.5, 1.1], size: [0.08, 0.04], sprite: 'dot3', color: [0xd6be92, 0xb39468, 0xeedfba] });
+      }
+      this.river?.splash(r.position.x + (Math.random() - 0.5) * 16, r.position.z + (Math.random() - 0.5) * 6, 1.2);
+    }
   }
 
   /**
@@ -592,6 +658,8 @@ export class World {
         }
       }
       this.river.update(dt, time, focus, fx);
+      this.riverGate(focus);
+      this.stepGate(dt, fx);
       if (fx && this.burnState.k > 0 && this.burnState.k < 1) this.fireFront(fx, focus);
     }
   }
@@ -613,6 +681,12 @@ export class World {
   }
 
   dispose() {
+    this.disposed = true;
+    if (this.gate) {
+      this.gate.inst.root.removeFromParent();
+      this.gate.inst.material.dispose();
+      this.gate = null;
+    }
     this.burnAnim?.resolve();
     this.burnAnim = null;
     this.river?.dispose();

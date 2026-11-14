@@ -738,8 +738,9 @@ export function sphinxRig(o: SphinxBuildOpts = {}): RigSpec {
   };
   site('crack_flank', 'belly', torsoBase, [9, 9.8, -2.2], [-1, 0, 0], 2.6, 1, [0.2, -0.9, 0.35]);
   site('crack_back', 'belly', torsoBase, [0, 18, -4.4], [0, -1, 0], 2.5, 2, [0.25, 0, 1]);
-  site('crack_shoulder', 'chest', torsoBase, [-9, 10.6, 4.4], [1, 0, 0], 2.3, 3, [0.1, 0.95, -0.3]);
-  site('crack_haunch', 'hips', torsoBase, [-9, 10.0, -10.6], [1, 0, 0], 2.4, 4, [0, 0.6, 0.8]);
+  // the right shoulder blade and the right haunch (on the limbs themselves, so nothing covers them)
+  site('crack_shoulder', 'arm_r', (x, y, z) => armF(-x, y, z), [-9, 10.2, 5.0], [1, 0, 0], 2.1, 3, [0.1, 0.95, -0.3]);
+  site('crack_haunch', 'thigh_r', (x, y, z) => thighF(-x, y, z), [-9, 9.4, -9.4], [1, 0, 0], 2.3, 4, [0, 0.6, 0.8]);
   site('crack_brow', 'head', headF, fromH([1.1, 1.2, 4.5]), [0, 0, -1], 1.5, 5, [0.6, 0.8, 0]);
 
   // ------------------------------------------------------------ parts (parents first)
@@ -777,7 +778,7 @@ export function sphinxRig(o: SphinxBuildOpts = {}): RigSpec {
   // ------------------------------------------------------------ torso: one body cut in three, sealed with buried plugs
   const CUT_HB = -6.4, CUT_BC = 1.2;
   const torsoPart = (z: number) => (z < CUT_HB ? 'hips' : z < CUT_BC ? 'belly' : 'chest');
-  if (['hips', 'belly', 'chest', 'crack_flank', 'crack_back', 'crack_shoulder', 'crack_haunch'].some(want)) {
+  if (['hips', 'belly', 'chest', 'crack_flank', 'crack_back'].some(want)) {
     const byPart: Record<string, Paint> = { hips: paintWithSites('hips', torsoPaint), belly: paintWithSites('belly', torsoPaint), chest: paintWithSites('chest', torsoPaint) };
     sculptInto(
       torsoF,
@@ -837,7 +838,8 @@ export function sphinxRig(o: SphinxBuildOpts = {}): RigSpec {
       return smax(d + erode(x, y, z, 0.75), -chipField(x, y, z), 0.08);
     };
     const B = (b: number[]) => (s > 0 ? b : [-b[3], b[1], b[2], -b[0], b[4], b[5]]);
-    if (want('arm_' + sd)) sculptInto(F(armF), B([1.2, 2.2, 1.4, 6.0, 13.6, 8.4]), { part: () => M['arm_' + sd] }, legPaint);
+    const limb = (name: string): { part: (x: number, y: number, z: number) => VoxelModel | null } => ({ part: (x, y, z) => only(siteOf(name, x, y, z, M) ?? M[name]) });
+    if (want('arm_' + sd) || want('crack_shoulder')) sculptInto(F(armF), B([1.2, 2.2, 1.4, 6.0, 13.6, 8.4]), limb('arm_' + sd), paintWithSites('arm_' + sd, legPaint));
     if (want('fore_' + sd)) sculptInto(F(foreF), B([2.2, 0.6, 2.4, 5.6, 6.4, 7.2]), { part: () => M['fore_' + sd] }, legPaint);
     if (want('paw_' + sd)) sculptInto(F(pawF), B([1.9, -0.1, 4.6, 6.1, 3.0, 9.9]), { part: () => M['paw_' + sd] }, legPaint);
     for (let k = 0; k < 4; k++) {
@@ -854,7 +856,7 @@ export function sphinxRig(o: SphinxBuildOpts = {}): RigSpec {
         toePaint(k)
       );
     }
-    if (want('thigh_' + sd)) sculptInto(F(thighF), B([0.9, 4.0, -13.0, 5.6, 12.6, -5.2]), { part: () => M['thigh_' + sd] }, legPaint);
+    if (want('thigh_' + sd) || want('crack_haunch')) sculptInto(F(thighF), B([0.9, 4.0, -13.0, 5.6, 12.6, -5.2]), limb('thigh_' + sd), paintWithSites('thigh_' + sd, legPaint));
     if (want('shin_' + sd)) sculptInto(F(shinF), B([2.0, 2.0, -12.8, 5.3, 7.6, -5.2]), { part: () => M['shin_' + sd] }, legPaint);
     if (want('foot_' + sd)) sculptInto(F(footF), B([1.8, -0.1, -12.8, 5.3, 4.3, -7.2]), { part: () => M['foot_' + sd] }, legPaint);
   }

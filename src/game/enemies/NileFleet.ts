@@ -29,6 +29,7 @@ const TAU = Math.PI * 2;
 const UP = new THREE.Vector3(0, 1, 0);
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
+const _dk = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
 const _m = new THREE.Matrix4();
@@ -55,7 +56,7 @@ export interface Mount {
   place(e: Enemy, dt: number): void;
 }
 
-type Kind = 'reed' | 'barge' | 'battery';
+type Kind = 'reed' | 'barge' | 'battery' | 'flagship';
 
 interface Section {
   part: string;
@@ -136,8 +137,14 @@ export class Hull implements ExternalTarget, Mount {
   private creakT = 3;
   private hit = { u: 0, hw: 0, tx: 0, tz: 1 } as RiverHitLike;
   aboard = false;
+  /** a boss owns this hull (the flagship): it steers it (goal / goalSpeed), updates it and owns the rig */
+  readonly owned: boolean;
+  goal: { x: number; z: number } | null = null;
+  goalSpeed = 0;
+  /** turn rate override (rad/s) for the owner */
+  turnRate = 0;
 
-  constructor(public fleet: NileFleet, public def: EnemyDef, public kind: Kind, spec: RigSpec, x: number, z: number, yaw: number) {
+  constructor(public fleet: NileFleet, public def: EnemyDef, public kind: Kind, spec: RigSpec, x: number, z: number, yaw: number, opts: { rig?: RigInstance; root?: THREE.Group; hp?: number } = {}) {
     this.id = NileFleet.nextId++;
     this.name = def.name;
     this.meta = spec.meta ?? {};
@@ -149,9 +156,16 @@ export class Hull implements ExternalTarget, Mount {
     this.len = (this.meta.length as number) ?? 4;
     this.beam = (this.meta.beam as number) ?? 2;
     this.draft = (this.meta.draft as number) ?? 0.3;
-    this.rig = new RigInstance(buildRigGeo(spec, 'fleet:' + spec.name), { ownMaterial: true });
-    this.root.add(this.rig.root);
-    fleet.ctx.scene.add(this.root);
+    this.owned = !!opts.rig;
+    if (opts.rig && opts.root) {
+      this.rig = opts.rig;
+      this.root = opts.root;
+    } else {
+      this.rig = new RigInstance(buildRigGeo(spec, 'fleet:' + spec.name), { ownMaterial: true });
+      this.root.add(this.rig.root);
+      fleet.ctx.scene.add(this.root);
+    }
+    if (opts.hp) this.maxHp = this.hp = opts.hp;
     for (const s of (this.meta.sections as { part: string; z0: number; z1: number; share: number }[]) ?? []) {
       const mx = this.maxHp * s.share * 1.35;
       this.sections.push({ part: s.part, z0: s.z0, z1: s.z1, hp: mx, max: mx, broken: false });
@@ -168,7 +182,7 @@ export class Hull implements ExternalTarget, Mount {
     this.pos.y = this.surface;
     this.place(null, 0);
     this.Mprev.copy(this.M);
-    fleet.enemies.registerExternal(this);
+    if (!this.owned) fleet.enemies.registerExternal(this);
   }
 
   // ------------------------------------------------------------------ water
@@ -190,13 +204,14 @@ export class Hull implements ExternalTarget, Mount {
     if (!this.alive || this.sink > 0.85) return null;
     const dx = x - this.pos.x, dz = z - this.pos.z;
     if (dx * dx + dz * dz > (this.len * 0.6) ** 2) return null;
-    _v.set(x, this.pos.y, z).applyMatrix4(this.MInv);
+    // (its own scratch vector: the ground hooks call this from inside other hull maths)
+    const q = _dk.set(x, this.pos.y, z).applyMatrix4(this.MInv);
     let best: number | null = null;
     const e = this.M.elements;
     for (const r of (this.meta.deck as number[][]) ?? []) {
-      if (_v.x < r[0] || _v.x > r[1] || _v.z < r[2] || _v.z > r[3]) continue;
-      if (this.brokenAt(_v.z)) continue;
-      const y = e[1] * _v.x + e[5] * r[4] + e[9] * _v.z + e[13];
+      if (q.x < r[0] || q.x > r[1] || q.z < r[2] || q.z > r[3]) continue;
+      if (this.brokenAt(q.z)) continue;
+      const y = e[1] * q.x + e[5] * r[4] + e[9] * q.z + e[13];
       if (best === null || y > best) best = y;
     }
     return best;
@@ -292,28 +307,30 @@ export class Hull implements ExternalTarget, Mount {
 
   // ------------------------------------------------------------------ targeting
   hitTest(o: THREE.Vector3, d: THREE.Vector3, maxT: number): RayHit | null {
-    if (!this.alive || this.sink > 0.7) return null;
-    let best: RayHit | null = null;
-    let bt = maxT;
-    const n = this.kind === 'battery' ? 1 : this.kind === 'reed' ? 4 : 6;
-    const r = this.kind === 'battery' ? 1.3 : this.beam * 0.52;
-    for (let i = 0; i < n; i++) {
-      const lz = n === 1 ? 0 : (i / (n - 1) - 0.5) * this.len * 0.82;
-      if (this.brokenAt(lz)) continue;
-      _v.set(0, this.kind === 'battery' ? 0.8 : 0.35, lz).applyMatrix4(this.M);
-      const ox = o.x - _v.x, oy = o.y - _v.y, oz = o.z - _v.z;
-      const b = ox * d.x + oy * d.y + oz * d.z;
-      const cc = ox * ox + oy * oy + oz * oz - r * r;
-      const disc = b * b - cc;
-      if (disc < 0) continue;
-      let t = -b - Math.sqrt(disc);
-      if (t < 0) t = -b + Math.sqrt(disc);
-      if (t < 0 || t > bt) continue;
-      bt = t;
-      const point = o.clone().addScaledVector(d, t);
-      best = { enemy: this, t, point, normal: point.clone().sub(_v).normalize(), headshot: false, part: 'hull', surface: 'enemy' };
+    if (!this.alive || this.sink > 0.7 || this.owned) return null;
+    // a box around the hull in boat space, up to the deck (crew standing on it stay shootable)
+    const lo = _v.copy(o).applyMatrix4(this.MInv);
+    const ld = _w.copy(d).transformDirection(this.MInv);
+    const deckY = Math.min(...((this.meta.deck as number[][]) ?? [[0, 0, 0, 0, 0.5]]).map((r) => r[4]));
+    const hx = this.kind === 'battery' ? 1.5 : this.beam * 0.5;
+    const hz = this.kind === 'battery' ? 1.6 : this.len * 0.46;
+    const y0 = this.kind === 'battery' ? 0 : -this.draft, y1 = this.kind === 'battery' ? 1.6 : deckY + 0.1;
+    let t0 = 0, t1 = maxT;
+    for (const [oo, dd, a, b] of [[lo.x, ld.x, -hx, hx], [lo.y, ld.y, y0, y1], [lo.z, ld.z, -hz, hz]] as number[][]) {
+      if (Math.abs(dd) < 1e-9) {
+        if (oo < a || oo > b) return null;
+        continue;
+      }
+      let ta = (a - oo) / dd, tb = (b - oo) / dd;
+      if (ta > tb) [ta, tb] = [tb, ta];
+      t0 = Math.max(t0, ta);
+      t1 = Math.min(t1, tb);
+      if (t0 > t1) return null;
     }
-    return best;
+    const lz = lo.z + ld.z * t0;
+    if (this.brokenAt(lz)) return null;
+    const point = o.clone().addScaledVector(d, t0);
+    return { enemy: this, t: t0, point, normal: d.clone().negate(), headshot: false, part: 'hull', surface: 'enemy' };
   }
 
   takeDamage(hit: Hit, point?: THREE.Vector3, dir?: THREE.Vector3) {
@@ -389,7 +406,7 @@ export class Hull implements ExternalTarget, Mount {
     }
     this.crew = [];
     for (const g of this.guns) g.busy = true;
-    if (byHunter) ctx.events.emit('enemyKilled', this, null);
+    if (byHunter && !this.owned) ctx.events.emit('enemyKilled', this, null);
     this.listT += rnd.sign() * 0.35;
     this.trimT += rnd.sign() * 0.25;
   }
@@ -534,7 +551,8 @@ export class Hull implements ExternalTarget, Mount {
       }
       if (this.kind === 'battery' && this.sink > 0.05 && rnd.chance(dt * 6)) ctx.fx.dust({ x: this.pos.x, y: this.surface + 0.5, z: this.pos.z }, 1.2, 0xc8b08a, 3);
       if (this.sink >= 1) {
-        this.dispose();
+        if (!this.owned) this.dispose();
+        else this.sink = 1;
         return;
       }
     }
@@ -547,7 +565,7 @@ export class Hull implements ExternalTarget, Mount {
     this.M.copy(this.root.matrixWorld);
     this.MInv.copy(this.M).invert();
     // flash on hits
-    const fxu = this.rig.material.userData.fx?.value;
+    const fxu = this.owned ? null : this.rig.material.userData.fx?.value;
     if (fxu) fxu.x = this.flash * 0.6;
     this.animateRig(dt);
     // the hunter aboard: carried with the deck
@@ -609,7 +627,11 @@ export class Hull implements ExternalTarget, Mount {
     let want = this.yaw;
     let topSpeed = this.kind === 'reed' ? 7.5 : 5.2;
     if (this.sinking) topSpeed = 0;
-    else if (this.leaving) {
+    else if (this.owned) {
+      // the owner steers: head for its goal at its speed
+      topSpeed = this.goalSpeed;
+      if (this.goal) want = Math.atan2(this.goal.x - this.pos.x, this.goal.z - this.pos.z);
+    } else if (this.leaving) {
       want = Math.atan2(-dx, -dz);
       topSpeed *= 1.2;
     } else if (this.ramT > 0) {
@@ -643,7 +665,7 @@ export class Hull implements ExternalTarget, Mount {
       }
     }
     // pick the first navigable heading near the wish
-    const look = this.kind === 'reed' ? [5, 11] : [8, 16];
+    const look = this.kind === 'reed' ? [5, 11] : this.kind === 'flagship' ? [14, 24] : [8, 16];
     let pick = want;
     let ok = false;
     for (const off of [0, 0.35, -0.35, 0.7, -0.7, 1.1, -1.1, 1.6, -1.6, Math.PI]) {
@@ -657,16 +679,16 @@ export class Hull implements ExternalTarget, Mount {
       }
     }
     if (!ok) topSpeed *= 0.3;
-    const rate = this.kind === 'reed' ? (this.ramT > 0 ? 1.4 : 0.9) : 0.42;
+    const rate = this.turnRate || (this.kind === 'reed' ? (this.ramT > 0 ? 1.4 : 0.9) : this.kind === 'flagship' ? 0.24 : 0.42);
     const prev = this.yaw;
     const dd = clamp(wrap(pick - this.yaw), -rate * dt, rate * dt);
     this.yaw += dd;
     this.turn = damp(this.turn, dd / Math.max(dt, 1e-3), 4, dt);
     const sharp = Math.abs(wrap(pick - this.yaw));
     const target = topSpeed * (1 - clamp(sharp / 1.6, 0, 0.6));
-    this.speed = damp(this.speed, target, this.kind === 'reed' ? 1.4 : 0.6, dt);
+    this.speed = damp(this.speed, target, this.kind === 'reed' ? 1.4 : this.kind === 'flagship' ? 0.45 : 0.6, dt);
     const nx = this.pos.x + Math.sin(this.yaw) * this.speed * dt, nz = this.pos.z + Math.cos(this.yaw) * this.speed * dt;
-    if (this.navigable(nx, nz) || !ok) {
+    if (this.navigable(nx, nz) || (!ok && !this.fleet.water)) {
       this.vel.set(Math.sin(this.yaw) * this.speed, 0, Math.cos(this.yaw) * this.speed);
       this.pos.x = nx;
       this.pos.z = nz;
@@ -686,7 +708,7 @@ export class Hull implements ExternalTarget, Mount {
         this.pos.z += (oz / d) * (min - d) * dt * 2;
       }
     }
-    if (this.leaving && (dist > 75 || this.t > 600)) this.dispose();
+    if (this.leaving && !this.owned && (dist > 75 || this.t > 600)) this.dispose();
   }
 
   private animateRig(dt: number) {
@@ -720,9 +742,11 @@ export class Hull implements ExternalTarget, Mount {
       if (this.leaving) c.e.alive = false;
     }
     this.crew = [];
-    this.root.removeFromParent();
-    this.rig.material.dispose();
-    this.fleet.enemies.unregisterExternal(this);
+    if (!this.owned) {
+      this.root.removeFromParent();
+      this.rig.material.dispose();
+      this.fleet.enemies.unregisterExternal(this);
+    }
   }
 }
 
@@ -752,10 +776,13 @@ const CREWS: Record<Kind, string[][]> = {
     ['nileBaboon', 'nileWolf', 'nileFalcon', 'nileHippo', 'nileFalcon', 'nileRam'],
   ],
   battery: [['nileBaboon', 'nileBaboon'], ['nileBaboon', 'nileFalcon']],
+  flagship: [['nileRam', 'nileFalcon', 'nileFalcon', 'nileBaboon', 'nileBaboon', 'nileFalcon', 'nileWolf', 'nileJackalSpear', 'nileWolf', 'nileHippo', 'nileFalcon']],
 };
 
 export class NileFleet {
   static nextId = 950000;
+  /** the run's fleet (bosses that sail borrow it) */
+  static current: NileFleet | null = null;
   hulls: Hull[] = [];
   readonly ctx: Ctx;
   readonly player: FleetDeps['player'];
@@ -769,6 +796,7 @@ export class NileFleet {
     this.player = d.player;
     this.enemies = d.enemies;
     this.enemies.vesselSpawner = (id, x, z, o) => this.spawn(id, x, z, o);
+    NileFleet.current = this;
     this.hook();
     if (typeof window !== 'undefined') {
       (window as any).__fleet = this; // dev: __fleet.spawn('warBarge', x, z), __fleet.lineup(), __fleet.review()
@@ -938,7 +966,7 @@ export class NileFleet {
 
   // ------------------------------------------------------------------ spawning
   /** find a spot on the river near (x, z) (deep enough, out from the banks), or null */
-  private findWater(x: number, z: number, depth: number, minR = 0): { x: number; z: number } | null {
+  findWater(x: number, z: number, depth: number, minR = 0): { x: number; z: number } | null {
     if (!this.water) return { x, z };
     const pp = this.player.pos;
     for (let r = 0; r <= 90; r += 6)
@@ -1016,10 +1044,38 @@ export class NileFleet {
     return first;
   }
 
+  /** a boss's own hull (the flagship): floats, carries its crew and the boarder, the boss steers and updates it */
+  adopt(def: EnemyDef, spec: RigSpec, x: number, z: number, yaw: number, opts: { rig: RigInstance; root: THREE.Group; hp: number }) {
+    this.hook();
+    const h = new Hull(this, def, 'flagship', spec, x, z, yaw, opts);
+    this.hulls.push(h);
+    return h;
+  }
+  /** man the free stations of a hull with these soldiers */
+  crewUp(h: Hull, ids: string[], gunners: string[] = ['nileBaboon']) {
+    const stations = (h.meta.stations as number[][]) ?? [];
+    const taken = new Set(h.crew.map((c) => `${c.station.x.toFixed(2)},${c.station.z.toFixed(2)}`));
+    const out: Enemy[] = [];
+    let k = 0;
+    for (const st of stations) {
+      if (k >= ids.length) break;
+      if (taken.has(`${st[0].toFixed(2)},${st[2].toFixed(2)}`)) continue;
+      const loc = new THREE.Vector3(st[0], st[1], st[2]);
+      _v.copy(loc).applyMatrix4(h.M);
+      const id = ids[k++];
+      const e = this.enemies.spawn(id, _v.x, _v.z, { emerge: 'run' });
+      if (!e) continue;
+      h.addCrew(e, loc, gunners.includes(id));
+      out.push(e);
+    }
+    return out;
+  }
+
   // ------------------------------------------------------------------ per frame
   update(dt: number) {
     if (!this.hulls.length) return;
     this.hook();
+    // the flagship too: its owner (the boss) steers it, the fleet floats it before the crew think
     for (const h of this.hulls) if (h.alive) h.update(dt);
     this.hulls = this.hulls.filter((h) => h.alive);
   }
@@ -1032,6 +1088,7 @@ export class NileFleet {
   dispose() {
     this.clear();
     this.unhook();
+    if (NileFleet.current === this) NileFleet.current = null;
     if (this.enemies.vesselSpawner) this.enemies.vesselSpawner = null;
     if (typeof window !== 'undefined' && (window as any).__fleet === this) delete (window as any).__fleet;
   }

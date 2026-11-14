@@ -24,7 +24,7 @@ import { NILE } from './kit';
 type G = [number, number, number];
 const res = (c: CSpec, x: number, y: number, z: number) => (typeof c === 'number' ? c : (c(x, y, z) as number));
 
-class BoatRig {
+export class BoatRig {
   parts: PartSpec[] = [];
   sockets: Record<string, { part: string; at: V3 }> = {};
   constructor(public name: string, public vs: number) {}
@@ -55,7 +55,7 @@ class BoatRig {
 }
 
 /** sky light on top faces, darker undersides (the renderer adds AO and the cel ramp) */
-function shadeTops(r: BoatRig, up = 1.06, down = 0.86) {
+export function shadeTops(r: BoatRig, up = 1.06, down = 0.86) {
   for (const p of r.parts) {
     const m = p.model;
     const todo: [number, number, number, number, number][] = [];
@@ -70,7 +70,7 @@ function shadeTops(r: BoatRig, up = 1.06, down = 0.86) {
 }
 
 // ============================================================================ materials
-const REED = { a: 0xb8a248, b: 0x9a8a38, c: 0xd2bc62, d: 0x6e6428, band: 0x5a3a1e };
+export const REED = { a: 0xb8a248, b: 0x9a8a38, c: 0xd2bc62, d: 0x6e6428, band: 0x5a3a1e };
 /** bundled papyrus: stalks running along z (stripes by x+y), lashed every `every` voxels */
 function reedC(every: number, seed = 0): CSpec {
   return (x, y, z) => {
@@ -83,7 +83,7 @@ function reedC(every: number, seed = 0): CSpec {
   };
 }
 /** cedar planking: strakes along z with dark seams every 3 rows, trenails, weathered patches */
-function plankC(seed = 0, base = 0x8a4a2a): CSpec {
+export function plankC(seed = 0, base = 0x8a4a2a): CSpec {
   const lite = mix(base, 0xd8a070, 0.22), dark = mix(base, 0x1a0c06, 0.4);
   return (x, y, z) => {
     if (((y % 3) + 3) % 3 === 0) return dark;
@@ -94,7 +94,7 @@ function plankC(seed = 0, base = 0x8a4a2a): CSpec {
   };
 }
 /** deck boards along z */
-function deckC(seed = 0): CSpec {
+export function deckC(seed = 0): CSpec {
   const base = 0xa8743e, dark = 0x5e3a1a, lite = 0xc89a5e;
   return (x, _y, z) => {
     if (((x % 4) + 4) % 4 === 0) return dark;
@@ -104,7 +104,7 @@ function deckC(seed = 0): CSpec {
   };
 }
 /** painted frieze along a gunwale: lapis, gold, carnelian, turquoise bands with a lotus scallop */
-function friezeC(y0: number): CSpec {
+export function friezeC(y0: number): CSpec {
   return (x, y, z) => {
     const k = y - y0;
     if (k <= 0) return NILE.lapis;
@@ -115,7 +115,7 @@ function friezeC(y0: number): CSpec {
   };
 }
 /** sail cloth: linen with broad red stripes and a few patches */
-function sailC(stripe = 0xa8281e, seed = 0): CSpec {
+export function sailC(stripe = 0xa8281e, seed = 0): CSpec {
   return (x, y, z) => {
     const band = ((Math.floor(y / 6) % 2) + 2) % 2 === 0;
     const n = noise.n3(x / 7 + seed, y / 7, z / 7);

@@ -152,7 +152,6 @@ export class Sphinx extends Boss {
   private jawT = 0;
   private headDown = 0;
   private headDownT = 0;
-  private tailMood = 0.3;
   private whip = 0;
   private whipT = 0;
   private whipSide = 1;
@@ -161,17 +160,20 @@ export class Sphinx extends Boss {
   private wiggle = 0;
   private pupil: 'slit' | 'wide' | 'shut' = 'shut';
   private blinkT = 0;
+  private eyeShown = '';
   private turnRate = 0.9;
   private walkTo: THREE.Vector3 | null = null;
   private walkSpeed = 0;
+  private walkAccel = 3;
   private grind = 0;
   private grindSfxT = 0;
   private fxT = 0;
   private dormant = true;
+  /** eyes closed in stone sleep */
+  private asleep = true;
   private dead = false;
   private exposedT = 0;
   private gemOpenT = 0;
-  private stunT = 0;
   private dazeT = 0;
   // ------------------------------------------------------------ hunter handling
   private hold: { at: () => THREE.Vector3; squeeze: number } | null = null;
@@ -183,9 +185,10 @@ export class Sphinx extends Boss {
   private lastCallout = '';
   /** what it is doing (dev / tests) */
   dbg = '';
+  /** dev / tests: only run queued moves */
+  devHold = false;
   // ------------------------------------------------------------ the gate and the corpse
   private gate: RigInstance | null = null;
-  private gateMat: VoxelMaterial | null = null;
   private gateOpen = 0;
   private gateOpenT = 0;
   private chunks: Chunk[] = [];
@@ -195,7 +198,7 @@ export class Sphinx extends Boss {
   private gemSphere: HitSphere;
   private pawSpheres: HitSphere[] = [];
   private plantedWeak = 0;
-  private offRelease: (() => void) | null = null;
+  private seamToastT = -9;
   private riddleUI: { plaques: FloatText3D[]; pts: THREE.Vector3[]; marks: unknown[] } | null = null;
 
   constructor(d: BossDeps, private tier = 2) {
@@ -345,13 +348,7 @@ export class Sphinx extends Boss {
 
   // ================================================================== small helpers
   private setPupil(k: 'slit' | 'wide' | 'shut') {
-    if (!this.G || k === this.pupil) return;
     this.pupil = k;
-    for (const sd of ['l', 'r']) {
-      const m = this.rig.meshes['eye_' + sd];
-      const g = this.G.eyes[`${k}_${sd}`];
-      if (m && g) m.geometry = g;
-    }
   }
   private callout(song: string, big = true) {
     this.dbg = song;
@@ -457,6 +454,17 @@ export class Sphinx extends Boss {
     this.check();
     return r === 'good' || r === 'perfect';
   }
+  /** lunge so a paw can reach p: the body slides until p sits `keep` metres in front of it */
+  private lunge(p: THREE.Vector3, keep: number) {
+    const f = this.fwd(_w);
+    const want = new THREE.Vector3(p.x - f.x * keep, 0, p.z - f.z * keep);
+    const l = this.toBody(p);
+    if (l.z > keep + 1.5 || l.z < keep - 6) {
+      this.walkTo = want;
+      this.walkSpeed = 13;
+      this.walkAccel = 8;
+    } else this.walkTo = null;
+  }
   private openUp(dur = 2.6, label = 'OPENING!') {
     this.exposedT = Math.max(this.exposedT, dur);
     const top = { x: this.pos.x, y: this.pos.y + this.height + 1.2, z: this.pos.z };
@@ -539,6 +547,7 @@ export class Sphinx extends Boss {
       await this.wait(0.1);
     }
     ctx.sfx('divine_power', this.pos, 0.9, 0.55);
+    this.asleep = false;
     this.setPupil('slit');
     for (let t = 0; t < 1.0; t += 0.05) {
       this.U.glow.value = t;
@@ -651,7 +660,6 @@ export class Sphinx extends Boss {
     if (!nile?.gate && this.G) {
       const gate = new RigInstance(this.G.gate, { ownMaterial: true });
       this.gate = gate;
-      this.gateMat = gate.material;
       gate.root.position.set(gx, Math.min(this.ground(gx, gz), this.ground(gx + Math.cos(gyaw) * 10, gz - Math.sin(gyaw) * 10), this.ground(gx - Math.cos(gyaw) * 10, gz + Math.sin(gyaw) * 10)) - 0.4, gz);
       gate.root.rotation.y = gyaw;
       this.ctx.scene.add(gate.root);
@@ -665,6 +673,10 @@ export class Sphinx extends Boss {
       const q = this.queue.shift();
       if (q) {
         await this.run(q);
+        continue;
+      }
+      if (this.devHold) {
+        await this.wait(0.2);
         continue;
       }
       const p = this.phase, r = rnd.next(), d = this.distToPlayer();
@@ -750,13 +762,15 @@ export class Sphinx extends Boss {
       return l.z > 2 && l.z < 22 && Math.abs(l.x) < 15 && this.player.pos.y - this.ground(this.player.pos.x, this.player.pos.z) < 4;
     };
     this.warn().wedge(this.pos.x, this.pos.z, this.yaw + (pr.x > 0 ? 0.3 : -0.3), 20, 0.75, windup, 'tell');
+    this.lunge(this.predicted(windup), 11);
     await this.wait(windup * 0.6);
+    this.walkTo = null;
     let dodged = false;
     if (zone() && rnd.chance(0.65)) dodged = await this.dodgeOffer(this.bodyPt(sgn * 8, 0, 10, new THREE.Vector3()));
     else await this.wait(windup * 0.4);
     // the swipe: across the front through where the hunter will be
     const tgtL = this.toBody(this.predicted(0.2));
-    const hx = clamp(tgtL.x, -10, 10), hz = clamp(tgtL.z, 6, 19);
+    const hx = clamp(tgtL.x, -9, 9), hz = clamp(tgtL.z, 6, 13.5);
     const path: V3[] = [[sgn * 9, 2.4, hz - 1], [hx + sgn * 2.5, 1.2, hz + 0.6], [hx - sgn * 3, 1.0, hz + 0.4], [-sgn * 8, 2.6, hz - 2]];
     ctx.sfx('whoosh_big', this.pos, 1, 0.55);
     this.N.lean = sgn * 0.06;
@@ -769,6 +783,7 @@ export class Sphinx extends Boss {
       const seg = Math.min(2, Math.floor(k * 3)), u = k * 3 - seg;
       const a = path[seg], b = path[seg + 1];
       this.aimLocal(leg, a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u, 30, { pitch: -0.15, roll: sgn * 0.5, yaw: -sgn * 0.7 }, -0.5);
+      if (!hit) this.lunge(pl.pos, 10.5);
       // claws through the shallows: a wake of spray
       const pw = this.sock(s === 0 ? 'paw_l' : 'paw_r', _a);
       if (rnd.chance(0.6)) this.splash(pw.x, this.ground(pw.x, pw.z), pw.z, 0.7);
@@ -784,6 +799,7 @@ export class Sphinx extends Boss {
       }
       await this.wait(1 / 60);
     }
+    this.walkTo = null;
     this.N.lean = 0;
     this.P.twist = 0;
     this.toPlant(leg);
@@ -831,18 +847,22 @@ export class Sphinx extends Boss {
     this.warn().bang(this, { tier: 'grab', life: W, y: this.height + 1 });
     let lock = new THREE.Vector3();
     for (let t = 0, t0 = this.t; t < W; t = this.t - t0) {
-      if (t < W * 0.82) lock.copy(this.predicted(0.25));
+      if (t < W * 0.82) {
+        lock.copy(this.predicted(0.25));
+        this.lunge(lock, 11.5);
+      } else this.walkTo = null;
       const l = this.toBody(lock);
-      l.x = clamp(l.x, -11, 11);
-      l.z = clamp(l.z, 5, 21);
+      l.x = clamp(l.x, -9, 9);
+      l.z = clamp(l.z, 5, 13);
       this.aimLocal(leg, l.x, 7.5 + Math.sin(t * 9) * 0.3, l.z, 5, { pitch: 0.1, roll: 0, yaw: 0 }, -0.4);
       this.N.lean = sgn * Math.sin(t * 11) * 0.025;
       await this.wait(1 / 30);
     }
     this.warn().endMark(mark);
+    this.walkTo = null;
     const l = this.toBody(lock);
-    l.x = clamp(l.x, -11, 11);
-    l.z = clamp(l.z, 5, 21);
+    l.x = clamp(l.x, -9, 9);
+    l.z = clamp(l.z, 5, 13);
     // the slam
     lock = this.bodyPt(l.x, 0, l.z, new THREE.Vector3());
     lock.y = this.ground(lock.x, lock.z);
@@ -941,19 +961,22 @@ export class Sphinx extends Boss {
     this.pose({ rear: 0.2, front: -2.2 }, 3);
     this.setPupil('wide');
     this.aimLocal(leg, sgn * 9, 3.5, 8, 7, { pitch: -0.2, roll: sgn * 0.8, yaw: -sgn * 0.6 }, -0.4);
+    this.lunge(this.predicted(W), 11);
     await this.wait(W * 0.6);
+    this.walkTo = null;
     let dodged = false;
     if (this.inFront(24, 0.2)) dodged = await this.dodgeOffer(this.bodyPt(sgn * 9, 0, 9, new THREE.Vector3()));
     else await this.wait(W * 0.4);
     // the scoop: low along the ground, toes cupped
     const tL = this.toBody(this.predicted(0.25));
-    const hx = clamp(tL.x, -10, 10), hz = clamp(tL.z, 6, 18);
+    const hx = clamp(tL.x, -9, 9), hz = clamp(tL.z, 6, 13);
     let caught = false;
     ctx.sfx('whoosh_big', this.pos, 1, 0.65);
     for (let t = 0, t0 = this.t; t < 0.4; t = this.t - t0) {
       const k = t / 0.4;
       const x = sgn * 9 + (hx - sgn * 3 - sgn * 9) * k;
       this.aimLocal(leg, x, 0.9 + Math.sin(k * Math.PI) * 0.4, hz + Math.sin(k * Math.PI) * 1.2, 28, { pitch: -0.5, roll: sgn * 0.6, yaw: -sgn * 0.8 }, 0.6);
+      this.lunge(pl.pos, 10.5);
       const pw = this.sock(s === 0 ? 'paw_l' : 'paw_r', _a);
       if (rnd.chance(0.5)) this.splash(pw.x, this.ground(pw.x, pw.z), pw.z, 0.6);
       if (!dodged && pl.alive && pl.invuln <= 0 && pw.distanceTo(pl.center(_b)) < 2.8) {
@@ -962,6 +985,7 @@ export class Sphinx extends Boss {
       }
       await this.wait(1 / 60);
     }
+    this.walkTo = null;
     if (!caught) {
       this.toPlant(leg);
       this.pose({ rear: 0, front: 0 }, 2);
@@ -974,12 +998,12 @@ export class Sphinx extends Boss {
     ctx.sfx('punch', pl.pos, 0.8, 0.6);
     ctx.engine.letterbox(true, 0.4);
     this.pose({ rear: -3.2, front: -0.4, foreZ: 0, foreX: 0 }, 1.6);
-    this.headDownT = 0.45;
+    this.headDownT = 0.05;
     this.setExpr('smug');
     // the paw rises in front of the face, palm up, toes curled round the hunter
     const showPaw = (rate: number, lift = 0) => {
       const hc = this.j.hc as V3;
-      this.aimLocal(leg, sgn * 2.4, hc[1] - 3.4 + lift, hc[2] + 3.8, rate, { pitch: -1.15, roll: sgn * 0.3, yaw: -sgn * 0.4 }, 0.85);
+      this.aimLocal(leg, sgn * 2.2, hc[1] - 3.8 + lift, hc[2] + 4.6, rate, { pitch: -1.15, roll: sgn * 0.3, yaw: -sgn * 0.4 }, 0.85);
       this.look = this.lookV.copy(cup());
     };
     for (let t = 0, t0 = this.t; t < 1.2; t = this.t - t0) {
@@ -989,8 +1013,9 @@ export class Sphinx extends Boss {
     // the cinematic: the giant face and the tiny hunter in its paw
     const face = this.sock('mouth', new THREE.Vector3());
     const mid = face.clone().lerp(cup(), 0.5);
-    const camP = mid.clone().addScaledVector(this.side(_a), -sgn * 11).addScaledVector(this.fwd(_b), 7);
-    camP.y += 1.2;
+    // a profile: the face, the paw, and the hunter caught between them
+    const camP = mid.clone().addScaledVector(this.side(_a), sgn * 12).addScaledVector(this.fwd(_b), 4);
+    camP.y += 0.8;
     cam.setCine({ pos: camP, look: mid, fov: 48 });
     this.tiltT = sgn * 0.3;
     this.say(['Such a small thing, to cross my river.', 'Do you squeak? Squeak for me.', 'I want to keep you. Forever.', 'What a funny little face.']);
@@ -1305,7 +1330,8 @@ export class Sphinx extends Boss {
         await this.wait(1 / 30);
       }
       this.N.roll = w0;
-      this.bump(0.7);
+      // every other wriggle sends out a ring worth jumping; the rest only shake the river
+      this.bump(0.7, i % 2 === 1);
     }
     await roll(dir * Math.PI * 0.5, 0.6);
     this.bump(1.0);
@@ -1329,7 +1355,7 @@ export class Sphinx extends Boss {
       l.curl = 0.4 + Math.sin(t * 6 + ph) * 0.4;
     }
   }
-  private bump(k: number) {
+  private bump(k: number, harm = true) {
     const ctx = this.ctx;
     ctx.shake(0.5 * k);
     ctx.sfx('explosion', this.pos, 0.8 * k, 0.5);
@@ -1338,7 +1364,7 @@ export class Sphinx extends Boss {
       const p = this.bodyPt((rnd.next() - 0.5) * 12, 0, (rnd.next() - 0.5) * 24, _a);
       this.splash(p.x, this.ground(p.x, p.z), p.z, 1.4 * k);
     }
-    this.quake(this.pos.x, this.pos.z, 22 + 6 * k, 10 + this.phase * 3, 10, 18);
+    this.quake(this.pos.x, this.pos.z, 22 + 6 * k, harm ? 10 + this.phase * 3 : 0, 10, 18);
   }
 
   // ------------------------------------------------------------------ Run for Your Life: it bounds after you
@@ -1501,7 +1527,10 @@ export class Sphinx extends Boss {
     this.ctx.fx.light(p, 0xffb04a, 6, 0.8, 14);
     this.ctx.shake(0.4);
     this.ctx.particles.emit({ pos: p, count: 16, spread: 4, up: 3, life: [0.5, 1.1], size: [0.3, 0.06], sprite: ['spark', 'glow8'], additive: true, color: [0xffd98a, 0xffa53a, 0xffffff], gravity: 6, drag: 1 });
-    if (this.alive) this.ctx.toast('A SEAM CRACKS OPEN', COL, 'Shoot the glowing cracks');
+    if (this.alive && this.t - this.seamToastT > 4) {
+      this.seamToastT = this.t;
+      this.ctx.toast('A SEAM CRACKS OPEN', COL, 'Shoot the glowing cracks');
+    }
   }
   private planted(l: Leg, t: number) {
     this.plantedWeak = Math.max(this.plantedWeak, t);
@@ -1595,12 +1624,13 @@ export class Sphinx extends Boss {
       else {
         this.yaw = dampAngle(this.yaw, Math.atan2(dx, dz), 1.4, dt);
         const sp = this.walkSpeed * this.status.slowMul() * clamp(1 - Math.abs(Math.atan2(Math.sin(Math.atan2(dx, dz) - this.yaw), Math.cos(Math.atan2(dx, dz) - this.yaw))), 0.2, 1);
-        this.vel.x = damp(this.vel.x, Math.sin(this.yaw) * sp, 3, dt);
-        this.vel.z = damp(this.vel.z, Math.cos(this.yaw) * sp, 3, dt);
+        this.vel.x = damp(this.vel.x, Math.sin(this.yaw) * sp, this.walkAccel, dt);
+        this.vel.z = damp(this.vel.z, Math.cos(this.yaw) * sp, this.walkAccel, dt);
       }
     } else {
       this.vel.x = damp(this.vel.x, 0, 4, dt);
       this.vel.z = damp(this.vel.z, 0, 4, dt);
+      this.walkAccel = 3;
     }
     this.pos.x += this.vel.x * dt;
     this.pos.z += this.vel.z * dt;
@@ -1677,7 +1707,7 @@ export class Sphinx extends Boss {
         }
       }
       const d = Math.hypot(pl.pos.x - r.x, pl.pos.z - r.z);
-      if (!r.hit && pl.alive && !this.hold && d > prev - 1 && d < r.r + 0.6 && pl.pos.y < this.ground(pl.pos.x, pl.pos.z) + 1.2) {
+      if (!r.hit && r.dmg > 0 && pl.alive && !this.hold && d > prev - 1 && d < r.r + 0.6 && pl.pos.y < this.ground(pl.pos.x, pl.pos.z) + 1.2) {
         r.hit = true;
         pl.takeHit({ base: r.dmg, kind: 'phys', source: 'contact', knock: r.knock }, _v.set(r.x, pl.pos.y, r.z));
         pl.board.impulse.y += 5;
@@ -1796,7 +1826,7 @@ export class Sphinx extends Boss {
     const wig = this.wiggle * Math.sin(t * 13);
     // ------------------------------------------------------------ body: rear and front heights pitch the spine about the hips
     const rollAbs = Math.abs(N.roll);
-    const rollDrop = -5.0 * clamp(Math.sin(Math.min(rollAbs, Math.PI / 2)) + (rollAbs > Math.PI / 2 ? 0.15 : 0), 0, 1.1);
+    const rollDrop = -3.8 * clamp(Math.sin(Math.min(rollAbs, Math.PI / 2)) + (rollAbs > Math.PI / 2 ? 0.15 : 0), 0, 1.1);
     const rear = N.rear + backGround + rollDrop + this.wiggle * 0.5 + wig * 0.25;
     const front = N.front + frontGround + rollDrop;
     const hipsR = this.rest['hips'];
@@ -1815,14 +1845,15 @@ export class Sphinx extends Boss {
       const lp = neck.parent!.worldToLocal(_v.copy(lookAt));
       const hp = this.rest['head'];
       const dx = lp.x - hp.x, dy = lp.y - hp.y, dz = lp.z - hp.z;
-      yawT = clamp(Math.atan2(dx, dz), -1.0, 1.0);
-      pitchT = clamp(-Math.atan2(dy, Math.hypot(dx, dz)), -0.5, 0.75);
+      // a cat follows with its eyes: the head only goes part of the way
+      yawT = clamp(Math.atan2(dx, dz), -1.0, 1.0) * 0.85;
+      pitchT = clamp(-Math.atan2(dy, Math.hypot(dx, dz)), -0.5, 0.75) * 0.5;
     }
     this.headYaw = damp(this.headYaw, yawT, this.lookRate, dt);
     this.headPitch = damp(this.headPitch, pitchT + this.headDown, this.lookRate, dt);
     this.headTilt = damp(this.headTilt, this.tiltT, 2, dt);
-    neck.rotation.set(this.headPitch * 0.4 - pitch * 0.35, this.headYaw * 0.4, -N.roll * 0.15);
-    head.rotation.set(this.headPitch * 0.6 - pitch * 0.25 + hitK * 0.06, this.headYaw * 0.6, this.headTilt + Math.sin(t * 0.37) * 0.02);
+    neck.rotation.set(this.headPitch * 0.4 - pitch * 0.35, this.headYaw * 0.4, -N.roll * 0.3);
+    head.rotation.set(this.headPitch * 0.6 - pitch * 0.25 + hitK * 0.06, this.headYaw * 0.6, this.headTilt - N.roll * 0.25 + Math.sin(t * 0.37) * 0.02);
     // jaw, brows, lappets (stone cloth hangs)
     this.jaw = damp(this.jaw, this.jawT + this.rig.exprJaw * 0.5, 6, dt);
     if (n['jaw']) n['jaw'].rotation.x = this.jaw * 0.55;
@@ -1834,7 +1865,7 @@ export class Sphinx extends Boss {
     }
     // eyes: they find the hunter; blink and pupil state
     this.root.updateMatrixWorld(true);
-    if (lookAt && !this.dormant) {
+    if (lookAt && !this.asleep) {
       for (const sd of ['l', 'r']) {
         const eye = n['eye_' + sd];
         if (!eye) continue;
@@ -1845,17 +1876,18 @@ export class Sphinx extends Boss {
       }
     }
     if (this.G) {
-      const want = this.dormant || this.blinkT > 0 || this.dead ? 'shut' : this.pupil === 'shut' ? 'slit' : this.pupil;
-      if (want !== this.pupil || this.blinkT > 0) {
+      const want = this.asleep || this.blinkT > 0 || this.dead ? 'shut' : this.pupil === 'shut' ? 'slit' : this.pupil;
+      if (want !== this.eyeShown) {
+        this.eyeShown = want;
         for (const sd of ['l', 'r']) {
           const m = this.rig.meshes['eye_' + sd];
-          const g = this.G.eyes[`${this.blinkT > 0 || this.dormant || this.dead ? 'shut' : want}_${sd}`];
+          const g = this.G.eyes[`${want}_${sd}`];
           if (m && g) m.geometry = g;
         }
       }
     }
     // occasional blinks and a relaxed pupil
-    if (!this.dormant && rnd.chance(dt * 0.15)) this.blinkT = 0.14;
+    if (!this.asleep && rnd.chance(dt * 0.15)) this.blinkT = 0.14;
     if (this.pupil === 'wide' && rnd.chance(dt * 0.25) && !this.hold) this.setPupil('slit');
     // ------------------------------------------------------------ tail: a lazy swish, the tip flicks; whips on command
     this.whip = damp(this.whip, this.whipT, this.whipT !== 0 ? 10 : 4, dt);
@@ -2066,9 +2098,9 @@ export class Sphinx extends Boss {
       const l = out.length() || 1;
       out.multiplyScalar(1 / l);
       const head = node.name === 'head';
-      const v = out.multiplyScalar(head ? 3 : 1.5 + rnd.next() * 3).add(new THREE.Vector3(0, head ? 4 : 2 + rnd.next() * 4, 0));
-      if (head) v.addScaledVector(this.fwd(_a), 5);
-      this.chunks.push({ node, v, w: new THREE.Vector3((rnd.next() - 0.5) * 1.6, (rnd.next() - 0.5) * 1.2, (rnd.next() - 0.5) * 1.6).multiplyScalar(head ? 0.5 : 1), t: 0, landed: false, sink: 0 });
+      const v = out.multiplyScalar(head ? 3 : 3 + rnd.next() * 4).add(new THREE.Vector3(0, head ? 6 : 4 + rnd.next() * 6, 0));
+      if (head) v.addScaledVector(this.fwd(_a), 7);
+      this.chunks.push({ node, v, w: new THREE.Vector3((rnd.next() - 0.5) * 2.4, (rnd.next() - 0.5) * 1.6, (rnd.next() - 0.5) * 2.4).multiplyScalar(head ? 0.6 : 1), t: 0, landed: false, sink: 0 });
       ctx.events.emit('gibs', p.x, p.y, p.z, head ? 14 : 8, 0.45, STONE, 6, 5);
     }
     for (let i = 0; i < 8; i++) {
@@ -2140,7 +2172,6 @@ export class Sphinx extends Boss {
     // materials are ours; the geometry belongs to the shared cache (released with the run, or after the gate)
     for (const m of this.mats) m.dispose();
     this.mats = [];
-    this.offRelease?.();
     if ((window as any).__sphinx === this) (window as any).__sphinx = null;
   }
 }

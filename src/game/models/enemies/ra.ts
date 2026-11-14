@@ -52,7 +52,7 @@ const OBSIDIAN = { hi: 0x51485e, base: 0x2c2636, shade: 0x1a1621, deep: 0x0c0a10
 const LAPIS = { hi: 0x5b86e0, base: 0x2c52b2, shade: 0x1b3479 };
 const CARNELIAN = { base: 0xb8452a, shade: 0x8a2c1a };
 const TURQ = 0x34b8a6;
-const PLUME = { hi: 0xffcf7a, base: 0xf4a446, shade: 0xd77a2e, dark: 0xa8521e, edge: 0x7a3416 };
+const PLUME = { hi: 0xffc66a, base: 0xf29a40, shade: 0xc86a2c, dark: 0x8e4418, edge: 0xf0702e };
 const BEAK = { hi: 0xfff0b0, base: 0xe7b23e, shade: 0xb5801e, burnt: 0x3a2a24, tip: 0x1c1418 };
 const SOCKET = 0x1a0d08;
 const EYE = { pupil: 0x060304, corona: 0xfffbe6, iris0: 0xffd65a, iris1: 0xffae2e, iris2: 0xf58a1e, fibre: 0xfff0a0, limbal: 0xc8401a, back: 0x2a0e08, glint: 0xffffff };
@@ -879,10 +879,11 @@ function headPaint(x: number, y: number, z: number, nx: number, ny: number, nz: 
   if (chainD(x, y, z, JW, 0.8) < 0.25 && y < 1.95 && z > 2.0) return pk(MOLTEN.orange, VF.GLOW);
   // plumage: scalloped feathers flowing back from the beak, an ember edge on each, lighter on the crown
   const pc = plumeCell(x, y, z);
+  // the plumage is solid (the cel light shapes the face); only the feather rims smoulder
   if (pc[0] > 0.88) return pk(PLUME.edge, VF.EMISSIVE);
   const lift = 0.3 + (y - 1.0) / 3.2 + pc[1] * 0.3 + (pc[2] - 0.5) * 0.3;
-  const c = lift > 0.85 ? PLUME.hi : lift > 0.4 ? PLUME.base : PLUME.shade;
-  return pk(c, VF.EMISSIVE);
+  const c = lift > 0.85 ? PLUME.hi : lift > 0.4 ? PLUME.base : lift > 0.05 ? PLUME.shade : PLUME.dark;
+  return pk(c, VF.SOFTAO);
 }
 function jawF(x: number, y: number, z: number) {
   return Math.max(chainD(x, y, z, JW, 0.78), y - 1.95);

@@ -1,5 +1,6 @@
 // Registry of Cleopatra's Nile army: soldiers, vessels, cannons and the two river captains.
 import type { ModelEntry } from './registryCharacters';
+import { warshipRig, admiralApisRig } from './nile/warship';
 import { crocChampionRig } from './nile/crocodile';
 import { reedBoatRig, warBargeRig, bankCannonRig } from './nile/boats';
 import { wolfLegionaryRig, jackalSpearmanRig, hippoShieldRig, falconArcherRig, baboonGunnerRig, ramDrummerRig } from './nile/soldiers';
@@ -29,4 +30,6 @@ export const NILE_ARMY_MODELS: Record<string, ModelEntry> = {
   nile_cannon: () => bankCannonRig(),
   nile_crocodile: () => crocChampionRig(),
   nile_crocodile_enraged: () => crocChampionRig({ enraged: true }),
+  nile_warship: () => warshipRig(),
+  nile_admiral: () => admiralApisRig(),
 };

@@ -113,6 +113,13 @@ export interface NileInfo {
   themes: NileTheme[];
   /** the gate boss's open ground (Sphinx / Cleopatra / Ra) */
   arena: { x: number; z: number; r: number; y: number; zone: number } | null;
+  /**
+   * The river gate at the end of region A (the Sphinx's gate): the bronze-doored water gate
+   * spanning the narrows; yaw turns its front (+z) upstream, toward the Sphinx's arena.
+   * World raises the gate model and fills in openGate() (the doors swing open).
+   */
+  gate: { x: number; z: number; yaw: number } | null;
+  openGate?: () => void;
   /** farmland crop kind at a point (-1: not a field) */
   fieldAt(x: number, z: number): number;
   foliage(x: number, z: number, h: number, mat: number, pick: number): FoliageHint | null;
@@ -262,25 +269,49 @@ export function generateNileArea(key: 'A' | 'B' | 'C', seed: number): SubArea {
     return d;
   };
   const hwFor = (th: NileTheme) => (th === 'cataract' || th === 'fire' ? spec.hw * 0.68 : th === 'hippo' ? spec.hw * 1.45 : th === 'delta' || th === 'mouths' || th === 'glass' ? spec.hw * 1.15 : th === 'sphinxGate' || th === 'court' || th === 'throne' ? spec.hw * 0.85 : spec.hw);
+  // the river gate (region A): the narrows two thirds of the way through the Sphinx's zone
+  let gateS = -1;
+  {
+    const gz = zones.find((z) => theme(z.index) === 'sphinxGate');
+    if (gz) {
+      let sAcc = 0, a = -1, b = -1;
+      for (let i = 0; i < mainPts.length; i++) {
+        if (i > 0) sAcc += Math.hypot(mainPts[i].x - mainPts[i - 1].x, mainPts[i].z - mainPts[i - 1].z);
+        if (Math.hypot(mainPts[i].x - gz.cx, mainPts[i].z - gz.cz) < gz.r - 22) {
+          if (a < 0) a = sAcc;
+          b = sAcc;
+        }
+      }
+      if (a >= 0 && b - a > 60) gateS = a + (b - a) * 0.72;
+    }
+  }
   const main = makeChannel(0, true, mainPts, (s, _k, x, z) => {
     const { zi, d } = zoneOf(x, z);
     const th = theme(zi);
     const inZ = smoothstep(26, -30, d) * smoothstep(20, 75, corrDist(x, z));
     const hwZ = hwFor(th) * (1 + 0.2 * noise.n2(s / 170, 1.7));
-    const hw = lerp(15, hwZ, inZ);
+    const hw0 = lerp(15, hwZ, inZ);
+    // the gate's narrows: the river squeezes between the pylons
+    const gk = gateS >= 0 ? smoothstep(44, 16, Math.abs(s - gateS)) : 0;
+    const hw = lerp(hw0, 8.4, gk);
     const rapids = th === 'cataract' || th === 'fire' ? inZ : 0;
     const calm = th === 'delta' || th === 'mouths' || th === 'hippo' || th === 'papyrus' ? inZ : 0;
     const depth = lerp(3.2, 2.6 + 0.6 * noise.n2(s / 120, 9.1), inZ) * (1 - rapids * 0.25);
     const speed = clamp(2.3 * Math.pow(22 / hw, 0.75) * (1 + rapids * 0.65) * (1 - calm * 0.3), 1.3, 4.8);
     const rough = clamp(lerp(0.95, 0.55 + 0.4 * noise.n2(s / 260, 4.4), inZ) * (1 - calm * 0.5) + rapids * 0.95, 0.15, 1.65);
-    return { hw, depth, speed, rough };
+    return { hw, depth, speed: Math.min(speed, lerp(speed, 3.4, gk)), rough: rough * (1 - gk * 0.85) };
   });
   const channels: NileChannel[] = [main];
+  let gate: NileInfo['gate'] = null;
+  if (gateS >= 0) {
+    const q = pointOn(main, gateS, { x: 0, z: 0, tx: 0, tz: 0, hw: 0 });
+    gate = { x: q.x, z: q.z, yaw: Math.atan2(-q.tx, -q.tz) };
+  }
   // ------------------------------------------------------------------ side channels
   const branchEnds: { x: number; z: number }[] = [];
   for (const zn of zones) {
     const th = theme(zn.index);
-    const nb = BRANCHES[th] ?? (rng.chance(0.3) ? 1 : 0);
+    const nb = th === 'sphinxGate' || th === 'court' || th === 'throne' ? 0 : BRANCHES[th] ?? (rng.chance(0.3) ? 1 : 0);
     if (!nb) continue;
     // the stretch of main river inside this zone
     let sa = -1, sb = -1;
@@ -629,8 +660,9 @@ export function generateNileArea(key: 'A' | 'B' | 'C', seed: number): SubArea {
       case 'sphinxGate':
       case 'court':
       case 'throne': {
-        // the gate boss's ground: a wide open plaza on the bank, kept clear
-        const bf = bankFrame(zn, sMid, 0);
+        // the gate boss's ground: a wide open plaza on the bank, kept clear (the Sphinx lies
+        // in the river 34 m upstream of its gate, the plaza beside it)
+        const bf = bankFrame(zn, th === 'sphinxGate' && gateS >= 0 ? gateS - 36 : sMid, 0);
         const R = th === 'court' ? 46 : 48;
         const cx = bf.rx + bf.nx * (bf.hw + R + 6), cz = bf.rz + bf.nz * (bf.hw + R + 6);
         const y = th === 'court' ? top : FP + 0.4;
@@ -670,7 +702,8 @@ export function generateNileArea(key: 'A' | 'B' | 'C', seed: number): SubArea {
             anchor(zn, { kind: 'obeliskBroken', x: cx + bf.tx * sd * (R + 8), z: cz + bf.tz * sd * (R + 8), rot: rng.range(0, 6.28), scale: 1.5 }, 3);
             anchor(zn, { kind: 'hieroglyphWall', x: cx + bf.nx * (R + 10) + bf.tx * sd * 18, z: cz + bf.nz * (R + 10) + bf.tz * sd * 18, rot: faceRiver(bf), scale: 1.6 }, 6);
           }
-          anchor(zn, { kind: 'nileDock', x: bf.rx + bf.nx * (bf.hw - 4), z: bf.rz + bf.nz * (bf.hw - 4), rot: faceRiver(bf), data: { y: L - 0.85, variant: 1 } }, 4);
+          // keep the banks under the river gate's pylons clear
+          if (gate) for (const sd of [-1, 1]) placers[zn.index].keep.push({ x: gate.x + Math.cos(gate.yaw) * 16 * sd, z: gate.z - Math.sin(gate.yaw) * 16 * sd, r: 11 });
         } else {
           const nsp = 14;
           for (let c = 0; c < nsp; c++) {
@@ -1023,7 +1056,7 @@ export function generateNileArea(key: 'A' | 'B' | 'C', seed: number): SubArea {
   };
 
   console.log(`[nile] ${key}: ${channels.length} channels (${(main.s[main.n - 1] | 0)} m main), river ${(tRiver - t0).toFixed(0)} ms, terrain ${(tTerr - tRiver).toFixed(0)} ms, all ${(performance.now() - t0).toFixed(0)} ms`);
-  const nile: NileInfo = { key, level: L, river, burned: spec.burned, themes: spec.zones.map((z) => z.theme), arena, fieldAt, foliage };
+  const nile: NileInfo = { key, level: L, river, burned: spec.burned, themes: spec.zones.map((z) => z.theme), arena, gate, fieldAt, foliage };
   return {
     key,
     name: spec.name,

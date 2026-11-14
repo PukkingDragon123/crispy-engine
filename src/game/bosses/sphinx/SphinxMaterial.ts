@@ -54,12 +54,12 @@ export function sphinxStone(kind: 'body' | 'site', fx: { value: THREE.Vector4 },
       .replace(
         'totalEmissiveRadiance += diffuseColor.rgb * (vMatx.x * uEmissiveStrength * (1.0 + vFx.z));',
         `{
-          float sxE = vMatx.x > 1.0 ? (1.0 + vFx.z) * uSxGlow : sxSeam * (1.35 + 0.55 * sin(uTime * 2.6 + vWPos.y * 0.8 + vWPos.x * 0.3)) * (1.0 + uSxHeat * 1.6);
+          float sxE = vMatx.x > 1.0 ? (1.0 + vFx.z) * uSxGlow : sxSeam * (2.6 + 0.9 * sin(uTime * 2.6 + vWPos.y * 0.8 + vWPos.x * 0.3)) * (1.0 + uSxHeat * 1.6);
           totalEmissiveRadiance += diffuseColor.rgb * (vMatx.x * uEmissiveStrength * sxE);
         }`
       );
   };
-  m.customProgramCacheKey = () => 'sphinx-stone-' + kind + '-v1';
+  m.customProgramCacheKey = () => 'sphinx-stone-' + kind + '-v2';
   m.userData.fx = fx;
   return m;
 }

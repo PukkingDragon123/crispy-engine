@@ -3,6 +3,8 @@
 // roster. Gate bosses: the Sphinx at 50 (the river gate), Cleopatra at 75, Ra at 100.
 import type { Boss, BossDeps } from './Boss';
 import { CrocodileChampion } from './Crocodile';
+import { Warship } from './Warship';
+import { loadWarshipGeo } from './nile/warshipGeo';
 import { RaSunKing } from './Ra';
 import { Sphinx, prewarmSphinx } from './Sphinx';
 import { Cleopatra, prewarmCleopatra } from './Cleopatra';
@@ -12,6 +14,7 @@ export type NileBossFactory = (d: BossDeps, tier: number) => Boss;
 /** id -> factory; boss modules add themselves with one line each */
 export const NILE_BOSSES: Record<string, NileBossFactory> = {};
 NILE_BOSSES.crocodile = (d, tier) => new CrocodileChampion(d, tier);
+NILE_BOSSES.warship = (d, tier) => new Warship(d, tier);
 NILE_BOSSES.ra = (d, tier) => new RaSunKing(d, tier);
 NILE_BOSSES.sphinx = (d, tier) => new Sphinx(d, tier);
 NILE_BOSSES.cleopatra = (d, tier) => new Cleopatra(d, tier);
@@ -20,6 +23,7 @@ NILE_BOSSES.cleopatra = (d, tier) => new Cleopatra(d, tier);
 export const NILE_PREWARM: Record<string, (ctx: BossDeps['ctx']) => void> = {};
 NILE_PREWARM.sphinx = (ctx) => prewarmSphinx(ctx);
 NILE_PREWARM.cleopatra = () => prewarmCleopatra();
+NILE_PREWARM.warship = () => void loadWarshipGeo();
 /** call on every Nile wave start: warms the bosses of the next few waves */
 export function nilePrewarm(ctx: BossDeps['ctx'], wave: number) {
   for (let w = wave; w <= wave + 5; w++) {

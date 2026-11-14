@@ -480,6 +480,7 @@ export class Cleopatra extends Boss {
     if (toPl.dot(fwd) < 0) fwd.negate();
     const yaw = Math.atan2(fwd.x, fwd.z);
     const start = spot.anchor.clone().addScaledVector(fwd, -44);
+    start.y = this.surface(start.x, start.z);
     const pp = this.player.pos;
     const camPos = new THREE.Vector3(pp.x - fwd.z * 3 + (pp.x - spot.anchor.x) * 0.15, 0, pp.z + fwd.x * 3 + (pp.z - spot.anchor.z) * 0.15);
     camPos.y = this.surface(camPos.x, camPos.z) + 3.2;
