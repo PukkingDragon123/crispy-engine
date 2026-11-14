@@ -38,6 +38,8 @@
   tarot cards. Never replace those with 2D. The rest (bounty plank, wave plaque, notes, toasts, ledger, codex card,
   prompts) is detailed, stylized 2D pixel art that reads as UI, not photographed 3D or texture: moderate pixel
   resolution, hand-authored pixel sprites allowed there, polished and consistent.
+- All spoken dialogue and story text is floating 3D text in the world (FloatText3D), never 2D boxes or balloons.
+- Voxel models and environments carry detailed pixel-art surface textures (PixelTex), subtle and crisp.
 - World: near terrain, ruins and buildings read as big blocks with crisp pixel-art textures; pixel-art foliage sprites.
 - Guns: very high resolution models.
 - Model details: `src/game/models/CONTRACT.md`.
