@@ -18,9 +18,8 @@
 // lanterns and a wind chime, a fold-down ramp, and an acacia whose roots grip the
 // scutes; inside, a warm cluttered shop.
 //
-// Ozman, the tortoise man who keeps the shop, is a variant of Old Mother
-// Tamsin's (frozen, approved) rig: a turban instead of her headscarf, an olive
-// waistcoat for her shawl, a white beard, no coins or beads (`tortoiseGuyRig`).
+// Ozymandias (`tortoiseGuyRig`), the gnarled tortoise-man who keeps the shop, is
+// sculpted in creatures/ozymandias.ts on Old Mother Tamsin's rig layout.
 //
 // RIG (faces +Z, LEFT = +X, origin on the ground under the shell, 1/12 m):
 //   shell (root, carapace + house + interior) → neck → neck2 → head → jaw → tongue,
@@ -37,8 +36,7 @@ import { CRig, VoxelModel, VF, V3, RigSpec, ell, cap, tube, line, Prim, hollow, 
 import { fblob, plate, castIn, normalAt, splitMany, groove, surfaceCells, cullBuried, type Pal } from './mkit';
 import { signPanel } from '../props/western';
 import { PR, textWidth } from '../props/helpers';
-import { merchantRig } from '../characters';
-import type { PartSpec } from '../../../engine/voxel/Rig';
+import { ozymandiasRig } from './ozymandias';
 
 const VS = 1 / 12;
 const U = (m: number) => m / VS;
@@ -282,10 +280,10 @@ const SEEDS: Seed[] = (() => {
   const out: Seed[] = [];
   const n = (v: V3) => norm3(v);
   // vertebrals down the spine; the front and rear ones (clear of the house) rise into horned pyramids
-  [0.86, 0.5, 0.06, -0.4, -0.8].forEach((z, i) => out.push({ d: n([0, Math.sqrt(1 - z * z), z]), h: 0.3, kind: 0, spike: i === 0 ? 0.8 : i === 4 ? 1.0 : i === 3 ? 0.65 : 0 }));
+  [0.86, 0.5, 0.06, -0.4, -0.8].forEach((z, i) => out.push({ d: n([0, Math.sqrt(1 - z * z), z]), h: 0.36, kind: 0, spike: i === 0 ? 0.8 : i === 4 ? 1.0 : i === 3 ? 0.65 : 0 }));
   for (const s of [1, -1]) {
     // costals
-    [0.66, 0.24, -0.2, -0.62].forEach((z) => out.push({ d: n([s * 0.68, 0.6, z * 0.95]), h: 0.26, kind: 1, spike: 0 }));
+    [0.66, 0.24, -0.2, -0.62].forEach((z) => out.push({ d: n([s * 0.68, 0.6, z * 0.95]), h: 0.32, kind: 1, spike: 0 }));
     // marginals round the rim
     for (let i = 1; i <= 11; i++) {
       const a = (i / 12) * Math.PI;
@@ -331,7 +329,9 @@ function buildCarapace(m: VoxelModel) {
         const rings = sd.kind === 2 ? 2 : 3;
         const ring = Math.floor(cen * rings);
         // stepped growth terraces rising to the areola; seams sunk as grooves
-        let rel = cen < 0.07 ? -0.03 : sd.h * (0.18 + 0.82 * Math.min(1, (ring + sstep(0.75, 1, cen * rings - ring)) / rings));
+        // deep seams, stepped growth terraces, and a craggy, knobbed areola
+        let rel = cen < 0.1 ? -0.1 + cen * 0.6 : sd.h * (0.18 + 0.82 * Math.min(1, (ring + sstep(0.75, 1, cen * rings - ring)) / rings));
+        if (cen > 0.62) rel += (n01(X, Y, Z, 3.2, 9) - 0.45) * 0.16 * sstep(0.62, 0.85, cen);
         // the marginals flare and turn down at the rim
         if (sd.kind === 2) rel += 0.05 * sstep(0.1, -0.1, dy);
         const surf = 1 + rel / R;
@@ -345,7 +345,7 @@ function buildCarapace(m: VoxelModel) {
         let c: number;
         const top = rho > surf - 1.2 * (VB / R);
         if (!top) c = SCU.c;
-        else if (cen < 0.14) c = SCU.seam;
+        else if (cen < 0.14) c = cen < 0.08 ? SCU.sand : SCU.seam; // packed with sand
         else if (cen > 0.84) c = sd.kind === 2 ? SCU.bleach : SCU.bone;
         else {
           c = ring & 1 ? SCU.b : SCU.a;
@@ -407,6 +407,74 @@ function buildCarapace(m: VoxelModel) {
     cap(m, add3(a, scl3(d, -UB(0.08))), b, 0.55, 0.5, (_x, yy) => ((yy & 1) === 0 ? 0x6a4a2a : 0x8a643a));
     cap(m, b, add3(b, scl3(d, 0.8)), 0.7, 0.4, 0x9a7a4c); // splintered end
   }
+  /** a point on the shell along an ellipsoid direction, and its outward normal (null under the house) */
+  const onShell = (dv: V3) => {
+    const d = norm3(dv);
+    const T: V3 = [d[0] * CR[0], CC[1] + d[1] * CR[1], CC[2] + d[2] * CR[2]];
+    if (inHouse(T[0], T[2], 0.4) && T[1] > H.floor - 0.5) return null;
+    const nrm = norm3([d[0] / CR[0], d[1] / CR[1], d[2] / CR[2]]);
+    const hit = castIn(m, add3(PBv(T), scl3(nrm, UB(1.2))), scl3(nrm, -1));
+    return hit ? { hit, n: normalAt(m, hit, 3) } : null;
+  };
+  // three old claw gouges raked across the front-left costals, pale scar tissue at their lips
+  const surf = surfaceCells(m);
+  for (let g = 0; g < 3; g++)
+    groove(m, (x, y, z) => {
+      const X = MB(x), Y = MB(y), Z = MB(z);
+      if (X < 1.0 || Z < 0.6 || Z > 2.6 || Y < 1.9) return 99;
+      return (Y - (3.05 - g * 0.24) + (Z - 1.6) * 0.42) / VB;
+    }, { depth: 2, width: 0.7, rim: 1.2, floor: () => SCU.seam, behind: () => SCU.chip, front: () => SCU.chip, cand: surf });
+  // two great broken spears from some forgotten war, the shafts bound in rotten rope
+  for (const [dv, tilt, len] of [[[-0.62, 0.62, -0.55], [-0.2, 0.5, -0.4], 1.5], [[0.7, 0.45, 0.45], [0.3, 0.6, 0.5], 1.1]] as [V3, V3, number][]) {
+    const p = onShell(dv);
+    if (!p) continue;
+    const a: V3 = [p.hit[0] + 0.5, p.hit[1] + 0.5, p.hit[2] + 0.5];
+    const d = norm3(add3(p.n, tilt));
+    const b = add3(a, scl3(d, UB(len)));
+    cap(m, add3(a, scl3(d, -UB(0.25))), b, 0.75, 0.6, (x, y, z) => {
+      const s = dot3(sub3([x + 0.5, y + 0.5, z + 0.5], a), d) * VB;
+      return s > len * 0.55 && s < len * 0.75 && Math.floor(s / 0.06) & 1 ? 0xb89a62 : Math.floor(s / 0.25) & 1 ? 0x6e5232 : 0x5a4228;
+    });
+    cap(m, b, add3(b, add3(scl3(d, 0.9), [0.5, 0.3, 0])), 0.8, 0.4, 0x9a7a4c); // the splintered end
+    cap(m, add3(a, scl3(d, -0.5)), add3(a, scl3(d, 1.5)), 1.6, 0.9, 0x5a4a40, { fl: VF.METAL }); // the iron head, half buried
+  }
+  // desert growths: crusts of rock-limpet barnacles on the low flanks, each a worn cone with a dark mouth
+  let gs = 1;
+  for (const [ax, ay, az, nb] of [[0.95, 0.18, 0.2, 6], [0.82, 0.25, -0.5, 5], [-0.9, 0.2, 0.35, 6], [-0.75, 0.3, -0.62, 4], [0.45, 0.2, -0.88, 5], [-0.35, 0.22, 0.92, 4], [0.4, 0.15, 0.9, 4]] as number[][]) {
+    for (let b = 0; b < nb; b++) {
+      const jx = (h01(gs, b, 1) - 0.5) * 0.22, jy = (h01(gs, b, 2) - 0.5) * 0.16, jz = (h01(gs, b, 3) - 0.5) * 0.22;
+      const p = onShell([ax + jx, ay + jy, az + jz]);
+      if (!p) continue;
+      const a: V3 = [p.hit[0] + 0.5, p.hit[1] + 0.5, p.hit[2] + 0.5];
+      const s = 0.7 + h01(gs, b, 4) * 0.7;
+      const top = add3(a, scl3(p.n, UB(0.1 * s)));
+      cap(m, add3(a, scl3(p.n, -1)), top, UB(0.075 * s), UB(0.045 * s), (x, y, z) => (dot3(sub3([x + 0.5, y + 0.5, z + 0.5], a), p.n) > UB(0.06 * s) ? 0xe2dcc4 : (x + y + z) & 1 ? 0xc0b898 : 0xb0a684));
+      cap(m, top, add3(top, scl3(p.n, -1.5)), 0.8, 0.8, 0x3a3226);
+    }
+    gs++;
+  }
+  // cacti rooted in the sand-packed seams: barrel cacti in flower and a clump of prickly-pear pads
+  for (const [dv, kind] of [[[0.55, 0.45, 0.75], 0], [[-0.5, 0.5, -0.78], 0], [[0.75, 0.35, -0.6], 1], [[-0.7, 0.4, 0.6], 1]] as [V3, number][]) {
+    const p = onShell(dv);
+    if (!p) continue;
+    const base: V3 = [p.hit[0] + 0.5, p.hit[1] + 0.5, p.hit[2] + 0.5];
+    const up = norm3(add3(p.n, [0, 1.2, 0]));
+    if (kind === 0) {
+      const c = add3(base, scl3(up, UB(0.2)));
+      ell(m, c, [UB(0.17), UB(0.24), UB(0.17)], (x, y, z) => {
+        const a = Math.atan2(x + 0.5 - c[0], z + 0.5 - c[2]);
+        const rib = Math.cos(a * 7);
+        if (rib > 0.8 && h01(x, y, z, 6) > 0.6) return 0xe8dcb0; // spines along the ribs
+        return rib > 0.2 ? 0x5a8a3e : 0x3e6a2e;
+      });
+      ell(m, add3(c, scl3(up, UB(0.24))), [UB(0.07), UB(0.05), UB(0.07)], (x, y, z) => (h01(x, y, z, 2) > 0.5 ? 0xe86a8a : 0xf0c040));
+    } else {
+      for (const [ox, oy, rot] of [[0, 0.18, 0], [0.16, 0.38, 0.5], [-0.14, 0.36, -0.45]] as number[][]) {
+        const c = add3(base, add3(scl3(up, UB(oy)), [UB(ox), 0, 0]));
+        ell(m, c, [UB(0.14), UB(0.18), UB(0.05)], (x, y, z) => (h01(x, y, z, 8) > 0.9 ? 0xe8dcb0 : (x + z) & 1 ? 0x6a9a48 : 0x5a8a3e), { rot: [0, 0, rot] });
+      }
+    }
+  }
 }
 
 // ------------------------------------------------------------------ the neck: three segments of folded, tubercled hide
@@ -461,18 +529,18 @@ function buildHead(rig: CRig) {
   const prims: Prim[] = [
     { c: PB(0, 2.3, 4.85), r: [UB(0.62), UB(0.46), UB(0.72)] }, // cranium
     { c: PB(0, 2.2, 5.42), r: [UB(0.42), UB(0.34), UB(0.46)] }, // snout
-    { a: PB(0, 2.36, 5.62), b: PB(0, 2.2, 5.98), r0: UB(0.24), r1: UB(0.17) }, // the upper beak
-    { a: PB(0, 2.2, 5.98), b: PB(0, 1.82, 6.12), r0: UB(0.17), r1: UB(0.05) }, // its hooked tip
+    { a: PB(0, 2.4, 5.58), b: PB(0, 2.24, 6.04), r0: UB(0.28), r1: UB(0.2) }, // the massive upper beak
+    { a: PB(0, 2.24, 6.04), b: PB(0, 1.7, 6.22), r0: UB(0.2), r1: UB(0.05) }, // its great hooked tip
     { c: PB(0.5, 2.07, 4.72), r: [UB(0.3), UB(0.36), UB(0.42)] }, // jaw muscles
     { c: PB(-0.5, 2.07, 4.72), r: [UB(0.3), UB(0.36), UB(0.42)] },
-    { c: PB(0.37, 2.6, 4.98), r: [UB(0.22), UB(0.13), UB(0.32)] }, // brow ridges
-    { c: PB(-0.37, 2.6, 4.98), r: [UB(0.22), UB(0.13), UB(0.32)] },
+    { c: PB(0.38, 2.63, 5.0), r: [UB(0.27), UB(0.17), UB(0.36)] }, // heavy, overhanging brow ridges
+    { c: PB(-0.38, 2.63, 5.0), r: [UB(0.27), UB(0.17), UB(0.36)] },
     { a: PB(0, 1.84, 4.5), b: PB(0, 1.86, 5.62), r0: UB(0.46), r1: UB(0.26) }, // lower jaw
     { c: PB(0, 1.86, 5.78), r: [UB(0.2), UB(0.15), UB(0.18)] }, // chin, curling up to meet the hook
     { c: PB(0, 1.62, 4.62), r: [UB(0.46), UB(0.3), UB(0.48)] }, // throat
     { a: PB(0, 2.02, 4.2), b: PB(0, 2.08, 4.55), r0: UB(0.54), r1: UB(0.54) }, // neck join
-    { c: PB(0.46, 2.43, 5.12), r: [UB(0.19), UB(0.18), UB(0.19)], sub: true, k: 1 }, // eye sockets
-    { c: PB(-0.46, 2.43, 5.12), r: [UB(0.19), UB(0.18), UB(0.19)], sub: true, k: 1 },
+    { c: PB(0.47, 2.42, 5.14), r: [UB(0.23), UB(0.2), UB(0.22)], sub: true, k: 1 }, // deep-set eye sockets
+    { c: PB(-0.47, 2.42, 5.14), r: [UB(0.23), UB(0.2), UB(0.22)], sub: true, k: 1 },
   ];
   fblob(mass, prims, (x, y, z) => {
     const X = MB(x), Y = MB(y), Z = MB(z);
@@ -480,7 +548,7 @@ function buildHead(rig: CRig) {
     // the keratin beak: dark horn, worn bright along its cutting edges
     if (Z > 5.12 && Math.abs(Y - my) < 0.28) {
       const e = Math.abs(Y - my);
-      if (e < 0.045) return KER.edge;
+      if (e < 0.045) return Math.floor(Z / 0.12) & 1 ? KER.edge : KER.worn; // nicked and chipped
       if (e < 0.09) return KER.worn;
       return Z > 5.6 ? KER.mid : (Math.floor(Z / 0.09) & 1) ? KER.base : KER.dark;
     }
@@ -515,6 +583,15 @@ function buildHead(rig: CRig) {
   const head = rig.part('head', 'neck2', PBv(J.head));
   const jaw = rig.part('jaw', 'head', PBv(J.jaw));
   splitMany(mass, { head, jaw }, (x, y, z) => (MB(z) > 4.5 && MB(y) < mouthYT(MB(z)) ? 'jaw' : 'head'));
+  // the jagged cutting edge: a sawtooth of chips along both halves of the beak
+  for (const [m, dn, ph] of [[head, -1, 0], [jaw, 1, 1]] as [VoxelModel, number, number][]) {
+    const del: V3[] = [];
+    m.forEach((x, y, z) => {
+      if (m.has(x, y + dn, z) || MB(z) < 5.15 || Math.abs(MB(y) - mouthYT(MB(z))) > 0.12) return;
+      if ((Math.floor(MB(z) / 0.17) + ph) % 2 === 0) del.push([x, y, z]);
+    });
+    for (const [x, y, z] of del) m.del(x, y, z);
+  }
   // the mouth: the inside of the beak, a ridged palate, and the snapper's wormlike lure on the tongue
   jaw.forEach((x, y, z) => {
     if (jaw.has(x, y + 1, z) || MB(z) < 4.7) return;
@@ -532,10 +609,15 @@ function buildHead(rig: CRig) {
   for (const [z, r] of [[4.8, 0.2], [5.0, 0.18], [5.2, 0.14]] as number[][]) ell(tongue, PB(0, 1.98, z), [UB(r), UB(0.06), UB(0.13)], 0xa8605a, { fl: VF.METAL, keep: (_a, _b, _c, x, y, zz) => !jaw.has(x, y, zz) });
   for (const s of [1, -1]) cap(tongue, PB(0, 2.03, 5.05), PB(s * 0.06, 2.07, 5.2), UB(0.035), UB(0.018), 0xe07a76, { fl: VF.METAL });
   // eyes deep under the horned brows (wet, gold-ringed), with heavy hooded lids (closed = built; rest = open)
-  const E: V3 = [0.46, 2.43, 5.12];
+  const E: V3 = [0.47, 2.42, 5.14];
   const fwd: V3 = [0.62, 0.04, 0.78];
   const eye = rig.part('eye_l', 'head', PBv(E));
-  wetEye(eye, PBv(E), UB(0.17), fwd, { iris: 0xb07818, irisEdge: 0x4a2a08, sclera: 0x2a1c10, pupil: 0x060403, irisR: 0.9, pupilR: 0.42, bigGlint: 1, smallGlint: false });
+  wetEye(eye, PBv(E), UB(0.17), fwd, { iris: 0xd88a1c, irisEdge: 0x6a3008, sclera: 0x2a1c10, pupil: 0x060403, irisR: 0.9, pupilR: 0.36, bigGlint: 1, smallGlint: false });
+  // the irises smoulder: an old ember-glow deep under the brows
+  eye.forEach((x, y, z, c) => {
+    const r = (c >> 16) & 255, g = (c >> 8) & 255;
+    if (r > 120 && g < 150 && r - g > 50) eye.set(x, y, z, c, VF.METAL | VF.EMISSIVE);
+  });
   rig.mirror('eye_l', 'eye_r', 'head');
   const lid = rig.part('lid_l', 'head', PBv(E), [-1.15, 0, 0]);
   ell(lid, PBv(E), [UB(0.2), UB(0.2), UB(0.2)], (x, y, z) => (MB(y) < E[1] - 0.04 ? SK.shade : SK.base), {
@@ -576,16 +658,19 @@ function buildLeg(rig: CRig, name: string, S: V3, K: V3, F: V3, front: boolean) 
   for (const y0 of [0.5, 0.64]) groove(ft, (x, y, z) => (MB(y) - y0 - Math.sin(MB(x) * 5 + MB(z) * 4) * 0.025) / VB, { depth: 1, rim: 1.2, floor: (c) => mixc(c, SK.groove, 0.7), front: (c) => mixc(c, SK.hi, 0.2), cand: surf });
   // big imbricate horn scales down the front of the forelimb (an armoured shin); thigh spurs on the hind legs
   let seed = name.charCodeAt(0) * 7 + name.charCodeAt(1);
-  if (front) {
-    for (let r = 0; r < 3; r++)
-      for (let c = -1; c <= 1; c++) {
-        const y = 0.55 + r * 0.24 + Math.abs(c) * 0.05;
-        const o = norm3([c * 0.6 + 0.3, 0, 1]);
-        const at: V3 = [F[0] + 0.1 + c * 0.24, y, F[2] + 0.1];
-        const hit = castIn(ft, add3(PBv(at), scl3(o, UB(1))), scl3(o, -1));
-        if (hit) plate(ft, [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5], normalAt(ft, hit, 3), [0, -1, 0], { a: UB(0.14), b: UB(0.15), h: UB(0.06), keel: 0.3, tilt: -0.4, sink: 2.5, seed: seed++, sq: 2.6 }, HSC);
-      }
-  } else {
+  // elephantine columns armoured all round in big imbricate horn scales (heaviest down the front)
+  for (let r = 0; r < 3; r++)
+    for (let c = -3; c <= 3; c++) {
+      if (!front && r === 2) continue;
+      const a = c * 0.62 + 0.25 + (r & 1) * 0.31;
+      const y = 0.52 + r * 0.24;
+      const o = norm3([Math.sin(a), 0, Math.cos(a)]);
+      const at: V3 = [F[0] + 0.05, y, F[2] + 0.05];
+      const hit = castIn(ft, add3(PBv(at), scl3(o, UB(1.2))), scl3(o, -1));
+      const big = Math.cos(a) > 0.3;
+      if (hit) plate(ft, [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5], normalAt(ft, hit, 3), [0, -1, 0], { a: UB(big ? 0.15 : 0.12), b: UB(big ? 0.16 : 0.13), h: UB(big ? 0.07 : 0.05), keel: 0.3, tilt: -0.4, sink: 2.5, seed: seed++, sq: 2.6, clean: true }, HSC);
+    }
+  if (!front) {
     for (const [dy, dx, l] of [[0.0, 0.0, 0.26], [-0.18, 0.12, 0.2], [0.14, -0.1, 0.16]] as number[][]) {
       const p = lerp3(S, K, 0.62);
       const o = norm3([0.3, 0.1, -1]);
@@ -602,11 +687,11 @@ function buildLeg(rig: CRig, name: string, S: V3, K: V3, F: V3, front: boolean) 
     const a = (k - (n - 1) / 2) * (front ? 0.33 : 0.38) + 0.12;
     const d: V3 = [Math.sin(a), 0, Math.cos(a) * fz];
     const root: V3 = [pad[0] + d[0] * 0.5, 0.16, pad[2] + d[2] * 0.55];
-    const mid = add3(root, [d[0] * 0.14, 0.02, d[2] * 0.14]);
-    const tip = add3(root, [d[0] * 0.3, -0.12, d[2] * 0.3]);
-    cap(toes, PBv(root), PBv(mid), UB(0.13), UB(0.11), SK.shade);
+    const mid = add3(root, [d[0] * 0.18, 0.04, d[2] * 0.18]);
+    const tip = add3(root, [d[0] * 0.48, -0.14, d[2] * 0.48]);
+    cap(toes, PBv(root), PBv(mid), UB(0.15), UB(0.13), SK.shade);
     const chipped = (k + n) % 3 === 0;
-    tube(toes, [PBv(mid), PBv(lerp3(mid, tip, 0.5)), PBv(chipped ? lerp3(mid, tip, 0.82) : tip)], [UB(0.1), UB(0.075), UB(chipped ? 0.05 : 0.025)], (x, y) => {
+    tube(toes, [PBv(mid), PBv(add3(lerp3(mid, tip, 0.5), [0, 0.05, 0])), PBv(chipped ? lerp3(mid, tip, 0.85) : tip)], [UB(0.13), UB(0.1), UB(chipped ? 0.055 : 0.03)], (x, y) => {
       const Y = MB(y);
       return Y > 0.17 ? KER.mid : Y < 0.07 ? KER.worn : KER.base;
     }, { keep: (_t, _a, _b, _x, y) => y >= 0 });
@@ -631,12 +716,20 @@ function buildTail(rig: CRig) {
     for (let s = 0; s < nS; s++) {
       const t = (s + 0.5) / nS;
       const p = lerp3(a, b, t);
-      for (const [dx, len] of [[0, 0.2 - i * 0.04], [0.16, 0.1], [-0.16, 0.1]] as number[][]) {
+      for (const [dx, len] of [[0, 0.34 - i * 0.05], [0.17, 0.18], [-0.17, 0.18]] as number[][]) {
         const hit = castIn(m, PB(p[0] + dx * (1 - i * 0.25), p[1] + 0.8, p[2]), [0, -1, 0]);
         if (hit) plate(m, [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5], normalAt(m, hit, 3), sub3(a, b), { a: UB(0.08), b: UB(0.07), h: UB(0.05), keel: 0.4, tilt: 0.3, sink: 2, seed: i * 10 + s * 3 + dx * 20, sq: 2, spike: UB(len), spikeLean: 1.2, rings: false }, dx ? HSC : HORN);
       }
     }
-    if (last) cap(m, PBv(TAIL_PTS[4]), add3(PBv(TAIL_PTS[4]), PB(0, -0.06, -0.2)), UB(0.07), UB(0.015), (_x, y) => (MB(y) > 0.52 ? HORN.top : HORN.mid));
+    if (last) {
+      // a knobbed horn club bristling with spikes
+      ell(m, PBv(TAIL_PTS[4]), [UB(0.17), UB(0.15), UB(0.2)], (x, y, z) => (h01(x, y, z, 4) > 0.8 ? HORN.mid : HORN.base));
+      for (const d of [[0, 0.2, -1], [0.8, 0.3, -0.5], [-0.8, 0.3, -0.5], [0, 1, -0.2], [0.6, -0.6, -0.5], [-0.6, -0.6, -0.5]] as V3[]) {
+        const dir = norm3(d);
+        const a = add3(PBv(TAIL_PTS[4]), scl3(dir, UB(0.1)));
+        cap(m, a, add3(a, scl3(dir, UB(0.28))), UB(0.07), UB(0.012), (x, y, z) => (dot3(sub3([x + 0.5, y + 0.5, z + 0.5], a), dir) > UB(0.16) ? HORN.top : HORN.mid));
+      }
+    }
     parent = names[i];
   }
 }
@@ -891,41 +984,8 @@ export function turtleHouseRig(): RigSpec {
   return cached;
 }
 
-// ================================================================== Ozman, the tortoise man
-const TURBAN = new Map<number, number>([
-  [0x3f4c7c, 0xe6dcc4], // headscarf indigo -> turban linen
-  [0x2f3a62, 0xc4b590],
-  [0xd9a53a, 0xa8382a], // its gold motif -> a red band
-]);
-const VEST = new Map<number, number>([
-  [0xb0563a, 0x55683a], // knitted shawl -> olive waistcoat
-  [0x8e4028, 0x3f4e2a],
-  [0xe8d6b0, 0xc9a050], // cream stripes -> gold piping
-]);
-let guy: RigSpec | null = null;
-/** Ozman: Old Mother Tamsin's rig, re-dressed as an old tortoise gentleman (her model is untouched) */
+// ================================================================== Ozymandias, the tortoise man
+/** Ozymandias: a gnarled, monstrous old desert tortoise-man (creatures/ozymandias.ts), on Tamsin's rig layout */
 export function tortoiseGuyRig(): RigSpec {
-  if (guy) return guy;
-  const base = merchantRig();
-  const drop = new Set(['coins', 'beads']);
-  const recolour = (m: VoxelModel, map: Map<number, number>) => {
-    const o = m.clone();
-    o.forEach((x, y, z, c, f) => {
-      const n = map.get(c);
-      if (n !== undefined) o.set(x, y, z, n, f);
-    });
-    return o;
-  };
-  const parts: PartSpec[] = base.parts
-    .filter((p) => !drop.has(p.name))
-    .map((p) => ({ ...p, model: p.name === 'head' || p.name === 'scarf_tails' ? recolour(p.model, TURBAN) : p.name === 'shell' ? recolour(p.model, VEST) : p.model }));
-  // a long white beard under the beak (it sways)
-  const beard = new VoxelModel('beard');
-  const chin: V3 = [0, 42.2, 11.6];
-  for (const [dx, len, r] of [[0, 6.2, 2.0], [-1.2, 4.8, 1.2], [1.2, 5.0, 1.2]] as [number, number, number][])
-    tube(beard, [[chin[0] + dx, chin[1], chin[2]], [chin[0] + dx * 1.1, chin[1] - len * 0.55, chin[2] + 1.0], [chin[0] + dx * 0.6, chin[1] - len, chin[2] + 0.9]], [r, r * 0.8, 0.5], (x, y) => ((x + y) & 1 ? 0xe9e5da : 0xcac2b2), { fl: VF.SOFTAO });
-  parts.push({ name: 'beard', model: beard, pivot: chin, attach: chin, parent: 'jaw' });
-  const meta = { ...base.meta, swing: (base.meta?.swing ?? []).filter((s: string) => !drop.has(s)).concat(['beard']) };
-  guy = { ...base, name: 'tortoise_guy', parts, meta };
-  return guy;
+  return ozymandiasRig();
 }

@@ -18,7 +18,7 @@ import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMater
 import { VoxelModel, VF } from '../../engine/voxel/VoxelModel';
 import { hash3, noise } from '../../engine/math/rand';
 import { SKILL_CARD, skillFrame, levelGem, SkillRarity, mixc } from '../models/props/tarot';
-import { RARITY, Offer, UPGRADES, UPGRADE_BY_ID, UpgradeDef, prosCons, perLevelText, kindLabel, isTrade } from '../run/Upgrades';
+import { RARITY, Offer, UPGRADES, UPGRADE_BY_ID, UpgradeDef, perLevelText, kindLabel, isTrade, offerRarity, offerSteps, offerDesc, offerProsCons, offerBonus, tierMult, isGame } from '../run/Upgrades';
 import { fmtStat, DERIVED_INFO, CORE_INFO, StatId } from '../combat/Stats';
 import { paintCardBack, canvasTex, TEXT_PPV } from './CardArt';
 import { skillFamily } from './SkillArt';
@@ -323,14 +323,19 @@ function paintFront(o: Offer) {
   }
   const d = surface(C.desc);
   const c = d.c, W = d.cv.width, H = d.cv.height;
-  const lv = Math.max(1, o.toLv);
   const split = !!(def.pros || def.cons);
-  const pc = split ? prosCons(def, lv) : null;
+  const pc = split ? offerProsCons(o) : null;
   const per = def.gamble ? '' : perLevelText(def);
+  // dealt above its own rarity: the numbers that grew are inked green, and Rare+ deals add bonus lines
+  const steps = offerSteps(o);
+  const rar = offerRarity(o);
+  const bonus = offerBonus(o);
+  const desc = offerDesc(o), base = offerDesc(o, 'base');
+  const dealt = steps > 0 ? `DEALT ${RARITY[rar].name.toUpperCase()}  ·  ${steps} TIER${steps > 1 ? 'S' : ''} UP  ·  NUMBERS ×${tierMult(steps)}` : '';
   const fl = def.lore ?? FLAVOUR[skillFamily(def)] ?? '';
   const foot = def.learn ? `TAROT SKILL  ·  KEY [${def.learn}]` : `${kindLabel(def)}  ·  ${def.gamble && def.maxLv > 5 ? 'A GAME OF CHANCE' : o.fromLv === 0 ? (def.cat === 'evolution' ? 'EVOLVED' : 'NEW') : `LV ${o.fromLv} → ${o.toLv}`}${def.god ? '  ·  ' + def.god.toUpperCase() : ''}`;
   const kindCol = def.gamble ? '#7a4a00' : def.curse ? '#5c1a5a' : '#6a3a14';
-  const kind = def.gamble ? (def.odds ? def.odds(lv).split('  ·  ')[0].toUpperCase() : 'A GAMBLE') : def.curse ? 'A CURSED BARGAIN' : 'A TRADE-OFF';
+  const kind = def.gamble ? (def.odds ? def.odds(o.pwDn ?? Math.max(1, o.toLv)).split('  ·  ')[0].toUpperCase() : 'A GAMBLE') : def.curse ? 'A CURSED BARGAIN' : 'A TRADE-OFF';
   const build = (s: number, withPer: boolean, withFl: boolean) => {
     const ops: Op[] = [];
     const para = (text: string, px: number, color: string, lip = 0.5) => {
@@ -339,12 +344,20 @@ function paintFront(o: Offer) {
       const lh = px * s * 1.12;
       ops.push({ h: ls.length * lh, draw: (y) => ls.forEach((l, i) => ((c.font = font(px * s)), (c.textAlign = 'center'), engrave(c, l, W / 2, y + px * s * 0.84 + i * lh, color, lip))) });
     };
+    if (dealt) {
+      para(dealt, 25, RAR_INK[rar] ?? INK, 0.35);
+      ops.push({ h: 3 * s, draw: () => {} });
+    }
     if (split) {
       para(kind, 27, kindCol, 0.35);
       ops.push({ h: 4 * s, draw: () => {} });
       for (const t of pc!.pros) para('+ ' + t, 40, GREEN);
       for (const t of pc!.cons) para('− ' + t, 40, RED);
-    } else para(def.desc(lv), 42, INK);
+    } else {
+      c.font = font(42 * s);
+      ops.push(richOp(c, desc, base, W * 0.9, 42 * s, INK, GREEN, W / 2));
+    }
+    for (const t of bonus) para(`+ ${t}  (${RARITY[rar].name} bonus)`, 34, GREEN);
     if (withPer && per) para(`Per level: ${per}`, 28, INK_SOFT, 0.35);
     if (withFl && fl) {
       ops.push({ h: 5 * s, draw: () => {} });
@@ -410,7 +423,7 @@ export interface CardDetail {
 }
 
 export function makeSkillCard(o: Offer, rows: { stat: StatId; before: number; after: number }[], detail?: CardDetail): SkillCard3D {
-  const rarity = o.def.rarity as SkillRarity;
+  const rarity = offerRarity(o) as SkillRarity;
   const frameMat = cardMaterial();
   frameMat.foil.uFoil.value = FOIL[rarity].foil;
   frameMat.foil.uSheenCol.value.setHex(FOIL[rarity].sheen);
@@ -483,7 +496,7 @@ export function makeSkillCard(o: Offer, rows: { stat: StatId; before: number; af
   plaque(bt.plaque, C.back.plaque, -4 * VS - 0.0005, true);
   plaque(bt.panel, C.back.panel, -3 * VS - 0.0005, true);
   // level gems: lit up to the current level; the new ones fill (fillPips) and pulse
-  const gemCol = RARITY[o.def.rarity].hex;
+  const gemCol = RARITY[rarity].hex;
   const pips: { dark: THREE.Mesh | null; lit: THREE.Mesh | null; fresh: boolean; t: number }[] = [];
   // repeatable games keep no level gems
   const total = o.def.gamble && o.def.maxLv > 5 ? 0 : Math.min(5, o.def.maxLv);
@@ -807,6 +820,59 @@ export function synergyTags(def: UpgradeDef, lv: number) {
   return out.slice(0, 5);
 }
 
+/** word indices of `text` that differ from `base`: the numbers a richer deal grew */
+function grown(text: string, base: string) {
+  const out = new Set<number>();
+  if (text === base) return out;
+  const a = text.split(/\s+/), b = base.split(/\s+/);
+  a.forEach((w, i) => {
+    if (/\d/.test(w) && (a.length === b.length ? w !== b[i] : !b.includes(w))) out.add(i);
+  });
+  return out;
+}
+
+/**
+ * A centred paragraph whose grown numbers are inked in `hi` (green): the effect at
+ * the dealt rarity, with every number that beats the card's own rarity standing out.
+ * `c.font` must already be set to `px`.
+ */
+function richOp(c: CanvasRenderingContext2D, text: string, base: string, maxW: number, px: number, ink: string, hi: string, cx: number, lead = 1.12): Op {
+  const words = text.split(/\s+/);
+  const green = grown(text, base);
+  const space = c.measureText(' ').width;
+  const lines: { i: number; w: string; x: number }[][] = [];
+  let line: { i: number; w: string; x: number }[] = [];
+  let lw = 0;
+  words.forEach((w, i) => {
+    const ww = c.measureText(w).width;
+    if (line.length && lw + space + ww > maxW) {
+      lines.push(line);
+      line = [];
+      lw = 0;
+    }
+    line.push({ i, w, x: line.length ? lw + space : 0 });
+    lw = line.length > 1 ? lw + space + ww : ww;
+  });
+  if (line.length) lines.push(line);
+  const widths = lines.map((l) => {
+    const last = l[l.length - 1];
+    return last.x + c.measureText(last.w).width;
+  });
+  const lh = px * lead;
+  const f = font(px);
+  return {
+    h: lines.length * lh,
+    draw: (y) => {
+      c.font = f;
+      c.textAlign = 'left';
+      lines.forEach((l, li) => {
+        const x0 = cx - widths[li] / 2;
+        for (const t of l) engrave(c, t.w, x0 + t.x, y + px * 0.84 + li * lh, green.has(t.i) ? hi : ink, 0.5);
+      });
+    },
+  };
+}
+
 function wrap(c: CanvasRenderingContext2D, text: string, maxW: number) {
   const out: string[] = [];
   let line = '';
@@ -860,7 +926,10 @@ function paintDetail(o: Offer, d: CardDetail) {
   const c = cv.getContext('2d')!;
   const W = cv.width, H = cv.height;
   const def = o.def;
-  const rar = RARITY[def.rarity];
+  const rk = offerRarity(o);
+  const rar = RARITY[rk];
+  const steps = offerSteps(o);
+  const bonus = offerBonus(o);
   let pipY = 0;
   // trim: what makes way when the parchment is full (1 synergy, 2 restated stats, 3 the next level when "per level" says it)
   const build = (s: number, trim: number) => {
@@ -906,7 +975,7 @@ function paintDetail(o: Offer, d: CardDetail) {
     };
     // header: rarity · kind · god
     if (def.learn) centre(`NEW SKILL  ·  KEY [${def.learn}]${def.god ? '  ·  ' + def.god.toUpperCase() : ''}`, 32, '#16664a');
-    else centre(`${rar.name.toUpperCase()}  ·  ${kindLabel(def)}${def.god ? '  ·  ' + def.god.toUpperCase() : ''}`, 30, RAR_INK[def.rarity] ?? INK);
+    else centre(`${rar.name.toUpperCase()}  ·  ${kindLabel(def)}${def.god ? '  ·  ' + def.god.toUpperCase() : ''}`, 30, RAR_INK[rk] ?? INK);
     gap(4);
     centre(def.name.toUpperCase(), 54, INK);
     // levels: a line, then a row of real gems (3D, placed by the panel)
@@ -916,11 +985,23 @@ function paintDetail(o: Offer, d: CardDetail) {
     if (!game) ops.push({ h: 66 * s, draw: (y) => (pipY = (y + 36 * s) / H) });
     else gap(8);
     // what it does, in full
+    // the rarity it was dealt at, and what that bought
+    if (steps > 0) {
+      label('DEALT ' + rar.name.toUpperCase(), RAR_INK[rk] ?? INK_SOFT);
+      const own = RARITY[def.rarity].name;
+      para(isGame(def) ? `${steps} tier${steps > 1 ? 's' : ''} above its own ${own}: it plays for ×${tierMult(steps)} the winnings, and its losses grow half as fast.` : `${steps} tier${steps > 1 ? 's' : ''} above its own ${own}: every number ×${tierMult(steps)}${def.cons || def.curse || def.gamble ? ', its price only half as steep' : ''}. The green numbers are the gain.`, 26, INK);
+      for (const t of bonus) para(`+ ${t}  (${rar.name} bonus)`, 28, UP);
+      gap(4);
+    }
     label(def.gamble ? 'THE GAME' : 'EFFECT');
-    para(def.desc(Math.max(1, o.toLv)), 27, INK);
+    {
+      const px = 27 * s;
+      c.font = font(px);
+      ops.push(richOp(c, offerDesc(o), offerDesc(o, 'base'), W * 0.88, px, INK, UP, W / 2, 1.16));
+    }
     gap(4);
     // wins and losses
-    const pc = prosCons(def, o.toLv);
+    const pc = offerProsCons(o);
     if (def.pros || def.cons || isTrade(def)) {
       if (pc.pros.length) {
         label(def.gamble ? 'WIN' : 'PROS', UP);
@@ -934,7 +1015,7 @@ function paintDetail(o: Offer, d: CardDetail) {
     if (def.odds) {
       gap(4);
       label('ODDS');
-      para(def.odds(Math.max(1, o.toLv)), 27, INK);
+      para(def.odds(o.pwDn ?? Math.max(1, o.toLv)), 27, INK);
     }
     // the stat changes, current → new, coloured by whether it helps
     const split = !!(def.pros || def.cons);
@@ -974,7 +1055,7 @@ function paintDetail(o: Offer, d: CardDetail) {
       }
     } else if (o.fromLv > 0 && !game && trim < 2) {
       label('NOW');
-      para(def.desc(o.fromLv), 26, INK_SOFT);
+      para(offerDesc(o, 'from'), 26, INK_SOFT);
     }
     gap(6);
     // how it grows, and what the next level would add
@@ -985,7 +1066,7 @@ function paintDetail(o: Offer, d: CardDetail) {
     }
     if (!game && !(per && trim >= 3)) {
       label('NEXT LEVEL');
-      if (o.toLv < def.maxLv) para(`Lv ${o.toLv + 1}: ${def.desc(o.toLv + 1)}`, 26, INK);
+      if (o.toLv < def.maxLv) para(`Lv ${o.toLv + 1} (dealt ${RARITY[def.rarity].name}): ${offerDesc(o, 'next')}`, 26, INK);
       else para(def.maxLv > 1 ? 'Fully honed: this takes it to the top.' : 'Nothing more to learn: it is whole.', 26, INK_SOFT);
     }
     // evolution path
@@ -1040,7 +1121,7 @@ export class DetailPanel {
   private t = 0;
 
   constructor(o: Offer, d: CardDetail) {
-    const rarity = o.def.rarity as SkillRarity;
+    const rarity = offerRarity(o) as SkillRarity;
     this.mat = makeVoxelMaterial({ fog: false });
     this.gemMat = makeVoxelMaterial({ fog: false, emissiveStrength: 1.8 });
     const body = new THREE.Mesh(panelGeo(rarity), this.mat);
@@ -1059,7 +1140,7 @@ export class DetailPanel {
     this.owned.push(this.mat, this.gemMat, this.textMat, tex, geo);
     // the level pips as real cut gems, set into the parchment under the level line
     const n = o.def.gamble && o.def.maxLv > 5 ? 0 : Math.min(8, o.def.maxLv);
-    const col = RARITY[o.def.rarity].hex;
+    const col = RARITY[rarity].hex;
     const gy = iy + ih / 2 - pipY * ih;
     const step = 0.06;
     for (let i = 0; i < n; i++) {

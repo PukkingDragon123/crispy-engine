@@ -1,7 +1,8 @@
 // Moves: things Sundown can do that are not tarot abilities. The tarot bar holds
 // only three active skills (Magician / Tower / Sun) plus the Death ultimate;
 // everything else is a move you perform with the board, the gun and timing.
-// Base moves are always known; the rest unlock permanently (saved).
+// Base moves are always known; the rest unlock permanently (saved), and Serket
+// teaches each one hands-on at the next wave break (run/Progression -> run/Tutorial).
 import { loadSave, writeSave } from '../meta/Save';
 
 export type TechniqueId = 'push' | 'drift' | 'grapple' | 'kick' | 'neck_slicer' | 'sand_kick' | 'wall_ride' | 'manual' | 'dune_surf';
@@ -10,7 +11,7 @@ export type TechniqueId = 'push' | 'drift' | 'grapple' | 'kick' | 'neck_slicer' 
 export const MOVE_UNLOCKS = {
   /** Bounty Rank reached in a run */
   sand_kick: { rank: 3 },
-  manual: { rank: 6 },
+  manual: { rank: 5 },
   /** any boss defeated (not escaped) */
   wall_ride: { boss: true },
   /** a style combo banked at this multiplier or better */
@@ -77,7 +78,7 @@ export const TECHNIQUES: Technique[] = [
     id: 'manual',
     name: 'Nose Manual',
     how: 'Double-tap W: rock onto the nose and glide with almost no drag. Keep it balanced with W / S, JUMP to pop a nollie out of it, double-tap W to set it down.',
-    unlockHint: 'Reach Bounty Rank 6 in a run.',
+    unlockHint: 'Reach Bounty Rank 5 in a run.',
     base: false,
     art: '',
   },

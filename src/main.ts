@@ -14,6 +14,9 @@ const params = new URLSearchParams(location.search);
 const engine = new Engine(document.getElementById('app')!);
 if (params.get('q') === 'low') engine.applyQuality({ shadows: false, pixelRatio: 0.5, bloom: false, shadowSize: 512 });
 (window as any).__engine = engine;
+// anything that still escapes (a rejected cinematic promise, an event handler) is logged, never fatal
+window.addEventListener('unhandledrejection', (e) => console.error('[dustUP] unhandled rejection', e.reason));
+window.addEventListener('error', (e) => console.error('[dustUP] uncaught', e.error ?? e.message));
 // the hourglass takes over the plain dark boot cover from index.html and stays up until the first scene is built
 const loading = new LoadingScreen(document.getElementById('boot')!, { dpr: params.get('q') === 'low' ? 0.75 : 1.25 });
 engine.loader = loading;

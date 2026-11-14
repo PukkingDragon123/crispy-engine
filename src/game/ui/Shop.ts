@@ -46,6 +46,7 @@
 // Old Mother Tamsin (models/characters/tortoise.ts, frozen) is still the
 // puppet here too: Ozymandias is her rig re-dressed, and she keeps her own
 // rug shop (the shot from the rug, the dolly back) wherever she stands alone.
+import { Unlocks } from '../meta/Unlocks';
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Input } from '../../engine/Input';
@@ -161,6 +162,10 @@ export class StockBook {
     if (w.id === this.deal) k *= 0.7;
     if (this.haggle === 'won') k *= 0.85;
     return Math.max(1, Math.round(w.price * k));
+  }
+  /** stock unlocked since the last visit (meta/Unlocks): his "new stock, fresh from the dead!" line, once */
+  news(): string | null {
+    return Unlocks.takeNews();
   }
   /** the porch haggle: once a period; a higher bounty rank talks him down more often */
   tryHaggle() {
@@ -3001,7 +3006,8 @@ export class Shop {
       // behind his counter: fresh stock the first time this restock, the same shelf after
       const bk = this.book;
       if (this.stall) bk.visits++;
-      const line = this.stall && bk.visits === 1 ? rnd.pick(OZ.fresh) : this.stall && bk.sold.size ? rnd.pick(OZ.same) : rnd.pick(this.voice.lines.hello);
+      const news = this.stall ? bk.news() : null;
+      const line = news ? news : this.stall && bk.visits === 1 ? rnd.pick(OZ.fresh) : this.stall && bk.sold.size ? rnd.pick(OZ.same) : rnd.pick(this.voice.lines.hello);
       this.pendingLine = { text: line, mood: 'laugh', at: (her ? her.outIn() : 0) + 0.15 };
     }
     if (this.indoor) return Promise.resolve(); // the visit resolves when he is back on his board

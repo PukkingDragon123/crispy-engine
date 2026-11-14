@@ -43,6 +43,143 @@ export const RARITY: Record<Rarity, RarityInfo> = {
 
 type M = Omit<Modifier, 'source'>;
 
+// ------------------------------------------------------------------ dealt rarity: better rarity = more buffs
+//
+// Every card a rank-up deals rolls its own rarity (never below the card's own).
+// Each tier it climbs above its own multiplies the card's numbers: the upside by
+// TIER_MULT, the downside of trade-offs, curses and gambles by TIER_DOWN (half as
+// fast, so a richer roll is always a better deal). A card dealt Rare or better
+// above its own rarity also carries a bonus stat line (two at Legendary).
+// Levels stack as power: Lv 3 of Quickdraw taken Common, Rare, Legendary is
+// 1 + 1.75 + 3 = 5.75 "levels" of Quickdraw.
+// A pick is written to the run's history as "id" (dealt at its own rarity) or
+// "id@steps", so carried runs and older saves rebuild exactly.
+
+/** numbers multiplier per tier climbed above the card's own rarity */
+export const TIER_MULT = [1, 1.35, 1.75, 2.3, 3];
+const clampSteps = (s: number) => Math.max(0, Math.min(TIER_MULT.length - 1, Math.round(s || 0)));
+/** the upside multiplier for a card dealt `steps` tiers above its own */
+export const tierMult = (steps: number) => TIER_MULT[clampSteps(steps)];
+/** the downside multiplier (trade-offs, curses, gambles): grows half as fast */
+export const tierDown = (steps: number) => 1 + (tierMult(steps) - 1) * 0.5;
+/** a count from a power (scorpions, bounces, rounds): whole levels stay exact, any richer tier adds one */
+export const cnt = (p: number) => (p <= 1e-6 ? 0 : Math.max(1, Math.ceil(p - 0.25 - 1e-9)));
+/** a whole number (core stats: Defense, Luck, Vitality ...) */
+export const rd = (v: number) => Math.round(v);
+/** a repeatable game of chance: each deal stands alone (its power is just this deal's tier) */
+export const isGame = (d: UpgradeDef) => !!d.gamble && d.maxLv > 5;
+
+/** the rarity a card is dealt at, `steps` tiers above its own */
+export function dealtRarity(d: UpgradeDef, steps = 0): Rarity {
+  return RARITY_ORDER[Math.min(Math.max(RARITY[d.rarity].rank, 4), RARITY[d.rarity].rank + clampSteps(steps))];
+}
+
+/** parse a history entry ("id" or "id@steps") */
+export function parsePick(entry: string): { id: string; steps: number } {
+  const at = entry.indexOf('@');
+  if (at < 0) return { id: entry, steps: 0 };
+  return { id: entry.slice(0, at), steps: clampSteps(+entry.slice(at + 1)) };
+}
+const pickEntry = (id: string, steps: number) => (steps > 0 ? `${id}@${steps}` : id);
+
+const COUNT_STATS = new Set<string>(['ammo', 'pierce', 'scorpions', 'projectiles']);
+const WHOLE_STATS = new Set<string>(['vit', 'def', 'phys', 'magic', 'mob', 'luck', 'poisonStacks', 'thorns']);
+/** whole-number stats land on whole numbers (and the card text says the same number) */
+function settle(m: M): M {
+  if (m.type !== 'flat') return m;
+  if (COUNT_STATS.has(m.stat)) return { ...m, value: Math.sign(m.value) * cnt(Math.abs(m.value)) };
+  if (WHOLE_STATS.has(m.stat)) return { ...m, value: rd(m.value) };
+  return m;
+}
+
+/** bonus stat lines by category (Rare strength; Epic ×1.6, Legendary ×2.5 plus a second line) */
+const RIDERS: Record<UpCat, M[]> = {
+  gun: [
+    { stat: 'gunDmg', type: 'pct', value: 0.06 },
+    { stat: 'critChance', type: 'flat', value: 0.03 },
+    { stat: 'reloadSpeed', type: 'pct', value: 0.1 },
+    { stat: 'fireRate', type: 'pct', value: 0.06 },
+    { stat: 'critDmg', type: 'flat', value: 0.15 },
+  ],
+  insect: [
+    { stat: 'magicDmg', type: 'pct', value: 0.08 },
+    { stat: 'statusPower', type: 'pct', value: 0.1 },
+    { stat: 'statusChance', type: 'flat', value: 0.04 },
+    { stat: 'cdr', type: 'flat', value: 0.04 },
+  ],
+  passive: [
+    { stat: 'maxHp', type: 'pct', value: 0.06 },
+    { stat: 'moveSpeed', type: 'pct', value: 0.05 },
+    { stat: 'luck', type: 'flat', value: 2 },
+    { stat: 'boostRegen', type: 'pct', value: 0.12 },
+    { stat: 'critChance', type: 'flat', value: 0.02 },
+  ],
+  gear: [
+    { stat: 'def', type: 'flat', value: 2 },
+    { stat: 'armor', type: 'flat', value: 10 },
+    { stat: 'maxHp', type: 'pct', value: 0.06 },
+    { stat: 'physRes', type: 'flat', value: 0.02 },
+  ],
+  relic: [
+    { stat: 'critDmg', type: 'flat', value: 0.2 },
+    { stat: 'luck', type: 'flat', value: 3 },
+    { stat: 'magicDmg', type: 'pct', value: 0.1 },
+    { stat: 'lifesteal', type: 'flat', value: 0.01 },
+  ],
+  evolution: [],
+  gamble: [
+    { stat: 'luck', type: 'flat', value: 2 },
+    { stat: 'goldGain', type: 'pct', value: 0.12 },
+    { stat: 'critChance', type: 'flat', value: 0.02 },
+  ],
+};
+
+function strHash(s: string) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+function riderAt(m: M, k: number): M {
+  const v = m.value * k;
+  // whole numbers for whole stats, whole percent for the rest
+  const whole = WHOLE_STATS.has(m.stat) || m.stat === 'armor';
+  return { ...m, value: whole ? Math.max(1, rd(v)) : Math.round(v * 100) / 100 };
+}
+
+/** the bonus lines a pick dealt `steps` tiers up carries (none below Rare, or when dealt at its own rarity) */
+export function riderMods(d: UpgradeDef, steps: number): M[] {
+  const s = clampSteps(steps);
+  // games pay inside the game itself (UpgradesExtra.resolveGamble), not in bonus lines
+  if (s < 1 || d.learn || d.cat === 'evolution' || isGame(d)) return [];
+  const r = RARITY[dealtRarity(d, s)].rank;
+  if (r < 2) return [];
+  const list = RIDERS[d.cat] ?? RIDERS.passive;
+  if (!list.length) return [];
+  const h = strHash(d.id);
+  const out = [riderAt(list[h % list.length], r >= 4 ? 2.5 : r >= 3 ? 1.6 : 1)];
+  if (r >= 4 && list.length > 1) out.push(riderAt(list[(h + 1) % list.length], 1.6));
+  return out;
+}
+
+/**
+ * A card's stat modifiers at `lv` levels and power `pw` (upside) / `dn`
+ * (downside), plus the bonus lines of every pick in `tiers`.
+ */
+export function scaledMods(d: UpgradeDef, lv: number, pw: number, dn: number, tiers: number[]): M[] {
+  const out: M[] = [];
+  if (d.mods && lv > 0) {
+    const base = d.mods(lv), up = d.mods(pw), down = d.mods(dn);
+    for (let i = 0; i < base.length; i++) {
+      const b = base[i];
+      if (b.type === 'mult' || !up[i] || !down[i]) out.push(b);
+      else out.push(settle(modHelps(b) ? up[i] : down[i]));
+    }
+  }
+  for (const s of tiers) out.push(...riderMods(d, s));
+  return out;
+}
+
 /** the prop a gamble is played with */
 export type GambleKind = 'bones' | 'double' | 'snake' | 'deadman' | 'coin' | 'roulette';
 
@@ -53,7 +190,8 @@ export interface UpgradeDef {
   rarity: Rarity;
   maxLv: number;
   icon: string;
-  desc: (lv: number) => string;
+  /** the effect at power `lv` (levels × tier multipliers); `dn` is the downside's power (defaults to lv) */
+  desc: (lv: number, dn?: number) => string;
   mods?: (lv: number) => M[];
   attach?: string;
   evolveFrom?: [string, string];
@@ -65,7 +203,7 @@ export interface UpgradeDef {
   needs?: string;
   /** what you win: exact numbers at this level (green rows on the card and the ledger) */
   pros?: (lv: number) => string[];
-  /** what it costs you: exact numbers at this level (red rows) */
+  /** what it costs you: exact numbers at this level (red rows; passed the downside's power) */
   cons?: (lv: number) => string[];
   /** a cursed bargain (a big win, a real price) */
   curse?: boolean;
@@ -141,35 +279,85 @@ export function prosCons(d: UpgradeDef, lv: number) {
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 
+// ------------------------------------------------------------------ an offer's numbers at its dealt rarity
+
+/** the rarity this offer was dealt at */
+export const offerRarity = (o: Offer): Rarity => o.rarity ?? o.def.rarity;
+/** tiers climbed above the card's own rarity */
+export const offerSteps = (o: Offer) => o.steps ?? 0;
+
+/** tidy the long decimals a fractional power leaves in card text ("16.200000001%" -> "16.2%") */
+export function fmtNums(s: string) {
+  return s.replace(/\d+\.\d+/g, (n) => {
+    const v = +n;
+    return String(+v.toFixed(Math.abs(v) >= 1 ? 1 : 2));
+  });
+}
+
+const pwTo = (o: Offer) => o.pw ?? Math.max(1, o.toLv);
+const dnTo = (o: Offer) => o.pwDn ?? Math.max(1, o.toLv);
+
+/** the effect text at the dealt rarity: 'to' after taking it, 'from' what you have now, 'next' one more level dealt at its own rarity */
+export function offerDesc(o: Offer, at: 'to' | 'from' | 'next' | 'base' = 'to') {
+  const d = o.def;
+  const g = isGame(d);
+  if (at === 'from') return fmtNums(d.desc(o.fromPw ?? o.fromLv, o.fromPwDn ?? o.fromLv));
+  if (at === 'next') return fmtNums(d.desc(g ? 1 : pwTo(o) + 1, g ? 1 : dnTo(o) + 1));
+  // 'base': the same pick dealt at the card's own rarity (what the green numbers grew from)
+  if (at === 'base') return fmtNums(g ? d.desc(1, 1) : d.desc((o.fromPw ?? o.fromLv) + 1, (o.fromPwDn ?? o.fromLv) + 1));
+  return fmtNums(d.desc(pwTo(o), dnTo(o)));
+}
+
+/** green and red rows at the dealt rarity */
+export function offerProsCons(o: Offer) {
+  const d = o.def;
+  const pw = pwTo(o), dn = dnTo(o);
+  if (d.pros || d.cons) return { pros: (d.pros?.(pw) ?? []).map(fmtNums), cons: (d.cons?.(dn) ?? []).map(fmtNums) };
+  const pros: string[] = [], cons: string[] = [];
+  for (const m of scaledMods(d, Math.max(1, o.toLv), pw, dn, [])) (modHelps(m) ? pros : cons).push(modText(m));
+  return { pros, cons };
+}
+
+/** the bonus stat lines this deal carries ("+6% Gun Damage"), none below Rare */
+export function offerBonus(o: Offer) {
+  return riderMods(o.def, offerSteps(o)).map(modText);
+}
+
+/** "×1.75" (upside) for this deal, or '' at the card's own rarity */
+export function offerMultText(o: Offer) {
+  const s = offerSteps(o);
+  return s > 0 ? `×${tierMult(s)}` : '';
+}
+
 export const UPGRADES: UpgradeDef[] = [
   // ------------------------------------------------------------- the tarot skills (sealed at the start of a hunt)
   { id: 'learnScorpionToss', name: 'The Magician', cat: 'insect', rarity: 'rare', maxLv: 1, icon: 'scorp', god: 'Serket', learn: 'E', desc: () => 'LEARN SCORPION TOSS  [E]: hurl a brood of venomous scorpions that hunt down and sting whatever they land near.', lore: 'Serket keeps a few spare scorpions up her sleeve. Now so do you.' },
   { id: 'learnLocustSwarm', name: 'The Tower', cat: 'insect', rarity: 'rare', maxLv: 1, icon: 'scarab', god: 'Khepri', learn: 'C', desc: () => 'LEARN SCARAB SWARM  [C]: whistle, and a carpet of scarabs boils out of the sand and eats whatever you were looking at.', lore: 'Khepri rolls the sun. His children roll everything else.' },
   { id: 'learnDungBomb', name: 'The Sun', cat: 'insect', rarity: 'rare', maxLv: 1, icon: 'dung', god: 'Khepri', learn: 'G', desc: () => 'LEARN DUNG BOMB  [G]: lob a bouncing ball of sacred dung that bursts into a poison stink cloud. Two charges.', lore: 'Khepri rolls the sun across the sky. You roll something else.' },
   // ------------------------------------------------------------- gun
-  { id: 'venomRounds', name: 'Venom Rounds', cat: 'gun', rarity: 'common', maxLv: 5, icon: 'bubble', god: 'Serket', desc: (l) => `Bullets apply +${l} extra poison stack${l > 1 ? 's' : ''}. Poison +${l * 8}% potency.`, mods: (l) => [{ stat: 'statusPower', type: 'pct', value: l * 0.08 }], lore: 'Pinch milks the venom himself. Do not ask how.' },
+  { id: 'venomRounds', name: 'Venom Rounds', cat: 'gun', rarity: 'common', maxLv: 5, icon: 'bubble', god: 'Serket', desc: (l) => `Bullets apply +${cnt(l)} extra poison stack${cnt(l) > 1 ? 's' : ''}. Poison +${l * 8}% potency.`, mods: (l) => [{ stat: 'statusPower', type: 'pct', value: l * 0.08 }], lore: 'Pinch milks the venom himself. Do not ask how.' },
   { id: 'quickdraw', name: 'Quickdraw', cat: 'gun', rarity: 'common', maxLv: 5, icon: 'bullet', desc: (l) => `Fire rate +${l * 12}%.`, mods: (l) => [{ stat: 'fireRate', type: 'pct', value: l * 0.12 }] },
-  { id: 'extraChamber', name: 'Extra Chamber', cat: 'gun', rarity: 'uncommon', maxLv: 4, icon: 'cylinder', desc: (l) => `Cylinder holds ${6 + l} rounds.`, mods: (l) => [{ stat: 'ammo', type: 'flat', value: l }] },
+  { id: 'extraChamber', name: 'Extra Chamber', cat: 'gun', rarity: 'uncommon', maxLv: 4, icon: 'cylinder', desc: (l) => `Cylinder holds ${6 + cnt(l)} rounds.`, mods: (l) => [{ stat: 'ammo', type: 'flat', value: l }] },
   { id: 'hollowPoints', name: 'Hollow Points', cat: 'gun', rarity: 'common', maxLv: 5, icon: 'bullet', desc: (l) => `Gun damage +${l * 14}%, crit damage +${l * 10}%.`, mods: (l) => [{ stat: 'gunDmg', type: 'pct', value: l * 0.14 }, { stat: 'critDmg', type: 'flat', value: l * 0.1 }] },
-  { id: 'ricochet', name: 'Ricochet Rounds', cat: 'gun', rarity: 'rare', maxLv: 3, icon: 'spark', desc: (l) => `Hits bounce to ${l} nearby enem${l > 1 ? 'ies' : 'y'} for 60% damage.` },
-  { id: 'piercing', name: 'Piercing Lead', cat: 'gun', rarity: 'uncommon', maxLv: 3, icon: 'streak', desc: (l) => `Bullets pierce ${l} extra target${l > 1 ? 's' : ''}.`, mods: (l) => [{ stat: 'pierce', type: 'flat', value: l }] },
+  { id: 'ricochet', name: 'Ricochet Rounds', cat: 'gun', rarity: 'rare', maxLv: 3, icon: 'spark', desc: (l) => `Hits bounce to ${cnt(l)} nearby enem${cnt(l) > 1 ? 'ies' : 'y'} for 60% damage.` },
+  { id: 'piercing', name: 'Piercing Lead', cat: 'gun', rarity: 'uncommon', maxLv: 3, icon: 'streak', desc: (l) => `Bullets pierce ${cnt(l)} extra target${cnt(l) > 1 ? 's' : ''}.`, mods: (l) => [{ stat: 'pierce', type: 'flat', value: l }] },
   { id: 'deadeye', name: 'Deadeye', cat: 'gun', rarity: 'rare', maxLv: 3, icon: 'eye', god: 'Horus', desc: (l) => `Headshots +${l * 25}% damage. Aiming mid-air slows time.` },
   { id: 'speedLoader', name: 'Speed Loader', cat: 'gun', rarity: 'common', maxLv: 4, icon: 'cylinder', desc: (l) => `Reload speed +${l * 20}%.`, mods: (l) => [{ stat: 'reloadSpeed', type: 'pct', value: l * 0.2 }] },
   { id: 'steadyHand', name: 'Steady Hand', cat: 'gun', rarity: 'common', maxLv: 3, icon: 'dot4', desc: (l) => `Spread −${l * 18}%, crit chance +${l * 3}%.`, mods: (l) => [{ stat: 'spread', type: 'pct', value: -l * 0.18 }, { stat: 'critChance', type: 'flat', value: l * 0.03 }] },
   // ------------------------------------------------------------- insects
-  { id: 'broodMother', needs: 'learnScorpionToss', name: 'Brood Mother', cat: 'insect', rarity: 'uncommon', maxLv: 4, icon: 'scorp', god: 'Serket', desc: (l) => `Scorpion Toss throws ${l} more scorpion${l > 1 ? 's' : ''}; they sting harder.`, mods: (l) => [{ stat: 'scorpions', type: 'flat', value: l }, { stat: 'magicDmg', type: 'pct', value: l * 0.05 }] },
+  { id: 'broodMother', needs: 'learnScorpionToss', name: 'Brood Mother', cat: 'insect', rarity: 'uncommon', maxLv: 4, icon: 'scorp', god: 'Serket', desc: (l) => `Scorpion Toss throws ${cnt(l)} more scorpion${cnt(l) > 1 ? 's' : ''}; they sting ${l * 5}% harder.`, mods: (l) => [{ stat: 'scorpions', type: 'flat', value: l }, { stat: 'magicDmg', type: 'pct', value: l * 0.05 }] },
   { id: 'locustCloud', needs: 'learnLocustSwarm', name: 'Scarab Horde', cat: 'insect', rarity: 'uncommon', maxLv: 4, icon: 'scarab', god: 'Khepri', desc: (l) => `Scarab swarm +${l * 25}% bigger and feeds longer.`, mods: (l) => [{ stat: 'swarmSize', type: 'pct', value: l * 0.25 }] },
   { id: 'dungEngineer', needs: 'learnDungBomb', name: 'Dung Engineer', cat: 'insect', rarity: 'common', maxLv: 4, icon: 'dung', god: 'Khepri', desc: (l) => `Dung Bomb radius +${l * 18}%, damage +${l * 15}%.`, mods: (l) => [{ stat: 'explosionRadius', type: 'pct', value: l * 0.18 }] },
-  { id: 'pinchTraining', name: "Pinch's Training", cat: 'insect', rarity: 'uncommon', maxLv: 4, icon: 'scorp_x2', desc: (l) => `Pinch attacks ${l * 20}% faster and stings for more poison.`, mods: (l) => [{ stat: 'magic', type: 'flat', value: l }] },
-  { id: 'scarabShield', name: 'Scarab Shield', cat: 'insect', rarity: 'rare', maxLv: 3, icon: 'scarab', god: 'Khepri', desc: (l) => `${l + 1} armored scarabs orbit you and block bullets.`, attach: 'scarab_pauldron' },
-  { id: 'fireAnts', name: 'Fire Ants', cat: 'insect', rarity: 'rare', maxLv: 2, icon: 'flame1', desc: (l) => `Insect attacks have ${l * 30}% chance to ignite (burn).` },
+  { id: 'pinchTraining', name: "Pinch's Training", cat: 'insect', rarity: 'uncommon', maxLv: 4, icon: 'scorp_x2', desc: (l) => `Pinch attacks ${l * 20}% faster and stings for more poison (+${rd(l)} Magic Power).`, mods: (l) => [{ stat: 'magic', type: 'flat', value: l }] },
+  { id: 'scarabShield', name: 'Scarab Shield', cat: 'insect', rarity: 'rare', maxLv: 3, icon: 'scarab', god: 'Khepri', desc: (l) => `${cnt(l) + 1} armored scarabs orbit you and block bullets.`, attach: 'scarab_pauldron' },
+  { id: 'fireAnts', name: 'Fire Ants', cat: 'insect', rarity: 'rare', maxLv: 2, icon: 'flame1', desc: (l) => `Insect attacks have ${Math.min(100, l * 30)}% chance to ignite (burn).` },
   // ------------------------------------------------------------- passives
-  { id: 'ironRibs', name: 'Iron Ribs', cat: 'passive', rarity: 'common', maxLv: 5, icon: 'shield', desc: (l) => `+${l * 3} Defense.`, mods: (l) => [{ stat: 'def', type: 'flat', value: l * 3 }] },
-  { id: 'desertHeart', name: 'Desert Heart', cat: 'passive', rarity: 'common', maxLv: 5, icon: 'heart', desc: (l) => `+${l * 3} Vitality.`, mods: (l) => [{ stat: 'vit', type: 'flat', value: l * 3 }] },
-  { id: 'grit', name: "Gunslinger's Grit", cat: 'passive', rarity: 'common', maxLv: 5, icon: 'bullet', desc: (l) => `+${l * 3} Physical Power.`, mods: (l) => [{ stat: 'phys', type: 'flat', value: l * 3 }] },
-  { id: 'serketBlessing', name: "Serket's Blessing", cat: 'passive', rarity: 'common', maxLv: 5, icon: 'ankh', god: 'Serket', desc: (l) => `+${l * 3} Magic Power.`, mods: (l) => [{ stat: 'magic', type: 'flat', value: l * 3 }] },
-  { id: 'tumbleweedLegs', name: 'Tumbleweed Legs', cat: 'passive', rarity: 'common', maxLv: 5, icon: 'twig', desc: (l) => `+${l * 3} Mobility.`, mods: (l) => [{ stat: 'mob', type: 'flat', value: l * 3 }] },
-  { id: 'horseshoe', name: 'Lucky Horseshoe', cat: 'passive', rarity: 'uncommon', maxLv: 5, icon: 'coin', desc: (l) => `+${l * 3} Luck.`, mods: (l) => [{ stat: 'luck', type: 'flat', value: l * 3 }] },
+  { id: 'ironRibs', name: 'Iron Ribs', cat: 'passive', rarity: 'common', maxLv: 5, icon: 'shield', desc: (l) => `+${rd(l * 3)} Defense.`, mods: (l) => [{ stat: 'def', type: 'flat', value: l * 3 }] },
+  { id: 'desertHeart', name: 'Desert Heart', cat: 'passive', rarity: 'common', maxLv: 5, icon: 'heart', desc: (l) => `+${rd(l * 3)} Vitality.`, mods: (l) => [{ stat: 'vit', type: 'flat', value: l * 3 }] },
+  { id: 'grit', name: "Gunslinger's Grit", cat: 'passive', rarity: 'common', maxLv: 5, icon: 'bullet', desc: (l) => `+${rd(l * 3)} Physical Power.`, mods: (l) => [{ stat: 'phys', type: 'flat', value: l * 3 }] },
+  { id: 'serketBlessing', name: "Serket's Blessing", cat: 'passive', rarity: 'common', maxLv: 5, icon: 'ankh', god: 'Serket', desc: (l) => `+${rd(l * 3)} Magic Power.`, mods: (l) => [{ stat: 'magic', type: 'flat', value: l * 3 }] },
+  { id: 'tumbleweedLegs', name: 'Tumbleweed Legs', cat: 'passive', rarity: 'common', maxLv: 5, icon: 'twig', desc: (l) => `+${rd(l * 3)} Mobility.`, mods: (l) => [{ stat: 'mob', type: 'flat', value: l * 3 }] },
+  { id: 'horseshoe', name: 'Lucky Horseshoe', cat: 'passive', rarity: 'uncommon', maxLv: 5, icon: 'coin', desc: (l) => `+${rd(l * 3)} Luck.`, mods: (l) => [{ stat: 'luck', type: 'flat', value: l * 3 }] },
   { id: 'batSpurs', name: 'Vampire Bat Spurs', cat: 'passive', rarity: 'rare', maxLv: 3, icon: 'blood0', desc: (l) => `Lifesteal ${l * 2}%.`, mods: (l) => [{ stat: 'lifesteal', type: 'flat', value: l * 0.02 }] },
   { id: 'momentum', name: 'Momentum', cat: 'passive', rarity: 'uncommon', maxLv: 4, icon: 'speedline', desc: (l) => `+${l * 0.5}% damage per 2 m/s above 10 m/s.`, mods: (l) => [{ stat: 'speedDamage', type: 'flat', value: l * 0.005 }] },
   { id: 'license', name: "Bounty Hunter's License", cat: 'passive', rarity: 'uncommon', maxLv: 3, icon: 'sheriff', desc: (l) => `Bounty gained +${l * 15}%.`, mods: (l) => [{ stat: 'bountyGain', type: 'pct', value: l * 0.15 }] },
@@ -178,19 +366,19 @@ export const UPGRADES: UpgradeDef[] = [
   { id: 'driftKing', name: 'Drift King', cat: 'passive', rarity: 'uncommon', maxLv: 3, icon: 'puff0', desc: (l) => `Drift boosts are ${l * 30}% stronger and blast sand at enemies.` },
   // ------------------------------------------------------------- gear (visible)
   { id: 'scarabPauldron', name: 'Scarab Pauldron', cat: 'gear', rarity: 'uncommon', maxLv: 3, icon: 'scarab', desc: (l) => `Armor +${l * 15}, physical resist +${l * 3}%.`, mods: (l) => [{ stat: 'armor', type: 'flat', value: l * 15 }, { stat: 'physRes', type: 'flat', value: l * 0.03 }], attach: 'scarab_pauldron' },
-  { id: 'bandolier', name: 'Locust Bandolier', cat: 'gear', rarity: 'uncommon', maxLv: 3, icon: 'bullet', desc: (l) => `+${l} ammo, reload +${l * 10}%.`, mods: (l) => [{ stat: 'ammo', type: 'flat', value: l }, { stat: 'reloadSpeed', type: 'pct', value: l * 0.1 }], attach: 'locust_bandolier' },
-  { id: 'venomTank', name: 'Venom Tank', cat: 'gear', rarity: 'rare', maxLv: 3, icon: 'bubble', god: 'Serket', desc: (l) => `Max poison stacks +${l * 15}.`, mods: (l) => [{ stat: 'poisonStacks', type: 'flat', value: l * 15 }], attach: 'venom_tank' },
-  { id: 'sheriffStar', name: "Dead Sheriff's Star", cat: 'gear', rarity: 'rare', maxLv: 2, icon: 'sheriff', desc: (l) => `Counters heal ${l * 6}% and reflect bullets ×${1 + l}.`, attach: 'sheriff_star' },
+  { id: 'bandolier', name: 'Locust Bandolier', cat: 'gear', rarity: 'uncommon', maxLv: 3, icon: 'bullet', desc: (l) => `+${cnt(l)} ammo, reload +${l * 10}%.`, mods: (l) => [{ stat: 'ammo', type: 'flat', value: l }, { stat: 'reloadSpeed', type: 'pct', value: l * 0.1 }], attach: 'locust_bandolier' },
+  { id: 'venomTank', name: 'Venom Tank', cat: 'gear', rarity: 'rare', maxLv: 3, icon: 'bubble', god: 'Serket', desc: (l) => `Max poison stacks +${rd(l * 15)}.`, mods: (l) => [{ stat: 'poisonStacks', type: 'flat', value: l * 15 }], attach: 'venom_tank' },
+  { id: 'sheriffStar', name: "Dead Sheriff's Star", cat: 'gear', rarity: 'rare', maxLv: 2, icon: 'sheriff', desc: (l) => `Counters heal ${l * 6}% and reflect bullets ×${1 + cnt(l)}.`, attach: 'sheriff_star' },
   { id: 'dynamiteBelt', name: 'Dynamite Belt', cat: 'gear', rarity: 'uncommon', maxLv: 3, icon: 'bolt', desc: (l) => `Taking a hit has ${l * 10}% chance to drop a lit stick of dynamite.`, attach: 'dynamite_belt' },
   // ------------------------------------------------------------- relics (gods)
-  { id: 'eyeOfHorus', name: 'Eye of Horus', cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'eye', god: 'Horus', desc: () => 'Crits mark enemies: marked targets take +25% damage.' },
+  { id: 'eyeOfHorus', name: 'Eye of Horus', cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'eye', god: 'Horus', desc: (l) => `Crits mark enemies: marked targets take +${25 * l}% damage.` },
   { id: 'sunDisk', name: "Ra's Sun Disk", cat: 'relic', rarity: 'legendary', maxLv: 1, icon: 'coin', god: 'Ra', desc: () => 'Every 8th shot fires a searing sun beam that burns everything in a line.', attach: 'sun_disk' },
-  { id: 'anubisScale', name: "Anubis' Scale", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'ankh', god: 'Anubis', desc: () => 'Kills heal 1% health; at full health they grant shield instead.' },
-  { id: 'thothLedger', name: "Thoth's Ledger", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'glyph0', god: 'Thoth', desc: () => '+30% bounty. Weak points crit more (+15% crit chance on headshots).', mods: () => [{ stat: 'bountyGain', type: 'pct', value: 0.3 }] },
-  { id: 'sekhmetClaw', name: "Sekhmet's Claw", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'flame2', god: 'Sekhmet', desc: () => 'Burning enemies spread fire on death. Melee ignites.' },
+  { id: 'anubisScale', name: "Anubis' Scale", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'ankh', god: 'Anubis', desc: (l) => `Kills heal ${l}% health; at full health they grant ${2 * l}% shield instead.` },
+  { id: 'thothLedger', name: "Thoth's Ledger", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'glyph0', god: 'Thoth', desc: (l) => `+${30 * l}% bounty. Weak points crit more (+${15 * l}% crit chance on headshots).`, mods: (l) => [{ stat: 'bountyGain', type: 'pct', value: 0.3 * l }] },
+  { id: 'sekhmetClaw', name: "Sekhmet's Claw", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'flame2', god: 'Sekhmet', desc: (l) => `Burning enemies spread fire ${(4 * l).toFixed(1)} m around them on death. Melee ignites.` },
   { id: 'dungCrown', needs: 'learnDungBomb', name: "Khepri's Dung Crown", cat: 'relic', rarity: 'legendary', maxLv: 1, icon: 'dung', god: 'Khepri', desc: () => 'Dung Bombs split into 3 smaller bombs on explosion. Glorious.' },
-  { id: 'moonCharm', name: "Khonsu's Moon Charm", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'star4', god: 'Khonsu', desc: () => 'Big air (1 s+) slows time while airborne. +10% crit while airborne.' },
-  { id: 'bastetBell', name: "Bastet's Bell", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'charm', god: 'Bastet', desc: () => 'Counters are easier and heal 8%. Pinch purrs. (He is a scorpion.)' },
+  { id: 'moonCharm', name: "Khonsu's Moon Charm", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'star4', god: 'Khonsu', desc: (l) => `Big air (1 s+) slows time while airborne. +${10 * l}% crit while airborne.` },
+  { id: 'bastetBell', name: "Bastet's Bell", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'charm', god: 'Bastet', desc: (l) => `Counters are easier and heal ${8 * l}%. Pinch purrs. (He is a scorpion.)` },
   // ------------------------------------------------------------- evolutions
   { id: 'serketsKiss', name: "Serket's Kiss", cat: 'evolution', rarity: 'mythic', maxLv: 1, icon: 'venomSplat', god: 'Serket', evolveFrom: ['venomRounds', 'serketBlessing'], desc: () => 'EVOLUTION: enemies reaching 25 poison stacks erupt in a venom nova (stacks ×12 damage).' },
   { id: 'broodQueen', name: 'Queen of the Brood', cat: 'evolution', rarity: 'mythic', maxLv: 1, icon: 'scorp_x2', evolveFrom: ['broodMother', 'pinchTraining'], desc: () => 'EVOLUTION: Pinch grows huge, scorpion tosses become a living tide (double count, double damage).', mods: () => [{ stat: 'scorpions', type: 'mult', value: 2 }] },
@@ -207,16 +395,34 @@ export interface Offer {
   def: UpgradeDef;
   fromLv: number;
   toLv: number;
+  /** the rarity it was dealt at (never below its own; absent = its own) */
+  rarity?: Rarity;
+  /** tiers above the card's own rarity (0..4): the numbers ×TIER_MULT[steps] */
+  steps?: number;
+  /** power after taking it (levels × tier multipliers): upside / downside */
+  pw?: number;
+  pwDn?: number;
+  /** power before taking it */
+  fromPw?: number;
+  fromPwDn?: number;
 }
 
 export class UpgradeManager {
   levels = new Map<string, number>();
+  /** per upgrade, the tiers each level was dealt above the card's own rarity (one entry per level) */
+  tiers = new Map<string, number[]>();
   history: string[] = [];
   banished = new Set<string>();
   rerolls = 2;
   /** learn cards picked whose skill unseals later (a cinematic carries the card to the bar first) */
   deferLearn = new Set<string>();
   onChange?: (id: string, lv: number) => void;
+  /**
+   * Hooks for run pacing (another system may set these): the highest rarity a deal
+   * can climb to, and extra "picks" of progress added to the rarity odds.
+   */
+  tierCap: Rarity = 'legendary';
+  progressBonus = 0;
 
   constructor(private stats: StatSheet) {}
 
@@ -225,8 +431,60 @@ export class UpgradeManager {
     return this.stats;
   }
 
+  /** levels taken */
   lv(id: string) {
     return this.levels.get(id) ?? 0;
+  }
+
+  /** power of an upgrade's upside: its levels, each × its dealt tier's multiplier (what effects scale with) */
+  pw(id: string) {
+    const t = this.tiers.get(id);
+    if (!t || t.length !== this.lv(id)) return this.lv(id);
+    return t.reduce((a, s) => a + tierMult(s), 0);
+  }
+
+  /** power of an upgrade's downside (trade-offs, curses): grows half as fast as the upside */
+  pwDn(id: string) {
+    const t = this.tiers.get(id);
+    if (!t || t.length !== this.lv(id)) return this.lv(id);
+    return t.reduce((a, s) => a + tierDown(s), 0);
+  }
+
+  /**
+   * The odds of the rarity a card is dealt at: Common, Uncommon, Rare, Epic,
+   * Legendary weights. Richer as the hunt goes on (picks taken) and with Luck
+   * (Rarity Luck = 1 + 3% per Luck). No Epic on the first deal, no Legendary
+   * before the fourth: early hunts stay fair.
+   */
+  tierWeights() {
+    const p = this.history.length + this.progressBonus;
+    const L = this.stats.get('rarity');
+    return [
+      Math.max(36, 62 - p * 1.1),
+      26,
+      9 * (1 + p * 0.04) * L,
+      p < 1 ? 0 : 2.6 * (1 + p * 0.06) * L * (p < 2 ? 0.5 : 1),
+      p < 3 ? 0 : 0.6 * (1 + p * 0.08) * L,
+    ];
+  }
+
+  /** roll the tiers a card is dealt above its own rarity */
+  rollSteps(u: UpgradeDef) {
+    if (u.learn || u.cat === 'evolution') return 0;
+    const base = RARITY[u.rarity].rank;
+    const cap = Math.min(4, RARITY[this.tierCap]?.rank ?? 4);
+    if (base >= cap) return 0;
+    const w = this.tierWeights();
+    const r = rnd.weighted([0, 1, 2, 3, 4], (k) => (k > cap ? 0 : w[k]));
+    return Math.max(0, (r ?? 0) - base);
+  }
+
+  /** an offer of this card dealt `steps` tiers up, with its powers before and after */
+  offer(u: UpgradeDef, steps = 0): Offer {
+    const lv = this.lv(u.id);
+    const g = isGame(u);
+    const fromPw = g ? 0 : this.pw(u.id), fromPwDn = g ? 0 : this.pwDn(u.id);
+    return { def: u, fromLv: lv, toLv: lv + 1, rarity: dealtRarity(u, steps), steps, fromPw, fromPwDn, pw: fromPw + tierMult(steps), pwDn: fromPwDn + tierDown(steps) };
   }
 
   /** owned upgrades a gamble could double or cost a level */
@@ -244,15 +502,16 @@ export class UpgradeManager {
    * Roll n offers weighted by rarity (luck), with a guaranteed evolution if eligible
    * and a sealed tarot skill until all three are learned. Trade-offs come up half
    * again as often as plain cards, and a gamble turns up in roughly two hands of
-   * five (more with Luck), never two at once.
+   * five (more with Luck), never two at once. Each card then rolls the rarity it is
+   * dealt at (rollSteps).
    */
   roll(n: number): Offer[] {
     const out: Offer[] = [];
     const evo = UPGRADES.filter((u) => u.cat === 'evolution' && !this.lv(u.id) && u.evolveFrom && u.evolveFrom.every((id) => this.lv(id) >= Math.min(UPGRADE_BY_ID[id].maxLv, 3)));
-    if (evo.length) out.push({ def: evo[0], fromLv: 0, toLv: 1 });
+    if (evo.length) out.push(this.offer(evo[0]));
     // a sealed tarot skill is always on offer until all three are learned
     const sealed = UPGRADES.filter((u) => u.learn && !this.lv(u.id) && !this.banished.has(u.id));
-    if (sealed.length && out.length < n) out.push({ def: sealed[Math.floor(rnd.next() * sealed.length)], fromLv: 0, toLv: 1 });
+    if (sealed.length && out.length < n) out.push(this.offer(sealed[Math.floor(rnd.next() * sealed.length)]));
     const rarityLuck = this.stats.get('rarity');
     const luck = this.stats.get('luck');
     const pool = UPGRADES.filter((u) => u.cat !== 'evolution' && !u.learn && (!u.needs || this.lv(u.needs) > 0) && !this.banished.has(u.id) && this.lv(u.id) < u.maxLv && (!u.gamble || this.gambleOk(u)));
@@ -269,7 +528,7 @@ export class UpgradeManager {
       const g = rnd.weighted(games, weight);
       if (g) {
         chosen.add(g.id);
-        out.push({ def: g, fromLv: this.lv(g.id), toLv: this.lv(g.id) + 1 });
+        out.push(this.offer(g, this.rollSteps(g)));
       }
     }
     let guard = 0;
@@ -278,47 +537,82 @@ export class UpgradeManager {
       const u = rnd.weighted(pool, (u) => (chosen.has(u.id) || (u.gamble && hasGame) ? 0 : weight(u)));
       if (!u || chosen.has(u.id)) continue;
       chosen.add(u.id);
-      out.push({ def: u, fromLv: this.lv(u.id), toLv: this.lv(u.id) + 1 });
+      out.push(this.offer(u, this.rollSteps(u)));
     }
     return out;
   }
 
-  apply(id: string) {
+  /** re-add an upgrade's stat modifiers at its current levels, powers and bonus lines */
+  private restat(id: string) {
     const def = UPGRADE_BY_ID[id];
-    const lv = Math.min(def.maxLv, this.lv(id) + 1);
-    this.levels.set(id, lv);
-    this.history.push(id);
     const src = 'up:' + id;
     this.stats.removeSource(src);
-    if (def.mods) this.stats.add(def.mods(lv).map((m) => ({ ...m, source: src })));
+    const lv = this.lv(id);
+    if (!def || lv <= 0) return;
+    const mods = scaledMods(def, lv, this.pw(id), this.pwDn(id), this.tiers.get(id) ?? []);
+    if (mods.length) this.stats.add(mods.map((m) => ({ ...m, source: src })));
+  }
+
+  /**
+   * Take a level of an upgrade. `entry` is an id or a history entry ("id@steps");
+   * `steps` (tiers dealt above its own rarity) overrides the entry's.
+   */
+  apply(entry: string, steps?: number) {
+    const p = parsePick(entry);
+    const id = p.id;
+    const def = UPGRADE_BY_ID[id];
+    if (!def) return 0;
+    const s = Math.max(0, Math.min(4, Math.round(steps ?? p.steps)));
+    const was = this.lv(id);
+    const lv = Math.min(def.maxLv, was + 1);
+    const t = (this.tiers.get(id) ?? []).slice(0, was);
+    while (t.length < was) t.push(0);
+    if (lv > was) t.push(s);
+    else if (t.length) t[t.length - 1] = Math.max(t[t.length - 1], s); // already maxed (games): keep the richer deal
+    this.tiers.set(id, t);
+    this.levels.set(id, lv);
+    this.history.push(pickEntry(id, s));
+    this.restat(id);
     this.onChange?.(id, lv);
     return lv;
   }
 
-  /** force a level (gambles: Double or Nothing); 0 removes it. History is rewritten so carried runs rebuild it. */
-  setLevel(id: string, lv: number) {
+  /**
+   * Force a level (gambles: Double or Nothing); 0 removes it. Levels gained are
+   * dealt `steps` tiers up; levels lost go from the top. History is rewritten so
+   * carried runs rebuild it.
+   */
+  setLevel(id: string, lv: number, steps = 0) {
     const def = UPGRADE_BY_ID[id];
     if (!def) return 0;
     const l = Math.max(0, Math.min(def.maxLv, Math.round(lv)));
-    const src = 'up:' + id;
-    this.stats.removeSource(src);
-    this.history = this.history.filter((h) => h !== id);
+    const t = (this.tiers.get(id) ?? []).slice(0, this.lv(id));
+    while (t.length < this.lv(id)) t.push(0);
+    while (t.length < l) t.push(Math.max(0, Math.min(4, Math.round(steps))));
+    t.length = l;
+    this.history = this.history.filter((h) => parsePick(h).id !== id);
     if (l > 0) {
       this.levels.set(id, l);
-      for (let i = 0; i < l; i++) this.history.push(id);
-      if (def.mods) this.stats.add(def.mods(l).map((m) => ({ ...m, source: src })));
-    } else this.levels.delete(id);
+      this.tiers.set(id, t);
+      for (const s of t) this.history.push(pickEntry(id, s));
+    } else {
+      this.levels.delete(id);
+      this.tiers.delete(id);
+    }
+    this.restat(id);
     this.onChange?.(id, l);
     return l;
   }
 
   /** preview: stat values before/after taking an offer (for card backs) */
   preview(o: Offer) {
-    const mods = o.def.mods?.(o.toLv) ?? [];
+    const id = o.def.id;
+    const tiers = [...(this.tiers.get(id) ?? []).slice(0, o.fromLv), o.steps ?? 0];
+    const mods = scaledMods(o.def, Math.min(o.def.maxLv, o.toLv), o.pw ?? o.toLv, o.pwDn ?? o.toLv, tiers);
     const before = this.stats;
     const after = before.clone();
-    after.removeSource('up:' + o.def.id);
-    after.add(mods.map((m) => ({ ...m, source: 'up:' + o.def.id })));
+    after.removeSource('up:' + id);
+    after.add(mods.map((m) => ({ ...m, source: 'up:' + id })));
     const keys = [...new Set(mods.map((m) => m.stat))];
     return keys.map((k) => ({ stat: k, before: before.get(k), after: after.get(k) }));
   }
@@ -342,18 +636,19 @@ export class UpgradeEffects {
     ev.on('shot', (hit: any) => this.onShot(hit));
     ev.on('playerHurt', () => this.onHurt());
     ev.on('counter', () => {
-      const l = this.up.lv('sheriffStar') + (this.up.lv('bastetBell') ? 1.3 : 0);
-      if (l > 0) this.player.heal(this.player.maxHp * (0.06 * this.up.lv('sheriffStar') + (this.up.lv('bastetBell') ? 0.08 : 0)));
+      // heals scale with each card's power (levels × dealt-tier multipliers)
+      const h = 0.06 * this.up.pw('sheriffStar') + 0.08 * this.up.pw('bastetBell');
+      if (h > 0) this.player.heal(this.player.maxHp * h);
     });
     ev.on('trick', (l: any) => {
-      const r = this.up.lv('rodeoStar');
+      const r = this.up.pw('rodeoStar');
       if (r > 0) {
         ctx.run.ultCharge = Math.min(1, ctx.run.ultCharge + (l.score / 6000) * r * 0.4);
         this.player.board.boostMeter = Math.min(1, this.player.board.boostMeter + 0.05 * r);
       }
     });
     ev.on('driftBoost', (p: number) => {
-      const l = this.up.lv('driftKing');
+      const l = this.up.pw('driftKing');
       if (!l) return;
       this.player.board.vel.multiplyScalar(1 + 0.1 * l * p);
       ctx.fx.sandBurst(this.player.pos, 1 + l * 0.4);
@@ -392,13 +687,13 @@ export class UpgradeEffects {
   private onHit(e: any, hit: any, amt: number, res: any) {
     const ctx = this.ctx;
     // extra venom stacks from Venom Rounds
-    const vr = this.up.lv('venomRounds');
+    const vr = cnt(this.up.pw('venomRounds'));
     if (vr && hit.source === 'gun' && e.status) e.status.apply('poison', vr, 4, 2.2 * this.player.stats.get('statusPower'), this.player.stats.get('poisonStacks'), e.def?.statusRes ?? {});
     // lifesteal
     const ls = this.player.stats.get('lifesteal');
     if (ls > 0 && (hit.source === 'gun' || hit.source === 'melee')) this.player.heal(amt * ls);
     // ricochet
-    const rc = this.up.lv('ricochet');
+    const rc = cnt(this.up.pw('ricochet'));
     if (rc && hit.source === 'gun' && !hit.tags?.includes('ricochet')) {
       let from = e;
       const hitSet = new Set([e.id]);
@@ -414,10 +709,10 @@ export class UpgradeEffects {
     }
     // eye of horus marks
     if (this.up.lv('eyeOfHorus') && res?.crit && e.status) e.status.apply('mark', 1, 6, 0, 1, {});
-    if (e.status?.has?.('mark')) e.vulnerable = 1.25;
+    if (e.status?.has?.('mark')) e.vulnerable = 1 + 0.25 * Math.max(1, this.up.pw('eyeOfHorus'));
     // fire ants
-    const fa = this.up.lv('fireAnts');
-    if (fa && (hit.source === 'scorpion' || hit.source === 'swarm') && Math.random() < 0.3 * fa && e.status) e.status.apply('burn', 1, 3, 1.5, 99, e.def?.statusRes ?? {});
+    const fa = this.up.pw('fireAnts');
+    if (fa && (hit.source === 'scorpion' || hit.source === 'swarm') && Math.random() < Math.min(1, 0.3 * fa) && e.status) e.status.apply('burn', 1, 3, 1.5, 99, e.def?.statusRes ?? {});
     if (this.up.lv('sekhmetClaw') && hit.source === 'melee' && e.status) e.status.apply('burn', 1, 3, 2, 99, e.def?.statusRes ?? {});
     // serket's kiss
     if (this.up.lv('serketsKiss') && e.status?.stacks('poison') >= 25 && e.alive) {
@@ -430,19 +725,21 @@ export class UpgradeEffects {
   }
 
   private onKill(e: any, hit: any) {
-    if (this.up.lv('anubisScale')) {
-      if (this.player.hp >= this.player.maxHp - 0.5) this.player.shield = Math.min(this.player.maxHp * 0.5, this.player.shield + this.player.maxHp * 0.02);
-      else this.player.heal(this.player.maxHp * 0.01);
+    const an = this.up.pw('anubisScale');
+    if (an) {
+      if (this.player.hp >= this.player.maxHp - 0.5) this.player.shield = Math.min(this.player.maxHp * 0.5, this.player.shield + this.player.maxHp * 0.02 * an);
+      else this.player.heal(this.player.maxHp * 0.01 * an);
     }
-    if (this.up.lv('sekhmetClaw') && e.status?.has('burn')) {
-      this.ctx.enemies.inRadius(e.pos, 4, (o: any) => o.status?.apply('burn', 1, 3, 2, 99, o.def?.statusRes ?? {}));
+    const sk = this.up.pw('sekhmetClaw');
+    if (sk && e.status?.has('burn')) {
+      this.ctx.enemies.inRadius(e.pos, 4 * sk, (o: any) => o.status?.apply('burn', 1, 3, 2, 99, o.def?.statusRes ?? {}));
       this.ctx.fx.flames({ x: e.pos.x, y: e.pos.y + 0.5, z: e.pos.z }, 6, 1.4);
     }
     void hit;
   }
 
   private onHurt() {
-    const l = this.up.lv('dynamiteBelt');
+    const l = this.up.pw('dynamiteBelt');
     if (l && Math.random() < l * 0.1) {
       const p = this.player.pos.clone();
       this.ctx.toast('DYNAMITE DROPPED', '#ff8a4a');
@@ -460,7 +757,7 @@ export class UpgradeEffects {
     // (a card still flying to the bar in its unlock cinematic unseals when it lands)
     for (const u of LEARN_CARDS) if (this.up.lv(u.id) > 0 && !this.up.deferLearn.has(u.id)) this.skills?.learn?.(u.learn, true);
     // scarab shield orbiters block projectiles
-    const l = this.up.lv('scarabShield');
+    const l = cnt(this.up.pw('scarabShield'));
     if (!l) return;
     const n = l + 1;
     while (this.scarabs.length < n) this.scarabs.push({ a: Math.random() * 6.28, hp: 3 });

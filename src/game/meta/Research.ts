@@ -22,6 +22,7 @@ import { Codex, CodexEntry, F_CLAIM, F_SEEN } from './Codex';
 import { Blueprints, blueprint } from './Blueprints';
 import { ITEMS, ItemId } from '../player/Items';
 import { GEAR, GearId } from '../player/Equipment';
+import { Unlocks } from './Unlocks';
 
 export interface Goal {
   /** what Thoth wants, short: "Bring down 15 of them" */
@@ -219,6 +220,8 @@ export const Research = {
       out.push(g);
     }
     writeSave();
+    // studies are a progression track too (new shop stock: meta/Unlocks)
+    Unlocks.evaluate();
     return out;
   },
   /** give a gift: items into the satchel, plans learned, cosmetics unlocked (already owned → its worth in gold) */
@@ -293,6 +296,8 @@ export const Research = {
   },
   /** what Thoth would ask for next (not taken yet); `skip` asks for another one */
   proposeErrand(skip = 0): Errand | null {
+    // Thoth starts handing out errands once the hunter has ridden out once (meta/Unlocks)
+    if (!Unlocks.has('system:errands')) return null;
     const r = rs();
     const d = loadSave();
     const past = new Set(r.past);

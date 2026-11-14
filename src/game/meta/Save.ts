@@ -27,6 +27,26 @@ export interface SaveData {
   /** the treasure-hunt collection: relic ids dug up so far (any region) */
   relics: string[];
   seenIntro: boolean;
+  /** the slow-reveal progression (meta/Unlocks.ts): Anubis' tally, unlocks granted, news, lessons; absent on old saves */
+  prog?: ProgSave;
+}
+
+/** meta/Unlocks.ts state (additive: an old save gets one on first use, its past milestones granted quietly) */
+export interface ProgSave {
+  /** Anubis' tally: deaths that reached the Duat */
+  deaths: number;
+  /** unlock ids granted (meta/Unlocks UNLOCKS) */
+  got: string[];
+  /** unlock ids not yet shown on the reveal card */
+  reveal: string[];
+  /** unlock ids Ozymandias has not mentioned yet ("new stock, fresh from the dead!") */
+  news: string[];
+  /** shop unlocks already put on a shelf once (a fresh one is guaranteed a spot) */
+  shelved: string[];
+  /** best bounty rank reached in any run */
+  bestRank: number;
+  /** Serket's lessons already given (run/Tutorial lesson ids) */
+  lessons: string[];
 }
 
 export type LongGunId = 'shotgun' | 'tommy';
@@ -111,6 +131,7 @@ export function loadSave(): SaveData {
         if (!Array.isArray(cache.blueprints)) cache.blueprints = [];
         if (!cache.arsenal?.attach) cache.arsenal = { secondary: cache.arsenal?.secondary ?? null, attach: {} };
         if (!Array.isArray(cache.relics)) cache.relics = [];
+        // (cache.prog stays absent on an old save: meta/Unlocks builds it on first use)
         // the punk biker jacket is Sundown's new signature look: hand it to old saves once
         if (!cache.unlocked.includes('outfit:punk')) {
           cache.unlocked.push('outfit:punk');

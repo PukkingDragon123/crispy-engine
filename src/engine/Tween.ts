@@ -47,6 +47,17 @@ interface TweenItem {
 }
 
 /** Tween manager. update(dt, realDt) must be called per frame. */
+const reported = new Map<string, number>();
+/** log a caught error, at most once per second per message (a system that throws every frame must not flood) */
+export function reportError(where: string, e: unknown) {
+  const msg = `${where}: ${e instanceof Error ? e.message : String(e)}`;
+  const now = performance.now();
+  if (now - (reported.get(msg) ?? -1e9) < 1000) return;
+  reported.set(msg, now);
+  if (reported.size > 200) reported.clear();
+  console.error('[dustUP] ' + msg, e);
+}
+
 export class Tweens {
   private items: TweenItem[] = [];
   /** animate a function from 0..1 over duration */
@@ -81,10 +92,27 @@ export class Tweens {
       }
       it.t += step;
       const k = Math.min(1, it.t / it.dur);
-      it.fn(it.ease(k));
+      // one broken tween must not stall the rest (or throw every frame forever): it is
+      // dropped, and its `done` still runs so anything awaiting it moves on
+      try {
+        it.fn(it.ease(k));
+      } catch (e) {
+        reportError('tween', e);
+        it.dead = true;
+        try {
+          it.done?.();
+        } catch (e2) {
+          reportError('tween done', e2);
+        }
+        continue;
+      }
       if (k >= 1) {
         it.dead = true;
-        it.done?.();
+        try {
+          it.done?.();
+        } catch (e) {
+          reportError('tween done', e);
+        }
       }
     }
     if (this.items.length > 64) this.items = this.items.filter((x) => !x.dead);

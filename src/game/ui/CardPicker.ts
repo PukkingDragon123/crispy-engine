@@ -21,7 +21,7 @@
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Offer, UpgradeManager } from '../run/Upgrades';
-import { RARITY } from '../run/Upgrades';
+import { RARITY, offerRarity, offerSteps, tierMult } from '../run/Upgrades';
 import { makeSkillCard, SkillCard3D, CARD_W, CARD_H, PANEL_W } from './SkillCards';
 import { SkillArt } from './SkillArt';
 import { Spring } from '../../engine/Tween';
@@ -395,7 +395,7 @@ export class CardPicker {
       homeHit.scale.setScalar(L.sc * 1.04);
       this.hitGroup.add(homeHit);
       homeHit.updateMatrixWorld(true);
-      const r = o.def.rarity;
+      const r = offerRarity(o);
       const learn = !!o.def.learn;
       // a new skill is a big moment: it always rises on Serket's jade light
       const entrance: Entrance = learn ? 'pillar' : r === 'common' || r === 'uncommon' ? 'pop' : r === 'rare' ? 'spin' : 'pillar';
@@ -500,10 +500,14 @@ export class CardPicker {
     const more = this.queue > 0;
     if (!more) this.release();
     const picked = card.offer;
-    const lv = this.up.apply(picked.def.id);
+    // the pick is written with the rarity it was dealt at (its numbers and bonus lines follow)
+    const steps = offerSteps(picked);
+    const lv = this.up.apply(picked.def.id, steps);
     const o = this.outcome;
+    const R = RARITY[offerRarity(picked)];
+    const dealt = steps > 0 ? `${R.name}  ×${tierMult(steps)}  ·  ` : '';
     if (o) this.ctx.toast(o.title, o.win ? '#9dff5a' : '#ff6a4a', o.line);
-    else this.ctx.toast(picked.def.name.toUpperCase(), RARITY[picked.def.rarity].color, lv > 1 ? `Level ${lv}` : picked.def.cat === 'evolution' ? 'EVOLVED!' : 'Acquired');
+    else this.ctx.toast(picked.def.name.toUpperCase(), R.color, dealt + (lv > 1 ? `Level ${lv}` : picked.def.cat === 'evolution' ? 'EVOLVED!' : 'Acquired'));
     this.ctx.events.emit('upgradePicked', picked.def.id, lv);
     this.show?.dispose();
     this.show = null;
@@ -535,7 +539,7 @@ export class CardPicker {
   /** a card has landed: its rarity's sting and a burst of its light */
   private sting(c: Card) {
     const def = c.offer.def;
-    const R = RARITY[def.rarity];
+    const R = RARITY[offerRarity(c.offer)];
     const at = c.mesh.position.clone();
     const ctx = this.ctx;
     const n = R.rank + 1;
@@ -717,7 +721,7 @@ export class CardPicker {
       const lt = T - c.t0;
       if (!c.ready) {
         if (lt < 0) continue;
-        const r = c.offer.def.rarity;
+        const r = offerRarity(c.offer);
         if (!c.burst) {
           c.burst = true;
           m.visible = true;
@@ -793,7 +797,7 @@ export class CardPicker {
       if (c.pillar) c.pillarK = Math.max(0, c.pillarK - rdt * 1.6);
       // it sheds motes of its rarity's light off the frame (more the rarer it is)
       {
-        const R = RARITY[c.offer.def.rarity];
+        const R = RARITY[offerRarity(c.offer)];
         if (Math.random() < [0.7, 1.8, 3.2, 5, 8, 12][R.rank] * (1 + c.hover) * rdt) {
           const e = Math.random() * 4;
           _v.set(e < 2 ? (e < 1 ? -0.5 : 0.5) * CARD_W : (Math.random() - 0.5) * CARD_W, e >= 2 ? (e < 3 ? -0.5 : 0.5) * CARD_H : (Math.random() - 0.5) * CARD_H, 0.01);
@@ -858,7 +862,7 @@ export class CardPicker {
     if (!c || !c.fly) return;
     const f = c.fly;
     const m = c.mesh;
-    const col = RARITY[c.offer.def.rarity].hex;
+    const col = RARITY[offerRarity(c.offer)].hex;
     if (f.t < 1) {
       f.t = Math.min(1, f.t + rdt / (f.mode === 'dive' ? 0.42 : f.mode === 'deal' ? 0.36 : 0.5));
       const k = f.t * f.t;

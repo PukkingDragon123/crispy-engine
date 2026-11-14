@@ -24,6 +24,8 @@ import { buildRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { RigEyes, emote } from '../fx/FaceFx';
 import { rnd } from '../../engine/math/rand';
+import { unlockShelf } from './UnlockWares';
+import { Unlocks } from '../meta/Unlocks';
 
 export interface MissionDeps {
   ctx: Ctx;
@@ -157,23 +159,48 @@ export class Missions {
    */
   private wares(): Ware[] {
     const d = this.d;
-    return d.shop.book.stock(() => [
-      ...merchantStock(d.ctx, (id) => d.items.add(id), () => d.player.heal(d.player.maxHp), () => d.card(), {
-        pockets: (id: ItemId) => {
-          let have = 0, room = false;
-          for (const sl of d.items.slots) {
-            if (!sl) room = true;
-            else if (sl.id === id) {
-              have += sl.count;
-              if (sl.count < ITEMS[id].stack) room = true;
-            }
-          }
-          return { have, room };
-        },
-        hp: () => [d.player.hp, d.player.maxHp],
-      }),
-      ...(d.gearWares?.() ?? []),
-    ]);
+    const pockets = (id: ItemId) => {
+      let have = 0, room = false;
+      for (const sl of d.items.slots) {
+        if (!sl) room = true;
+        else if (sl.id === id) {
+          have += sl.count;
+          if (sl.count < ITEMS[id].stack) room = true;
+        }
+      }
+      return { have, room };
+    };
+    // the slow reveal (meta/Unlocks): only unlocked consumables, plus the rare-ware spot
+    return d.shop.book.stock(() =>
+      unlockShelf(
+        [
+          ...merchantStock(d.ctx, (id) => d.items.add(id), () => d.player.heal(d.player.maxHp), () => d.card(), { pockets, hp: () => [d.player.hp, d.player.maxHp] }),
+          ...(d.gearWares?.() ?? []),
+        ],
+        { ctx: d.ctx, player: d.player, add: (id) => d.items.add(id), pockets }
+      )
+    );
+  }
+
+  /**
+   * Quest givers not yet visited (for the objective tracker's markers): every landmark
+   * job still on offer, with its name and whether it is open yet.
+   */
+  givers(): { pos: THREE.Vector3; name: string; type: string; open: boolean }[] {
+    const out: { pos: THREE.Vector3; name: string; type: string; open: boolean }[] = [];
+    for (const lm of this.seen) {
+      const type = lm.extra?.type as string;
+      if (!type || type === 'tradingPost' || this.done.has(lm)) continue;
+      const h = (lm.extra?.meta?.height as number) ?? 12;
+      out.push({ pos: new THREE.Vector3(lm.anchor.x, lm.baseY + h + 1.5, lm.anchor.z), name: (lm.anchor.data?.name as string) ?? type, type, open: Unlocks.missionOpen(type) });
+    }
+    return out;
+  }
+
+  /** a spot just ahead of the hunter: rewards land here, no walking back for them */
+  private nearYou(r = 3.5) {
+    const p = this.d.player.pos, a = this.d.cam.yaw;
+    return { x: p.x + Math.sin(a) * r, z: p.z + Math.cos(a) * r };
   }
 
   /** walk-in cinematic, then the landmark's offer */
@@ -183,6 +210,12 @@ export class Missions {
     const type = lm.extra.type as string;
     if (type !== 'tradingPost' && (this.active || this.done.has(lm))) {
       ctx.toast(this.active ? 'ONE JOB AT A TIME' : 'NOTHING LEFT HERE', '#c9a97c', this.active ? this.active.name : 'The place is quiet now.');
+      return;
+    }
+    // jobs that open later in the slow reveal (meta/Unlocks)
+    if (!Unlocks.missionOpen(type)) {
+      ctx.toast('BOARDED UP', '#c9a97c', Unlocks.missionHint(type));
+      ctx.sfx('door_creak', door, 0.5);
       return;
     }
     this.busy = true;
@@ -267,7 +300,8 @@ export class Missions {
                 return this.timeLeft <= 0 ? 'fail' : 'run';
               },
               reward: () => {
-                this.d.chest(door.x, door.z, 'gold');
+                const at = this.nearYou();
+                this.d.chest(at.x, at.z, 'gold');
                 this.d.addBounty(reward);
               },
             };
@@ -381,7 +415,8 @@ export class Missions {
                 return this.timeLeft <= 0 ? 'fail' : 'run';
               },
               reward: () => {
-                this.d.chest(camp.x + 2, camp.z, 'silver');
+                const at = this.nearYou();
+                this.d.chest(at.x, at.z, 'silver');
                 player.stats.add([{ stat: 'moveSpeed', type: 'pct', value: 0.05, source: 'humphrey' }]);
                 ctx.toast("HUMPHREY'S GRATITUDE", '#9dff3a', '+5% speed for the rest of the run');
               },
@@ -423,7 +458,8 @@ export class Missions {
               },
               reward: () => {
                 this.d.addBounty(reward);
-                if (tgt) this.d.chest(tgt.pos.x, tgt.pos.z, 'silver');
+                const at = this.nearYou();
+                this.d.chest(at.x, at.z, 'silver');
               },
             };
           },

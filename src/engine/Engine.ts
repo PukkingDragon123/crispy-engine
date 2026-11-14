@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { PostStack } from './render/Post';
 import { Input } from './Input';
-import { Tweens, Ease } from './Tween';
+import { Tweens, Ease, reportError } from './Tween';
 import { AudioEngine } from './audio/AudioEngine';
 import { globalUniforms } from './render/VoxelMaterial';
 import { clamp, damp } from './math/rand';
@@ -76,6 +76,10 @@ export class Engine {
   barTop: HTMLDivElement;
   barBot: HTMLDivElement;
   paused = false;
+  /** the GPU dropped the WebGL context (tab in the background on a phone, driver reset): nothing draws until it is back */
+  contextLost = false;
+  /** called once the context is restored (scenes re-bake anything that lived only on the GPU) */
+  onContextRestored: (() => void)[] = [];
   /** the loading screen, if the game installed one */
   loader: LoadingCover | null = null;
   /** the loading screen hides the view: skip drawing the scene (its GPU time goes to the build and the hourglass) */
@@ -97,6 +101,25 @@ export class Engine {
     r.outputColorSpace = THREE.SRGBColorSpace;
     r.domElement.id = 'gl';
     container.appendChild(r.domElement);
+    // a lost context (phones drop it under memory pressure or in the background) must not end the game:
+    // three keeps its own state and re-uploads lazily once restored; drawing pauses meanwhile
+    r.domElement.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      this.contextLost = true;
+      console.warn('[dustUP] WebGL context lost; waiting for it to come back');
+    });
+    r.domElement.addEventListener('webglcontextrestored', () => {
+      this.contextLost = false;
+      console.warn('[dustUP] WebGL context restored');
+      for (const f of this.onContextRestored) {
+        try {
+          f();
+        } catch (e) {
+          reportError('contextRestored', e);
+        }
+      }
+      (this.current as { contextRestored?: () => void } | null)?.contextRestored?.();
+    });
     this.post = new PostStack(r, this.emptyScene, this.emptyCam, this.width, this.height);
     this.post.setSize(this.width, this.height, this.quality.pixelRatio);
     this.input = new Input(r.domElement);
@@ -148,7 +171,12 @@ export class Engine {
       await this.loader!.show(typeof o.loading === 'string' ? o.loading : undefined);
       this.covered = true;
     }
-    this.current?.exit?.();
+    // a scene that throws while leaving or arriving must not leave the screen covered forever
+    try {
+      this.current?.exit?.();
+    } catch (e) {
+      reportError('scene exit', e);
+    }
     this.tweens.clear();
     this.current = s;
     this.post.setSceneCamera(s.scene, s.camera);
@@ -156,7 +184,12 @@ export class Engine {
     s.camera.updateProjectionMatrix();
     this.timeScale = this.targetScale = 1;
     this.hitStopLeft = 0;
-    await s.enter?.();
+    try {
+      await s.enter?.();
+    } catch (e) {
+      reportError('scene enter', e);
+      (s as { ready?: boolean }).ready = true;
+    }
     // some scenes finish building over later frames
     if (load) while ((s as { ready?: boolean }).ready === false && this.current === s) await this.nextFrame();
     if (fade > 0 || this.loader?.shown) void this.fadeIn(fade, light(color));
@@ -255,14 +288,25 @@ export class Engine {
       this.time += dt;
       globalUniforms.uTime.value = this.realTime;
       this.post.u.uTime.value = this.realTime;
-      this.tweens.update(dt, rdt);
-      if (this.current) {
-        this.current.update(dt, rdt);
-        for (const f of this.onAfterUpdate) f(dt, rdt);
-        this.audio.setListener(this.current.camera);
-        if (!this.covered) {
-          this.post.render(rdt);
-          this.current.postRender?.(this.renderer);
+      // every stage is guarded: one throwing system is logged and skipped, the rest of the frame
+      // still runs, input edges still clear and the frame counter still ticks (scene switches and
+      // cinematics wait on it), so an exception can never freeze the game
+      const guard = (where: string, fn: () => void) => {
+        try {
+          fn();
+        } catch (e) {
+          reportError(where, e);
+        }
+      };
+      guard('tweens', () => this.tweens.update(dt, rdt));
+      const cur = this.current;
+      if (cur) {
+        guard('update', () => cur.update(dt, rdt));
+        for (const f of this.onAfterUpdate.slice()) guard('afterUpdate', () => f(dt, rdt));
+        guard('audio', () => this.audio.setListener(cur.camera));
+        if (!this.covered && !this.contextLost) {
+          guard('render', () => this.post.render(rdt));
+          guard('postRender', () => cur.postRender?.(this.renderer));
         }
       }
       this.input.endFrame();

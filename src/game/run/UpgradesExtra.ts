@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import type { Ctx, EnemyLike } from '../Ctx';
 import type { Hit } from '../combat/Damage';
 import type { Modifier } from '../combat/Stats';
-import { UPGRADES, UPGRADE_BY_ID, UpgradeDef, UpgradeManager, Offer, Rarity, GambleKind } from './Upgrades';
+import { UPGRADES, UPGRADE_BY_ID, UpgradeDef, UpgradeManager, Offer, Rarity, GambleKind, RARITY, RARITY_ORDER, TIER_MULT, cnt, rd, tierMult, tierDown, dealtRarity } from './Upgrades';
 import { rnd } from '../../engine/math/rand';
 import { zap, shockwave } from '../player/Equipment';
 
@@ -29,12 +29,12 @@ export const EXTRA_UPGRADES: UpgradeDef[] = [
   // ------------------------------------------------------------- gun
   { id: 'bankShot', name: 'Bank Shot', cat: 'gun', rarity: 'uncommon', maxLv: 3, icon: 'spark', desc: (l) => `Missed shots skip off the sand into the nearest enemy within ${7 + 2 * l} m for ${55 + 15 * l}% damage.`, lore: 'Sundown never misses. The ground does.' },
   { id: 'sixthChamber', name: 'The Sixth Chamber', cat: 'gun', rarity: 'rare', maxLv: 2, icon: 'cylinder', desc: (l) => `The last round in the cylinder is a dynamite slug: it explodes for ${35 + 25 * l} damage in a ${f1(2.6 + 0.6 * l)} m blast.`, lore: 'Load five, pray on the sixth.' },
-  { id: 'thunderhead', name: 'Thunderhead', cat: 'gun', rarity: 'rare', maxLv: 3, icon: 'bolt', god: 'Set', desc: (l) => `Crits arc lightning to ${1 + l} nearby enem${l ? 'ies' : 'y'} for 45% of the hit, jolting them stiff.` },
+  { id: 'thunderhead', name: 'Thunderhead', cat: 'gun', rarity: 'rare', maxLv: 3, icon: 'bolt', god: 'Set', desc: (l) => `Crits arc lightning to ${1 + cnt(l)} nearby enemies for 45% of the hit, jolting them stiff.` },
   { id: 'deadCalm', name: 'Dead Calm', cat: 'gun', rarity: 'rare', maxLv: 2, icon: 'eye', god: 'Horus', desc: (l) => `A perfect reload slows the world for ${f1(1.6 + 0.6 * l)} s: deadeye, +${25 * l}% crit chance.` },
   { id: 'trickShot', name: 'Trick Shot', cat: 'gun', rarity: 'uncommon', maxLv: 3, icon: 'star4', desc: (l) => `Airborne: +${12 * l}% gun damage and +${5 * l}% crit chance. Airborne kills refill ${10 * l}% boost.` },
   // ------------------------------------------------------------- insects
   { id: 'venomPuddles', name: 'Venom Puddles', cat: 'insect', rarity: 'uncommon', maxLv: 3, icon: 'bubble', god: 'Serket', desc: (l) => `Poisoned enemies burst into a venom puddle when they die (${f1(1.4 + 0.3 * l)} m, ${4 + l} s) that poisons all who wade in.` },
-  { id: 'mirrorBrood', name: 'Phantom Pinches', cat: 'insect', rarity: 'rare', maxLv: 3, icon: 'scorp', god: 'Serket', desc: (l) => `Crit kills have a ${25 + 15 * l}% chance to hatch a phantom Pinch from the corpse. It hunts for ${5 + l} s.`, lore: 'Pinch insists they are cousins.' },
+  { id: 'mirrorBrood', name: 'Phantom Pinches', cat: 'insect', rarity: 'rare', maxLv: 3, icon: 'scorp', god: 'Serket', desc: (l) => `Crit kills have a ${Math.min(100, 25 + 15 * l)}% chance to hatch a phantom Pinch from the corpse. It hunts for ${5 + l} s.`, lore: 'Pinch insists they are cousins.' },
   { id: 'scorpionWhip', name: 'Scorpion-Tail Whip', cat: 'insect', rarity: 'rare', maxLv: 3, icon: 'scorp_x2', god: 'Serket', desc: (l) => `Melee also cracks a venomous tail-whip ${f1(5.5 + 0.5 * l)} m ahead: ${16 + 10 * l} damage, 3 poison, and it drags them in.` },
   // ------------------------------------------------------------- passives
   { id: 'hellfireTrail', name: 'Hellfire Trail', cat: 'passive', rarity: 'uncommon', maxLv: 3, icon: 'flame1', desc: (l) => `Boosting scorches the sand: the board leaves fire for ${f1(1.6 + 0.4 * l)} s that burns anything crossing it.` },
@@ -58,133 +58,152 @@ export const RISK_UPGRADES: UpgradeDef[] = [
   {
     id: 'glassCannon', name: 'Glass Cannon', cat: 'passive', rarity: 'rare', maxLv: 3, icon: 'bolt',
     mods: (l) => [...dmg3(0.25 * l), { stat: 'maxHp', type: 'pct', value: -0.12 * l }],
-    desc: (l) => `Every shot, slash and sting hits ${25 * l}% harder, but your bones carry ${12 * l}% less health.`,
+    desc: (l, d = l) => `Every shot, slash and sting hits ${25 * l}% harder, but your bones carry ${12 * d}% less health.`,
     pros: (l) => [`+${25 * l}% gun, melee and divine damage`], cons: (l) => [`−${12 * l}% max health`],
     lore: 'Hits like a cannon. Breaks like the bottle it came in.',
   },
   {
     id: 'warmGun', name: 'Happiness Is a Warm Gun', cat: 'gun', rarity: 'uncommon', maxLv: 3, icon: 'cylinder',
     mods: (l) => [{ stat: 'fireRate', type: 'pct', value: 0.22 * l }, { stat: 'ammo', type: 'flat', value: l }, { stat: 'spread', type: 'pct', value: 0.3 * l }],
-    desc: (l) => `The iron runs hot: it fires ${22 * l}% faster and holds ${l} more round${s_(l)}, but every shot kicks ${30 * l}% wider.`,
-    pros: (l) => [`+${22 * l}% fire rate`, `+${l} round${s_(l)} in the cylinder`], cons: (l) => [`+${30 * l}% spread`],
+    desc: (l, d = l) => `The iron runs hot: it fires ${22 * l}% faster and holds ${cnt(l)} more round${s_(cnt(l))}, but every shot kicks ${30 * d}% wider.`,
+    pros: (l) => [`+${22 * l}% fire rate`, `+${cnt(l)} round${s_(cnt(l))} in the cylinder`], cons: (l) => [`+${30 * l}% spread`],
     lore: 'Bang bang, shoot shoot.',
   },
   {
     id: 'heavyIron', name: 'Heavy Iron', cat: 'gun', rarity: 'uncommon', maxLv: 3, icon: 'bullet',
     mods: (l) => [{ stat: 'gunDmg', type: 'pct', value: 0.3 * l }, { stat: 'knockback', type: 'pct', value: 0.25 * l }, { stat: 'fireRate', type: 'pct', value: -0.12 * l }, { stat: 'reloadSpeed', type: 'pct', value: -0.12 * l }],
-    desc: (l) => `Lead slugs in a bored-out barrel: ${30 * l}% more gun damage and ${25 * l}% more knockback, but the hammer and the reload both drag ${12 * l}%.`,
+    desc: (l, d = l) => `Lead slugs in a bored-out barrel: ${30 * l}% more gun damage and ${25 * l}% more knockback, but the hammer and the reload both drag ${12 * d}%.`,
     pros: (l) => [`+${30 * l}% gun damage`, `+${25 * l}% knockback`], cons: (l) => [`−${12 * l}% fire rate`, `−${12 * l}% reload speed`],
     lore: 'Every shot lands like a mule kick. So does every reload.',
   },
   {
     id: 'taxman', name: 'Taxman', cat: 'passive', rarity: 'uncommon', maxLv: 3, icon: 'coin',
     mods: (l) => [{ stat: 'goldGain', type: 'pct', value: 0.4 * l }, { stat: 'bountyGain', type: 'pct', value: 0.2 * l }, ...dmg3(-0.06 * l)],
-    desc: (l) => `Skim off the top: ${40 * l}% more gold and ${20 * l}% more bounty, but counting coins slows the trigger finger (${6 * l}% less damage).`,
+    desc: (l, d = l) => `Skim off the top: ${40 * l}% more gold and ${20 * l}% more bounty, but counting coins slows the trigger finger (${6 * d}% less damage).`,
     pros: (l) => [`+${40 * l}% gold`, `+${20 * l}% bounty`], cons: (l) => [`−${6 * l}% gun, melee and divine damage`],
     lore: "There's one for you, nineteen for me.",
   },
   {
     id: 'gimmeShelter', name: 'Gimme Shelter', cat: 'gear', rarity: 'common', maxLv: 3, icon: 'shield',
     mods: (l) => [{ stat: 'def', type: 'flat', value: 4 * l }, { stat: 'maxHp', type: 'pct', value: 0.08 * l }, { stat: 'moveSpeed', type: 'pct', value: -0.07 * l }, { stat: 'accel', type: 'pct', value: -0.07 * l }],
-    desc: (l) => `Iron plates sewn into the coat: +${4 * l} Defense and ${8 * l}% more max health, but the board pushes and picks up ${7 * l}% slower.`,
-    pros: (l) => [`+${4 * l} Defense`, `+${8 * l}% max health`], cons: (l) => [`−${7 * l}% push speed and acceleration`],
+    desc: (l, d = l) => `Iron plates sewn into the coat: +${rd(4 * l)} Defense and ${8 * l}% more max health, but the board pushes and picks up ${7 * d}% slower.`,
+    pros: (l) => [`+${rd(4 * l)} Defense`, `+${8 * l}% max health`], cons: (l) => [`−${7 * l}% push speed and acceleration`],
     lore: "War, children, it's just a shot away.",
   },
   {
     id: 'helterSkelter', name: 'Helter Skelter', cat: 'passive', rarity: 'rare', maxLv: 3, icon: 'speedline',
     mods: (l) => [{ stat: 'moveSpeed', type: 'pct', value: 0.12 * l }, { stat: 'boostRegen', type: 'pct', value: 0.2 * l }, { stat: 'speedDamage', type: 'flat', value: 0.004 * l }, { stat: 'armor', type: 'pct', value: -0.15 * l }],
-    desc: (l) => `Ride reckless: ${12 * l}% faster pushes, ${20 * l}% faster boost regen and +${(0.4 * l).toFixed(1)}% damage per 2 m/s of speed, but ${15 * l}% less armor.`,
-    pros: (l) => [`+${12 * l}% push speed`, `+${20 * l}% boost regen`, `+${(0.4 * l).toFixed(1)}% momentum damage`], cons: (l) => [`−${15 * l}% armor`],
+    desc: (l, d = l) => `Ride reckless: ${12 * l}% faster pushes, ${20 * l}% faster boost regen and +${(0.4 * l).toFixed(2)}% damage per 2 m/s of speed, but ${15 * d}% less armor.`,
+    pros: (l) => [`+${12 * l}% push speed`, `+${20 * l}% boost regen`, `+${(0.4 * l).toFixed(2)}% momentum damage`], cons: (l) => [`−${15 * l}% armor`],
     lore: 'When I get to the bottom I go back to the top of the slide.',
   },
   {
     id: 'paradiseCity', name: 'Paradise City', cat: 'passive', rarity: 'uncommon', maxLv: 3, icon: 'coin',
     mods: (l) => [{ stat: 'luck', type: 'flat', value: 4 * l }, { stat: 'goldGain', type: 'pct', value: 0.1 * l }, { stat: 'critDmg', type: 'flat', value: -0.15 * l }],
-    desc: (l) => `Lady Luck rides along: +${4 * l} Luck (crits, rarer cards, better gambles) and ${10 * l}% more gold, but crits hit ${15 * l}% softer.`,
-    pros: (l) => [`+${4 * l} Luck`, `+${10 * l}% gold`], cons: (l) => [`−${15 * l}% crit damage`],
+    desc: (l, d = l) => `Lady Luck rides along: +${rd(4 * l)} Luck (crits, rarer cards, better gambles) and ${10 * l}% more gold, but crits hit ${15 * d}% softer.`,
+    pros: (l) => [`+${rd(4 * l)} Luck`, `+${10 * l}% gold`], cons: (l) => [`−${15 * l}% crit damage`],
     lore: 'Take me down to the Paradise City. It is further than it looks.',
   },
   {
     id: 'jumpinJack', name: "Jumpin' Jack Flash", cat: 'gun', rarity: 'uncommon', maxLv: 3, icon: 'cylinder',
     mods: (l) => [{ stat: 'reloadSpeed', type: 'pct', value: 0.3 * l }, { stat: 'fireRate', type: 'pct', value: 0.12 * l }, { stat: 'ammo', type: 'flat', value: -l }],
-    desc: (l) => `A hair-trigger rig: reloads ${30 * l}% faster and fires ${12 * l}% faster, but ${l} chamber${s_(l)} of the cylinder ${l === 1 ? 'is' : 'are'} welded shut.`,
-    pros: (l) => [`+${30 * l}% reload speed`, `+${12 * l}% fire rate`], cons: (l) => [`−${l} round${s_(l)} in the cylinder`],
+    desc: (l, d = l) => `A hair-trigger rig: reloads ${30 * l}% faster and fires ${12 * l}% faster, but ${cnt(d)} chamber${s_(cnt(d))} of the cylinder ${cnt(d) === 1 ? 'is' : 'are'} welded shut.`,
+    pros: (l) => [`+${30 * l}% reload speed`, `+${12 * l}% fire rate`], cons: (l) => [`−${cnt(l)} round${s_(cnt(l))} in the cylinder`],
     lore: "It's a gas, gas, gas.",
   },
   // ---- cursed bargains: a big win, a real price
   {
     id: 'paintItBlack', name: 'Paint It Black', cat: 'relic', rarity: 'rare', maxLv: 2, icon: 'eye', curse: true,
     mods: (l) => [{ stat: 'critChance', type: 'flat', value: 0.1 * l }, { stat: 'critDmg', type: 'flat', value: 0.4 * l }],
-    desc: (l) => `Your eye goes dark and sure: +${10 * l}% crit chance and +${40 * l}% crit damage. Every crit you land with gun or melee costs you ${l} health (never below 1).`,
+    desc: (l, d = l) => `Your eye goes dark and sure: +${10 * l}% crit chance and +${40 * l}% crit damage. Every crit you land with gun or melee costs you ${d} health (never below 1).`,
     pros: (l) => [`+${10 * l}% crit chance`, `+${40 * l}% crit damage`], cons: (l) => [`Every crit costs you ${l} health`],
     lore: 'I see a red door and I want it painted black.',
   },
   {
     id: 'sympathyDevil', name: 'Sympathy for the Devil', cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'flame2', curse: true,
-    mods: () => [...dmg3(0.5), { stat: 'critChance', type: 'flat', value: 0.05 }, { stat: 'maxHp', type: 'pct', value: -0.3 }, { stat: 'regen', type: 'mult', value: 0 }],
-    desc: () => 'Shake the stranger\'s hand: +50% gun, melee and divine damage and +5% crit chance. He keeps a third of your health and all of your natural regeneration.',
-    pros: () => ['+50% gun, melee and divine damage', '+5% crit chance'], cons: () => ['−30% max health', 'No natural regeneration'],
+    mods: (l) => [...dmg3(0.5 * l), { stat: 'critChance', type: 'flat', value: 0.05 * l }, { stat: 'maxHp', type: 'pct', value: -0.3 * l }, { stat: 'regen', type: 'mult', value: 0 }],
+    desc: (l, d = l) => `Shake the stranger's hand: +${50 * l}% gun, melee and divine damage and +${5 * l}% crit chance. He keeps ${d > 1.01 ? `${30 * d}%` : 'a third'} of your health and all of your natural regeneration.`,
+    pros: (l) => [`+${50 * l}% gun, melee and divine damage`, `+${5 * l}% crit chance`], cons: (l) => [`−${30 * l}% max health`, 'No natural regeneration'],
     lore: 'Pleased to meet you. Hope you guessed my name.',
   },
   {
     id: 'heavensDoor', name: "Knockin' on Heaven's Door", cat: 'relic', rarity: 'epic', maxLv: 1, icon: 'ankh', curse: true,
-    mods: () => [{ stat: 'lifesteal', type: 'flat', value: 0.06 }, { stat: 'regen', type: 'pct', value: 1.0 }, { stat: 'maxHp', type: 'pct', value: -0.25 }],
-    desc: () => 'One foot through the door: 6% of all gun and melee damage heals you and regeneration doubles, but you carry a quarter less max health.',
-    pros: () => ['+6% lifesteal', '+100% regeneration'], cons: () => ['−25% max health'],
+    mods: (l) => [{ stat: 'lifesteal', type: 'flat', value: 0.06 * l }, { stat: 'regen', type: 'pct', value: 1.0 * l }, { stat: 'maxHp', type: 'pct', value: -0.25 * l }],
+    desc: (l, d = l) => `One foot through the door: ${6 * l}% of all gun and melee damage heals you and regeneration ${l > 1.01 ? `climbs ${100 * l}%` : 'doubles'}, but you carry ${d > 1.01 ? `${25 * d}%` : 'a quarter'} less max health.`,
+    pros: (l) => [`+${6 * l}% lifesteal`, `+${100 * l}% regeneration`], cons: (l) => [`−${25 * l}% max health`],
     lore: 'Mama, put my guns in the ground.',
   },
   {
     id: 'liveAndLetDie', name: 'Live and Let Die', cat: 'gear', rarity: 'rare', maxLv: 2, icon: 'bolt', curse: true,
     mods: (l) => [{ stat: 'explosionRadius', type: 'pct', value: 0.3 * l }, { stat: 'magicDmg', type: 'pct', value: 0.15 * l }],
-    desc: (l) => `Packed with black powder: blasts reach ${30 * l}% wider and divine damage is up ${15 * l}%, but standing in your own blast singes you for 4% of your max health.`,
-    pros: (l) => [`+${30 * l}% blast radius`, `+${15 * l}% divine damage`], cons: () => ['Your own blasts singe you (−4% max health)'],
+    desc: (l, d = l) => `Packed with black powder: blasts reach ${30 * l}% wider and divine damage is up ${15 * l}%, but standing in your own blast singes you for ${4 * d}% of your max health.`,
+    pros: (l) => [`+${30 * l}% blast radius`, `+${15 * l}% divine damage`], cons: (l) => [`Your own blasts singe you (−${4 * l}% max health)`],
     lore: 'When you got a job to do, you got to do it well.',
   },
-  // ---- gambles: the pick plays the game
+  // ---- gambles: the pick plays the game. A game dealt above its own rarity plays for
+  // more: `l` is this deal's upside multiplier, `d` its downside's (half as steep).
   {
     id: 'rollBones', name: 'Roll the Bones', cat: 'gamble', rarity: 'rare', maxLv: 9, icon: 'skull', gamble: 'bones',
-    desc: () => 'Roll two bone dice for a free upgrade: the higher the roll, the rarer it is. 3–5 Common or Uncommon, 6–8 Uncommon or Rare, 9–10 Rare or Epic, 11 Epic or Legendary. Boxcars (6–6) pays a MYTHIC evolution; snake eyes (1–1) deals you a cursed card.',
-    pros: () => ['High roll: a rarer free upgrade', '6–6: a MYTHIC evolution'], cons: () => ['1–1: a cursed card, like it or not'],
+    desc: (l) => `Roll two bone dice for a free upgrade: the higher the roll, the rarer it is. 3–5 Common or Uncommon, 6–8 Uncommon or Rare, 9–10 Rare or Epic, 11 Epic or Legendary.${richer(l)} Boxcars (6–6) pays a MYTHIC evolution; snake eyes (1–1) deals you a cursed card.`,
+    pros: (l) => [`High roll: a rarer free upgrade${tiersUp(l)}`, '6–6: a MYTHIC evolution'], cons: () => ['1–1: a cursed card, like it or not'],
     odds: () => 'Mythic 1 in 36  ·  Cursed 1 in 36', per: 'A game, not a level: deal it again any time.',
     lore: 'The desert keeps its dice in the bones of men who lost.',
   },
   {
     id: 'snakeEyes', name: 'Snake Eyes', cat: 'gamble', rarity: 'uncommon', maxLv: 9, icon: 'dot4', gamble: 'snake',
-    desc: () => 'Roll two bone dice. Any doubles: +5 Luck and +8% crit chance for the rest of the hunt. Snake eyes (1–1): a free Legendary as well. Anything else: −2 Luck.',
-    pros: () => ['Doubles: +5 Luck, +8% crit chance', '1–1: a free Legendary too'], cons: () => ['No doubles: −2 Luck'],
+    desc: (l, d = l) => `Roll two bone dice. Any doubles: +${rd(5 * l)} Luck and +${rd(8 * l)}% crit chance for the rest of the hunt. Snake eyes (1–1): a free Legendary as well. Anything else: −${rd(2 * d)} Luck.`,
+    pros: (l) => [`Doubles: +${rd(5 * l)} Luck, +${rd(8 * l)}% crit chance`, '1–1: a free Legendary too'], cons: (l) => [`No doubles: −${rd(2 * l)} Luck`],
     odds: () => 'Doubles 1 in 6  ·  Snake eyes 1 in 36  ·  Luck loads the dice', per: 'A game, not a level: deal it again any time.',
     lore: 'Two little eyes, staring up at you from the sand.',
   },
   {
     id: 'deadMansDraw', name: "Dead Man's Draw", cat: 'gamble', rarity: 'rare', maxLv: 9, icon: 'skull', gamble: 'deadman',
-    desc: () => 'Roll against a dead gunslinger, one die each: yours bone, his black. Match or beat him: a random Rare-or-better upgrade and +60 gold. Roll lower: he draws first, and you lose 30% of your current health and 30 gold.',
-    pros: () => ['Win: a Rare+ upgrade and +60 gold'], cons: () => ['Lose: −30% health, −30 gold'],
+    desc: (l, d = l) => `Roll against a dead gunslinger, one die each: yours bone, his black. Match or beat him: a random ${winTier(l)} upgrade and +${rd(60 * l)} gold. Roll lower: he draws first, and you lose ${deadHp(d)}% of your current health and ${rd(30 * d)} gold.`,
+    pros: (l) => [`Win: a ${winTier(l)} upgrade and +${rd(60 * l)} gold`], cons: (l) => [`Lose: −${deadHp(l)}% health, −${rd(30 * l)} gold`],
     odds: () => 'You win 7 in 12 (ties go to the living)', per: 'A game, not a level: deal it again any time.',
     lore: 'Aces and eights. He is still holding them.',
   },
   {
     id: 'coinToss', name: 'Coin Toss', cat: 'gamble', rarity: 'common', maxLv: 9, icon: 'coin', gamble: 'coin',
-    desc: () => 'Call it in the air. Heads: double your gold (at least +40, at most +400). Tails: lose half of it.',
-    pros: () => ['Heads: your gold ×2 (+40 to +400)'], cons: () => ['Tails: lose half your gold'],
+    desc: (l, d = l) => `Call it in the air. Heads: ${l > 1.01 ? `win ${rd(100 * l)}% of your gold on top` : 'double your gold'} (at least +${rd(40 * l)}, at most +${rd(400 * l)}). Tails: lose ${tailsLoss(d) === 50 ? 'half' : tailsLoss(d) + '%'} of it.`,
+    pros: (l) => [`Heads: +${rd(100 * l)}% of your gold (+${rd(40 * l)} to +${rd(400 * l)})`], cons: (l) => [`Tails: lose ${tailsLoss(l) === 50 ? 'half' : tailsLoss(l) + '%'} of your gold`],
     odds: () => 'Heads 50% (+1% per Luck, up to 65%)', per: 'A game, not a level: deal it again any time.',
     lore: 'Heads you win. Tails the desert wins. It usually does.',
   },
   {
     id: 'doubleNothing', name: 'Double or Nothing', cat: 'gamble', rarity: 'epic', maxLv: 9, icon: 'coin', gamble: 'double',
-    desc: () => 'Flip a gold coin over one of your upgrades, chosen at random. Heads: its level doubles (up to its max). Tails: it loses a level, and at level 1 it is gone.',
-    pros: () => ["Heads: a random upgrade's level ×2"], cons: () => ['Tails: that upgrade loses a level'],
+    desc: (l) => `Flip a gold coin over one of your upgrades, chosen at random. Heads: its level doubles (up to its max)${l > 1.01 ? `, every new level dealt ${stepsOfMult(l)} tier${s_(stepsOfMult(l))} richer` : ''}. Tails: it loses a level, and at level 1 it is gone.`,
+    pros: (l) => [`Heads: a random upgrade's level ×2${tiersUp(l)}`], cons: () => ['Tails: that upgrade loses a level'],
     odds: () => 'Heads 50% (+1% per Luck, up to 65%)', per: 'A game, not a level: deal it again any time.',
     lore: 'Every gambler dies broke. Not every gambler dies today.',
   },
   {
     id: 'russianRoulette', name: 'Russian Roulette', cat: 'gamble', rarity: 'epic', maxLv: 3, icon: 'cylinder', gamble: 'roulette',
     mods: (l) => dmg3(0.3 * l),
-    desc: (l) => `+${30 * l}% gun, melee and divine damage, kept whatever happens. Spin the cylinder with ${l} live round${s_(l)} in six and pull the hammer on yourself: a live round costs 40% of your max health (never fatal).`,
-    pros: (l) => [`+${30 * l}% gun, melee and divine damage`], cons: (l) => [`${l} in 6: shoot yourself, −40% max health`],
-    odds: (l) => `${6 - l} in 6 you walk away clean`, per: '+30% damage and one more live round per level',
+    desc: (l, d = l) => `+${30 * l}% gun, melee and divine damage, kept whatever happens. Spin the cylinder with ${live(d)} live round${s_(live(d))} in six and pull the hammer on yourself: a live round costs 40% of your max health (never fatal).`,
+    pros: (l) => [`+${30 * l}% gun, melee and divine damage`], cons: (l) => [`${live(l)} in 6: shoot yourself, −40% max health`],
+    odds: (l) => `${6 - live(l)} in 6 you walk away clean`, per: '+30% damage and one more live round per level',
     lore: 'Six chambers, one prayer.',
   },
 ];
+
+// ------------------------------------------------------------------ a game's stakes at its dealt rarity
+
+/** tiers climbed, from a deal's upside multiplier */
+function stepsOfMult(m: number) {
+  let best = 0;
+  for (let i = 0; i < TIER_MULT.length; i++) if (Math.abs(TIER_MULT[i] - m) < Math.abs(TIER_MULT[best] - m)) best = i;
+  return best;
+}
+const tiersUp = (l: number) => (stepsOfMult(l) > 0 ? ` (+${stepsOfMult(l)} tier${s_(stepsOfMult(l))})` : '');
+const richer = (l: number) => (stepsOfMult(l) > 0 ? ` Dealt rich: every free card climbs ${stepsOfMult(l)} more tier${s_(stepsOfMult(l))}.` : '');
+const winTier = (l: number) => `${RARITY[RARITY_ORDER[Math.min(4, 2 + stepsOfMult(l))]].name}-or-better`;
+/** Dead Man's Draw: share of current health lost */
+const deadHp = (d: number) => Math.min(60, rd(30 * d));
+/** Coin Toss: share of gold lost on tails */
+const tailsLoss = (d: number) => Math.min(75, rd(50 * d));
+/** Russian Roulette: live rounds in the cylinder */
+const live = (d: number) => Math.min(5, cnt(d));
 
 // ------------------------------------------------------------------ playing a gamble
 
@@ -221,19 +240,26 @@ function freeCard(up: UpgradeManager, rarities: Rarity[]) {
   return pick(UPGRADES.filter((u) => ok(u) && rarities.includes(u.rarity))) ?? pick(UPGRADES.filter(ok));
 }
 
+/** tiers to deal a free card at so it lands on `rank` (never below its own rarity) */
+const stepsTo = (d: UpgradeDef | null, rank: number) => (d ? Math.max(0, Math.min(4, rank) - RARITY[d.rarity].rank) : 0);
+
 /**
  * Decide a gamble now (the props then play this exact result). `player` is the
  * hunter (hp / maxHp); gold is the run's. Nothing changes until apply().
+ * A game dealt above its own rarity (o.steps) plays for more: its winnings ×
+ * tierMult, its losses × tierDown, its free cards dealt that many tiers richer.
  */
 export function resolveGamble(o: Offer, up: UpgradeManager, ctx: Ctx, player: any): GambleOutcome {
   const def = o.def;
   const kind = def.gamble!;
+  const k = Math.max(0, Math.min(4, o.steps ?? 0));
+  const m = tierMult(k), dn = tierDown(k);
   const luck = up.sheet.get('luck');
   const n = up.history.length;
-  const stat = (m: M) => up.sheet.add({ ...m, source: `gamble:${def.id}:${n}` });
-  const grant = (d: UpgradeDef | null) => {
+  const stat = (mm: M) => up.sheet.add({ ...mm, source: `gamble:${def.id}:${n}` });
+  const grant = (d: UpgradeDef | null, steps = 0) => {
     if (!d) return;
-    const lv = up.apply(d.id);
+    const lv = up.apply(d.id, steps);
     ctx.events.emit('upgradePicked', d.id, lv);
   };
   const hurt = (frac: number, ofMax: boolean) => {
@@ -250,10 +276,17 @@ export function resolveGamble(o: Offer, up: UpgradeManager, ctx: Ctx, player: an
     return d;
   };
   const name = (d: UpgradeDef | null) => (d ? d.name.toUpperCase() : 'NOTHING');
+  /** "MOMENTUM  ·  EPIC  LV 2" */
+  const named = (d: UpgradeDef | null, steps: number) => {
+    if (!d) return 'NOTHING';
+    const lvAfter = up.lv(d.id) + 1;
+    return `${name(d)}  ·  ${RARITY[dealtRarity(d, steps)].name.toUpperCase()}${lvAfter > 1 ? '  LV ' + lvAfter : ''}`;
+  };
   if (kind === 'bones') {
     const dice = [d6(), d6()];
     const sum = dice[0] + dice[1];
     let card: UpgradeDef | null;
+    let steps = 0;
     let title: string;
     let win = true, jackpot = false;
     if (sum === 2) {
@@ -262,15 +295,18 @@ export function resolveGamble(o: Offer, up: UpgradeManager, ctx: Ctx, player: an
       win = false;
     } else if (sum === 12) {
       card = pick(UPGRADES.filter((u) => u.cat === 'evolution' && !up.lv(u.id))) ?? freeCard(up, ['legendary']);
+      if (card && card.cat !== 'evolution') steps = stepsTo(card, 4);
       title = 'BOXCARS!';
       jackpot = true;
     } else {
       const tier: Rarity[] = sum <= 5 ? ['common', 'uncommon'] : sum <= 8 ? ['uncommon', 'rare'] : sum <= 10 ? ['rare', 'epic'] : ['epic', 'legendary'];
       card = freeCard(up, tier);
+      // the roll names the rarity it lands on; a rich deal climbs k tiers more
+      const at = RARITY[tier[rnd.next() < 0.5 ? 0 : 1]].rank + k;
+      steps = stepsTo(card, at);
       title = `ROLLED ${sum}`;
     }
-    const lvAfter = card ? up.lv(card.id) + 1 : 0;
-    return { kind, prop: 'dice', win, jackpot, dice, title, line: card ? `${win ? '' : 'CURSED: '}${name(card)}${lvAfter > 1 ? '  LV ' + lvAfter : ''}` : 'THE BONES ARE SILENT', apply: () => grant(card) };
+    return { kind, prop: 'dice', win, jackpot, dice, title, line: card ? `${win ? '' : 'CURSED: '}${card.cat === 'evolution' ? name(card) : named(card, steps)}` : 'THE BONES ARE SILENT', apply: () => grant(card, steps) };
   }
   if (kind === 'snake') {
     const dice = [d6(), d6()];
@@ -278,16 +314,18 @@ export function resolveGamble(o: Offer, up: UpgradeManager, ctx: Ctx, player: an
     const dbl = dice[0] === dice[1];
     const snake = dbl && dice[0] === 1;
     const card = snake ? freeCard(up, ['legendary']) : null;
+    const cs = stepsTo(card, 4);
+    const lk = rd(5 * m), cc = rd(8 * m), lose = rd(2 * dn);
     return {
       kind, prop: 'dice', win: dbl, jackpot: snake, dice,
       title: snake ? 'SNAKE EYES!' : dbl ? 'DOUBLES!' : 'NO DICE',
-      line: snake ? `+5 LUCK  +8% CRIT  ·  ${name(card)}` : dbl ? '+5 LUCK  ·  +8% CRIT CHANCE' : '−2 LUCK',
+      line: snake ? `+${lk} LUCK  +${cc}% CRIT  ·  ${named(card, cs)}` : dbl ? `+${lk} LUCK  ·  +${cc}% CRIT CHANCE` : `−${lose} LUCK`,
       apply: () => {
         if (dbl) {
-          stat({ stat: 'luck', type: 'flat', value: 5 });
-          stat({ stat: 'critChance', type: 'flat', value: 0.08 });
-          if (card) grant(card);
-        } else stat({ stat: 'luck', type: 'flat', value: -2 });
+          stat({ stat: 'luck', type: 'flat', value: lk });
+          stat({ stat: 'critChance', type: 'flat', value: cc / 100 });
+          if (card) grant(card, cs);
+        } else stat({ stat: 'luck', type: 'flat', value: -lose });
       },
     };
   }
@@ -296,17 +334,20 @@ export function resolveGamble(o: Offer, up: UpgradeManager, ctx: Ctx, player: an
     if (dice[0] < dice[1] && rnd.next() < Math.min(0.3, luck * 0.015)) dice[0] = d6();
     const win = dice[0] >= dice[1];
     const card = win ? freeCard(up, ['rare', 'epic', 'legendary']) : null;
+    // Rare-or-better (k tiers more on a rich deal): at least that, and at least k above its own
+    const cs = card ? Math.max(stepsTo(card, 2 + k), Math.min(k, 4 - RARITY[card.rarity].rank)) : 0;
+    const g = rd(60 * m), lg = rd(30 * dn), hp = deadHp(dn);
     return {
       kind, prop: 'dice', win, jackpot: win && dice[0] === 6, dice, dark: [false, true],
       title: win ? (dice[0] === dice[1] ? 'A DEAD HEAT' : 'YOU DREW FIRST') : 'HE DREW FIRST',
-      line: win ? `${name(card)}  ·  +60 GOLD` : '−30% HEALTH  ·  −30 GOLD',
+      line: win ? `${named(card, cs)}  ·  +${g} GOLD` : `−${hp}% HEALTH  ·  −${lg} GOLD`,
       apply: () => {
         if (win) {
-          grant(card);
-          gold(60);
+          grant(card, cs);
+          gold(g);
         } else {
-          hurt(0.3, false);
-          gold(-30);
+          hurt(hp / 100, false);
+          gold(-lg);
         }
       },
     };
@@ -315,7 +356,7 @@ export function resolveGamble(o: Offer, up: UpgradeManager, ctx: Ctx, player: an
     const heads = rnd.next() < 0.5 + Math.min(0.15, luck * 0.01);
     if (kind === 'coin') {
       const g = ctx.run.gold;
-      const win = heads ? Math.max(40, Math.min(400, g)) : -Math.floor(g / 2);
+      const win = heads ? Math.round(Math.max(40 * m, Math.min(400 * m, g * m))) : -Math.floor((g * tailsLoss(dn)) / 100);
       return { kind, prop: 'coin', win: heads, jackpot: heads && win >= 200, heads, title: heads ? 'HEADS!' : 'TAILS', line: heads ? `+${win} GOLD` : win < 0 ? `${win} GOLD` : 'NOTHING TO LOSE', apply: () => void gold(win) };
     }
     const stakes = up.stakes();
@@ -325,23 +366,23 @@ export function resolveGamble(o: Offer, up: UpgradeManager, ctx: Ctx, player: an
     return {
       kind, prop: 'coin', win: heads, jackpot: heads && to - lv >= 2, heads,
       title: heads ? 'DOUBLE!' : 'NOTHING',
-      line: target ? `${name(target)}  LV ${lv} → ${to > 0 ? to : 'GONE'}` : 'NOTHING ON THE TABLE',
+      line: target ? `${name(target)}  LV ${lv} → ${to > 0 ? to : 'GONE'}${heads && k > 0 && to > lv ? '  ·  ' + RARITY[dealtRarity(target, k)].name.toUpperCase() : ''}` : 'NOTHING ON THE TABLE',
       apply: () => {
-        if (target) up.setLevel(target.id, to);
+        if (target) up.setLevel(target.id, to, k);
       },
     };
   }
-  // russian roulette: toLv live rounds in six
-  const live = Math.min(5, o.toLv);
+  // russian roulette: the live rounds follow the downside's power, the damage the upside's (Offer.pw)
+  const nLive = live(o.pwDn ?? o.toLv);
   const loaded = [false, false, false, false, false, false];
   const order = [0, 1, 2, 3, 4, 5].sort(() => rnd.next() - 0.5);
-  for (let i = 0; i < live; i++) loaded[order[i]] = true;
+  for (let i = 0; i < nLive; i++) loaded[order[i]] = true;
   const stop = Math.floor(rnd.next() * 6);
   const bang = loaded[stop];
   return {
     kind, prop: 'chamber', win: !bang, jackpot: false, loaded, stop,
     title: bang ? 'BANG!' : 'CLICK.',
-    line: bang ? '−40% MAX HEALTH  ·  THE DAMAGE STAYS' : `YOU LIVE  ·  +${30 * o.toLv}% DAMAGE`,
+    line: bang ? '−40% MAX HEALTH  ·  THE DAMAGE STAYS' : `YOU LIVE  ·  +${+(30 * (o.pw ?? o.toLv)).toFixed(1)}% DAMAGE`,
     apply: () => {
       if (bang) hurt(0.4, true);
     },
@@ -414,8 +455,9 @@ export class ExtraUpgradeEffects {
     );
   }
 
+  /** an upgrade's power: levels × dealt-tier multipliers (0 when not taken) */
   private lv(id: string) {
-    return this.up.lv(id);
+    return this.up.pw(id);
   }
 
   private mod(key: string, mods: M[] | null) {
@@ -469,7 +511,7 @@ export class ExtraUpgradeEffects {
     if (!this.lv('liveAndLetDie') || owner !== 'player' || !pl.alive) return;
     if (Math.hypot(pl.pos.x - at.x, pl.pos.y - at.y, pl.pos.z - at.z) > r || this.ctx.run.time - this.singeT < 0.3) return;
     this.singeT = this.ctx.run.time;
-    pl.hp = Math.max(1, pl.hp - pl.maxHp * 0.04);
+    pl.hp = Math.max(1, pl.hp - pl.maxHp * 0.04 * Math.max(1, this.up.pwDn('liveAndLetDie')));
     pl.hurtFlash = 1;
     this.ctx.fx.flames({ x: pl.pos.x, y: pl.pos.y + 0.6, z: pl.pos.z }, 4, 0.7);
   }
@@ -497,7 +539,7 @@ export class ExtraUpgradeEffects {
     const ctx = this.ctx;
     if (res?.crit) this.crits.set(e.id, ctx.run.time);
     // Paint It Black: every crit you land draws a little of your own blood
-    const pb = this.lv('paintItBlack');
+    const pb = this.up.pwDn('paintItBlack');
     if (pb && res?.crit && (hit.source === 'gun' || hit.source === 'melee') && ctx.run.time - this.blackT > 0.12 && this.player.alive) {
       this.blackT = ctx.run.time;
       this.player.hp = Math.max(1, this.player.hp - pb);
@@ -507,7 +549,7 @@ export class ExtraUpgradeEffects {
     if (th && res?.crit && hit.source === 'gun' && !hit.tags?.includes('chain')) {
       let from: EnemyLike = e;
       const seen = new Set([e.id]);
-      for (let i = 0; i < 1 + th; i++) {
+      for (let i = 0; i < 1 + cnt(th); i++) {
         const next = ctx.enemies.nearest(from.pos, 9, (o) => !seen.has(o.id) && o.alive);
         if (!next) break;
         seen.add(next.id);
@@ -529,7 +571,7 @@ export class ExtraUpgradeEffects {
     if (this.lv('venomBrood') && hit?.source === 'scorpion') this.addPuddle(e.pos.x, e.pos.z, 1.3, 3, 12);
     const mb = this.lv('mirrorBrood');
     const ct = this.crits.get(e.id);
-    if (mb && ct !== undefined && ctx.run.time - ct < 0.3 && rnd.chance(0.25 + 0.15 * mb)) this.phantom(e.pos, 5 + mb);
+    if (mb && ct !== undefined && ctx.run.time - ct < 0.3 && rnd.chance(Math.min(1, 0.25 + 0.15 * mb))) this.phantom(e.pos, 5 + mb);
     this.crits.delete(e.id);
     const ts = this.lv('trickShot');
     if (ts && !pl.board.grounded) pl.board.boostMeter = Math.min(1, pl.board.boostMeter + 0.1 * ts);
