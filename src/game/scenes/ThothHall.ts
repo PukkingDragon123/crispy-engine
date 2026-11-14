@@ -1571,8 +1571,6 @@ export class ThothHall {
     this.ped.obj?.removeFromParent();
     this.ped.puppet?.dispose();
     this.giftShow.p?.dispose();
-    // Thoth's animator owns his eye materials
-    this.thoth?.th?.dispose();
     for (const w of [this.thoth, ...this.worms]) w?.rig.dispose();
     this.moon?.shadow.map?.dispose();
     this.glassMat.dispose();

@@ -544,8 +544,10 @@ export class HallUI {
   }
 
   // ======================================================================= frame
+  private touch = false;
   frame(rdt: number, s: HallUIState) {
     this.t += rdt;
+    this.touch = s.touch;
     const c = this.c;
     c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     c.clearRect(0, 0, this.W, this.H);
@@ -888,7 +890,7 @@ export class HallUI {
     const nameSize = this.tw(p.name, 26) > inner || maxH < 300 ? 20 : 26;
     line(p.known ? p.name : 'Under the dust sheet', nameSize, p.known ? RED : SEPIA, 'center', 2);
     line(p.known ? p.title : `${p.section}  ·  jar ${p.num}`, small, SEPIA, 'center', 6);
-    if (p.known) line(`${p.section}  ·  jar ${p.num}${p.isNew ? '  ·  NEW' : ''}`, small - 1, DIM, 'center', 4);
+    if (p.known && maxH >= 300) line(`${p.section}  ·  jar ${p.num}${p.isNew ? '  ·  NEW' : ''}`, small - 1, DIM, 'center', 4);
     rule();
     // the study block at the foot is always kept whole; the story above it gives way on a short screen
     const studyH = 12 + 22 + (small + 4) + inkH + (small + 2) + 14;
@@ -993,7 +995,8 @@ export class HallUI {
     const x = this.W - W - 16 + (1 - a) * (W + 30);
     const top = 64;
     const size = this.narrow ? 13 : 15;
-    const maxH = this.H - top - Math.ceil((size * 2 + 22) / S) * S - 56;
+    // down to just above the drawers (the shelf arrows keep to the left of the sheet)
+    const maxH = this.H - top - Math.ceil((size * 2 + 22) / S) * S - (this.touch ? 12 : 30) - (this.H < 500 ? 14 : 40);
     const sig = JSON.stringify(p) + W + ':' + maxH + ':' + S;
     if (!this.page || this.page.sig !== sig) {
       const np = this.renderPage(p, W, maxH);
@@ -1256,8 +1259,11 @@ export class HallUI {
     const ax = Math.round(x0 + PW / 2 - (img.width * S) / 2), ay = top;
     this.astroAt = { x: ax, y: ay };
     // a soft shadow under the instrument
-    this.c.globalAlpha = 0.35 * a;
-    px(this.c, ax + 3 * S, ay + 4 * S + A.T * S, img.width * S, img.width * S, '#000');
+    this.c.globalAlpha = 0.3 * a;
+    for (let r = -A.R; r <= A.R; r++) {
+      const half = Math.floor(Math.sqrt(A.R * A.R - r * r));
+      px(this.c, ax + (A.cx - half + 3) * S, ay + (A.cy + r + 4) * S, (half * 2 + 1) * S, S, '#000');
+    }
     this.c.globalAlpha = 1;
     this.blit(img, ax, ay, a);
     this.rect('astro', ax, ay + A.T * S, img.width * S, img.width * S);
@@ -1278,7 +1284,7 @@ export class HallUI {
       const nm = this.tw(g.name, 20) > PW - 30 ? 16 : 20;
       this.ink(g.name, x0 + PW / 2, py + 8, g.given ? '#ffd36b' : '#fff3d6', nm, 'center', true, a);
       this.ink(status, x0 + PW / 2, py + 12 + nm, g.given ? '#a8f0c0' : this.astroSel === next ? '#ffd36b' : '#cfdcf6', size, 'center', false, a);
-      this.ink(`${s.studies} studies finished  ·  tap a jewel, spin the stars`, x0 + PW / 2, py + 16 + nm + size, '#8ab0e8', size - 2, 'center', false, a);
+      this.ink(`${s.studies} stud${s.studies === 1 ? 'y' : 'ies'} finished  ·  tap a jewel, spin the stars`, x0 + PW / 2, py + 16 + nm + size, '#8ab0e8', size - 2, 'center', false, a);
     }
     this.rect('panel', x0, py, PW, plateH * S);
     this.sheet.w = 0;
