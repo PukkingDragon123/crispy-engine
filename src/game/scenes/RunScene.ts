@@ -134,6 +134,24 @@ export function rankCost(rank: number) {
   return Math.round(12 + rank * 9 + Math.pow(rank, 1.6) * 2 + 30 * Math.exp(-(rank - 1) / 4));
 }
 
+/** a height sampler on the bare height field (a closure made here holds only the sub-area, never the run) */
+function heightSampler(sa: { field: { heightAt(x: number, z: number): number }; waterLevel: number }) {
+  return (x: number, z: number) => Math.max(sa.field.heightAt(x, z), sa.waterLevel);
+}
+
+/** the results screen after a run; built out here so its closures cannot capture the finished run */
+function showResults(eng: Engine, res: ConstructorParameters<typeof ResultsScene>[1], opts: RunOptions) {
+  eng.tweens.after(2.6, () => {
+    void eng.setScene(
+      new ResultsScene(eng, res, () => void eng.setScene(new RunScene(eng, { ...opts, seed: (opts.seed * 31 + 7) % 100000, startWave: 1 }), 0.8)),
+      1.0
+    );
+  }, true);
+}
+
+/** the run's dev handles on window (each would keep the finished run alive) */
+const RUN_HANDLES = ['__director', '__horde', '__shop', '__trail', '__cine', '__oasis', '__bountyRip', '__khonsuSand', '__reaping', '__trial', '__wantedInk', '__wantedPhoto', '__pit'];
+
 export class RunScene implements GameScene {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(72, 1, 0.08, 1400);
@@ -499,6 +517,13 @@ export class RunScene implements GameScene {
     this.equipment?.dispose();
     this.upFx2?.dispose();
     this.events.clear();
+    // let the whole run go: nothing global may keep pointing into it, or the next scene is built
+    // while this one (world, meshes, ~650 MB of JS heap) is still alive and a phone runs out of memory
+    if (Skills.current === this.skills) Skills.current = null;
+    this.world.env.dispose();
+    this.world.sa.field.onDirty.length = 0;
+    const w = window as unknown as Record<string, unknown>;
+    for (const k of RUN_HANDLES) delete w[k];
   }
 
   // ------------------------------------------------------------------ events
@@ -1019,15 +1044,18 @@ export class RunScene implements GameScene {
     this.events.emit('runOver', this.run, won);
     const eng = this.engine;
     const p = this.player.pos;
+    // the results only need the sub-area's heights: a sampler on the bare height field, so the
+    // finished run (world, meshes, ~650 MB) is not kept alive behind the results screen
+    const sa = this.world.sa;
     const res = {
       run: { ...this.run },
       won,
-      sa: this.world.sa,
+      sa,
       reached: this.world.activeZone,
       trail: [...this.trail, { x: p.x, z: p.z }],
       deathAt: won ? null : { x: p.x, z: p.z },
       bosses: this.bossNames,
-      heightAt: this.world.groundAt,
+      heightAt: heightSampler(sa),
       banked: awardRun(this.run, this.codexKills),
       hero: this.player.rig.geo.spec,
     };
@@ -1037,12 +1065,7 @@ export class RunScene implements GameScene {
       eng.tweens.after(1.4, () => void eng.setScene(new DeathCine(eng, deathCineFromRun(this, res)), 0.35, '#fff3dc', { loading: false }), true);
       return;
     }
-    eng.tweens.after(2.6, () => {
-      void eng.setScene(
-        new ResultsScene(eng, res, () => void eng.setScene(new RunScene(eng, { ...this.opts, seed: (this.opts.seed * 31 + 7) % 100000, startWave: 1 }), 0.8)),
-        1.0
-      );
-    }, true);
+    showResults(eng, res, this.opts);
   }
 
   // ------------------------------------------------------------------ update

@@ -214,7 +214,7 @@ export class Hud {
     this.hint.style.display = 'none';
     parent.appendChild(this.hint);
     this.resize();
-    window.addEventListener('resize', () => this.resize());
+    window.addEventListener('resize', this.onResize);
   }
 
   resize() {
@@ -259,7 +259,10 @@ export class Hud {
     const tx = kind === 'coin' ? 46 : 98, ty = kind === 'coin' ? 33 : 15;
     this.parts.push({ kind, x, y, sx: x, sy: y, tx, ty, vx: (Math.random() - 0.5) * 60, vy: -40 - Math.random() * 40, t: 0, life: 0.55 + Math.random() * 0.2 });
   }
+  /** (removed in dispose: the listener would keep the whole finished run alive) */
+  private onResize = () => this.resize();
   dispose() {
+    window.removeEventListener('resize', this.onResize);
     this.canvas.remove();
     this.hint.remove();
   }
