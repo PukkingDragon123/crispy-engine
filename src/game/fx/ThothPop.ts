@@ -365,6 +365,7 @@ export class ThothPop {
   private ang = -1;
   private pos = new THREE.Vector3();
   private voicePos = new THREE.Vector3();
+  private lookPt = new THREE.Vector3();
   private stageY = 0;
   private trailT = 0;
   private sparkT = 0;
@@ -520,12 +521,14 @@ export class ThothPop {
       this.ctx.engine.audio.play('gem_chime', { volume: 0.45, pitch: 1.2 });
       a.kick(-4);
       a.flutter(1.5);
+      a.setMood('surprised', 0.5);
     }
     if (once('voice', 0.14)) {
       const s = this.show;
       const kind = !s.fresh ? 'again' : big && s.cat === 'boss' ? 'boss' : s.cat === 'bounty' ? 'bounty' : s.cat === 'wildlife' ? 'wildlife' : s.cat === 'place' ? 'place' : s.cat === 'legend' ? 'legend' : s.cat === 'loot' || s.cat === 'blueprint' ? 'loot' : 'fresh';
-      this.speech = thothSay(thothLine(kind), { pos: this.voicePos, follow: true, volume: 1 });
-      a.talk(this.speech?.duration ?? 1.2);
+      const line = thothLine(kind);
+      this.speech = thothSay(line, { pos: this.voicePos, follow: true, volume: 1 });
+      a.talk(this.speech?.duration ?? 1.2, line);
     }
     if (once('text', 0.34)) {
       this.title?.show(true);
@@ -581,12 +584,13 @@ export class ThothPop {
       if (mode === 'run') this.ctx.engine.audio.play('paper_flutter', { volume: 0.35, pitch: 1.3 });
       if (mode === 'write') this.ctx.engine.audio.play('page_turn', { volume: 0.4, pitch: 1.25 });
       if (mode === 'delight') {
-        a.flutter(1.2);
+        a.excite(0.9, tl.joy1 - t + 0.3);
         this.ctx.engine.audio.play('gem_chime', { volume: 0.5, pitch: 1.35 });
         this.ctx.fx.sparkle(this.textPos(_v, 1.05), 0xffe38c, 10, 0.5);
       }
     }
-    a.lookAt = mode === 'gasp' || mode === 'delight' ? cam.position : null;
+    // gasping and bouncing he looks at you; scampering round, his eyes stay on the thing
+    a.lookAt = mode === 'gasp' || mode === 'delight' ? cam.position : mode === 'run' ? this.lookPt.set(c.x, c.y + 0.25, c.z) : null;
     // where he stands on the ring (stage space)
     const ang = camYaw + this.ang;
     this.body.position.set(Math.sin(ang) * R, 0.06, Math.cos(ang) * R);
@@ -777,6 +781,7 @@ export class ThothPop {
     this.stage.removeFromParent();
     this.dial?.group.removeFromParent();
     for (const m of this.tiles) m.geometry.dispose();
+    this.anim?.dispose();
     this.rig?.dispose();
   }
 }
