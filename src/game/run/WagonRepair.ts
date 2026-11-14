@@ -19,6 +19,7 @@
 //              if (this.wagon?.finished) { this.wagon.dispose(); this.wagon = null; }
 //   updateHud(): ...(this.missions.active ? this.missions.hud() : this.wagon?.hud() ?? this.missions.hud())
 //   exit():    this.wagon?.dispose();
+import { speak3D, chatter3D } from '../fx/WorldSpeech';
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Player } from '../player/Player';
@@ -188,15 +189,14 @@ export class WagonRepair {
     this.reveal();
     this.pete.talk = 1.4;
     if (this.fixed) {
-      ctx.toast(this.name.toUpperCase(), '#ffd36b', '"She rolls like a dream, friend."');
-      Voice.say('prospector', 'She rolls like a dream, friend.', { pos: this.pete.pos });
+      speak3D(ctx.engine, 'prospector', 'She rolls like a dream, friend.', this.pete.pos, { key: 'pete', lift: 1.95, size: 0.17, color: '#fff3d6', glow: '#3a1a08' });
       return;
     }
     if (this.found < 3) {
       ctx.sfx('merchant_greet', this.pete.pos, 0.5, 0.9);
       const missing = this.parts.filter((p) => !p.found).map((p) => p.name.toLowerCase());
       ctx.toast(this.found ? `${this.found}/3 PARTS` : 'BROKEN WAGON', '#ffd36b', `Still need: ${missing.join(', ')}`);
-      Voice.chatter('prospector', 'ask', { pos: this.pete.pos });
+      chatter3D(ctx.engine, 'prospector', 'ask', this.pete.pos, { key: 'pete', lift: 1.95, size: 0.17, color: '#fff3d6', glow: '#3a1a08' });
       return;
     }
     // everything is here: hammer the linchpin home
@@ -276,7 +276,7 @@ export class WagonRepair {
       ctx.run.gold += gold;
       ctx.run.totalGold += gold;
       ctx.toast('WAGON FIXED', '#9dff3a', `${this.name} is back on the trail · +${bounty} bounty · +${gold} gold`, true);
-      Voice.chatter('prospector', 'thanks', { pos: this.pete.pos, delay: 0.3 });
+      chatter3D(ctx.engine, 'prospector', 'thanks', this.pete.pos, { key: 'pete', lift: 1.95, size: 0.17, color: '#fff3d6', glow: '#3a1a08', voice: { delay: 0.3 } });
       ctx.sfx('sting_positive', null, 0.9);
       const back = new THREE.Vector3(-Math.sin(this.yaw) * 3.6, 0, -Math.cos(this.yaw) * 3.6);
       ctx.engine.tweens.after(1.2, () => this.d.chest?.(pos.x + back.x, pos.z + back.z, perfect ? 'gold' : 'silver'));
@@ -302,7 +302,7 @@ export class WagonRepair {
         this.callCd = 11;
         this.pete.talk = 1.2;
         ctx.sfx('merchant_greet', this.pete.pos, 0.45, 0.9);
-        Voice.chatter('prospector', 'hail', { pos: this.pete.pos });
+        chatter3D(ctx.engine, 'prospector', 'hail', this.pete.pos, { key: 'pete', lift: 1.95, size: 0.17, color: '#fff3d6', glow: '#3a1a08' });
       }
     }
     this.pete.look = pl.pos;

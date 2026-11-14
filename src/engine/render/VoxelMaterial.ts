@@ -3,6 +3,7 @@
 // (hit flash, dissolve-into-sand, emissive boost) and optional wind sway.
 
 import * as THREE from 'three';
+import { voxelDetailAtlas, ensureVoxelGrid, VOXEL_DETAIL_GLSL, VOXEL_DETAIL } from './VoxelDetail';
 
 export const globalUniforms = {
   uTime: { value: 0 },
@@ -148,6 +149,8 @@ export interface VoxelMaterialOptions {
    * pxUV(p, n) and pxSampleG(uv, gx, gy, layer) (see game/world/PixelTex); fades out with distance.
    */
   pixel?: { tex: THREE.Texture; glsl: string; near?: number; far?: number };
+  /** the per-voxel pixel-art detail layer (VoxelDetail); on by default */
+  detail?: boolean;
 }
 
 export type VoxelMaterial = THREE.MeshStandardMaterial & {
@@ -195,7 +198,10 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
   const emissiveStrength = { value: o.emissiveStrength ?? 1.0 };
   const sway = o.sway ?? 0;
   const px = o.pixel;
+  const vd = o.detail ?? true;
   m.userData = { fx, tint, emissiveStrength } as any;
+  // voxel meshes learn their grid on first draw (VoxelDetail)
+  if (vd) m.onBeforeRender = (_r, _s, _c, geo) => ensureVoxelGrid(geo);
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uFx = fx;
     shader.uniforms.uTint = tint;
@@ -207,6 +213,10 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
     shader.uniforms.uSunCol = globalUniforms.uSunCol;
     shader.uniforms.uBounceCol = globalUniforms.uBounceCol;
     if (px) shader.uniforms.uPxTex = { value: px.tex };
+    if (vd) {
+      shader.uniforms.uVDTex = { value: voxelDetailAtlas() };
+      shader.uniforms.uVDOn = VOXEL_DETAIL.on;
+    }
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -221,13 +231,17 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
         #ifdef USE_INSTANCING
           attribute vec4 instFx;
         #endif
-        ${px ? 'attribute vec2 pxl; varying vec2 vPxl; varying vec3 vOP; varying vec3 vON;' : ''}`
+        ${px || vd ? 'varying vec3 vOP; varying vec3 vON;' : ''}
+        ${px ? 'attribute vec2 pxl; varying vec2 vPxl;' : ''}
+        ${vd ? 'attribute vec4 pxv; varying vec4 vPxv;' : ''}`
       )
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
         vMatx = matx;
-        ${px ? 'vPxl = pxl; vOP = position; vON = normal;' : ''}
+        ${px || vd ? 'vOP = position; vON = normal;' : ''}
+        ${px ? 'vPxl = pxl;' : ''}
+        ${vd ? 'vPxv = pxv;' : ''}
         #ifdef USE_INSTANCING
           vFx = instFx + uFx;
         #else
@@ -274,7 +288,9 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
         uniform vec4 uLook;
         uniform vec3 uSunDirW, uSunCol, uBounceCol;
         uniform vec3 uTint;
-        ${px ? 'varying vec2 vPxl; varying vec3 vOP; varying vec3 vON;' + px.glsl : ''}
+        ${px || vd ? 'varying vec3 vOP; varying vec3 vON;' : ''}
+        ${px ? 'varying vec2 vPxl;' + px.glsl : ''}
+        ${vd ? 'varying vec4 vPxv;' + VOXEL_DETAIL_GLSL : ''}
         float vhash(vec3 p){ p = fract(p*0.3183099+0.1); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }`
       )
       .replace(
@@ -300,6 +316,25 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
           if (vPxl.y > 0.5) { puv = puv.yx; pgx = pgx.yx; pgy = pgy.yx; }
           float pk = 1.0 - smoothstep(${(px.near ?? 48).toFixed(1)}, ${(px.far ?? 86).toFixed(1)}, length(vViewPosition));
           diffuseColor.rgb *= mix(vec3(1.0), pxSampleG(puv, pgx, pgy, vPxl.x - 1.0), pk);
+        }`
+            : ''
+        }
+        ${
+          vd
+            ? `{
+          // pixel-art detail on the model's own voxel grid (one texel per voxel face)
+          vec3 vdCell = vOP * vPxv.w - vPxv.xyz / 64.0;
+          vec3 vdN = abs(vON);
+          vec2 vdUV = vdN.y > max(vdN.x, vdN.z) ? vdCell.xz : (vdN.x > vdN.z ? vec2(vdCell.z, -vdCell.y) : vec2(vdCell.x, -vdCell.y));
+          float vdPx = max(length(dFdx(vdUV)), length(dFdy(vdUV)));
+          float vdK = (1.0 - smoothstep(0.3, 0.6, vdPx)) * step(0.5, vPxv.w) * uVDOn${px ? ' * step(vPxl.x, 0.5)' : ''};
+          if (vdK > 0.001) {
+            float vdL = vdLayer(vColor.rgb, vMatx.y, vMatx.x);
+            if (vdL >= 0.0) {
+              ivec2 vt = ivec2(mod(floor(vdUV + 1e-3), 64.0));
+              diffuseColor.rgb *= mix(vec3(1.0), texelFetch(uVDTex, ivec3(vt, int(vdL)), 0).rgb * 2.0, vdK);
+            }
+          }
         }`
             : ''
         }
@@ -346,7 +381,7 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
       );
     celify(shader);
   };
-  m.customProgramCacheKey = () => 'voxel-mat-v4look-' + sway.toFixed(3) + (px ? '-px' : '');
+  m.customProgramCacheKey = () => 'voxel-mat-v4look-' + sway.toFixed(3) + (px ? '-px' : '') + (vd ? '-vd1' : '');
   m.envMapIntensity = 1.0;
   return m;
 }

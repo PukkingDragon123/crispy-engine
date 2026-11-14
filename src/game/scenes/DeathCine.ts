@@ -12,6 +12,7 @@
 //   4. the last sunrise blooms to white and dissolves into the hideout, where he wakes
 //      up on the couch (HubScene's wake arrival) and his WANTED poster gets nailed up.
 // Space / Enter / Esc / click skips straight to the hideout.
+import { say3D } from '../fx/WorldSpeech';
 import * as THREE from 'three';
 import type { Engine, GameScene } from '../../engine/Engine';
 import { Env, EnvPreset, PRESETS } from '../world/Env';
@@ -823,13 +824,14 @@ export class DeathCine implements GameScene {
     if (l?.setVolume) l.setVolume(0.35 * night);
   }
 
+  /** "N DAYS PASSED": the count of sunrises hangs in the air in front of the camera (floating 3D type) */
+  private daysLine(text: string, instant = false) {
+    say3D(this.engine, text, null, { key: 'death:days', screen: [0, 0.3], depth: 2.6, fit: false, size: 0.19, px: 72, wrap: 40, cps: instant ? 0 : 40, color: '#fff1d2', glow: '#ffbe6e', hdr: 1.7, hold: 30 });
+  }
+
   private onSunrise(n: number) {
     this.sunrises = n;
-    const el = this.title;
-    el.textContent = `${n} ${n === 1 ? 'DAY' : 'DAYS'} PASSED…`;
-    el.style.opacity = '1';
-    el.style.transform = 'translateY(0) scale(1)';
-    el.animate([{ transform: 'translateY(0) scale(1.08)', filter: 'brightness(1.6)' }, { transform: 'translateY(0) scale(1)', filter: 'brightness(1)' }], { duration: 700, easing: 'cubic-bezier(.2,.7,.2,1)' });
+    this.daysLine(`${n} ${n === 1 ? 'DAY' : 'DAYS'} PASSED...`);
     this.engine.audio.play('divine_chime', { volume: 0.35, pitch: 0.7 + n * 0.05 });
   }
 
@@ -839,20 +841,10 @@ export class DeathCine implements GameScene {
     this.leaving = true;
     const eng = this.engine;
     const days = this.o.days;
-    if (skipped) {
-      this.title.textContent = `${days} DAYS PASSED…`;
-      this.title.style.opacity = '1';
-      this.title.style.transform = 'translateY(0) scale(1)';
-    }
+    if (skipped) this.daysLine(`${days} DAYS PASSED...`, true);
     // after the first ride, waking at home is how the hideout is found
     const first = loadSave().runs === 1;
-    if (first) {
-      const sub = document.createElement('div');
-      sub.textContent = 'and the way home is found';
-      sub.style.cssText = 'font-size:.3em;letter-spacing:.12em;margin-top:.5em;color:#ffe2a0;opacity:0;transition:opacity 1s ease';
-      this.title.appendChild(sub);
-      requestAnimationFrame(() => (sub.style.opacity = '1'));
-    }
+    if (first) say3D(eng, 'and the way home is found', null, { key: 'death:home', screen: [0, 0.12], depth: 2.6, fit: false, size: 0.075, px: 56, wrap: 40, cps: 22, color: '#ffe2a0', glow: '#ffae5a', hdr: 1.4, hold: 30 });
     void (async () => {
       if (first) await eng.tweens.wait(1.3, true);
       await eng.fadeOut(skipped ? 0.5 : 1.5, '#fff3dc');

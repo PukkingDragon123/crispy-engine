@@ -2,6 +2,7 @@
 // cloth capes, weak-point hit spheres, multi-phase coroutine move scripts
 // that cancel safely on death/escape, telegraphed attack helpers, QTE hooks,
 // dramatic intros, escapes and deaths.
+import { speak3D } from '../fx/WorldSpeech';
 import * as THREE from 'three';
 import type { Ctx, RayHit } from '../Ctx';
 import type { ExternalTarget, Enemies } from '../enemies/Enemies';
@@ -205,8 +206,8 @@ export abstract class Boss implements ExternalTarget {
     }
   }
   taunt(text: string, color = '#ffb070') {
-    this.ctx.toast(`${this.name}: “${text}”`, color);
-    Voice.say(voiceFor(this.name), text, { pos: this.pos, follow: true, key: `boss:${this.id}` });
+    // the taunt hangs over the boss in big glowing type (off screen: at the screen's edge on its side)
+    speak3D(this.ctx.engine, voiceFor(this.name), text, this.pos, { key: `boss:${this.id}`, lift: this.height * 1.05 + 0.3, side: this.radius * 0.6, size: 0.2, px: 64, wrap: 26, color: '#fff1dc', glow: color, hdr: 1.5, voice: { follow: true, key: `boss:${this.id}` } });
   }
   async qte(spec: Parameters<Qte['run']>[0]): Promise<QteResult> {
     this.check();

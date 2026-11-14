@@ -5,7 +5,7 @@
 //  - the hall's cartouche (top left): the studies finished and the next gift
 //  - CLOSE / BACK plates (top right)
 //  - the wing plaques along the bottom (found / total, a gold seal when a study is ready)
-//  - Thoth's talk box: his portrait in a gold niche and a papyrus balloon that types
+//  (Thoth's own words are not here: he speaks in floating 3D text, see fx/WorldSpeech)
 //  - the specimen sheet (right): name, title, lore, stats, moves, weak spot, and THOTH'S
 //    STUDY with its progress bar and the COMPLETE STUDY button
 //  - the page arrows, the errand slip, the gift ladder at the desk, the jar markers, the
@@ -59,9 +59,6 @@ export interface HallUIState {
   hoverWing: number;
   page: { cur: number; total: number } | null;
   panel: PanelData | null;
-  talk: string | null;
-  /** where Thoth's head is on screen (the balloon hangs over him there; null: the portrait box) */
-  talkAt: { x: number; y: number } | null;
   errand: ErrandSlip | null;
   gifts: GiftRow[] | null;
   satchel: string | null;
@@ -230,27 +227,7 @@ function arrowPlate(dir: -1 | 1, hot: boolean) {
   });
 }
 
-/** the portrait niche: Thoth (the HUD's authored pixel portrait) in a gold-rimmed lapis niche */
-function niche() {
-  return spr('niche', 40, 46, (c) => {
-    c.drawImage(lapisPlate(40, 46, false, 7), 0, 0);
-    px(c, 4, 4, 32, 38, L.o);
-    for (let y = 5; y < 41; y++) px(c, 5, y, 30, 1, y < 16 ? L.d : L.m);
-    c.drawImage(sprite(ART.thoth), 6, 6);
-  });
-}
 
-/** a speech balloon of papyrus, its tail pointing left at the portrait */
-function balloon(w: number, h: number) {
-  return spr(`bl:${w}:${h}`, w + 6, h, (c) => {
-    c.drawImage(papyrus(w, h, 5, false), 6, 0);
-    for (let i = 0; i < 6; i++) {
-      px(c, 6 - i, 12 + i, i + 1, 1, i === 5 ? P.o : P.m);
-      px(c, 6 - i, 12 + i, 1, 1, P.o);
-    }
-    px(c, 0, 18, 7, 1, P.o);
-  });
-}
 
 /** a progress bar: a lapis well with a gold fill and ticks */
 function bar(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, k: number, done: boolean) {
@@ -278,9 +255,6 @@ export class HallUI {
   private rects: Rect[] = [];
   private panelK = 0;
   private panelKey = '';
-  private talkText = '';
-  private talkT = 0;
-  private talkK = 0;
   private bannerT = -1;
   private bannerLast: HallUIState['banner'] = null;
   private onResize = () => this.resize();
@@ -337,12 +311,6 @@ export class HallUI {
       if (this.panelK < 0.05 || !this.panelKey) this.panelKey = pk;
       this.panelK = k(this.panelK, false, 8, 14);
     } else this.panelK = k(this.panelK, !!pk, 6, 12);
-    if (s.talk && s.talk !== this.talkText) {
-      this.talkText = s.talk;
-      this.talkT = 0;
-    }
-    this.talkT += rdt;
-    this.talkK = k(this.talkK, !!s.talk, 7, 5);
 
     this.drawMarkers(s);
     this.drawTitle(s);
@@ -352,7 +320,6 @@ export class HallUI {
     if (s.view === 'nave') this.drawErrand(s.errand, s.satchel);
     if (this.panelKey && this.panelKey !== 'gifts' && s.panel && s.panel.key === this.panelKey) this.drawPanel(s.panel);
     else if (this.panelKey === 'gifts' && s.gifts) this.drawGifts(s);
-    this.drawTalk(s);
     this.drawHint(s);
     this.drawBanner(rdt, s.banner);
     this.drawTip(s.tip);
@@ -488,69 +455,6 @@ export class HallUI {
       if (m.kind === 'ready') this.blit(seal(5), m.x - 6.5 * this.S, m.y - 14 * this.S + bob);
       else this.ink('NEW', m.x, m.y - 22 + bob, '#ffd36b', 14, 'center', true);
     }
-  }
-
-  private drawTalk(s: HallUIState) {
-    const a = this.talkK;
-    if (a < 0.02 || !this.talkText) return;
-    const S = this.S;
-    const size = this.narrow ? 14 : 16;
-    const shown = this.talkText.slice(0, Math.floor(this.talkT * 46));
-    const tabsTop = this.H - Math.ceil((15 * 2 + 14) / S) * S - 40;
-    const right = this.panelKey ? this.panelLeft() - 12 : this.W - 12;
-    const at = s.talkAt;
-    // over Thoth's head when he is on screen and clear of the sheet and the plaques
-    if (at && at.y > 90 && at.y < tabsTop + 20 && at.x > 30 && at.x < right - 20) {
-      const maxBW = Math.min(this.narrow ? this.W * 0.6 : 380, right - 20);
-      const lines = this.wrap(this.talkText, maxBW - 24, size);
-      const bwPx = Math.ceil((Math.max(...lines.map((l) => this.tw(l, size))) + 24) / S);
-      const bhPx = Math.ceil((lines.length * (size + 4) + 16) / S);
-      const bw = bwPx * S, bh = bhPx * S;
-      const bx = Math.max(10, Math.min(right - bw, at.x - bw * 0.3));
-      const by = Math.max(70, at.y - bh - 14 - 4 * S) + (1 - a) * 16;
-      this.blit(papyrus(bwPx, bhPx, 5, false), bx, by, a);
-      // the tail: a stepped wedge of papyrus from the balloon down to the top of his head
-      const c = this.c;
-      c.globalAlpha = a;
-      const tx = Math.max(bx + 12, Math.min(bx + bw - 16, at.x));
-      const ty0 = by + bh - S, ty1 = Math.max(ty0 + 4 * S, at.y - 4);
-      const steps = Math.max(3, Math.round((ty1 - ty0) / S));
-      for (let i = 0; i < steps; i++) {
-        const k = i / steps;
-        const w = Math.max(S, Math.round(((1 - k) * 7 * S) / S) * S);
-        const cx = tx + (at.x - tx) * k;
-        const yy = ty0 + i * S;
-        px(c, cx - w / 2 - S, yy, w + 2 * S, S, P.o);
-        if (w > S) px(c, cx - w / 2, yy, w, S, i === 0 ? P.m : P.l);
-      }
-      c.globalAlpha = 1;
-      let left = shown.length;
-      lines.forEach((l, i) => {
-        if (left <= 0) return;
-        this.ink(l.slice(0, left), bx + 12, by + 8 + i * (size + 4), INK, size, 'left', false, a);
-        left -= l.length + 1;
-      });
-      this.rect('talk', bx, by, bw, bh);
-      return;
-    }
-    const nich = niche();
-    const x = 14, maxBW = Math.min(this.narrow ? this.W - 40 * S - 60 : 420, this.panelKey ? this.panelLeft() - 40 * S - 50 : 9999);
-    const lines = this.wrap(this.talkText, maxBW - 26, size);
-    const bwPx = Math.ceil((Math.max(...lines.map((l) => this.tw(l, size))) + 26) / S);
-    const bhPx = Math.ceil((lines.length * (size + 4) + 18) / S);
-    const y = tabsTop - Math.max(46 * S, bhPx * S) - 12 + (1 - a) * 30;
-    const bob = Math.sin(this.t * 2.2) * 1.2;
-    this.blit(nich, x, y + bob, a);
-    this.blit(balloon(bwPx, bhPx), x + 40 * S + 4, y, a);
-    // type it out line by line
-    let left = shown.length;
-    lines.forEach((l, i) => {
-      if (left <= 0) return;
-      const part = l.slice(0, left);
-      left -= l.length + 1;
-      this.ink(part, x + 40 * S + 4 + 6 * S + 10, y + 9 + i * (size + 4), INK, size, 'left', false, a);
-    });
-    this.rect('talk', x, y, 40 * S + 4 + bwPx * S, Math.max(46 * S, bhPx * S));
   }
 
   private drawHint(s: HallUIState) {

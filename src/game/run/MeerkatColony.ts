@@ -26,6 +26,7 @@
 // The colony registers its own Interactable ("Swap with the meerkats" at the stall), its own solid
 // colliders (rock + stall), listens to ctx.events 'shot' / 'explosion', hands the camera to the
 // counter while trading (camRig.setCine, released on close) and applies swaps to player.items.
+import { chatter3D } from '../fx/WorldSpeech';
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Interactable } from './Interact';
@@ -296,14 +297,15 @@ export class MeerkatColony {
       if (k.role === 'rock' && k.state === 'rock') {
         this.go(k, 'bark', 0.55);
         this.chirp(k, 1.35, 0.6);
-        Voice.chatter('meerkat', 'alarm', { pos: this.world(k, _v), key: 'meerkat:alarm' });
+        const at = this.world(k, new THREE.Vector3());
+        chatter3D(this.d.ctx.engine, 'meerkat', 'alarm', at, { key: 'meerkat:alarm', lift: 0.55, size: 0.13, color: '#fff3d6', glow: '#3a2408', voice: { key: 'meerkat:alarm' } });
       }
     }
   }
 
   private react(kind: TradeReaction) {
     const tr = this.kats.find((k) => k.role === 'trader')!;
-    Voice.chatter('meerkat', kind, { pos: this.world(tr, _v) });
+    chatter3D(this.d.ctx.engine, 'meerkat', kind, this.world(tr, new THREE.Vector3()), { key: 'meerkat:trader', lift: 0.6, size: 0.13, color: '#fff3d6', glow: '#3a2408' });
     const set = (m: MeerkatMode, s: number) => {
       tr.mode = m;
       tr.modeUntil = this.time + s;

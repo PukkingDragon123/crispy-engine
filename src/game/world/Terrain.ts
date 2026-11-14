@@ -200,7 +200,7 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
           float h1 = th(px + vec2(vTM.x * 17.0, 3.0));
           float m = floor(vTM.x + 0.5);
           // near field: big blocks with pixel-art material textures (fade to the painted far look)
-          float pxK = (1.0 - smoothstep(42.0, 74.0, distance(vWP, cameraPosition))) * step(m, 8.5);
+          float pxK = (1.0 - smoothstep(62.0, 108.0, distance(vWP, cameraPosition))) * step(m, 8.5);
           float jit = (h1 - 0.5) * 0.11 * (1.0 - 0.75 * pxK);
           if (m <= 2.0 || m == 6.0) {
             if (top) {

@@ -286,8 +286,8 @@ let skinSwayMat: ReturnType<typeof makeVoxelMaterial> | null = null;
 /** the voxel material with the pixel-art material atlas on skinned faces (+ the foliage sway for plants) */
 const skinMaterial = (sway = false) =>
   sway
-    ? (skinSwayMat ??= makeVoxelMaterial({ sway: 0.05, pixel: { tex: pixelAtlas(), glsl: PIXEL_GLSL } }))
-    : (skinMat ??= makeVoxelMaterial({ pixel: { tex: pixelAtlas(), glsl: PIXEL_GLSL } }));
+    ? (skinSwayMat ??= makeVoxelMaterial({ sway: 0.05, pixel: { tex: pixelAtlas(), glsl: PIXEL_GLSL, near: 62, far: 110 } }))
+    : (skinMat ??= makeVoxelMaterial({ pixel: { tex: pixelAtlas(), glsl: PIXEL_GLSL, near: 62, far: 110 } }));
 /** snap colours to a coarse grid so a far LOD merges into big quads (its colour detail is sub-pixel) */
 function quantize(m: VoxelModel, step = 12): VoxelModel {
   const q = (c: number) => Math.min(255, Math.round(c / step) * step);
@@ -374,7 +374,9 @@ void main(){
   vec3 col = mix(uShallow, uDeep, smoothstep(0.0, 1.0, depth));
   col += (w1 * 0.035 + w2 * 0.025);
   float glint = step(0.986, h12(px + floor(uTime * 3.0))) * 0.55;
-  float foam = smoothstep(0.1, 0.0, vD) * (0.55 + 0.45 * step(0.5, fract(w2 * 2.0)));
+  // pixel shoreline: a crisp, ragged two-band foam rim at the terrain's 16 texels / m
+  float fn = h12(floor(vW.xz * 16.0));
+  float foam = vD < 0.035 + fn * 0.05 ? 1.0 : (vD < 0.1 + fn * 0.05 && fract(w2 * 2.0) > 0.5 ? 0.5 : 0.0);
   col = mix(col, vec3(0.93, 0.96, 0.9), foam);
   col += glint;
   float fr = pow(1.0 - clamp(normalize(cameraPosition - vW).y, 0.0, 1.0), 4.0);

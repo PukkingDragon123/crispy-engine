@@ -13,7 +13,7 @@ import { Voice } from '../../audio/Voice';
 import { armIK } from '../../anim/playerAnim';
 import * as WSK from '../../models/props/workshop';
 import { buy, owns } from '../../meta/Save';
-import { pixelBubbleStyle } from './HubUI';
+import { say3D, type SpeechLine } from '../../fx/WorldSpeech';
 
 export type SM = { model: VoxelModel; voxelSize: number; meta?: any } | undefined | null;
 export type HubPose = 'door' | 'bench' | 'board' | 'mirror' | 'book' | 'hearth' | 'music' | 'range' | 'cards' | 'trophies';
@@ -232,21 +232,31 @@ export function engrave(m: VoxelModel, text: string, cx: number, cy: number, z: 
 }
 
 /** Sundown's own speech bubble (Mama's lives in HubScene): types itself over his hat, voiced */
+/** Sundown's lines in the hideout: floating 3D text that types beside his head (fx/WorldSpeech) */
 export class HeroBubble {
-  el = document.createElement('div');
-  private text = '';
+  private line: SpeechLine | null = null;
   private t = 0;
   private life = 0;
-  constructor(private host: HubHost) {
-    this.el.style.cssText = pixelBubbleStyle();
-    host.engine.overlay.appendChild(this.el);
-  }
+  constructor(private host: HubHost) {}
   say(text: string, voice = true) {
-    this.text = text;
     this.t = 0;
     this.life = 1.6 + text.length * 0.05;
     const head = this.head(new THREE.Vector3());
-    if (voice) Voice.say('sundown', text, { pos: head, key: 'hub-sundown' });
+    const sp = voice ? Voice.say('sundown', text, { pos: head, key: 'hub-sundown' }) : null;
+    this.line = say3D(this.host.engine, text, () => this.head(new THREE.Vector3()), {
+      key: 'hub-sundown',
+      scene: this.host.scene,
+      camera: this.host.camera,
+      size: 0.24,
+      wrap: 24,
+      color: '#fff0d4',
+      glow: '#3a1406',
+      hdr: 1.15,
+      lift: -0.12,
+      side: 0.55,
+      voiceDur: sp?.duration,
+      hold: this.life * 0.6,
+    });
     const h = this.host.hero;
     if (h?.nodes['jaw']) this.jawT = this.life;
   }
@@ -266,27 +276,14 @@ export class HeroBubble {
     }
     this.jawWas = this.jawT > 0;
     this.jawT = Math.max(0, this.jawT - rdt);
-    if (!this.text) {
-      this.el.style.display = 'none';
-      return;
-    }
     this.t += rdt;
-    const n = Math.min(this.text.length, Math.floor(this.t * 34));
-    const p = this.head(new THREE.Vector3()).project(this.host.camera);
-    if (p.z < 1 && Math.abs(p.x) < 1.1 && Math.abs(p.y) < 1.1 && this.host.engine.overlay) {
-      this.el.style.display = 'block';
-      this.el.style.left = `${((p.x + 1) / 2) * this.host.engine.width}px`;
-      this.el.style.top = `${((1 - p.y) / 2) * this.host.engine.height}px`;
-      if (this.el.textContent !== this.text.slice(0, n)) this.el.textContent = this.text.slice(0, n);
-    } else this.el.style.display = 'none';
-    if (this.t > this.life + 1.2) this.text = '';
   }
   hide() {
-    this.text = '';
-    this.el.style.display = 'none';
+    this.line?.end();
+    this.line = null;
   }
   dispose() {
-    this.el.remove();
+    this.hide();
   }
 }
 

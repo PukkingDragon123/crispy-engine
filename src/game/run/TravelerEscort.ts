@@ -21,6 +21,7 @@
 //              if (this.escort?.finished) { this.escort.dispose(); this.escort = null; }
 //   updateHud(): ...(this.missions.active ? this.missions.hud() : this.escort?.hud() ?? this.missions.hud())
 //   exit():    this.escort?.dispose();
+import { speak3D } from '../fx/WorldSpeech';
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Player } from '../player/Player';
@@ -435,8 +436,8 @@ export class TravelerEscort {
     ctx.sfx('merchant_greet', this.npc.pos, 0.8, 1.2);
     if (this.d.items) {
       const ok = this.d.items.add('snakeoil', 2);
-      if (ok) ctx.engine.tweens.after(1.4, () => Voice.say('peddler', 'On the house, partner.', { pos: this.npc.pos, follow: true }));
-      ctx.engine.tweens.after(1.4, () => ctx.toast(ok ? "DOC HAPI'S SNAKE OIL ×2" : 'POCKETS FULL', ok ? '#9dff3a' : '#ff8a6a', ok ? '"On the house, partner."' : 'He keeps the tonics for next time'));
+      if (ok) ctx.engine.tweens.after(1.4, () => speak3D(ctx.engine, 'peddler', 'On the house, partner.', this.npc.pos, { key: 'peddler', lift: 1.95, size: 0.17, color: '#fff3d6', glow: '#3a1a08', voice: { follow: true } }));
+      ctx.engine.tweens.after(1.4, () => ctx.toast(ok ? "DOC HAPI'S SNAKE OIL ×2" : 'POCKETS FULL', ok ? '#9dff3a' : '#ff8a6a', ok ? 'Two bottles, on the house' : 'He keeps the tonics for next time'));
     }
     if (this.d.card && this.ambushes >= 2 && this.hp > this.maxHp * 0.6) ctx.engine.tweens.after(2.4, () => this.d.card?.());
     ctx.engine.tweens.after(1.6, () => this.phase === 'arrived' && (this.npc.mode = 'cheer'));
@@ -553,8 +554,7 @@ export class TravelerEscort {
       if (this.callCd <= 0) {
         this.callCd = 10;
         npc.talk = 1.4;
-        ctx.toast(`${this.name.toUpperCase()}`, '#ffd36b', '"Partner? Don\'t leave me out here!"');
-        Voice.say('peddler', "Partner? Don't leave me out here!", { pos: npc.pos, follow: true });
+        speak3D(ctx.engine, 'peddler', "Partner? Don't leave me out here!", npc.pos, { key: 'peddler', lift: 1.95, size: 0.17, color: '#fff3d6', glow: '#3a1a08', voice: { follow: true } });
       }
     } else {
       npc.mode = 'walk';

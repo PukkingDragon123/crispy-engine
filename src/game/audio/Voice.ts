@@ -1533,13 +1533,18 @@ class VoiceSystem {
 
   /** a random canned line for a mood (profile.phrases[kind]); null if it has none */
   chatter(profile: VoiceId, kind: string, o: SayOpts = {}): Speech | null {
+    const text = this.line(profile, kind);
+    return text ? this.say(profile, text, o) : null;
+  }
+  /** pick a canned line for a mood without saying it (never the same one twice running) */
+  line(profile: VoiceId, kind: string): string | null {
     const list = resolve(profile).phrases?.[kind];
     if (!list?.length) return null;
     const k = profile + ':' + kind;
     let i = Math.floor(Math.random() * list.length);
     if (list.length > 1 && i === this.lastPick.get(k)) i = (i + 1) % list.length;
     this.lastPick.set(k, i);
-    return this.say(profile, list[i], o);
+    return list[i];
   }
 
   /** silence one channel / profile, or everyone */

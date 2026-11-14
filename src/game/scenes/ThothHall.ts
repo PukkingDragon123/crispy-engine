@@ -28,6 +28,7 @@ import { ThothAnim, ThothMode } from '../models/characters/thoth';
 import { BookwormAnim, BookwormMode } from '../models/creatures/bookworm';
 import { bakeRig, bakedRig } from '../fx/RigBake';
 import { thothSay } from '../fx/ThothPop';
+import { say3D, hush3D } from '../fx/WorldSpeech';
 import type { Speech } from '../audio/Voice';
 import { Puppet } from '../ui/codex/Puppet';
 import { entryPuppet, placeProps, plateMound } from '../ui/codex/Plate';
@@ -64,6 +65,13 @@ const WING_PLAN: { cat: CodexCat; side: -1 | 0 | 1; z: number; x?: number }[] = 
 ];
 const APSE_Y = 1 / 12;
 /** the bookworms' jobs and which librarian does each (bookworm variants) */
+/** what the bookworms murmur (they read by touch: no eyes, lots of opinions) */
+const WORM_LINES: Partial<Record<BookwormMode, string[]>> = {
+  shelve: ['Filed!', 'Under S. For shelf.', 'There we go.', 'Spine out, spine out.'],
+  look: ['Hm? Who is there?', 'I smell boots.', 'Shhh!', 'Page forty-two...'],
+  rear: ['Mmm. Vellum.', 'Dusty up here.', 'Is that a new jar?'],
+  surprised: ['Eep!', 'My page!'],
+};
 const WORM_JOBS: [string, number][] = [['gallery', 0], ['reader', 1], ['desk', 3], ['jars', 2]];
 
 // ---------------------------------------------------------------- shared geometry (kept warm between visits)
@@ -1021,6 +1029,10 @@ export class ThothHall {
 
   private gesture(w: Walker | null, mode: ThothMode | BookwormMode, t = 1.6) {
     if (w) w.gest = { mode, t };
+    if (w?.bw && Math.random() < 0.55) {
+      const lines = WORM_LINES[mode as BookwormMode];
+      if (lines) this.wormSay(w, lines[Math.floor(Math.random() * lines.length)]);
+    }
   }
 
   private updateThoth(dt: number) {
@@ -1110,9 +1122,52 @@ export class ThothHall {
     try {
       this.speech = thothSay(text, { volume: 0.8 });
     } catch {
-      /* no voice: the balloon still talks */
+      /* no voice: the words still float */
     }
     this.thoth?.th?.talk(Math.min(5, this.speech?.duration ?? text.length / 16));
+    // the words float in the hall beside his head and follow him as he runs
+    say3D(this.engine, text, () => (this.thoth ? this.thoth.rig.root.position.clone().add(new THREE.Vector3(0, 0.82, 0)) : null), {
+      key: 'hall:thoth',
+      scene: this.scene,
+      camera: this.camera,
+      size: 0.2,
+      px: 60,
+      wrap: 26,
+      color: '#fff1cc',
+      glow: '#142a6e',
+      hdr: 1.15,
+      lift: 0,
+      side: 0.32,
+      depth: 2.2,
+      voiceDur: this.speech?.duration,
+      hold: hold * 0.6 + text.length * 0.03,
+      area: () => this.speechArea(),
+    });
+  }
+
+  /** where an off-screen line may float: clear of the sheet on the right and the plaques below */
+  private speechArea(): [number, number, number, number] {
+    const pl = this.view === 'nave' || !this.ui ? this.engine.width * 0.62 : this.ui.panelLeft();
+    return [-0.82, Math.min(0.8, (pl / this.engine.width) * 2 - 1 - 0.12), -0.5, 0.72];
+  }
+
+  /** a bookworm's little reaction, floating over its head */
+  private wormSay(w: Walker, text: string) {
+    say3D(this.engine, text, () => w.rig.nodes.head?.getWorldPosition(new THREE.Vector3()) ?? w.rig.root.position, {
+      key: 'hall:worm' + this.worms.indexOf(w),
+      scene: this.scene,
+      camera: this.camera,
+      size: 0.13,
+      px: 52,
+      wrap: 22,
+      color: '#ffe6d2',
+      glow: '#5a1e14',
+      hdr: 1.1,
+      lift: 0.12,
+      side: 0.1,
+      hold: 1.4,
+      area: () => this.speechArea(),
+    });
   }
 
   // ======================================================================= input
@@ -1210,9 +1265,6 @@ export class ThothHall {
       case 'thoth':
         this.talk(say(TALK.idle), 5);
         this.gesture(this.thoth, Math.random() < 0.5 ? 'wave' : 'delight', 1.8);
-        return;
-      case 'talk':
-        this.talkLeft = Math.min(this.talkLeft, 0.4);
         return;
       case 'errand':
         this.errandAct(arg);
@@ -1433,11 +1485,6 @@ export class ThothHall {
         markers.push({ x: (v.x * 0.5 + 0.5) * this.engine.width, y: (-v.y * 0.5 + 0.5) * this.engine.height, kind });
       });
     }
-    let talkAt: HallUIState['talkAt'] = null;
-    if (this.thoth) {
-      const v = this.thoth.rig.root.position.clone().add(new THREE.Vector3(0, 0.98, 0)).project(this.camera);
-      if (v.z < 1 && Math.abs(v.x) < 0.98 && Math.abs(v.y) < 0.98) talkAt = { x: (v.x * 0.5 + 0.5) * this.engine.width, y: (-v.y * 0.5 + 0.5) * this.engine.height };
-    }
     const sat = Research.satchel();
     const state: HallUIState = {
       view: this.view,
@@ -1448,8 +1495,6 @@ export class ThothHall {
       hoverWing,
       page: this.view === 'wing' ? { cur: this.wings[this.wing].page, total: this.pages(this.wings[this.wing]) } : null,
       panel: this.view === 'wing' ? this.panelData(this.wings[this.wing]) : null,
-      talk: this.state === 'open' || this.state === 'closing' ? this.talkText : null,
-      talkAt,
       errand: this.view === 'nave' ? this.errandSlip() : null,
       gifts: this.view === 'desk' ? GIFTS.map((g, i) => ({ name: giftName(g), at: g.at, given: i < Research.given() })) : null,
       satchel: sat.length ? sat.map((s) => `${s.n} ${s.n > 1 ? 'x ' : ''}${giftName({ at: 0, kind: 'item', id: s.id, say: '' }).replace(/ x\d+$/, '')}`).join(', ') : null,
@@ -1466,6 +1511,7 @@ export class ThothHall {
   dispose() {
     this.state = 'done';
     this.speech?.stop(0.1);
+    hush3D(undefined, this.scene);
     this.restorePost();
     window.removeEventListener('pointerdown', this.onPDown);
     window.removeEventListener('pointermove', this.onPMove);

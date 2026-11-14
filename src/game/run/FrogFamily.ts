@@ -31,6 +31,7 @@
 //              ...(this.missions.active ? this.missions.hud() : this.frogs?.hud() ?? this.missions.hud())
 //   exit():    this.frogs?.dispose();
 // Uses the T prompt through `Interactions`; nothing is shootable (the frogs are not enemy targets).
+import { speak3D, chatter3D, say3D } from '../fx/WorldSpeech';
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Player } from '../player/Player';
@@ -492,7 +493,7 @@ export class FrogFamily {
             this.mama.squash.kick(3);
             ctx.sfx('squeak', this.mama.pos, 0.8, 0.75);
             ctx.sfx('squeak', b.pos, 0.5, 1.8);
-            Voice.chatter('frog', 'joy', { pos: this.mama.pos });
+            chatter3D(ctx.engine, 'frog', 'joy', this.mama.pos, { key: 'frog:mama', lift: 0.75, size: 0.14, color: '#e8fff6', glow: '#0e3a44' });
             ctx.particles.emit({ pos: { x: slot.x, y: slot.y + 0.05, z: slot.z }, count: 6, spread: 1, up: 1.2, life: [0.3, 0.6], size: [0.05, 0.03], sprite: 'dot3', color: [0xe0c08a, 0xc9a06a], gravity: 12, ground: true });
             if (this.returned >= 5) this.finale();
             else ctx.toast(`FROGLET HOME (${this.returned}/5)`, '#9fd8e0', this.returned === 4 ? 'One more out there…' : 'Mama squeaks with joy');
@@ -509,8 +510,9 @@ export class FrogFamily {
     this.finaleT = 0;
     this.rainT = 6;
     this.mamaInter.label = 'Say goodbye';
-    ctx.toast('REUNITED', '#9fd8e0', 'Mama Rain Frog sings "Rain" to her babies', true);
-    Voice.say('frog', 'Rain... rain, rain... rain. Mmm, mmm.', { pos: this.mama.pos, sing: [0, 3, 5, 7, 5, 3, 0], delay: 0.5, duck: 0.6 });
+    ctx.toast('REUNITED', '#9fd8e0', 'Mama Rain Frog sings to her babies', true);
+    // the song floats over her as she sings it
+    speak3D(ctx.engine, 'frog', 'Rain... rain, rain... rain. Mmm, mmm.', this.mama.pos, { key: 'frog:mama', lift: 0.8, size: 0.15, cps: 9, hold: 3, color: '#e8fff6', glow: '#0e3a44', voice: { sing: [0, 3, 5, 7, 5, 3, 0], delay: 0.5, duck: 0.6 } });
     ctx.sfx('sting_positive', null, 0.9);
     ctx.sfx('divine_chime', this.mama.pos, 0.6);
     ctx.engine.tweens.after(0.6, () => ctx.sfx('thunder', this.mama.pos, 0.25, 1.4));
@@ -563,7 +565,11 @@ export class FrogFamily {
     f.wailIn = 2.6 + rnd.next() * 2.4;
     const ctx = this.d.ctx;
     ctx.sfx('squeak', f.pos, loud ? 0.9 : 0.6, 0.5 + rnd.next() * 0.1);
-    Voice.chatter('frog', 'wail', { pos: f.pos, pitch: f.mama ? 1 : 2.3, key: `frog:${f.idx}`, volume: loud ? 1 : 0.7 });
+    const wl = Voice.line('frog', 'wail');
+    if (wl) {
+      Voice.say('frog', wl, { pos: f.pos, pitch: f.mama ? 1 : 2.3, key: `frog:${f.idx}`, volume: loud ? 1 : 0.7 });
+      if (loud || f.mama) say3D(ctx.engine, wl, f.pos, { key: `frog:${f.idx}`, lift: f.mama ? 0.75 : 0.35, size: f.mama ? 0.14 : 0.11, color: '#e8fff6', glow: '#0e3a44', hold: 1.2 });
+    }
   }
 
   // ------------------------------------------------------------- update

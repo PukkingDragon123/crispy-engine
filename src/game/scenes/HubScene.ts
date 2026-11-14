@@ -50,7 +50,8 @@ import { Codex } from '../meta/Codex';
 import { CodexBook } from '../ui/CodexBook';
 import { WantedPoster, PosterData } from './ResultsScene';
 import { HouseExtras } from './hub/HouseExtras';
-import { HubUI, STATION_CAN, UIHit, pixelBubbleStyle } from './hub/HubUI';
+import { HubUI, STATION_CAN, UIHit } from './hub/HubUI';
+import { say3D } from '../fx/WorldSpeech';
 import { touchText } from '../ui/TouchControls';
 import type { HubHost } from './hub/HubKit';
 
@@ -1093,7 +1094,7 @@ export class HubScene implements GameScene {
     this.prompt.onclick = () => this.act();
     this.hint.style.cssText = "position:absolute;left:50%;bottom:24px;transform:translateX(-50%);z-index:7;pointer-events:none;font-family:'Alagard';font-size:15px;color:#fff3d6;opacity:0;transition:opacity 1.5s;text-shadow:0 2px 0 #2a1408,0 0 8px #000;white-space:nowrap";
     this.hint.textContent = this.touch ? 'Tap the arrows or swipe to look around · tap the prompt to use it · two fingers: menu' : 'A / D or the arrows: look around   ·   E: use   ·   Esc: menu';
-    this.bubble.style.cssText = pixelBubbleStyle('max-width:260px');
+    this.bubble.style.display = 'none'; // (speech is 3D now: fx/WorldSpeech)
     eng.overlay.append(this.bubble);
     this.hui = new HubUI(eng.overlay);
     setTimeout(() => (this.title.style.opacity = '1'), 900);
@@ -1432,7 +1433,9 @@ export class HubScene implements GameScene {
     this.bubbleT = 0;
     this.mamaTalk = 1.4 + text.length * 0.045;
     this.engine.audio.play('squeak', { volume: 0.4, pitch: 0.42 + Math.random() * 0.08 });
-    Voice.say('mamaToad', text, { pos: this.mamaHead });
+    const sp = Voice.say('mamaToad', text, { pos: this.mamaHead });
+    // her words float over her head in the room (fx/WorldSpeech)
+    say3D(this.engine, text, this.mamaHead, { key: 'hub-mama', scene: this.scene, camera: this.camera, size: 0.24, wrap: 24, color: '#f2ffe8', glow: '#123a1c', hdr: 1.15, lift: 0.1, side: 0.45, voiceDur: sp?.duration, hold: 1.2 + text.length * 0.03 });
   }
 
   /** use a station (Sundown is standing at it) */
@@ -2336,19 +2339,11 @@ export class HubScene implements GameScene {
       this.say(MAMA_LINES[this.mamaLine]);
       this.mamaCd = 15 + Math.random() * 6;
     }
-    // the speech bubble types itself out over her head
-    if (this.bubbleText && (this.mamaTalk > 0 || this.bubbleT < 2)) {
+    // (her words float over her head as 3D text: say() hands them to fx/WorldSpeech)
+    if (this.bubbleText) {
       this.bubbleT += rdt;
-      const nn = Math.min(this.bubbleText.length, Math.floor(this.bubbleT * 38));
-      const p = this.mamaHead.clone().project(this.camera);
-      if (p.z < 1 && Math.abs(p.x) < 1.1 && Math.abs(p.y) < 1.1) {
-        this.bubble.style.display = 'block';
-        this.bubble.style.left = `${((p.x + 1) / 2) * this.engine.width}px`;
-        this.bubble.style.top = `${((1 - p.y) / 2) * this.engine.height}px`;
-        this.bubble.textContent = this.bubbleText.slice(0, nn);
-      } else this.bubble.style.display = 'none';
       if (this.mamaTalk <= 0 && this.bubbleT > 2) this.bubbleText = '';
-    } else this.bubble.style.display = 'none';
+    }
     // the toadlets
     for (const b of this.toadlets) {
       const r = b.rig, n = r.nodes;

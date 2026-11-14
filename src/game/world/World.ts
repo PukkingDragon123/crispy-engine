@@ -33,7 +33,9 @@ void main(){
   vec3 col = mix(uShallow, uDeep, smoothstep(0.0, 1.0, depth));
   col += (w1 * 0.04 + w2 * 0.03);
   float glint = step(0.985, h12(px + floor(uTime * 3.0))) * 0.6;
-  float foam = smoothstep(0.12, 0.0, depth) * (0.6 + 0.4 * step(0.5, fract(w2 * 2.0)));
+  // pixel shoreline: a crisp, ragged two-band foam rim at the terrain's 16 texels / m
+  float fn = h12(floor(vW.xz * 16.0));
+  float foam = depth < 0.012 + fn * 0.014 ? 1.0 : (depth < 0.03 + fn * 0.014 && fract(w2 * 2.0) > 0.5 ? 0.55 : 0.0);
   col = mix(col, vec3(0.95, 0.97, 0.92), foam);
   col += glint;
   // grazing views mirror the sky
