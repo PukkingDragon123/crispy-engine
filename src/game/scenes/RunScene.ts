@@ -73,6 +73,7 @@ import { Barks } from '../audio/Barks';
 import { DeathCine, deathCineFromRun } from './DeathCine';
 import { CodexRun } from '../ui/codex/CodexRun';
 import { ThothErrand } from '../run/ThothErrand';
+import { Progression } from '../run/Progression';
 import { Equipment } from '../player/Equipment';
 import { GearPickups } from '../run/GearLoot';
 import { GearHud } from '../ui/GearHud';
@@ -213,6 +214,8 @@ export class RunScene implements GameScene {
   private codexRun: CodexRun | null = null;
   /** Thoth's errand of the day ("find me a sand hippo calf!") and his satchel of study gifts */
   private thothErrand: ThothErrand | null = null;
+  /** unlock pacing, Anubis' tally, permanent rewards and the quest tracker */
+  progression: Progression | null = null;
   equipment!: Equipment;
   gearLoot!: GearPickups;
   gearHud!: GearHud;
@@ -428,6 +431,7 @@ export class RunScene implements GameScene {
     new Barks(this.ctx, this.player); // Sundown's voiced quips; tears itself down with the scene
     this.codexRun = new CodexRun(this.ctx, this);
     this.thothErrand = new ThothErrand(this.ctx, this);
+    this.progression = new Progression(this.ctx, this);
     ThothErrand.unpack((id) => this.items.add(id), (s) => this.hud.toast(s, '#7cf2b4', "From Thoth's satchel"));
 
     // place player
@@ -484,6 +488,7 @@ export class RunScene implements GameScene {
     this.bountyRip?.dispose();
     this.codexRun?.dispose();
     this.thothErrand?.dispose();
+    this.progression?.dispose();
     this.progress?.dispose();
     this.engine.paused = false;
     this.engine.post.u.uDesat.value = 0;
@@ -888,6 +893,7 @@ export class RunScene implements GameScene {
     const final = this.run.revived;
     this.run.revived = true;
     this.dying = true;
+    this.progression?.death(final);
     this.ctx.sfx('sting_negative', null, 0.8);
     this.ctx.sfx('soul_leave', null, 0.9);
     eng.slowMo(0.15, 6);
@@ -1025,6 +1031,7 @@ export class RunScene implements GameScene {
       banked: awardRun(this.run, this.codexKills),
       hero: this.player.rig.geo.spec,
     };
+    this.progression?.runOver(won);
     // a true death: the killing blow in slow motion, the sky wheels through the days, he wakes at home
     if (!won && !this.player.alive) {
       eng.tweens.after(1.4, () => void eng.setScene(new DeathCine(eng, deathCineFromRun(this, res)), 0.35, '#fff3dc', { loading: false }), true);
@@ -1051,6 +1058,7 @@ export class RunScene implements GameScene {
     }
     // codex discoveries wait until cutscenes, staged encounters and the rank-up are over
     this.thothErrand?.update(rdt);
+    this.progression?.update(dt, rdt);
     this.codexRun?.update(rdt, this.introOn || this.picker.cinematic || Cinema.busy() || cineFlags.choice || this.dying);
     const e = this.engine;
     this.run.time += dt;
@@ -1318,7 +1326,7 @@ export class RunScene implements GameScene {
       intermissionTotal: d.breakTotal,
       bell: d.bell,
       heroWorld: p.center(this.hudHero),
-      quests: this.questList(),
+      quests: this.progression?.quests(this.questList()) ?? this.questList(),
       boss: (() => {
         const b = this.bosses.find((x) => x.alive && !x.escaped);
         return b ? { name: b.name, frac: Math.max(0, b.frac), title: b.title } : null;
@@ -1346,6 +1354,7 @@ export class RunScene implements GameScene {
       zone: this.world.zone.name,
       prompt: this.picker.active || this.choice.active || this.shop.active || this.colony?.modal || this.jerboa?.modal ? null : this.inter.prompt(),
       ...this.questHud(),
+      ...this.progression?.hudOverride(),
     };
     this.hud.update(rdt, st);
   }
