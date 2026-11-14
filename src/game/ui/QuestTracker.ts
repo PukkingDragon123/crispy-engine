@@ -255,7 +255,8 @@ export class QuestTracker {
     B.ang += Math.atan2(Math.sin(ang - B.ang), Math.cos(ang - B.ang)) * Math.min(1, dt * 8);
     const sx = Math.sin(B.ang), sy = -Math.cos(B.ang);
     const cx = W / 2, cy = H / 2;
-    const L = 70, R = W - 22, T = 34, Bt = H - 70;
+    // the frame keeps clear of the trail ledger (left), the wave plaque (top) and the bottom HUD bar
+    const L = 104, R = W - 22, T = 44, Bt = H - 78;
     const k = Math.min(sx < 0 ? (L - cx) / sx : sx > 0 ? (R - cx) / sx : 1e9, sy < 0 ? (T - cy) / sy : sy > 0 ? (Bt - cy) / sy : 1e9);
     x = cx + sx * k;
     y = cy + sy * k;

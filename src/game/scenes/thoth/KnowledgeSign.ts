@@ -111,7 +111,7 @@ function outcrop(): VoxelModel {
           const k = Math.min(1, -z / 34);
           c = k < 0.18 ? mixRGB(ICE.deep, ICE.mid, k / 0.18 * 0.4) : k < 0.7 ? mixRGB(ICE.mid, ICE.lit, (k - 0.18) / 0.52) : mixRGB(ICE.lit, ICE.pale, (k - 0.7) / 0.3);
           if (hash3(x, y, z) < 0.15) c = mixRGB(c, 0x000000, 0.18);
-          if (k > 0.2) f = k > 0.85 ? VF.GLOW : VF.EMISSIVE;
+          if (k > 0.2) f = VF.EMISSIVE;
           const wall = x === -OW - 1 || x === OW;
           if (wall && -z > 8 && -z < 40) {
             const gy = (((y - 6) % 12) + 12) % 12, gx = ((-z - 8) % 9 + 9) % 9;
@@ -146,7 +146,7 @@ function outcrop(): VoxelModel {
     for (let x = -OW; x < OW; x++) {
       const gx = Math.floor((x + 10) / 3), gy = Math.floor((60 - y) / 4);
       const ibis = x >= -10 && x < 11 && y > 24 && y <= 60 && glyphOn(0, gx, gy);
-      m.set(x, y, PZ - 1, ibis ? GOLD.hi : mixRGB(ICE.pale, ICE.white, hash2(x, y) * 0.5), VF.GLOW);
+      m.set(x, y, PZ - 1, ibis ? GOLD.hi : mixRGB(ICE.lit, ICE.pale, 0.35 + hash2(x, y) * 0.3), ibis ? VF.GLOW : VF.EMISSIVE);
     }
   // ---- the jambs (battered), glyph columns, rope-bound torus bead
   for (const s of [-1, 1]) {
@@ -345,8 +345,8 @@ function templeDoorRig(): RigSpec {
     voxelSize: VS,
     parts: [
       { name: 'frame', model: timed(outcrop), pivot: [0, 0, 0], attach: [0, LIFT, 0] },
-      { name: 'leaf_l', model: leaf(1), pivot: [0, 0, 2], parent: 'frame', attach: [-OW, 0, -2], rest: [0, 0.14, 0] },
-      { name: 'leaf_r', model: leaf(-1), pivot: [0, 0, 2], parent: 'frame', attach: [OW, 0, -2], rest: [0, -0.8, 0] },
+      { name: 'leaf_l', model: leaf(1), pivot: [0, 0, 2], parent: 'frame', attach: [-OW, 0, -2], rest: [0, 0.22, 0] },
+      { name: 'leaf_r', model: leaf(-1), pivot: [0, 0, 2], parent: 'frame', attach: [OW, 0, -2], rest: [0, -1.15, 0] },
     ],
     meta: { height: (104 + LIFT) * VS, radius: 1.7 },
   };
@@ -374,9 +374,9 @@ export class KnowledgeSign {
   private t = 0;
   private hot = 0;
   private burstT = -1;
-  private open = 0.8;
+  private open = 1.15;
   /** the gap the light pours out of (group space) */
-  private gap = new THREE.Vector3(0.2, (LIFT + 34) * VS, -0.05);
+  private gap = new THREE.Vector3(0.12, (LIFT + 34) * VS, -0.05);
 
   constructor(private particles: Particles) {
     this.mat = makeVoxelMaterial({ emissiveStrength: 1 });
@@ -418,11 +418,11 @@ export class KnowledgeSign {
     const h = this.hot;
     this.group.updateMatrixWorld(true);
     // the right leaf breathes on its hinge (as if a draught pulled at it); hover swings it wider, the click wide open
-    const want = 0.8 + h * 0.25 + Math.sin(t * 0.7) * 0.03 + (this.burstT >= 0 ? 0.55 : 0);
+    const want = 1.15 + h * 0.25 + Math.sin(t * 0.7) * 0.04 + (this.burstT >= 0 ? 0.3 : 0);
     this.open += (want - this.open) * (1 - Math.exp(-dt * (this.burstT >= 0 ? 6 : 2.5)));
     const nr = this.door.nodes['leaf_r'], nl = this.door.nodes['leaf_l'];
     if (nr) nr.rotation.y = -this.open;
-    if (nl) nl.rotation.y = 0.14 + h * 0.06 + Math.sin(t * 0.9 + 1) * 0.01 + (this.burstT >= 0 ? 0.3 : 0);
+    if (nl) nl.rotation.y = 0.22 + h * 0.08 + Math.sin(t * 0.9 + 1) * 0.012 + (this.burstT >= 0 ? 0.4 : 0);
     if (this.burstT >= 0) {
       this.burstT += dt;
       if (this.burstT > 1.4) this.burstT = -1;

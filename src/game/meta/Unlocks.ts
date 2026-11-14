@@ -20,7 +20,7 @@
 //            kick, grapple, the break, the ledger), not fifteen
 //   shop   : Trail Bandage, Snake Oil, Cactus Whiskey, Dynamite, the tonic, a
 //            fortune card, two gear pieces from the starter kit
-//   cards  : the core deck (iron, brood, grit, gear basics, the three tarot cards)
+//   cards  : the core deck (gun, brood, grit and gear basics, the three tarot cards), rare at most
 //   jobs   : Outlaw Fort, Sheriff's WANTED, the trading post
 // THEN, each opening with a short "learned" moment (Serket, during a wave break,
 // shows it hands-on: run/Tutorial lesson mode, queued by run/Progression):
@@ -40,8 +40,11 @@
 //     32 Bounty Hunter's Ink (ware)       45 Tommy-gun plans for sale
 //   THOTH'S STUDIES   2 Embalmer's Linen on the shelf · 5 Ink of Thoth (ware)
 //   BOSSES FELLED     1 Sacrificial Dagger · Iron Tricks (cards) · the Ranch job · coach-gun plans
+//                     2 legendary cards can be dealt
 //   BEST BOUNTY RANK  4 Rider's Grit (cards)
-//   RIDES             1 Thoth starts handing out errands
+//   RIDES             1 Thoth starts handing out errands · 2 epic cards can be dealt
+// Card rarity is capped through the cards worker's hook (UpgradeManager.tierCap): rare on
+// the first rides, then epic, then legendary (Unlocks.cardCap(), set by run/Progression).
 // Moves keep their own triggers (player/Techniques MOVE_UNLOCKS; manual now at rank 5).
 //
 // ---------------------------------------------------------------- gates (who asks)
@@ -110,8 +113,10 @@ export const UNLOCKS: UnlockDef[] = [
   U('plan:gun_shotgun', 'bosses', 1, 'Coach-Gun Plans', 'For sale at the turtle shop until you own them', 'book', 'coach-gun plans'),
   // BEST BOUNTY RANK
   U('cards:grit', 'rank', 4, "Rider's Grit", 'Riding and gambling cards join the rank-up deck', 'book'),
+  U('cards:legendary', 'bosses', 2, 'Legendary Cards', 'Rank-ups can deal legendary cards now', 'book'),
   // RIDES
   U('system:errands', 'rides', 1, "Thoth's Errands", 'Thoth hands out errands in his Hall now'),
+  U('cards:epic', 'rides', 2, 'Epic Cards', 'Rank-ups can deal epic cards now', 'book'),
 ];
 
 /** consumables on the shelf from the very first ride */
@@ -224,6 +229,11 @@ export const Unlocks = {
     const out: string[] = [];
     for (const [g, ids] of Object.entries(CARD_GROUPS)) if (!Unlocks.has('cards:' + g)) out.push(...ids);
     return out;
+  },
+  /** the rarest a rank-up card may be dealt (UpgradeManager.tierCap): rare at first, epic after two rides, legendary after two bosses */
+  cardCap(): 'rare' | 'epic' | 'legendary' {
+    if (Unlocks.has('cards:legendary')) return 'legendary';
+    return Unlocks.has('cards:epic') ? 'epic' : 'rare';
   },
   missionOpen(type: string) {
     return !GATED_MISSIONS.includes(type) || Unlocks.has('mission:' + type);

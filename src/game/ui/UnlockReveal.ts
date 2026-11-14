@@ -20,6 +20,7 @@ import { buildRigGeo, clearRigCache, RigInstance, type RigSpec } from '../../eng
 import { SpriteBank, type Shot, type Sprite, blitObj, blitC, wrap, pixelText, pixelTextWidth } from './HudSprites';
 import { sprite, nine, strip3, type PixelSprite } from './PixelUI';
 import { HUD_ART as ART } from './HudArt';
+import { wrapInk } from './HudKit';
 
 const RIBBON_R: PixelSprite = { w: ART.ribbon_end.w, h: ART.ribbon_end.h, rows: ART.ribbon_end.rows.map((r) => r.split('').reverse().join('')) };
 
@@ -177,8 +178,12 @@ class Reveal {
   private paint(C: Card) {
     const c = this.c, u = C.u;
     const head = `${TRACK_TITLE[u.track]}  ${u.at}`;
-    const W = Math.min(this.w - 16, Math.max(210, Math.ceil(Math.max(pixelTextWidth(u.name, 16), pixelTextWidth(u.line, 16), pixelTextWidth(head, 16)) * 1.06 + 64)));
-    const H = 72;
+    // the effect line wraps (two lines at most) so the card stays a card, not a banner
+    const lw = Math.min(210, this.w - 90);
+    const lines = wrapInk(u.line, lw, 16, 2);
+    const tw = Math.max(pixelTextWidth(u.name, 16), pixelTextWidth(head, 16), ...lines.map((l) => pixelTextWidth(l, 16)));
+    const W = Math.min(this.w - 16, Math.max(200, Math.ceil(tw * 1.06 + 64)));
+    const H = 60 + lines.length * 13;
     // in: a drop with a little overshoot; out: snapped back up past the top
     const tin = Math.min(1, C.t / 0.42), tout = Math.max(0, (C.t - C.dur) / 0.45);
     const back = (k: number) => 1 + 2.2 * Math.pow(k - 1, 3) + 1.2 * Math.pow(k - 1, 2);
@@ -221,7 +226,7 @@ class Reveal {
     c.globalAlpha = al;
     pixelText(c, head, tx, y + 10, { size: 16, color: u.track === 'tally' ? '#5a2a8a' : '#8a2016', lip: '#f6e8c4' });
     pixelText(c, u.name, tx, y + 25, { size: 16, color: '#3a1c0a' });
-    pixelText(c, u.line, tx, y + 40, { size: 16, color: '#6a4a28' });
+    lines.forEach((l, i) => pixelText(c, l, tx, y + 40 + i * 13, { size: 16, color: '#6a4a28' }));
     if (C.of > 1) pixelText(c, `${C.idx}/${C.of}`, x + W - 10, y + H - 19, { size: 16, color: '#8a6a40', align: 'right' });
     c.globalAlpha = 1;
     c.restore();

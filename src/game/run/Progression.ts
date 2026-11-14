@@ -57,6 +57,8 @@ export class Progression {
     // the deck: locked card groups stay out
     const ban = host.upgrades?.banished as Set<string> | undefined;
     if (ban) for (const id of Unlocks.lockedCards()) if (!host.upgrades.lv?.(id)) ban.add(id);
+    // ...and the rarest card a rank-up may deal (the cards worker's UpgradeManager.tierCap hook)
+    this.capCards();
     // payouts as they happen
     this.offs.push(Codex.onDiscover(() => (this.evalT = 0.8)));
     this.offs.push(ctx.events.on('rankUp', (r: number) => Unlocks.noteRank(r)));
@@ -71,9 +73,15 @@ export class Progression {
     });
   }
 
+  private capCards() {
+    const up = this.host.upgrades;
+    if (up && 'tierCap' in up) up.tierCap = Unlocks.cardCap();
+  }
+
   /** an unlock landed mid-ride: say so (the reveal card comes at the results / the death) */
   private announce(u: UnlockDef) {
     if (u.kind === 'cards') {
+      this.capCards();
       const ban = this.host.upgrades?.banished as Set<string> | undefined;
       for (const id of CARD_GROUPS[u.id.slice(6)] ?? []) ban?.delete(id);
     }

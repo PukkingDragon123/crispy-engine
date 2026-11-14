@@ -512,14 +512,16 @@ export class MenuScene implements GameScene {
     const PS = 0.78, u = PS / 96;
     const Lv = len / u, Hv = h / u;
     const lock = new THREE.Group();
-    const cx = dir * len * 0.46, z = 10.5 * u;
+    const cx = dir * len * 0.46, z = 12 * u;
     lock.position.set(cx, 0, z);
     g.add(lock);
     const chains: THREE.Mesh[] = [];
     for (const s of [1, -1]) {
-      const ch = chainLine(-Lv * 0.36, s * Hv * 0.44, Lv * 0.32, -s * Hv * 0.4, s > 0 ? 3 : 8);
+      // big forged links, so the X reads from across the camp
+      const CS = 1.6;
+      const ch = chainLine((-Lv * 0.36) / CS, (s * Hv * 0.44) / CS, (Lv * 0.32) / CS, (-s * Hv * 0.4) / CS, s > 0 ? 3 : 8);
       const mesh = vmesh(ch.model, ch.voxelSize, [0, 0, 0]);
-      mesh.scale.setScalar(PS);
+      mesh.scale.setScalar(PS * CS);
       mesh.position.set(dir * -0.02 * len, 0, s * 0.6 * u);
       if (dir < 0) mesh.rotation.y = Math.PI;
       lock.add(mesh);
@@ -527,8 +529,8 @@ export class MenuScene implements GameScene {
     }
     const pb = padlockBody(), sh = padlockShackle();
     const body = vmesh(pb.model, pb.voxelSize, pb.pivot);
-    body.scale.setScalar(PS * 1.5);
-    body.position.set(0, -3 * u, 6 * u);
+    body.scale.setScalar(PS * 1.9);
+    body.position.set(0, -2 * u, 7 * u);
     body.rotation.z = 0.12;
     const shackle = vmesh(sh.model, sh.voxelSize, sh.pivot);
     // (inside the body's own space: model metres, before its scale)

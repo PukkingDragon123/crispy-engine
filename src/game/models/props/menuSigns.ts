@@ -14,7 +14,8 @@ import { mixRGB } from './helpers';
 import { alagardMask } from './menuSet';
 
 export type V3 = [number, number, number];
-const IRON = { hi: 0x8a8680, base: 0x5c5a57, shade: 0x444240, dark: 0x2a2826 };
+const IRON = { hi: 0x9a968e, base: 0x6c6a66, shade: 0x4a4846, dark: 0x2a2826 };
+const STEEL = { hi: 0xe4e0d6, base: 0xb4b0a6, shade: 0x77736c };
 const RUST = { hi: 0xc4743e, base: 0x9c5532, shade: 0x7a4024, dark: 0x4e2614 };
 const GILT = { hi: 0xfff0a6, base: 0xe2b24a, shade: 0xa8741e };
 const CHAR = 0x2a1a10;
@@ -117,8 +118,8 @@ export function signBoard(label: string, dir: 1 | -1, seed: number, wood: Ramp, 
         }
         let fl: number = VF.SOLID;
         if (text(x, y)) {
-          if (front || z === T - 2) continue; // carved two deep
-          if (z === T - 3) {
+          if (front) continue; // carved
+          if (z === T - 2) {
             const chipped = hash2(x * 13, y * 7 + seed) < 0.03;
             const lit = !text(x, y + 1) || !text(x - 1, y);
             c = chipped ? wood.shade : lit ? GILT.hi : !text(x, y - 1) ? ink.shade : ink.base;
@@ -174,7 +175,7 @@ export function chainLine(ax: number, ay: number, bx: number, by: number, seed =
         const th = (a / 34) * Math.PI * 2;
         const along = Math.cos(th) * ra, across = Math.sin(th) * rb;
         const lit = Math.sin(th) > 0.2 && ra > 4;
-        const c = rusty ? (lit ? RUST.hi : RUST.base) : lit ? 0xc8c4bc : Math.sin(th) < -0.4 ? IRON.shade : IRON.hi;
+        const c = rusty ? (lit ? RUST.hi : RUST.base) : lit ? STEEL.hi : Math.sin(th) < -0.4 ? STEEL.shade : STEEL.base;
         if (flat) m.set(Math.round(cx + ux * along - uy * across), Math.round(cy + uy * along + ux * across), 0, c, VF.METAL);
         else m.set(Math.round(cx + ux * along), Math.round(cy + uy * along), Math.round(across), c, VF.METAL);
       }
