@@ -38,6 +38,8 @@ const LOOK: Record<ProjKind, { sprite: string; size: number; color: number; stre
   dynamite: { sprite: 'bullet', size: 0.5, color: 0xff6040, stretch: 0, grav: 16, trail: 0xffb233 },
   bone: { sprite: 'bone', size: 0.4, color: 0xffffff, stretch: 0, grav: 4 },
   blood: { sprite: 'dot4', size: 0.24, color: 0xa81414, stretch: 0.03, grav: 15, trail: 0x6e0a0a },
+  // Nile cannon balls: a dark iron shot trailing powder smoke (solved arcs, explode on landing)
+  cannon: { sprite: 'pebble', size: 0.85, color: 0x4a4a52, stretch: 0, grav: 14, trail: 0x9a9288 },
 };
 /** red pixel trail of a blood squirt (bright arterial + dark clot), acid blood adds sickly green */
 const BLOOD_TRAIL = [0xc81e1e, 0x9a1010, 0x6e0a0a, 0xe03a2a];
@@ -216,7 +218,7 @@ export class Projectiles {
         const dy = q.y - pc.y;
         const dh = Math.hypot(dx, dz);
         if (dh < q.r + 0.42 && Math.abs(dy) < 1.0 + q.r) {
-          const dealt = pl.takeHit({ base: q.dmg, kind: q.kind === 'curse' || q.kind === 'venom' ? 'magic' : 'phys', source: 'projectile', status: q.status, knock: q.kind === 'dynamite' ? 8 : 1.5 }, new THREE.Vector3(q.x - q.vx * 0.05, q.y, q.z - q.vz * 0.05));
+          const dealt = pl.takeHit({ base: q.dmg, kind: q.kind === 'curse' || q.kind === 'venom' ? 'magic' : 'phys', source: 'projectile', status: q.status, knock: q.kind === 'dynamite' || q.kind === 'cannon' ? 8 : 1.5 }, new THREE.Vector3(q.x - q.vx * 0.05, q.y, q.z - q.vz * 0.05));
           if (dealt > 0 && q.status) for (const s of q.status) pl.status.apply(s.id, s.stacks, s.dur, 2, 30, {});
           const hp = pl as { invuln?: number };
           if (dealt > 0 && hp.invuln !== undefined) hp.invuln = Math.max(hp.invuln, this.graceIframes);
@@ -241,11 +243,14 @@ export class Projectiles {
       }
       const L = LOOK[q.kind];
       const col = q.owner === 'player' ? 0x9dff3a : L.color;
-      this.batch.push(q.x, q.y, q.z, L.sprite, L.size, L.size, q.kind === 'dynamite' || q.kind === 'dung' || q.kind === 'bone' ? q.spin : 0, col, 1, { x: q.vx, y: q.vy, z: q.vz }, L.stretch);
+      this.batch.push(q.x, q.y, q.z, L.sprite, L.size, L.size, q.kind === 'dynamite' || q.kind === 'dung' || q.kind === 'bone' || q.kind === 'cannon' ? q.spin : 0, col, 1, { x: q.vx, y: q.vy, z: q.vz }, L.stretch);
       if (q.kind === 'blood') {
         // a red pixel trail that drips: every drop sheds droplets, some fall away as they cool
         if (rnd.chance(0.85)) ctx.particles.emit({ pos: { x: q.x, y: q.y, z: q.z }, count: 1, vel: { x: q.vx * 0.12, y: q.vy * 0.1, z: q.vz * 0.12 }, life: [0.25, 0.55], size: [0.1, 0.035], sprite: ['dot3', 'dot4', 'blood0'], color: q.acid ? ACID_TRAIL : BLOOD_TRAIL, gravity: 7, drag: 1.6, jitter: 0.03 });
         if (rnd.chance(0.12)) ctx.particles.emit({ pos: { x: q.x, y: q.y, z: q.z }, count: 1, vel: { x: q.vx * 0.3, y: 0, z: q.vz * 0.3 }, life: [0.5, 0.8], size: [0.05, 0.05], sprite: 'dot3', color: q.acid ? 0x9dff3a : 0x7e1410, gravity: 16, ground: true });
+      } else if (q.kind === 'cannon') {
+        if (rnd.chance(0.8)) ctx.particles.emit({ pos: { x: q.x, y: q.y, z: q.z }, count: 1, life: [0.5, 0.9], size: [0.3, 0.7], sprite: ['puff0', 'puff1'], color: [0xb8b0a4, 0x8a8278], alpha: 0.5, drag: 1.5, rot: 6, rotSpeed: 0.4 });
+        if (rnd.chance(0.4)) ctx.particles.emit({ pos: { x: q.x, y: q.y, z: q.z }, count: 1, life: [0.15, 0.3], size: [0.1, 0.03], sprite: 'spark', color: 0xffb040, additive: true, drag: 2 });
       } else if (L.trail && rnd.chance(0.5)) ctx.particles.emit({ pos: { x: q.x, y: q.y, z: q.z }, count: 1, life: [0.2, 0.4], size: [0.12, 0.04], sprite: q.kind === 'dynamite' ? 'spark' : 'dot3', color: L.trail, additive: q.kind === 'dynamite', drag: 2 });
     }
     this.batch.end(ctx.world.env.fog);
@@ -265,6 +270,20 @@ export class Projectiles {
         ctx.fx.dust(pos, 0.6, 0x8a6a3a, 2);
         ctx.sfx('scarab_squish', pos, 0.6);
         break;
+      case 'cannon': {
+        // the ball bursts: fire on land, a tall column of spray on the river
+        const wet = (ctx.world as unknown as { water?: { heightAt?(x: number, z: number): number } | null }).water;
+        const wh = wet?.heightAt ? wet.heightAt(x, z) : -1e9;
+        if (wh > ctx.world.field.heightAt(x, z) + 0.2) {
+          ctx.particles.emit({ pos: { x, y: wh + 0.1, z }, count: 26, vel: { x: 0, y: 7, z: 0 }, spread: 2.4, gravity: 16, drag: 0.3, life: [0.6, 1.2], size: [0.16, 0.06], sprite: ['dot3', 'dot4', 'bubble'], color: [0xe8f6f4, 0xb8dcd4, 0xffffff], ground: true, jitter: 0.6 });
+          ctx.particles.emit({ pos: { x, y: wh + 0.4, z }, count: 6, spread: 1.2, up: 2.2, life: [0.7, 1.3], size: [0.8, 2.0], sprite: ['puff0', 'puff1', 'puff2'], color: [0xf0fbff, 0xd0e8e8], alpha: 0.6, drag: 2, rot: 6, rotSpeed: 0.5 });
+          ctx.fx.ring({ x, y: wh + 0.06, z }, 0xd8f4f0, 3.4, 0.5);
+        } else ctx.fx.explosion(pos, 3.0);
+        ctx.sfx('explosion', pos, 0.9, 0.85);
+        ctx.shake(0.2);
+        ctx.events.emit('explosion', pos, 3.0, q.dmg, 'enemy');
+        break;
+      }
       case 'dynamite': {
         ctx.fx.explosion(pos, 3.2);
         ctx.sfx('explosion', pos, 1);

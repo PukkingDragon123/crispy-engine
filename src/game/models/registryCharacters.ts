@@ -48,3 +48,9 @@ CHARACTER_MODELS['bookworm'] = () => bookwormRig(0);
 CHARACTER_MODELS['bookworm_elder'] = () => bookwormRig(1);
 CHARACTER_MODELS['bookworm_apprentice'] = () => bookwormRig(2);
 CHARACTER_MODELS['bookworm_archivist'] = () => bookwormRig(3);
+// Mark, the moon-mummy cat hunter, and his gear (characters/mark.ts, markGear.ts)
+import { markRig, crescentBoardModel, markBatonRig, moonCrestModel } from './characters';
+CHARACTER_MODELS['mark'] = markRig;
+CHARACTER_MODELS['board_crescent'] = crescentBoardModel;
+CHARACTER_MODELS['mark_baton'] = markBatonRig;
+CHARACTER_MODELS['mark_crest'] = moonCrestModel;

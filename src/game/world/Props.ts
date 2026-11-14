@@ -22,6 +22,7 @@ import { ruinify, ruinSpots, RuinOpts, RuinSpots, NOCOL, cobweb, spiderNest, pla
 import { globalUniforms, atmoFogUniforms } from '../../engine/render/VoxelMaterial';
 import { PRESETS } from './Env';
 import { rockArch, colossusLegs, colossusHead, shipwreck, shrine, cairn } from '../models/props/wilds';
+import * as NM from '../models/props/nile';
 
 type SM = {
   model: VoxelModel;
@@ -262,10 +263,20 @@ const KINDS: Record<string, KindDef> = {
   cairn: { variants: 2, build: (v) => cairn(v), solid: 'circle', radius: 0.6 },
   rimStone: { variants: 6, build: (v) => rimStone(v), solid: 'circle', radius: 0.7 },
   rimGate: { variants: 2, build: (v) => rimStone(6 + v), solid: 'circle', radius: 0.7 },
+  // the Nile (world/NileGen.ts): seated kings, landing stages, water levers, the burnt valley
+  papyrus: { variants: 4, build: (v) => NM.papyrusClump(v), solid: 'none', foliage: true },
+  nileColossus: { variants: 2, build: (v) => NM.seatedColossus(v), solid: 'voxel', unique: true },
+  nileDock: { variants: 3, build: (v) => NM.jetty(v), solid: 'none', unique: true },
+  nileShaduf: { variants: 2, build: (v) => NM.shaduf(v), solid: 'circle', radius: 0.35, unique: true },
+  charredPalm: { variants: 4, build: (v) => NM.charredPalm(v), solid: 'circle', radius: 0.12 },
+  obsidian: { variants: 4, build: (v) => NM.obsidianSpire(v), solid: 'circle', radius: 0.7 },
+  charredColumn: { variants: 2, build: (v) => NM.charred(P.column(v, v === 1), v), solid: 'circle', radius: 0.45, unique: true },
+  charredObelisk: { variants: 2, build: (v) => NM.charred(P.obelisk(v + 4, v === 1), v + 3), solid: 'circle', radius: 0.5, unique: true },
+  charredStatue: { variants: 1, build: () => NM.charred(P.godStatue('ra'), 7, 0.02), solid: 'circle', radius: 0.5, unique: true },
 };
 const RIM_KINDS = new Set(['rimStone', 'rimGate']);
 /** plants drawn as pixel-art sprites by the Foliage layer instead of voxel batches */
-const SPRITE_KINDS = new Set(['deadBush', 'dryGrass', 'oasisReeds', 'reeds', 'oasisFlowers']);
+const SPRITE_KINDS = new Set(['deadBush', 'dryGrass', 'oasisReeds', 'reeds', 'oasisFlowers', 'papyrus']);
 /**
  * Structures that wear the big-block pixel skin (see BlockSkin): walls, roofs, hulls and
  * stones become big textured faces instead of millions of tiny voxel quads.
@@ -280,6 +291,7 @@ const SKIN: Record<string, SkinHint | ((v: number) => SkinHint)> = {
   hieroglyphWall: 'stone', stoneGate: 'stone', sphinx: 'stone', obelisk: 'stone', obeliskBroken: 'stone', column: 'stone', shrine: 'stone',
   rockArch: 'rock', colossusLegs: 'rock', colossusHead: 'rock', rimStone: 'rock', rimGate: 'rock', boulder: 'rock',
   cactus: 'cactus', palm: 'bark',
+  nileColossus: 'stone', nileDock: 'wood', nileShaduf: 'adobe',
 };
 let skinMat: ReturnType<typeof makeVoxelMaterial> | null = null;
 let skinSwayMat: ReturnType<typeof makeVoxelMaterial> | null = null;

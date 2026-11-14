@@ -30,6 +30,7 @@ import { MissionPaper, questFromObjective } from './MissionPaper';
 import { OutlawHud } from './OutlawHud';
 import { Cinema, type BossLike } from '../cine/Cinema';
 import { ArsenalHud } from './ArsenalHud';
+import { MoonCrestHud } from './MoonCrestHud';
 import { SpriteBank, blitObj, glint, setGlintFx } from './HudSprites';
 import { PixelFx } from './HudKit';
 import { HUD_ART as ART } from './HudArt';
@@ -191,6 +192,8 @@ export class Hud3D implements HudPainter {
   private paper: MissionPaper;
   private outlaw: OutlawHud;
   private arsenal: ArsenalHud;
+  /** Mark's moon medallion and crests, in the cylinder's place */
+  private moonCrests: MoonCrestHud;
   private t = 0;
   private bustSpec: RigSpec | null = null;
   /** the player's revolver (for card art that shows Sundown armed) */
@@ -255,6 +258,7 @@ export class Hud3D implements HudPainter {
     this.paper = new MissionPaper(this.scene);
     this.outlaw = new OutlawHud(this.scene);
     this.arsenal = new ArsenalHud(this.scene, () => this.gunSpec);
+    this.moonCrests = new MoonCrestHud(this.scene);
 
     this.tarot = new TarotBar(this.scene, hud);
 
@@ -612,6 +616,7 @@ export class Hud3D implements HudPainter {
     this.glints.points.visible = visible;
     this.glints.update(dt, s);
     this.arsenal.update(dt, A.arsenal, visible, s, !!cy.hidden);
+    this.moonCrests.update(dt, cy, hud.last?.weapon, visible && !!cy.hidden, s);
     Cinema.poll(this.hud);
     this.updatePoster(dt, W, H);
     this.tarot.update(dt, W, H);
@@ -686,6 +691,7 @@ export class Hud3D implements HudPainter {
     this.paper.dispose();
     this.outlaw.dispose();
     this.arsenal.dispose();
+    this.moonCrests.dispose();
     this.posterUi?.remove();
     this.hud.canvas.style.display = '';
     this.hud.use3D = false;

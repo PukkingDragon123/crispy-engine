@@ -20,13 +20,21 @@
 // the shared warning language ("!" glyphs, wedges, tracking rings that lock,
 // lanes), and the big hand blows offer a QTE DODGE / JUMP: a dodged blow
 // leaves him wide open (+50% damage, the hand pinned longer).
+// THE NIGHT IS HIS (bosses/khonsu/LunarKit): Undercover of the Night (his entrance
+// sinks the sun and raises his moon; the day comes back when he falls), Shine a Light
+// (moonbeams), Patience (clock dials: ride out before the hand strikes twelve), and from
+// phase 2 Lucy in the Sky with Diamonds (crescent shards), Tomorrow Never Knows (an
+// hourglass stops his bullets mid-air, then they fly on), Yesterday (a dodged volley is
+// rewound along its paths) and 2000 Light Years from Home (the moon dragged close, its
+// pull and its beams). In phase 3 the moon cracks as the hand comes down, November Rain
+// sheds its shards, and once, near the end, Ruby Tuesday: a blood eclipse.
 import * as THREE from 'three';
 import { Boss, BossDeps, HitSphere } from './Boss';
 import type { RayHit } from '../Ctx';
 import { modelEntry } from '../models/lookup';
 import { buildRigGeo, RigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { RigEyes } from '../fx/FaceFx';
-import { PRESETS, EnvPreset } from '../world/Env';
+import { LunarKit } from './khonsu/LunarKit';
 import { rnd, damp, clamp, dampAngle } from '../../engine/math/rand';
 import type { Hit } from '../combat/Damage';
 import type { Enemy } from '../enemies/Enemies';
@@ -50,10 +58,9 @@ export class KhonsuAvatar extends Boss {
   /** the hand can be shot while it is low / stunned */
   private handOpen = 0;
   private caught = false;
-  private night = 0;
-  private nightTarget = 0;
-  private nightApplied = 0;
-  private baseEnv: EnvPreset | null = null;
+  /** the night, the moon and time (bosses/khonsu/LunarKit) */
+  lunar: LunarKit;
+  private moonCds = { pull: 12, rain: 0, ruby: false };
   private moonLight: THREE.PointLight;
   private sweepK = 0;
   private swingNames: string[] = [];
@@ -87,7 +94,8 @@ export class KhonsuAvatar extends Boss {
     (this.rig.sockets['blade_tip'] ?? this.root).add(this.moonLight);
     this.handRoot.visible = false;
     this.ctx.scene.add(this.handRoot);
-    this.baseEnv = { ...this.ctx.world.env.preset };
+    this.lunar = new LunarKit(this, { scale: 1, callout: (s) => this.callout(s) });
+    (window as any).__khonsu = this; // dev handle: __khonsu.debug('patience')
     // the dodge QTE needs the overlay even if the scene never handed it to the horde
     if (!d.enemies.qte) d.enemies.qte = d.qte;
   }
@@ -173,13 +181,18 @@ export class KhonsuAvatar extends Boss {
     this.flying = true;
     const g = this.ground(this.pos.x, this.pos.z);
     this.pos.y = g - this.height * 0.9;
-    this.nightTarget = 0.45;
+    // Undercover of the Night: the sun goes down behind the dunes and his moon comes up in its place
+    this.lunar.fall(1);
+    this.callout('Undercover of the Night');
+    ctx.sfx('divine_whisper', this.pos, 1, 0.55);
     const look = new THREE.Vector3(this.pos.x, g + this.height * 0.55, this.pos.z);
     const dir = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     const side = new THREE.Vector3(dir.z, 0, -dir.x);
-    const low = look.clone().addScaledVector(dir, 7.5).addScaledVector(side, 2.5);
+    // a low shot from the far side of him, so the moon climbs the sky right behind his crown
+    const md = this.lunar.sky.flatDir(new THREE.Vector3());
+    const low = look.clone().addScaledVector(md, -8.5).addScaledVector(new THREE.Vector3(md.z, 0, -md.x), 2.2);
     low.y = Math.max(g + 0.7, this.ground(low.x, low.z) + 0.7);
-    cam.setCine({ pos: low, look, fov: 52 });
+    cam.setCine({ pos: low, look: look.clone().add(new THREE.Vector3(0, 1.2, 0)), fov: 56 });
     await this.wait(0.15);
     // heavy meshes are built under the letterbox while the camera holds still
     this.prebuild();
@@ -204,15 +217,26 @@ export class KhonsuAvatar extends Boss {
     await this.wait(2.6);
     cam.setCine(null);
     ctx.engine.letterbox(false, 0.5);
-    this.nightTarget = 0;
     this.invulnerable = false;
     this.setExpr('angry');
   }
 
   // ------------------------------------------------------------------ fight loop
+  /** dev/test: queue a move by its method name, e.g. __khonsu.debug('tomorrowNeverKnows') */
+  private debugQ: string[] = [];
+  debug(name: string) {
+    this.debugQ.push(name);
+  }
+
   protected async fight() {
     while (true) {
       this.check();
+      const dq = this.debugQ.shift();
+      if (dq && typeof (this as any)[dq] === 'function') {
+        await (this as any)[dq]();
+        await this.wait(0.3);
+        continue;
+      }
       const p = this.phase;
       if (this.pendingRite) {
         this.pendingRite = false;
@@ -226,30 +250,43 @@ export class KhonsuAvatar extends Boss {
       }
       const r = rnd.next();
       if (p === 0) {
-        if (r < 0.34) await this.moonlightMile();
-        else if (r < 0.58) await this.midnightRambler();
-        else if (r < 0.8) await this.timeIsOnMySide();
+        if (r < 0.26) await this.moonlightMile();
+        else if (r < 0.44) await this.midnightRambler();
+        else if (r < 0.58) await this.timeIsOnMySide();
+        else if (r < 0.72) await this.shineALight();
+        else if (r < 0.86) await this.patience();
+        else if (r < 0.93 && this.tier >= 2) await this.lucyInTheSky();
         else await this.stalk();
         // chained: the sweep flows straight into a blink-slash
-        if (r < 0.34 && rnd.chance(0.4)) await this.midnightRambler();
+        if (r < 0.26 && rnd.chance(0.4)) await this.midnightRambler();
       } else if (p === 1) {
-        if (r < 0.22) await this.paintItBlack();
-        else if (r < 0.42) await this.moonlightMile();
-        else if (r < 0.58) await this.mrMoonlight();
-        else if (r < 0.8) await this.midnightRambler();
+        if (this.moonCds.pull <= 0 && r < 0.12) await this.twoThousandLightYears();
+        else if (r < 0.2) await this.paintItBlack();
+        else if (r < 0.34) await this.moonlightMile();
+        else if (r < 0.44) await this.mrMoonlight();
+        else if (r < 0.56) await this.midnightRambler();
+        else if (r < 0.66) await this.tomorrowNeverKnows();
+        else if (r < 0.76) await this.lucyInTheSky();
+        else if (r < 0.86) await this.patience();
+        else if (r < 0.93) await this.shineALight();
         else await this.timeIsOnMySide();
-        if (r >= 0.58 && r < 0.8 && rnd.chance(0.5)) await this.moonlightMile();
+        if (r >= 0.44 && r < 0.56 && rnd.chance(0.5)) await this.moonlightMile();
       } else {
         if (!this.hand) await this.wait(0.3);
-        else if (r < 0.26) {
+        else if (!this.moonCds.ruby && this.frac < 0.2) await this.rubyTuesday();
+        else if (r < 0.22) {
           await this.underMyThumb();
           if (rnd.chance(0.45)) await this.underMyThumb();
-        } else if (r < 0.44) await this.youCouldBeMine();
-        else if (r < 0.6) await this.nightTrain();
-        else if (r < 0.74 || this.frac < 0.12) await this.knockin();
-        else if (r < 0.88) await this.moonlightMile();
+        } else if (r < 0.36) await this.youCouldBeMine();
+        else if (r < 0.5) await this.nightTrain();
+        else if (r < 0.62 || this.frac < 0.12) await this.knockin();
+        else if (r < 0.72 && this.moonCds.rain <= 0) await this.novemberRain();
+        else if (r < 0.8) await this.moonlightMile();
+        else if (r < 0.88) await this.tomorrowNeverKnows();
         else await this.midnightRambler();
       }
+      // a volley you slipped is not over yet: he rewinds it (from phase 2)
+      if (p >= 1 && this.lunar.missedFor(1.2) && this.lunar.liveBullets() >= 10 && rnd.chance(0.3 + this.tier * 0.05)) await this.yesterday();
       await this.wait((p >= 2 ? 0.12 : p === 1 ? 0.25 : 0.38) * this.haste);
     }
   }
@@ -358,7 +395,8 @@ export class KhonsuAvatar extends Boss {
     this.callout('Paint It Black');
     this.stop();
     this.taunt(rnd.pick(['Night falls when I say it falls.', 'Close your eyes. It is easier.', 'Every star is a grave.']), MOON);
-    this.nightTarget = 1;
+    // a shadow crawls over the moon: the dark deepens while the blades fall
+    this.lunar.sky.eclipseT = Math.max(this.lunar.sky.eclipseT, 0.42);
     this.anim.aimL = this.anim.aimR = 1;
     this.ctx.sfx('divine_whisper', this.pos, 1, 0.7);
     this.warn.bang(this, { tier: 'heavy', life: 0.9, y: this.height + 0.5 });
@@ -373,7 +411,7 @@ export class KhonsuAvatar extends Boss {
     await Promise.all(hits);
     this.anim.aimL = this.anim.aimR = 0;
     await this.wait(0.8 * this.haste);
-    if (this.phase < 2) this.nightTarget = 0;
+    if (!this.moonCds.ruby || this.lunar.sky.eclipseT < 0.9) this.lunar.sky.eclipseT = 0;
   }
 
   /** the crown pours lunar spirals while the dead climb out of the sand */
@@ -388,6 +426,123 @@ export class KhonsuAvatar extends Boss {
       this.fire('spiral', { count: 18 + this.phase * 5, speed: 9.5, dmg: 8, proj: 'curse', phase: k * 0.3 }, from);
       await this.wait(0.42 * this.haste);
     }
+  }
+
+  // ------------------------------------------------------------------ the night, the moon and time (bosses/khonsu/LunarKit)
+  private crownAnchor() {
+    const out = this.socketWorld('head_top', new THREE.Vector3());
+    out.y += 1.5;
+    return out;
+  }
+  /** moonbeams crash down where you are going (the scythe raised to the moon) */
+  private async shineALight() {
+    this.stop();
+    this.anim.aimL = 1;
+    this.moonLight.intensity = 7;
+    this.warn.bang(this, { tier: 'tell', life: 0.5, y: this.height + 0.5 });
+    await this.wait(0.35 * this.haste);
+    const n = 4 + this.tier + this.phase * 2;
+    await this.lunar.shineALight({ n, gap: 0.24 * this.haste, lead: 1.1 - this.phase * 0.08, dmg: 14 + this.phase * 3, pattern: this.phase >= 1 && rnd.chance(0.45) ? 'ring' : 'track' });
+    this.anim.aimL = 0;
+    this.moonLight.intensity = 0;
+    await this.wait(0.4 * this.haste);
+  }
+  /** clock dials bloom under you: time crawls inside, the dial strikes at twelve */
+  private async patience() {
+    this.stop();
+    this.anim.aimL = 1;
+    this.setExpr('smug');
+    if (rnd.chance(0.5)) this.taunt(rnd.pick(['Wait. Time is mine to give.', 'Slowly, little bones. Slowly.', 'Every second belongs to the moon.']), MOON);
+    await this.lunar.patience({ n: 1 + (this.phase >= 1 ? 1 : 0) + (this.tier >= 2 ? 1 : 0), dur: 3.0 - this.phase * 0.25, dmg: 14 + this.phase * 3 });
+    // while you are slowed, the crescents come
+    const from = this.socketWorld('blade_tip', new THREE.Vector3());
+    from.y = Math.max(from.y, this.pos.y + 1.2);
+    for (let k = 0; k < 2 + this.phase; k++) {
+      await this.wait(0.55 * this.haste);
+      this.fire('fan', { count: 7 + this.phase * 2 + (this.tier - 1) * 2, spread: 1.2, speed: 9, dmg: 8, proj: 'curse' }, from);
+    }
+    this.anim.aimL = 0;
+    await this.wait(0.5 * this.haste);
+  }
+  /** crescent shards of the moon rain on you */
+  private async lucyInTheSky() {
+    this.stop();
+    this.anim.aimL = this.anim.aimR = 1;
+    this.warn.bang(this, { tier: 'tell', life: 0.6, y: this.height + 0.5 });
+    if (rnd.chance(0.5)) this.taunt(rnd.pick(['The sky is falling, and it is mine.', 'Catch the moon, little bones.']), MOON);
+    await this.wait(0.4 * this.haste);
+    await this.lunar.lucy({ n: 5 + this.phase * 2 + this.tier, gap: 0.26 * this.haste, dmg: 14 + this.phase * 2, splinters: 4 + this.phase * 2 });
+    this.anim.aimL = this.anim.aimR = 0;
+    await this.wait(0.5 * this.haste);
+  }
+  /** a dense volley, then the hourglass turns: his bullets stop dead in the air, then fly on */
+  private async tomorrowNeverKnows() {
+    this.stop();
+    this.faceTarget(this.playerPos());
+    this.anim.aimL = this.anim.aimR = 1;
+    this.setExpr('smug');
+    this.warn.bang(this, { tier: 'heavy', life: 0.7, y: this.height + 0.5 });
+    this.ctx.sfx('divine_whisper', this.pos, 0.8, 0.9);
+    await this.wait(0.7 * this.haste);
+    const from = this.socketWorld('head_top', new THREE.Vector3());
+    await this.lunar.tomorrowNeverKnows({
+      volley: () => {
+        this.fire('ring', { count: 22 + this.phase * 4 + (this.tier - 1) * 4, speed: 10, dmg: 8, proj: 'curse', phase: rnd.next() });
+        this.fire('spiral', { count: 18 + this.phase * 4, speed: 7.5, dmg: 8, proj: 'curse', phase: rnd.next() }, from);
+        this.fire('fan', { count: 9, spread: 1.4, speed: 12, dmg: 9, proj: 'curse' }, from);
+      },
+      anchor: () => this.crownAnchor(),
+      hold: 1.6,
+      lead: 0.45,
+    });
+    this.anim.aimL = this.anim.aimR = 0;
+    await this.wait(0.35 * this.haste);
+  }
+  /** a dodged volley is rewound along its own paths */
+  private async yesterday() {
+    this.stop();
+    this.setExpr('smug');
+    this.anim.aimL = 1;
+    if (rnd.chance(0.6)) this.taunt(rnd.pick(['Again. From the top.', 'Yesterday came back for you.', 'Nothing you dodge stays dodged.']), MOON);
+    await this.lunar.yesterday(() => this.crownAnchor(), 0.55);
+    this.anim.aimL = 0;
+    await this.wait(0.4 * this.haste);
+  }
+  /** he drags the moon close: it swells over the dunes, pulls at you, and its beams rain */
+  private async twoThousandLightYears() {
+    this.moonCds.pull = 24 - this.tier * 2;
+    this.stop();
+    this.anim.aimL = this.anim.aimR = 1;
+    this.moonLight.intensity = 10;
+    this.setExpr('enraged');
+    this.taunt(rnd.pick(['COME DOWN, MOON. SEE HIM CLOSER.', 'The sky is a rope, and I am pulling.']), MOON);
+    await this.lunar.pullMoon({ dur: 4.2 + this.tier * 0.4, beams: 5, gap: 1.25 * this.haste, dmg: 14 + this.phase * 2, pull: 3.0 });
+    this.anim.aimL = this.anim.aimR = 0;
+    this.moonLight.intensity = 0;
+    this.setExpr('angry');
+    await this.wait(0.5);
+  }
+  /** phase 3: the crack widens and the moon sheds a storm of shards */
+  private async novemberRain() {
+    this.moonCds.rain = 16;
+    this.anim.aimR = 1;
+    this.taunt(rnd.pick(['Even the moon bleeds for me.', 'Let it rain.']), MOON);
+    await this.lunar.novemberRain({ stage: 3, n: 9 + this.tier * 2, gap: 0.2, dmg: 15, spread: 13 });
+    this.anim.aimR = 0;
+  }
+  /** once, near the end: the blood eclipse; he hunts you in the dark, red beams spiral out of him */
+  private async rubyTuesday() {
+    this.moonCds.ruby = true;
+    this.stop();
+    this.setExpr('enraged');
+    this.taunt('Goodbye, moonlight. Goodbye, little bones.', '#ff7a5a');
+    await this.lunar.rubyTuesday({
+      dur: 6,
+      during: async () => {
+        void this.lunar.shineALight({ n: 12, gap: 0.18, lead: 1.15, dmg: 16, pattern: 'spiral', at: this.pos.clone(), blood: true, song: false }).catch(() => {});
+        for (let i = 0; i < 2 + (this.tier >= 2 ? 1 : 0); i++) await this.midnightRambler();
+      },
+    });
   }
 
   // ------------------------------------------------------------------ the court
@@ -478,7 +633,6 @@ export class KhonsuAvatar extends Boss {
     ctx.engine.slowMo(0.55, 10);
     this.anim.aimL = this.anim.aimR = 1;
     this.moonLight.intensity = 10;
-    this.nightTarget = Math.max(this.nightTarget, 0.6);
     const sites = this.riteSites(3, 8, 12);
     if (sites.length) {
       const s = sites[0];
@@ -498,7 +652,6 @@ export class KhonsuAvatar extends Boss {
     ctx.engine.slowMo(1, 6);
     this.anim.aimL = this.anim.aimR = 0;
     this.moonLight.intensity = 0;
-    if (this.phase < 2) this.nightTarget = 0.35;
     this.invulnerable = false;
     this.riteCd = 12;
     if (this.courtAlive() && this.court.some((e) => e.def.id === 'cursePriest')) ctx.toast('CURSE PRIESTS', MOON, 'Their moon-thread wards him — kill the priests first!', true);
@@ -531,7 +684,8 @@ export class KhonsuAvatar extends Boss {
     super.onPhase(p);
     if (p === 1) {
       this.taunt('You have seen my face. Now see my sky.', MOON);
-      this.nightTarget = 0.35;
+      // the first crack runs across the moon
+      this.lunar.crack(1);
       this.pendingRite = true;
     }
     if (p === 2) void this.descend();
@@ -558,10 +712,12 @@ export class KhonsuAvatar extends Boss {
     const cam = this.d.cam;
     this.invulnerable = true;
     this.stop();
-    this.nightTarget = 1;
+    this.lunar.calm();
     ctx.engine.letterbox(true, 0.4);
     ctx.engine.flash(0xcfe8ff, 0.5, 0.5);
     this.enrage();
+    // the moon splits and the hand reaches down out of the crack
+    this.lunar.crack(2);
     this.taunt('BEHOLD THE HAND THAT TURNS THE NIGHT!', MOON);
     ctx.sfx('boss_roar', this.pos, 1, 0.7);
     this.prebuild();
@@ -571,14 +727,17 @@ export class KhonsuAvatar extends Boss {
       this.handRoot.scale.setScalar(HAND_SCALE);
     }
     const g = this.ground(this.pos.x, this.pos.z);
-    const above = new THREE.Vector3(this.pos.x, g + 70, this.pos.z);
+    // the hand reaches down out of the cracked moon's quarter of the sky
+    const md = this.lunar.sky.flatDir(new THREE.Vector3());
+    const above = new THREE.Vector3(this.pos.x + md.x * 34, g + 70, this.pos.z + md.z * 34);
     this.handNow.pos.copy(above);
     this.handT.pos.copy(above);
     this.handRoot.visible = !!this.hand;
-    // camera looks up past him into the sky
-    const look = new THREE.Vector3(this.pos.x, g + 16, this.pos.z);
-    const cp = new THREE.Vector3(this.pos.x + Math.sin(this.yaw) * 10, g + 1.6, this.pos.z + Math.cos(this.yaw) * 10);
-    cam.setCine({ pos: cp, look, fov: 62 });
+    // camera looks up past him into the sky, the cracked moon behind the falling hand
+    const look = new THREE.Vector3(this.pos.x + md.x * 8, g + 15, this.pos.z + md.z * 8);
+    const cp = new THREE.Vector3(this.pos.x - md.x * 10 + md.z * 2.5, g + 1.6, this.pos.z - md.z * 10 - md.x * 2.5);
+    cp.y = Math.max(cp.y, this.ground(cp.x, cp.z) + 1.4);
+    cam.setCine({ pos: cp, look, fov: 64 });
     this.handRate = 0.9;
     this.handT.pos.set(this.pos.x, g + 13, this.pos.z);
     this.handT.pitch = Math.PI / 2;
@@ -872,12 +1031,12 @@ export class KhonsuAvatar extends Boss {
       this.updateWard(dt);
       if (this.exposedT > 0 && rnd.chance(dt * 10)) this.ctx.particles.emit({ pos: { x: this.pos.x + (rnd.next() - 0.5) * 1.6, y: this.pos.y + this.height * (0.3 + rnd.next() * 0.6), z: this.pos.z + (rnd.next() - 0.5) * 1.6 }, count: 1, vel: { x: 0, y: 0.7, z: 0 }, life: [0.3, 0.5], size: [0.45, 0.06], sprite: 'star4', additive: true, color: [0xffd36b, 0xffffff] });
     }
-    // night
-    this.night = damp(this.night, this.nightTarget, 1.1, dt);
-    if (this.baseEnv && Math.abs(this.night - this.nightApplied) > 0.004) {
-      this.nightApplied = this.night;
-      this.ctx.world.env.lerpPreset(this.baseEnv, PRESETS.night, this.night * 0.85);
+    // the night, the moon and time
+    if (this.alive) {
+      this.moonCds.pull -= dt;
+      this.moonCds.rain -= dt;
     }
+    this.lunar.update(dt);
     // the hand glides toward its pose
     if (this.hand && this.handRoot.visible) {
       const k = 1 - Math.exp(-this.handRate * dt);
@@ -940,7 +1099,7 @@ export class KhonsuAvatar extends Boss {
     if (!this.alive) return;
     this.taunt('The moon… will rise… again…', MOON);
     super.die();
-    this.nightTarget = 0;
+    this.lunar.calm();
     if (this.hand) {
       this.handOpen = 0;
       this.handRate = 0.8;
@@ -951,19 +1110,18 @@ export class KhonsuAvatar extends Boss {
 
   dispose() {
     super.dispose();
-    // the night lifts and the hand rises away before everything is cleaned up
+    if ((window as any).__khonsu === this) (window as any).__khonsu = null;
+    // the moon sets and the day comes back, the hand rises away, then everything is cleaned up
+    void this.lunar.end();
     void (async () => {
       const tw = this.ctx.engine.tweens;
       for (let t = 0; t < 4; t += 0.05) {
         await tw.wait(0.05);
-        this.night = damp(this.night, 0, 1.4, 0.05);
-        if (this.baseEnv) this.ctx.world.env.lerpPreset(this.baseEnv, PRESETS.night, this.night * 0.85);
         if (this.hand && this.handRoot.parent) {
           this.handNow.pos.lerp(this.handT.pos, 1 - Math.exp(-0.8 * 0.05));
           this.handRoot.position.copy(this.handNow.pos);
         }
       }
-      if (this.baseEnv) this.ctx.world.env.apply(this.baseEnv);
       this.handRoot.removeFromParent();
       this.hand?.material.dispose();
       this.moonLight.removeFromParent();

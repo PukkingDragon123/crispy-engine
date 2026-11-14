@@ -2,11 +2,14 @@
 // Rigs are resolved by registry name at runtime (see EnemyRender).
 import type { StatusResist } from '../combat/Status';
 import type { HitKind } from '../fx/Fx';
+import { NILE_ARMY, NILE_SONGS } from './NileArmyDefs';
 
 export type AiKind =
   | 'chaser' | 'ranged' | 'tank' | 'leaper' | 'swarm' | 'charger' | 'flyer' | 'rider'
   | 'bomber' | 'support' | 'sniper' | 'fleer' | 'ambusher' | 'whipper' | 'lobber'
-  | 'pack' | 'burrower' | 'skitter' | 'constrictor';
+  | 'pack' | 'burrower' | 'skitter' | 'constrictor'
+  /** boats and shore batteries: Enemies.spawn hands them to the Nile fleet (NileFleet) */
+  | 'vessel';
 
 export type AttackKind = 'melee' | 'burst' | 'fan' | 'ring' | 'spiral' | 'snipe' | 'lob' | 'leap' | 'charge' | 'explode' | 'aura' | 'lasso' | 'whip' | 'music' | 'volley' | 'dive' | 'vortex' | 'stream' | 'howl';
 
@@ -30,7 +33,7 @@ export interface AttackDef {
   qte?: boolean;
 }
 
-export type ProjKind = 'bullet' | 'venom' | 'curse' | 'dung' | 'arrow' | 'sand' | 'needle' | 'dynamite' | 'bone' | 'blood';
+export type ProjKind = 'bullet' | 'venom' | 'curse' | 'dung' | 'arrow' | 'sand' | 'needle' | 'dynamite' | 'bone' | 'blood' | 'cannon';
 
 export interface EnemyDef {
   id: string;
@@ -67,6 +70,8 @@ export interface EnemyDef {
   /** song titles for moves that are not AttackDefs (worm eruption, snake wrap, alpha death burst…) */
   moveTitles?: Record<string, string>;
   lore: string;
+  /** only rides this stage's roster ('nile' for Cleopatra's army); unset = the desert */
+  stage?: string;
 }
 
 export const ENEMIES: Record<string, EnemyDef> = {
@@ -256,6 +261,9 @@ export const ENEMIES: Record<string, EnemyDef> = {
   },
 };
 
+// Cleopatra's animal-human army (stage 'nile': never in the desert roster)
+Object.assign(ENEMIES, NILE_ARMY);
+
 /** every move gets a song title (titles only, never lyrics), by attack index */
 const SONG_TITLES: Record<string, string[]> = {
   husk: ['Mr. Brownstone', 'Gimme Shelter'],
@@ -283,15 +291,15 @@ const SONG_TITLES: Record<string, string[]> = {
   bellSnake: ['Sympathy for the Devil', 'Garden of Eden', 'Lucy in the Sky with Diamonds'],
   cursePriest: ['Eleanor Rigby', 'Tomorrow Never Knows'],
 };
-for (const [id, titles] of Object.entries(SONG_TITLES))
+for (const [id, titles] of Object.entries({ ...SONG_TITLES, ...NILE_SONGS }))
   titles.forEach((t, i) => {
     const a = ENEMIES[id]?.attacks[i];
     if (a) a.title = t;
   });
 
-/** wave → spawn table weights */
-export function rosterFor(wave: number) {
-  return Object.values(ENEMIES).filter((d) => d.firstWave <= wave && d.weight > 0);
+/** wave → spawn table weights (stage-tagged defs only ride their own stage) */
+export function rosterFor(wave: number, stage = 'desert') {
+  return Object.values(ENEMIES).filter((d) => d.firstWave <= wave && d.weight > 0 && (d.stage ?? 'desert') === stage);
 }
 
 /** easier fights: every enemy blow is scaled by this (about 28% less damage than before) */

@@ -50,6 +50,7 @@ import { Codex } from '../meta/Codex';
 import { CodexBook } from '../ui/CodexBook';
 import { WantedPoster, PosterData } from './ResultsScene';
 import { HouseExtras } from './hub/HouseExtras';
+import { HeroSwap } from './hub/HeroSwap';
 import { HubUI, STATION_CAN, UIHit } from './hub/HubUI';
 import { say3D } from '../fx/WorldSpeech';
 import { touchText } from '../ui/TouchControls';
@@ -480,6 +481,8 @@ export class HubScene implements GameScene {
   private bubbleT = 0;
   private mirror: Reflector | null = null;
   private duck: THREE.Object3D | null = null;
+  /** Mark's crescent board by the barn doors: click it there to swap riders (hub/HeroSwap) */
+  private heroSwap: HeroSwap | null = null;
   private duckSquash = 0;
   private wind: { stop(t?: number): void } | null = null;
   private fireLoop: { stop(t?: number): void } | null = null;
@@ -887,6 +890,11 @@ export class HubScene implements GameScene {
       via: [new THREE.Vector2(-3.9, LANE_Z)], slot: [-0.86, 0.84, 'left'],
       shot: { pos: new THREE.Vector3(-2.5, 1.42, 1.28), look: new THREE.Vector3(), fov: 44, subject: new THREE.Vector3(-4.38, 1.42, 0.1), ndc: [0.3, 0.1] },
     });
+    try {
+      this.heroSwap = HeroSwap.build({ scene: s, engine: this.engine, particles: this.particles, at: new THREE.Vector3(-4.22, 0, -1.72), yaw: Math.PI / 2 + 0.25, station: this.stations[this.stations.length - 1] });
+    } catch (e) {
+      console.warn('[hub] hero swap', e);
+    }
 
     // ------------------------------------------------ hanging things that swing
     const lanternAt = (x: number, top: number, z: number, chain: number, seed: number, light = true) => {
@@ -1568,6 +1576,8 @@ export class HubScene implements GameScene {
   }
 
   exit() {
+    this.heroSwap?.dispose();
+    this.heroSwap = null;
     this.panel?.remove();
     for (const el of [this.tip, this.bank, this.title, this.prompt, this.hint, this.bubble, ...this.arrows.map((a) => a.label)]) el.remove();
     this.hui?.dispose();
@@ -1954,6 +1964,7 @@ export class HubScene implements GameScene {
     let arrowDir = 0;
     let hit: Station | null = null;
     let duck = false;
+    let swapHit = false;
     const uiHit: UIHit = free && this.hui ? this.hui.hit(inp.mouseX, inp.mouseY) : null;
     this.uiHot = uiHit;
     if (free) {
@@ -1965,6 +1976,7 @@ export class HubScene implements GameScene {
           let o: THREE.Object3D | null = hits[0].object;
           while (o && !hit) {
             if (o === this.duck) duck = true;
+            if (this.heroSwap?.is(o)) swapHit = true;
             const oo = o;
             hit = this.stations.find((s) => s.objs.includes(oo)) ?? null;
             o = o.parent;
@@ -1980,11 +1992,12 @@ export class HubScene implements GameScene {
       document.body.style.cursor = hoverKey ? 'pointer' : 'default';
     }
     this.hoverArrow = arrowDir;
-    const tipText = arrowDir || uiHit ? '' : duck ? 'Squeeze the duck' : hit ? (hit === this.here ? hit.verb : 'Go to the ' + hit.short.toLowerCase()) : '';
+    const tipText = arrowDir || uiHit ? '' : swapHit && this.here.id === 'ride' && this.heroSwap ? this.heroSwap.tip() : duck ? 'Squeeze the duck' : hit ? (hit === this.here ? hit.verb : 'Go to the ' + hit.short.toLowerCase()) : '';
     if (free && inp.wasPressed('Mouse0')) {
       if (uiHit === 'prompt') this.act();
       else if (arrowDir) this.step(arrowDir);
       else if (duck && this.here.id === 'gramophone') this.use({ ...this.here, id: 'duck' });
+      else if (swapHit && this.here.id === 'ride' && this.heroSwap) this.heroSwap.toggle();
       else if (hit) {
         if (hit === this.here) this.act();
         else this.go(hit);
@@ -1993,6 +2006,7 @@ export class HubScene implements GameScene {
     // ------------------------------------------------ the house breathes
     this.animateLife(t, rdt);
     this.extras?.update(t, rdt);
+    this.heroSwap?.update(rdt);
     this.particles.update(rdt, this.scene.fog as THREE.Fog);
     this.stepMoveArt();
     // ------------------------------------------------ the screen furniture (after the stations had their say)

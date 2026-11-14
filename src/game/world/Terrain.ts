@@ -11,6 +11,7 @@ import { globalUniforms, celify } from '../../engine/render/VoxelMaterial';
 import type { HeightTex } from './Env';
 import { SandWaves, SAND_GLSL, SAND_MAX } from './SandWaves';
 import { pixelAtlas, PIXEL_GLSL, PX } from './PixelTex';
+import { BURN, BURN_GLSL } from './NileBurn';
 
 const CHUNK = 32;
 /** GPU heightfield texel (m) */
@@ -124,6 +125,7 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
     sh.uniforms.uSunDirW = globalUniforms.uSunDirW;
     sh.uniforms.uLook = globalUniforms.uLook;
     sh.uniforms.uPxTex = { value: pixelAtlas() };
+    sh.uniforms.uBurn = BURN;
     sandVertex(sh, sand, true);
     sh.vertexShader = sh.vertexShader
       .replace(
@@ -156,6 +158,8 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
         varying vec3 vWP;
         varying vec3 vWN;
         ${PIXEL_GLSL}
+        ${BURN_GLSL}
+        float burnGlow = 0.0;
         vec3 sandBump = vec3(0.0);
         // far field: the heightfield casts the dune shadows the shadow map cannot reach
         float tFarSh = 1.0;
@@ -310,6 +314,27 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
             }
           }
           diffuseColor.rgb *= 1.0 + jit;
+          // Ra's fire (the Nile): charred ground, glowing crack nets, the racing fire front
+          {
+            float bk = burnMask(vWP.xz);
+            if (bk > 0.001) {
+              float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+              float keep = m == 4.0 || m == 5.0 ? 0.55 : 0.9;
+              vec3 ash = vec3(0.05, 0.04, 0.036) + lum * vec3(0.42, 0.33, 0.28);
+              if (m == 7.0 || m == 8.0) ash *= 0.55;
+              diffuseColor.rgb = mix(diffuseColor.rgb, ash, bk * keep);
+              if (top && m != 5.0) {
+                vec2 cp = floor(vWP.xz * 8.0) / 8.0;
+                float r1 = abs(vn(cp * 0.21) - 0.5);
+                float r2 = abs(vn(cp * 0.53 + 7.0) - 0.5);
+                float crack = clamp((1.0 - smoothstep(0.012, 0.03, r1)) * step(0.45, vn(cp * 0.05 + 3.0)) + (1.0 - smoothstep(0.008, 0.018, r2)) * 0.55, 0.0, 1.0);
+                float fr = burnFront(vWP.xz);
+                float pulse = 0.65 + 0.35 * sin(uTime * 1.7 + vn(cp * 0.1) * 6.0);
+                burnGlow = crack * bk * (0.32 * pulse + fr * 2.5) + fr * 0.7 * step(0.62, th(cp * 3.0 + floor(uTime * 8.0)));
+                diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.55, 0.11, 0.02), crack * bk * 0.7);
+              }
+            }
+          }
           // ground marks: board tracks, scorch, blood, venom (timestamps -> fade by age)
           vec4 mk = texture2D(uMarks, fract(vWP.xz / uMarkArea));
           float tf = top ? 1.0 : 0.45;
@@ -347,7 +372,8 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
-        totalEmissiveRadiance += vec3(1.0, 0.92, 0.75) * sparkle * 0.45;`
+        totalEmissiveRadiance += vec3(1.0, 0.92, 0.75) * sparkle * 0.45;
+        totalEmissiveRadiance += vec3(1.0, 0.34, 0.06) * burnGlow * 2.2;`
       )
       .replace(
         '#include <dithering_fragment>',
@@ -356,7 +382,7 @@ export function makeTerrainMaterial(wind: { x: number; z: number }, sand: SandWa
       );
     celify(sh);
   };
-  m.customProgramCacheKey = () => 'terrain-v8px';
+  m.customProgramCacheKey = () => 'terrain-v9burn';
   (m as any).userData = { uWind, uMarks, uMarkArea, uMarkClock, uHF, uHFInfo, uShC };
   return m;
 }
@@ -701,10 +727,18 @@ export class Backdrop {
     geo.computeBoundingSphere();
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
     mat.onBeforeCompile = (sh) => {
-      sh.fragmentShader = sh.fragmentShader.replace('#include <dithering_fragment>', '#include <dithering_fragment>\n gl_FragColor.a = 0.0;');
+      sh.uniforms.uBurn = BURN;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vBW;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvBW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vBW;\n' + BURN_GLSL)
+        // the burnt Nile: the far land is ash and cinder too
+        .replace('#include <color_fragment>', '#include <color_fragment>\n{ float bk = burnSmooth(vBW.xz); if (bk > 0.001) { float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114)); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.05, 0.04, 0.036) + lum * vec3(0.42, 0.33, 0.28), bk * 0.85); } }')
+        .replace('#include <dithering_fragment>', '#include <dithering_fragment>\n gl_FragColor.a = 0.0;');
       celify(sh);
     };
-    mat.customProgramCacheKey = () => 'backdrop-v1';
+    mat.customProgramCacheKey = () => 'backdrop-v2burn';
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.name = 'backdrop';
     this.mesh.matrixAutoUpdate = false;

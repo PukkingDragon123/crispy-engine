@@ -51,6 +51,7 @@ import { sprite, nine, SWAP_DIM, HUD_PAL } from './PixelUI';
 import { HUD_ART as ART } from './HudArt';
 import { Blueprints } from '../meta/Blueprints';
 import { SUBAREAS } from '../world/RegionGen';
+import { NILE_AREAS } from '../world/NileGen';
 import { isTouchDevice } from './TouchControls';
 
 export interface LadderDeps {
@@ -369,7 +370,7 @@ export class ProgressLadder {
       R[2].title = `WAVE ${zw} OPENS`;
       R[2].sub = next.name;
     } else if (area !== 'C') {
-      const to = SUBAREAS[area === 'A' ? 'B' : 'C'];
+      const to = world.sa.nile ? NILE_AREAS[area === 'A' ? 'B' : 'C'] : SUBAREAS[area === 'A' ? 'B' : 'C'];
       R[2].short = String(zw);
       R[2].title = `WAVE ${zw}: STORM PARTS`;
       R[2].sub = to.name;

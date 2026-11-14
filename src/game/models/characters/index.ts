@@ -16,6 +16,8 @@ import { anubisRig as anubisBase } from './anubis';
 import { serketAvatarRig as serketBase } from './serket';
 import { attachmentModel as attachmentBase, AttachmentId, Attachment } from './attachments';
 import type { RigSpec } from '../../../engine/voxel/Rig';
+import { markRig as markBase } from './mark';
+import { crescentBoardModel as crescentBase, markBatonRig as batonBase, moonCrestModel as crestBase } from './markGear';
 
 export { HAT_IDS, OUTFIT_IDS, SUNDOWN_EXPRESSIONS, SUNDOWN_VS, skeletonFigure, figureRig } from './skeleton';
 export { SUNDOWN_HD_VS, BOARD_BACK_SOCKET, attachBoardOnBack } from './sundown';
@@ -69,3 +71,9 @@ export const camelRig = memo((): RigSpec => camelBase());
 export const anubisRig = memo((): RigSpec => anubisBase());
 export const serketAvatarRig = memo((): RigSpec => serketBase());
 export const attachmentModel = memo((id: AttachmentId): Attachment => attachmentBase(id));
+/** Mark, the moon-mummy cat hunter (1/128 m, realistic proportions), and his gear: the crescent glide board, a twin baton, the moon crest */
+export const markRig = (): RigSpec => markBase();
+export const crescentBoardModel = () => crescentBase();
+export const markBatonRig = (): RigSpec => batonBase();
+export const moonCrestModel = () => crestBase();
+export { MARK_VS, MARK_PAL } from './mark';

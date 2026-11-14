@@ -12,6 +12,7 @@ import { ClothRenderer } from '../../engine/physics/Cloth';
 import { Player, PlayerVisuals } from '../player/Player';
 import { CameraRig } from '../player/CameraRig';
 import { Enemies } from '../enemies/Enemies';
+import { NileFleet } from '../enemies/NileFleet';
 import { Pickups } from '../run/Pickups';
 import { WaveDirector, WaveSpec } from '../run/WaveDirector';
 import { Hud, HudState, HudQuest } from '../ui/Hud';
@@ -36,6 +37,8 @@ import { Ease } from '../../engine/Tween';
 import { Hud3D, CutInOpts } from '../ui/Hud3D';
 import type { Boss } from '../bosses/Boss';
 import { makeBoss } from '../bosses/BossRoster';
+import { nilePrewarm } from '../bosses/NileRoster';
+import { installRaWrath, raWrathDone } from '../bosses/RaWrath';
 import { Interactions, Chest, DumbScarab } from '../run/Interact';
 import { Missions } from '../run/Missions';
 import { Choice } from '../ui/Choice';
@@ -43,6 +46,7 @@ import { Shop } from '../ui/Shop';
 import { ProgressLadder } from '../ui/ProgressLadder';
 import type { ZoneDef } from '../world/RegionGen';
 import { SUBAREAS } from '../world/RegionGen';
+import { NILE_AREAS } from '../world/NileGen';
 import { AnubisTrial } from './AnubisTrial';
 import { Ledger } from '../ui/Ledger';
 import { TouchControls, isTouchDevice } from '../ui/TouchControls';
@@ -82,6 +86,7 @@ import { registerExtraUpgrades, ExtraUpgradeEffects } from '../run/UpgradesExtra
 import { unlock, technique } from '../player/Techniques';
 import { KhonsuAvatar } from '../bosses/Khonsu';
 import { ULT_INFO } from '../player/Ultimate';
+import { markVisuals, installMark } from '../player/heroes/Mark';
 
 export interface RunOptions {
   area: 'A' | 'B' | 'C';
@@ -155,7 +160,7 @@ function showResults(eng: Engine, res: ConstructorParameters<typeof ResultsScene
 }
 
 /** the run's dev handles on window (each would keep the finished run alive) */
-const RUN_HANDLES = ['__director', '__horde', '__shop', '__trail', '__cine', '__oasis', '__bountyRip', '__khonsuSand', '__reaping', '__trial', '__wantedInk', '__wantedPhoto', '__pit'];
+const RUN_HANDLES = ['__fleet', '__director', '__horde', '__shop', '__trail', '__cine', '__oasis', '__bountyRip', '__khonsuSand', '__reaping', '__trial', '__wantedInk', '__wantedPhoto', '__pit', '__sphinx', '__ra', '__raWrath', '__cleopatra'];
 
 export class RunScene implements GameScene {
   scene = new THREE.Scene();
@@ -170,6 +175,8 @@ export class RunScene implements GameScene {
   player!: Player;
   camRig!: CameraRig;
   enemies!: Enemies;
+  /** the Nile stage's boats and shore guns (null on the desert) */
+  fleet: NileFleet | null = null;
   pickups!: Pickups;
   director!: WaveDirector;
   hud!: Hud;
@@ -252,7 +259,7 @@ export class RunScene implements GameScene {
   async enter() {
     const e = this.engine;
     this.scene.background = null;
-    this.world = new World(this.scene, this.opts.area, this.opts.seed);
+    this.world = new World(this.scene, this.opts.area, this.opts.seed, this.opts.stage ?? 'desert');
     this.world.env.applyEnvMap(e.renderer);
     this.props = new Props(this.world);
     this.world.props = { update: () => {}, riseFor: (id, k) => this.props.riseFor(id, k), group: this.props.group };
@@ -310,10 +317,12 @@ export class RunScene implements GameScene {
       events: this.events,
       faces: this.faces,
     };
+    this.world.events = this.events;
 
     // player visuals
     const look = this.opts.look ?? loadSave().look;
-    const vis: PlayerVisuals = {
+    // Mark rides instead of Sundown: his rig, a twin baton in the gun hand, the crescent glide board
+    const vis: PlayerVisuals = this.opts.hero === 'mark' ? markVisuals() : {
       rig: (() => {
         // the wardrobe can take the bandana mask or the shades off: build that look directly
         const lk = look as { hat: string; outfit: string; mask?: boolean; shades?: boolean };
@@ -342,6 +351,7 @@ export class RunScene implements GameScene {
     Cinema.attach({ ctx: this.ctx, player: this.player, hud: this.hud });
     if (this.opts.gun) this.player.stats.add(gunMods(this.opts.gun) as any);
     this.enemies = new Enemies(this.ctx, this.player as any);
+    if (this.opts.stage === 'nile') this.fleet = new NileFleet({ ctx: this.ctx, player: this.player as any, enemies: this.enemies });
     this.slicer = new NeckSlicer({
       engine: e, ctx: this.ctx, player: this.player, enemies: this.enemies, cam: this.camRig,
       cutIn: (t, c) => this.hud3d.cutIn(t, c, 'determined'),
@@ -356,6 +366,7 @@ export class RunScene implements GameScene {
     this.skills = new Skills(this.ctx, this.player, e.input);
     this.items = new Inventory(this.ctx, this.player);
     this.ult = new Ultimate(this.ctx, this.player, this.qte, this.camRig);
+    if (this.opts.hero === 'mark') installMark({ ctx: this.ctx, player: this.player, input: e.input, skills: this.skills, ult: this.ult, qte: this.qte, cam: this.camRig });
     void ULT_INFO;
     this.upgrades = new UpgradeManager(this.player.stats);
     this.upFx = new UpgradeEffects(this.ctx, this.upgrades, this.player, this.skills);
@@ -423,7 +434,7 @@ export class RunScene implements GameScene {
       this.ult.variant = cy.ult as any;
       this.equipment.restore((cy.gear ?? []) as any);
       this.equipment.deadHandSpent = !!cy.deadHand;
-      e.tweens.after(1.6, () => this.hud3d.cutIn(SUBAREAS[this.opts.area].name.toUpperCase(), '#ffd36b', 'determined'), true);
+      e.tweens.after(1.6, () => this.hud3d.cutIn(this.world.sa.name.toUpperCase(), '#ffd36b', 'determined'), true);
     }
     this.trailEvents = new TrailEvents({
       ctx: this.ctx, player: this.player, choice: this.choice,
@@ -451,7 +462,8 @@ export class RunScene implements GameScene {
     this.director = new WaveDirector(this.ctx, this.enemies, () => this.player);
     this.wireEvents();
     this.progress = new ProgressLadder({ engine: e, ctx: this.ctx, hud: this.hud, director: this.director, world: this.world, shop: this.shop, camera: this.camera });
-    new Barks(this.ctx, this.player); // Sundown's voiced quips; tears itself down with the scene
+    // Sundown's voiced quips; tears itself down with the scene (Mark, the mummy cat, keeps his silence)
+    if (this.opts.hero !== 'mark') new Barks(this.ctx, this.player);
     this.codexRun = new CodexRun(this.ctx, this);
     this.thothErrand = new ThothErrand(this.ctx, this);
     this.progression = new Progression(this.ctx, this);
@@ -508,6 +520,7 @@ export class RunScene implements GameScene {
     this.treasure?.dispose();
     this.cavePit?.dispose();
     this.oasis?.dispose();
+    this.fleet?.dispose();
     this.bountyRip?.dispose();
     this.codexRun?.dispose();
     this.thothErrand?.dispose();
@@ -521,11 +534,13 @@ export class RunScene implements GameScene {
     this.gearHud?.dispose();
     this.equipment?.dispose();
     this.upFx2?.dispose();
+    this.player?.kit?.dispose();
     this.events.clear();
     // let the whole run go: nothing global may keep pointing into it, or the next scene is built
     // while this one (world, meshes, ~650 MB of JS heap) is still alive and a phone runs out of memory
     if (Skills.current === this.skills) Skills.current = null;
     this.world.env.dispose();
+    this.world.stopBurn();
     this.world.sa.field.onDirty.length = 0;
     const w = window as unknown as Record<string, unknown>;
     for (const k of RUN_HANDLES) delete w[k];
@@ -642,6 +657,8 @@ export class RunScene implements GameScene {
     this.director.onWaveStart = (s) => this.onWaveStart(s);
     this.director.spawnBoss = (wave) => this.spawnBoss(wave);
     this.director.onWaveEnd = (s) => this.onWaveEnd(s);
+    // the Nile: when Cleopatra falls, Ra rages and burns the river (RaWrath; travel waits for it)
+    if (this.opts.stage === 'nile') installRaWrath({ ctx: this.ctx, cam: this.camRig, player: this.player });
     this.enemies.qte = this.qte;
     this.director.cam = this.camRig;
     ev.on('oasisKingStart', () => (this.director.paused = true));
@@ -841,6 +858,8 @@ export class RunScene implements GameScene {
   // ------------------------------------------------------------------ waves
   private onWaveStart(s: WaveSpec) {
     this.waveIntroT = 0;
+    // the Nile's gate bosses are carved off-thread a few waves ahead
+    if (this.opts.stage === 'nile') nilePrewarm(this.ctx, s.n);
     const label = s.boss === 'major' ? 'THE RECKONING' : s.boss === 'mini' ? 'WANTED' : s.theme ? s.theme.name : `WAVE ${s.n}`;
     // the wave title is cast in voxel letters in the world, not a flat banner
     this.hud3d.cutIn(label, s.boss !== 'none' ? '#ff8a4a' : '#ffd36b', 'determined');
@@ -969,7 +988,8 @@ export class RunScene implements GameScene {
 
   private async travel(next: 'A' | 'B' | 'C', wave: number) {
     const eng = this.engine;
-    const info = SUBAREAS[next];
+    await raWrathDone(this.ctx);
+    const info = this.opts.stage === 'nile' ? NILE_AREAS[next] : SUBAREAS[next];
     this.hud.toast('THE STORM PARTS', '#ffd36b', `On to ${info.name}…`, true);
     this.ctx.sfx('wave_clear', null, 0.8);
     await eng.tweens.wait(2.5, true);
@@ -1164,6 +1184,7 @@ export class RunScene implements GameScene {
     this.upFx2.update(dt);
     this.equipment.update(dt);
     this.garments.update(this.world.sa.wind.x * 3, this.world.sa.wind.z * 3, this.player.board.vel);
+    this.fleet?.update(dt);
     this.enemies.update(dt, this.run.time);
     this.pickups.update(dt);
     this.director.update(dt);
@@ -1213,6 +1234,11 @@ export class RunScene implements GameScene {
       if (rnd.chance(dt * 2)) this.hud.toast('THE STORM BITES', '#ffb070');
     }
     const devil = this.world.storm.devilDamageAt(pp.x, pp.z);
+    // the burning Nile: molten lava scalds (cooled crust and the banks are safe)
+    if (this.world.river && this.player.alive && this.world.heatAt(pp.x, pp.y, pp.z) > 0) {
+      this.player.applyDamage(this.player.maxHp * 0.06 * dt, 'burn', true);
+      if (rnd.chance(dt * 1.5)) this.hud.toast('THE RIVER BURNS', '#ff8a4a', 'Ride the dark crust, not the molten channels');
+    }
     if (devil > 0) this.player.applyDamage(devil * dt, 'storm', true);
     this.stormLoop?.setVolume(near * 0.9, 0.3);
     this.windLoop?.setVolume(0.45 + near * 0.3, 0.3);
@@ -1344,7 +1370,7 @@ export class RunScene implements GameScene {
       rank: this.run.rank,
       bountyFrac: this.run.bounty / this.run.bountyToNext,
       bountyTotal: this.run.totalBounty,
-      weapon: this.player.weapons?.hud(),
+      weapon: this.player.kit?.hud() ?? this.player.weapons?.hud(),
       treasure: this.treasure?.waypoints() ?? [],
       gold: this.run.gold,
       wave: d.wave,

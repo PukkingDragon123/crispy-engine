@@ -17,6 +17,8 @@ import { oasisReeds, oasisFlowers } from '../models/props/ruins';
 import { MAT } from './Heightfield';
 import type { World } from './World';
 import { globalUniforms } from '../../engine/render/VoxelMaterial';
+import { papyrusClump, cropTuft } from '../models/props/nile';
+import { BURN, BURN_GLSL } from './NileBurn';
 
 const LS = 128; // layer size (texels)
 const PXM = 64; // texels per metre (the fine flora voxels keep their twigs)
@@ -209,8 +211,10 @@ export const SPR = {
   TURF: 16, // 16..21 lush oasis grass
   WILD: 22, // 22..25 desert wildflowers
   SCRUB: 26, // 26..27 leafy low brush
+  PAPYRUS: 28, // 28..31 the Nile's papyrus clumps
+  CROP: 32, // 32..35 barley, flax in flower, young wheat (the Nile's fields)
 } as const;
-const SPR_COUNT = 28;
+const SPR_COUNT = 36;
 
 type Src = () => { model: VoxelModel; voxelSize: number; skip?: (x: number, y: number, z: number, c: number) => boolean };
 const SAND_SKIP = new Set([0xe8c48a, 0xdcb478, 0xd0a86c]);
@@ -224,6 +228,8 @@ function sources(): Src[] {
   for (let i = 0; i < 6; i++) s[SPR.TURF + i] = () => turfTuft(i);
   for (let i = 0; i < 4; i++) s[SPR.WILD + i] = () => wildflower(i);
   for (let i = 0; i < 2; i++) s[SPR.SCRUB + i] = () => ({ ...deadBush(8 + i * 4), skip: (_x, _y, _z, c) => SAND_SKIP.has(c) });
+  for (let i = 0; i < 4; i++) s[SPR.PAPYRUS + i] = () => papyrusClump(i);
+  for (let i = 0; i < 4; i++) s[SPR.CROP + i] = () => cropTuft(i);
   return s;
 }
 
@@ -284,6 +290,7 @@ function makeMaterial(tex: THREE.Texture, uFocus: { value: THREE.Vector3 }, uRad
     sh.uniforms.uFocus = uFocus;
     sh.uniforms.uRad = uRad;
     sh.uniforms.uWind = uWind;
+    sh.uniforms.uBurn = BURN;
     sh.vertexShader = sh.vertexShader
       .replace(
         '#include <common>',
@@ -295,7 +302,9 @@ function makeMaterial(tex: THREE.Texture, uFocus: { value: THREE.Vector3 }, uRad
         uniform vec3 uFocus;
         uniform vec2 uWind;
         varying vec3 vSpr;
-        varying float vNear;`
+        varying float vNear;
+        varying float vBurnt;
+        ${BURN_GLSL}`
       )
       .replace('#include <beginnormal_vertex>', 'vec3 objectNormal = vec3(0.0, 1.0, 0.0);')
       .replace(
@@ -314,6 +323,9 @@ function makeMaterial(tex: THREE.Texture, uFocus: { value: THREE.Vector3 }, uRad
         vec2 wd = normalize(uWind + vec2(1e-4));
         float sw = (0.5 + sin(ph) * 0.7 + sin(ph * 2.7 + iSpr.w * 6.0) * 0.25) * gust;
         lp.xz += wd * sw * (hm * 0.1 + hm * hm * 0.04);
+        // Ra's fire: plants shrivel and blacken as the front passes
+        vBurnt = burnSmooth(iPos.xz);
+        lp.y *= 1.0 - 0.75 * vBurnt;
         vec3 transformed = iPos.xyz + lp;
         vSpr = vec3(sUV, iSpr.x);
         // plants right in front of the camera dissolve instead of filling the view
@@ -325,7 +337,8 @@ function makeMaterial(tex: THREE.Texture, uFocus: { value: THREE.Vector3 }, uRad
         `#include <common>
         uniform highp sampler2DArray uSpr;
         varying vec3 vSpr;
-        varying float vNear;`
+        varying float vNear;
+        varying float vBurnt;`
       )
       // both faces of a plane are lit as ground cover (the back face must not turn its normal down)
       .replace('#include <normal_fragment_begin>', THREE.ShaderChunk.normal_fragment_begin.replace('normal *= faceDirection;', ''))
@@ -334,7 +347,7 @@ function makeMaterial(tex: THREE.Texture, uFocus: { value: THREE.Vector3 }, uRad
         `if (vNear < 0.999 && fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) > vNear) discard;
         vec4 spr = texture(uSpr, vSpr);
         if (spr.a < 0.5) discard;
-        diffuseColor.rgb *= spr.rgb;`
+        diffuseColor.rgb *= mix(spr.rgb, vec3(0.06, 0.045, 0.04), smoothstep(0.05, 0.5, vBurnt));`
       )
       .replace(
         '#include <dithering_fragment>',
@@ -343,7 +356,7 @@ function makeMaterial(tex: THREE.Texture, uFocus: { value: THREE.Vector3 }, uRad
       );
     celify(sh);
   };
-  m.customProgramCacheKey = () => 'foliage-spr-v3';
+  m.customProgramCacheKey = () => 'foliage-spr-v4burn';
   return m;
 }
 
@@ -359,6 +372,8 @@ const GROUP = {
   turf: [SPR.TURF, 6, 1.0],
   wild: [SPR.WILD, 4, 1.0],
   scrub: [SPR.SCRUB, 2, 0.8],
+  papyrus: [SPR.PAPYRUS, 4, 1.0],
+  crop: [SPR.CROP, 4, 0.85],
 } as const;
 type GroupId = keyof typeof GROUP;
 /** anchors that leave the ground round them overgrown (ruins, wrecks, standing stones) */
@@ -424,7 +439,7 @@ export class Foliage {
 
   /** a placed plant from a zone anchor (dead brush, dry grass, reeds, flowering shrubs) */
   addAnchor(kind: string, variant: number, x: number, z: number, rot: number, scale: number) {
-    const g: GroupId | null = kind === 'deadBush' ? 'dead' : kind === 'dryGrass' ? 'dry' : kind === 'oasisReeds' || kind === 'reeds' ? 'reed' : kind === 'oasisFlowers' ? 'flower' : null;
+    const g: GroupId | null = kind === 'deadBush' ? 'dead' : kind === 'dryGrass' ? 'dry' : kind === 'oasisReeds' || kind === 'reeds' ? 'reed' : kind === 'oasisFlowers' ? 'flower' : kind === 'papyrus' ? 'papyrus' : null;
     if (!g) return false;
     const [l0, n, sc] = GROUP[g];
     const layer = l0 + (variant % n);
@@ -455,7 +470,8 @@ export class Foliage {
     const x0 = ci * CELL, z0 = cj * CELL;
     const ctx = this.ctxAt(x0 + CELL / 2, z0 + CELL / 2);
     // probe: lush ground in the cell (turf, mud, dirt, damp sand) needs the dense pass
-    let lush = !!ctx.oasis || ctx.ruins.length > 0 || ctx.rims.length > 0;
+    const nileF = sa.nile ? sa.nile.foliage : null;
+    let lush = !!ctx.oasis || ctx.ruins.length > 0 || ctx.rims.length > 0 || (!!sa.nile && Math.abs(sa.nile.river.bankDist(x0 + CELL / 2, z0 + CELL / 2)) < CELL + 8);
     if (!lush)
       for (let k = 0; k < 9 && !lush; k++) {
         const m = f.matAt(x0 + (k % 3) * 3.5 + 0.5, z0 + Math.floor(k / 3) * 3.5 + 0.5);
@@ -473,6 +489,16 @@ export class Foliage {
       const x = x0 + H(i, 1) * CELL, z = z0 + H(i, 2) * CELL;
       if (!f.inBounds(x, z, 1)) continue;
       const h = f.heightAt(x, z);
+      // the Nile: papyrus beds, reeds in the shallows, planted rows in the fields, burnt stubble
+      const nh = nileF ? nileF(x, z, h, f.matAt(x, z), H(i, 3)) : null;
+      if (nh) {
+        if (nh.dens <= 0 || H(i, 4) * candD >= nh.dens || f.slopeAt(x, z) > 1.1) continue;
+        const [l0, n, sc] = GROUP[nh.grp];
+        const layer = l0 + Math.floor(H(i, 5) * n);
+        const k = sc * (0.78 + H(i, 6) * 0.5);
+        out.push(x, h - 0.03, z, H(i, 7) * Math.PI * 2, layer, this.size[layer * 2] * k, this.size[layer * 2 + 1] * k, H(i, 8));
+        continue;
+      }
       if (h < sa.waterLevel + 0.06) continue;
       const m = f.matAt(x, z);
       if (m >= MAT.BONE) continue;

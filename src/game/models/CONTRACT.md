@@ -222,3 +222,15 @@ sockets: Sundown `coat_anchor_l`, `coat_anchor_r`, `coat_anchor_back` (waistline
 ## Sundown hair (half-zombie remake)
 - Parts `hair_l`, `hair_l2`, `hair_r`, `hair_r2`, `hair_b`, `hair_b2` are children of `head`; chains listed in
   `meta.hair.chains`. `installHairSway(rig)` (`characters/hairSway.ts`) drives them; rigs without hair ignore it.
+
+## Mark, the moon-mummy cat (second hero; `characters/mark.ts`, gear in `characters/markGear.ts`)
+- `markRig()` (registry `mark`): 1/128 m, realistic proportions (crown 1.83 m, ear tips 1.96 m), sculpted as
+  signed distance fields in centimetres (rig space, pivot = attach). Humanoid part names (so the shared riding
+  animation drives him) + `jaw`, `ear_l`/`ear_r`, modelled `eye_l`/`eye_r` (glowing moon-silver irises, slit pupils;
+  expression variants open / narrow / wide / closed / happy), `brow_l`/`brow_r`, tail chain `tail1`..`tail6`
+  (parent pelvis), loose linen strips as spring chains in `meta.hair.chains` (`wrap_la*`, `wrap_ra*`, `wrap_wl*`,
+  `wrap_wr*`, `apron*`), and the cowl tail as engine cloth (`meta.cloth.bandana` from `bandana_anchor`).
+  Digitigrade legs stay two-bone (`thigh`, `shin` = tibia + hock + metatarsus + paw); the sole sits under the knee pivot.
+  Sockets: the humanoid set + `hip_l` (baton holsters), `crest_back` (the crest halo), `tail_tip`, `paw_l`/`paw_r`.
+- `crescentBoardModel()` (`board_crescent`, 1/100 m), `markBatonRig()` (`mark_baton`, 1/256 m, root `grip`,
+  baton along +Y), `moonCrestModel()` (`mark_crest`, 1/192 m, flat in XZ).

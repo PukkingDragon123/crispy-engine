@@ -48,6 +48,13 @@ export interface SurfaceInfo {
   drag: number;
   speedMul: number;
   kind: 'sand' | 'hard' | 'water' | 'mud' | 'grass';
+  /** flowing water (the Nile): the current (m/s) that carries the board */
+  flowX?: number;
+  flowZ?: number;
+  /** rolling-resistance factor override (0 = the kind's default) */
+  roll?: number;
+  /** the river here is lava (Ra's fire) */
+  lava?: boolean;
 }
 
 export interface BoardEnv {
@@ -588,6 +595,18 @@ export class Board {
       const pull = (surf ? SURF_G : t.slopeG * (this.tucked ? 1.25 : 1)) * rollK;
       this.vel.x += ((pull * gx) / (1 + s2)) * dt;
       this.vel.z += ((pull * gz) / (1 + s2)) * dt;
+      // a river's current carries the board downstream (up to ~1.6x its speed), and pushes back upstream
+      if (s.flowX || s.flowZ) {
+        const fx0 = s.flowX ?? 0, fz0 = s.flowZ ?? 0;
+        const fl = Math.hypot(fx0, fz0);
+        const along = (this.vel.x * fx0 + this.vel.z * fz0) / fl;
+        const gap = fl * 1.6 - along;
+        if (gap > 0) {
+          const a = Math.min(gap, fl) * 0.62 * dt;
+          this.vel.x += (fx0 / fl) * a;
+          this.vel.z += (fz0 / fl) * a;
+        }
+      }
       const downhill = spd > 1e-3 ? (gx * this.vel.x + gz * this.vel.z) / spd : 0;
       this.surfing = surf && downhill > 0.12 && spd > 4;
 
@@ -676,7 +695,7 @@ export class Board {
       const sp = this.speed;
       if (sp > 1e-4) {
         const lean = this.manual ? 0 : clamp(inp.throttle, -1, 1);
-        const kindK = s.kind === 'hard' ? 0.55 : s.kind === 'grass' ? 1.2 : s.kind === 'mud' ? 1.8 : s.kind === 'water' ? 1.3 : 1;
+        const kindK = s.roll ? s.roll : s.kind === 'hard' ? 0.55 : s.kind === 'grass' ? 1.2 : s.kind === 'mud' ? 1.8 : s.kind === 'water' ? 1.3 : 1;
         let roll = t.rolling * kindK * (lean > 0 ? 1 - 0.42 * lean : 1);
         if (this.tucked) roll *= this.surfing ? 0.45 : 0.7;
         if (this.manual) roll *= 0.12;
@@ -698,7 +717,7 @@ export class Board {
         const dDir = this.drifting ? this.driftDir || 1 : this.driftEndDir;
         const launch = dCharge > 0.12;
         this.driftEndAt = -9;
-        let jv = (t.jump + charge * t.jumpCharge) * (0.9 + 0.1 * mob) * (s.kind === 'water' ? 0.75 : 1);
+        let jv = (t.jump + charge * t.jumpCharge) * (0.9 + 0.1 * mob) * (s.kind === 'water' ? (s.roll ? 0.95 : 0.75) : 1);
         if (this.manual) {
           jv *= 1.12; // nollie pop off the nose
           this.endManual('pop');

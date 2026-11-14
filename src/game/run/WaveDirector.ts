@@ -19,6 +19,7 @@ import type { Enemies } from '../enemies/Enemies';
 import type { CameraRig } from '../player/CameraRig';
 import { ENEMIES, rosterFor, waveScale } from '../enemies/EnemyDefs';
 import { rnd, clamp } from '../../engine/math/rand';
+import { nileRoster, nileSpawnPoint, NILE_THEMES, type NileWhere } from './NileWaves';
 
 /** seconds of calm between two waves */
 export const INTERMISSION = 30;
@@ -121,12 +122,18 @@ export class WaveDirector {
     return `NEXT: WAVE ${this.nextWave}`;
   }
 
+  /** the world is the Nile stage (its own roster, majors only at the gates) */
+  private get nile() {
+    return (this.ctx.world as { stage?: string } | undefined)?.stage === 'nile';
+  }
+
   specFor(n: number): WaveSpec {
-    const major = n === 50 || n === 75 || n === 85 || n === 100;
+    const nile = this.nile;
+    const major = n === 50 || n === 75 || (n === 85 && !nile) || n === 100;
     const mini = !major && n % 5 === 0;
     let theme: WaveSpec['theme'];
     if (!mini && !major && n > 3 && n % 5 === 3) {
-      const opts = THEMES.filter((t) => t.from <= n);
+      const opts = (nile ? NILE_THEMES : THEMES).filter((t) => t.from <= n);
       if (opts.length) theme = opts[(n * 7) % opts.length];
     }
     return { n, duration: mini || major ? 999 : 30 + Math.min(10, n * 0.1), boss: major ? 'major' : mini ? 'mini' : 'none', theme, alphaGuaranteed: n % 5 === 2 && n > 5 };
@@ -322,9 +329,9 @@ export class WaveDirector {
     // guaranteed alpha mid-wave
     if (this.spec.alphaGuaranteed && !this.alphaDone && this.timer > 10) {
       this.alphaDone = true;
-      const roster = rosterFor(n).filter((d) => d.id !== 'goldenScarab' && d.id !== 'bombScarab');
+      const roster = this.nile ? this.nileEntries(n).filter((e) => e.where === 'land' && e.def.id !== 'bombScarab').map((e) => e.def) : rosterFor(n).filter((d) => d.id !== 'goldenScarab' && d.id !== 'bombScarab');
       const d = rnd.pick(roster);
-      const p = this.spawnPoint(30, 44);
+      const p = this.nile ? this.nilePoint('land', 30, 44) : this.spawnPoint(30, 44);
       if (p) {
         this.enemies.spawn(d.id, p.x, p.z, { alpha: true });
         this.ctx.toast(`ALPHA ${d.name.toUpperCase()}`, '#ff8a4a', 'A mutated elite has appeared');
@@ -365,8 +372,43 @@ export class WaveDirector {
     return storm.randomPointNear(pl.x, pl.z, 10, maxR, 2);
   }
 
+  private nileEntries(n: number) {
+    return nileRoster(n, ((this.ctx.world as any).sa?.key ?? 'A') as 'A' | 'B' | 'C');
+  }
+  private nilePoint(where: NileWhere, minR: number, maxR: number, toward = false) {
+    const pl = this.getPlayer().pos;
+    return nileSpawnPoint(this.ctx.world as any, pl.x, pl.z, where, minR, maxR, toward ? this.bearing : undefined);
+  }
+  /** a Nile wave's pack: soldiers on the banks, hulls on the river, guns on the shore */
+  private spawnNileGroup(alphaChance: number) {
+    const n = this.wave;
+    let roster = this.nileEntries(n).filter((e) => e.def.id !== 'goldenScarab');
+    if (this.spec?.theme && rnd.chance(0.7)) {
+      const t = roster.filter((e) => this.spec!.theme!.types.includes(e.def.id));
+      if (t.length) roster = t;
+    }
+    if (!roster.length) return;
+    const ent = rnd.weighted(roster, (e) => e.weight * (e.def.firstWave === n ? 3 : 1));
+    const def = ent.def;
+    const hull = ent.where === 'water' || ent.where === 'bank';
+    const [g0, g1] = hull ? [1, 1] : def.group ?? [1, 2];
+    const count = Math.round(rnd.range(g0, g1) * (hull ? 1 : 1 + n * 0.009));
+    const open = this.groups++ < 2 && def.ai !== 'sniper';
+    const minR = def.ai === 'sniper' || hull ? 30 : open ? 17 : 24, maxR = def.ai === 'sniper' || hull ? 54 : open ? 28 : 46;
+    const p = this.nilePoint(ent.where, minR, maxR, this.bearingGroups-- > 0);
+    if (!p) return;
+    this.met.add(def.id);
+    const alphaRoll = rnd.next() < alphaChance && n >= 4;
+    for (let i = 0; i < count; i++) {
+      if (this.enemies.alive >= this.cap) break;
+      const a = rnd.next() * Math.PI * 2, r = hull ? 0 : rnd.next() * (1.5 + count * 0.35);
+      this.enemies.spawn(def.id, p.x + Math.cos(a) * r, p.z + Math.sin(a) * r, { alpha: alphaRoll && i === 0 });
+    }
+  }
+
   private spawnGroup(alphaChance: number) {
     const n = this.wave;
+    if (this.nile) return this.spawnNileGroup(alphaChance);
     let roster = rosterFor(n).filter((d) => d.id !== 'goldenScarab');
     // the Avatar of Khonsu's waves: his court answers instead of the usual mob
     if (this.phase === 'boss' && (n === 5 || n === 35 || n === 65)) roster = KHONSU_COURT.map((id) => ENEMIES[id]).filter((d) => !!d && (d.id !== 'cursePriest' || n > 5));

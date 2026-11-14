@@ -11,6 +11,7 @@ import { modelEntry } from '../models/lookup';
 import { Ease } from '../../engine/Tween';
 import { P } from '../../engine/voxel/palette';
 import { rnd } from '../../engine/math/rand';
+import type { HeroUlt } from './heroes/HeroKit';
 
 export type UltVariant = 'wrath' | 'detonation' | 'plague';
 
@@ -57,6 +58,8 @@ export class Ultimate {
   /** size of the last kill chain (2 = double, 3 = triple…), for HUD flair */
   multiKill = 0;
   private multiT = -99;
+  /** another hero's ultimate (Mark: Mr. Moonlight) runs in place of Serket's */
+  hero: HeroUlt | null = null;
 
   constructor(private ctx: Ctx, private player: Player, private qte: Qte, private cam: CameraRig) {}
 
@@ -133,8 +136,9 @@ export class Ultimate {
     ctx.shake(0.6);
     this.player.express('angry', 6);
     this.player.playAction('ult', 1.6);
-    ctx.events.emit('cutin', ULT_INFO[this.variant].name.toUpperCase(), '#9dff3a', 'angry');
-    if (this.variant === 'detonation') await this.detonation();
+    ctx.events.emit('cutin', (this.hero?.name ?? ULT_INFO[this.variant].name).toUpperCase(), this.hero ? '#cfe2ff' : '#9dff3a', 'angry');
+    if (this.hero) await this.hero.run();
+    else if (this.variant === 'detonation') await this.detonation();
     else if (this.variant === 'plague') await this.plague();
     else await this.wrath();
     eng.slowMo(1, 5);

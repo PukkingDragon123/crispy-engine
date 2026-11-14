@@ -27,6 +27,7 @@ import type { Player } from '../player/Player';
 import type { CameraRig } from '../player/CameraRig';
 import { Skills } from '../player/Skills';
 import { SUBAREAS } from '../world/RegionGen';
+import { NILE_AREAS } from '../world/NileGen';
 import { FloatText3D } from '../fx/FloatText3D';
 import { CineKit, KitWorld, SAND, GRAIN, cineFlags } from './CineKit';
 import { CineCam } from './CineCam';
@@ -96,7 +97,7 @@ const ease = (k: number) => {
   k = sat(k);
   return k * k * (3 - 2 * k);
 };
-const AREA_NAMES = new Set(Object.values(SUBAREAS).map((s) => s.name.toUpperCase()));
+const AREA_NAMES = new Set([...Object.values(SUBAREAS), ...Object.values(NILE_AREAS)].map((s) => s.name.toUpperCase()));
 
 export class Cinema {
   private static inst: Cinema | null = null;

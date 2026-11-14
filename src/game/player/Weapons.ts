@@ -104,8 +104,10 @@ export interface WeaponHud {
   name: string;
   ammo: number;
   mag: number;
-  /** how the HUD should draw the magazine */
-  kind: 'cylinder' | 'shells' | 'drum';
+  /** how the HUD should draw the magazine ('crest': Mark's moon crests, a 3D moon disc in the HUD) */
+  kind: 'cylinder' | 'shells' | 'drum' | 'crest';
+  /** Mark's crests: in hand, cap, the ones in the air (1 out, 2 coming home), ADS charge 0..1, recall flash */
+  crest?: { hand: number; max: number; out: number[]; charge: number; recall: number };
   reloading: boolean;
   /** 0..1 while a swap is under way */
   swap: number;

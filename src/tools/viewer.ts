@@ -113,7 +113,11 @@ root.position.x = -x / 2;
 box.setFromObject(root);
 const size = box.getSize(new THREE.Vector3());
 const center = box.getCenter(new THREE.Vector3());
-const dist = (Math.max(size.x, size.y * 1.4, size.z) * 1.6 + 0.6) / zoom;
+// optional close-up: fy = focus height (m), fd = camera distance (m)
+if (params.get('fy')) center.y = +params.get('fy')!;
+if (params.get('fz')) center.z = +params.get('fz')!;
+if (params.get('fx')) center.x = +params.get('fx')!;
+const dist = params.get('fd') ? +params.get('fd')! : (Math.max(size.x, size.y * 1.4, size.z) * 1.6 + 0.6) / zoom;
 cam.position.set(center.x + Math.sin(yaw) * Math.cos(pitch) * dist, center.y + Math.sin(pitch) * dist, center.z + Math.cos(yaw) * Math.cos(pitch) * dist);
 cam.lookAt(center);
 lbl.textContent = labels.join(' | ');

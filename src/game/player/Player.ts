@@ -21,6 +21,7 @@ import { PlayerAnim } from '../anim/playerAnim';
 import { CastAnim } from '../anim/castAnim';
 import { Weapons } from './Weapons';
 import { installHairSway } from '../models/characters/hairSway';
+import type { HeroKit } from './heroes/HeroKit';
 
 export interface PlayerVisuals {
   rig: RigSpec;
@@ -187,6 +188,8 @@ export class Player {
   muzzleWorld = new THREE.Vector3();
   /** the arsenal: revolver + long guns, switching, the two-hand hold, the dig (player/Weapons.ts) */
   weapons!: Weapons;
+  /** another hero's kit (RunOptions.hero, e.g. Mark): it takes the weapon / melee turn and adds its own pose layer */
+  kit: HeroKit | null = null;
   // tunables
   baseGunDamage = 18;
   fireInterval = 0.17;
@@ -461,6 +464,7 @@ export class Player {
     }
     if (sliding) bi.drift = this.alive && !stunned && inp.held('drift');
     const wasBoost = this.board.boosting;
+    this.kit?.preBoard(dt, bi);
     this.board.step(dt * this.status.slowMul(), bi, { surface: this.ctx.world.surface, normal: this.ctx.world.normal, slope: this.ctx.world.slope, colliders: this.ctx.world.colliders });
     if (this.board.boosting && !wasBoost) {
       this.ctx.sfx('boost', this.pos, 0.9);
@@ -498,7 +502,10 @@ export class Player {
     this.updateAssist(dt, this.aiming && !wasAiming);
     if (inp.touchMode) this.touchAssist(dt);
     else this.followCarve(dt, fx);
-    if (this.alive) {
+    if (this.kit) {
+      this.kit.update(dt);
+      if (this.alive) this.updateGrapple(dt);
+    } else if (this.alive) {
       this.weapons.preUpdate(dt);
       // a dig (treasure hunt) puts the gun away: no shooting with a shovel in hand
       if (this.weapons.dig) this.firing = this.fanning = false;
@@ -513,6 +520,7 @@ export class Player {
     // anim's springs divide by dt and would go NaN (the whole body vanishes on resume)
     if (dt > 1e-6) {
       this.animate(dt);
+      this.kit?.post(dt, this.pa);
       this.dodgeVisuals(dt);
     }
     this.barrelSmoke(dt);
@@ -1467,6 +1475,7 @@ export class Player {
   }
 
   dispose() {
+    this.kit?.dispose();
     this.weapons?.dispose();
     this.root.removeFromParent();
     this.grappleLine.removeFromParent();

@@ -3,6 +3,7 @@
 // outposts, craters, mesas, oasis lakes, pyramids), corridors and blockers.
 import { Heightfield, MAT, Stamp } from './Heightfield';
 import { Noise, RNG, smoothstep, clamp, lerp } from '../../engine/math/rand';
+import type { NileInfo } from './NileGen';
 
 export type ThemeId =
   | 'flats' | 'canyon' | 'bones' | 'temple' | 'outpost' | 'glassdunes' | 'hollows' | 'obelisks' | 'mesas' | 'arena'
@@ -46,6 +47,8 @@ export interface ZoneDef {
   /** where corridors meet this zone's rim (`to` = the neighbouring zone's index) */
   mouths: { x: number; z: number; to: number }[];
   dir: number; // heading from previous zone (radians)
+  /** the Nile stage's own zone theme (world/NileGen.ts); `theme` then carries the closest desert theme */
+  nile?: string;
 }
 
 export interface Poi {
@@ -68,11 +71,13 @@ export interface SubArea {
   field: Heightfield;
   wind: { x: number; z: number };
   waterLevel: number;
-  env: 'dunes' | 'oasis' | 'pyramid';
+  env: 'dunes' | 'oasis' | 'pyramid' | 'nileDay' | 'nileDusk' | 'nileBurn';
   start: { x: number; z: number; heading: number };
+  /** the Nile stage: river network, burn state, foliage hints (world/NileGen.ts) */
+  nile?: NileInfo;
 }
 
-interface SubAreaSpec {
+export interface SubAreaSpec {
   key: 'A' | 'B' | 'C';
   name: string;
   subtitle: string;
@@ -223,7 +228,7 @@ function polyField(field: Heightfield, pts: { x: number; z: number }[], reach: n
 const CORRIDOR_W = 34;
 
 /** zone layout: non-overlapping random snake inside the square, 50-80 m corridors between neighbours */
-function layoutZones(spec: SubAreaSpec, rng: RNG): ZoneDef[] {
+export function layoutZones(spec: SubAreaSpec, rng: RNG): ZoneDef[] {
   const S = spec.size;
   const margin = 80;
   for (let attempt = 0; attempt < 800; attempt++) {

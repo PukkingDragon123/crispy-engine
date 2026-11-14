@@ -34,6 +34,7 @@ import { VF } from '../../engine/voxel/VoxelModel';
 import { clamp, damp, dampAngle, rnd } from '../../engine/math/rand';
 import { Input, type Action } from '../../engine/Input';
 import { Qte } from '../ui/Qte';
+import type { HeroSpells } from './heroes/HeroKit';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -197,6 +198,8 @@ export class Skills {
   // Pinch
   pinch: RigInstance | null = null;
   pinchRoot = new THREE.Group();
+  /** another hero's spells on these tarot slots (Mark): casts, empower, echo and cooldowns go to it; Pinch stays home */
+  hero: HeroSpells | null = null;
   pinchState: 'shoulder' | 'leap' | 'sting' | 'return' | 'reload' = 'shoulder';
   pinchT = 0;
   pinchCd = 2;
@@ -248,6 +251,19 @@ export class Skills {
     const inp = this.input;
     const cdr = 1 - this.stats.get('cdr');
     this.time += dt;
+    if (this.hero) {
+      this.sealedNag -= dt;
+      this.pinchRoot.visible = false;
+      this.hero.update(dt);
+      if (this.player.alive) {
+        const q = Qte.current;
+        const eaten = (a: Action) => !!q && (q.quickWants(a) || q.ate(a));
+        if (inp.hit('skill1') && !eaten('skill1')) this.tryCast('E');
+        if (inp.hit('skill2') && !eaten('skill2')) this.tryCast('C');
+        if (inp.hit('grenade') && !eaten('grenade')) this.tryCast('G');
+      }
+      return;
+    }
     // the scarabs are drawn inside the enemy render pass (instanced rigs)
     if (!this.hooked) {
       const en = this.ctx.enemies as unknown as { drawHooks?: ((r: EnemyRender) => void)[]; render?: EnemyRender };
@@ -309,7 +325,9 @@ export class Skills {
       }
       return;
     }
-    if (k === 'E' && this.scorpCd <= 0) this.tossScorpions();
+    if (this.hero) {
+      if (!this.hero.cast(k)) return;
+    } else if (k === 'E' && this.scorpCd <= 0) this.tossScorpions();
     else if (k === 'C' && this.swarmCd <= 0) this.summonSwarm();
     else if (k === 'G' && this.bombCharges > 0) this.throwBomb();
     else return;
@@ -337,6 +355,7 @@ export class Skills {
 
   /** the payoff: a second wave from the same cast (scorpions, scarabs) or a heavier blast (dung bomb) */
   private empower(k: SkillKey, perfect: boolean, aim: THREE.Vector3) {
+    if (this.hero) return this.hero.empower(k, perfect, aim);
     const pl = this.player;
     const ctx = this.ctx;
     const c = pl.center(new THREE.Vector3()).add(_v3.set(0, 0.3, 0));
@@ -363,6 +382,7 @@ export class Skills {
   /** the echo: the same skill again, free, with a jade shimmer */
   private echoCast(k: SkillKey) {
     if (!this.player.alive) return;
+    if (this.hero) return this.hero.echo(k);
     const c = this.player.center(new THREE.Vector3());
     this.ctx.fx.sparkle(c, 0x9dff3a, 10, 0.7);
     this.ctx.sfx('divine_chime', c, 0.35, 1.4);
@@ -1662,6 +1682,7 @@ export class Skills {
   }
 
   cooldowns() {
+    if (this.hero) return this.hero.cooldowns();
     return {
       scorp: Math.max(0, this.scorpCd),
       swarm: Math.max(0, this.swarmCd),

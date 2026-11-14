@@ -306,6 +306,8 @@ export class Enemy implements EnemyLike {
   /** vulture: its tracking strike ring, the slow lazy-spiral phase */
   mark: MarkHandle | null = null;
   spiral = rnd.next() * 10;
+  /** standing on something that moves (a Nile boat's deck): it carries / re-places this enemy every frame */
+  mount: { place(e: Enemy, dt: number): void } | null = null;
   constructor(public def: EnemyDef, public alpha: boolean, wave: number, render: EnemyRender) {
     const sc = waveScale(wave);
     this.scale = alpha ? 1.32 : 1;
@@ -496,9 +498,13 @@ export class Enemies implements EnemyApi {
   }
 
   // ------------------------------------------------------------- spawning
+  /** boats and shore batteries (ai 'vessel') are spawned by the Nile fleet; returns their first crewman */
+  vesselSpawner: ((defId: string, x: number, z: number, opts: { alpha?: boolean }) => Enemy | null) | null = null;
+
   spawn(defId: string, x: number, z: number, opts: { alpha?: boolean; emerge?: Enemy['emerge']; focus?: FocusTarget | null } = {}) {
     const def = ENEMIES[defId];
     if (!def) return null;
+    if (def.ai === 'vessel') return this.vesselSpawner?.(defId, x, z, opts) ?? null;
     const e = new Enemy(def, !!opts.alpha, this.wave, this.render);
     e.focus = opts.focus ?? null;
     const g = this.ctx.world.groundAt(x, z);
@@ -1626,6 +1632,7 @@ export class Enemies implements EnemyApi {
       e.tint.setRGB(damp(e.tint.r, tr[0], 6, dt), damp(e.tint.g, tr[1], 6, dt), damp(e.tint.b, tr[2], 6, dt));
       this.think(e, dt, time, ppos);
       if (!e.alive) continue;
+      e.mount?.place(e, dt);
       // separation
       let sx = 0, sz = 0;
       const gx = Math.floor(e.pos.x / 3), gz = Math.floor(e.pos.z / 3);

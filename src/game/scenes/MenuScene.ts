@@ -33,6 +33,7 @@ import { signBoard, chainLine, padlockBody, padlockShackle } from '../models/pro
 import { hideoutOpen, hideoutRevealPending, markHideoutRevealed, hallOpen, hallRevealPending, markHallRevealed } from '../meta/HideoutGate';
 import { ThothHall } from './ThothHall';
 import { resetTutor } from '../ui/TouchTutor';
+import { StageFork } from './menu/StageFork';
 
 type Pivot = [number, number, number] | 'bottom' | 'center';
 function vmesh(model: VoxelModel, vs: number, pivot: Pivot = 'bottom', mat: THREE.Material = sharedVoxelMaterial, shadow = true) {
@@ -207,6 +208,8 @@ export class MenuScene implements GameScene {
   /** THOTH'S HALL: the sign, and the hall itself while it is open */
   private ksign: KnowledgeSign | null = null;
   private ksignHot = 0;
+  /** NEW RUN's fork in the trail: THE DUNES / THE NILE (menu/StageFork) */
+  private fork: StageFork | null = null;
   private hall: ThothHall | null = null;
   private ray = new THREE.Raycaster();
   private hot: Plank | null = null;
@@ -469,6 +472,12 @@ export class MenuScene implements GameScene {
       this.planks.push(plank);
     });
     if (this.planks.some((p) => p.lock) && hideoutRevealPending()) this.engine.tweens.after(2.4, () => this.springLock(), true);
+    try {
+      const run = this.planks.find((p) => p.label === 'NEW RUN');
+      if (run) this.fork = new StageFork({ engine: this.engine, camera: this.camera, particles: this.particles, post, faceZ: sp.faceZ, under: this.planks.filter((p) => p !== run).map((p) => p.group), say: (t) => this.say(t), ride: () => this.choose(run, true) });
+    } catch (e) {
+      console.warn('[menu] stage fork', e);
+    }
     // ---- lanterns: two on the gate, one on the signpost arm
     const lt = MS.hurricaneLantern();
     const lanternGeo = buildVoxelGeometry(lt.model, { voxelSize: lt.voxelSize, pivot: lt.pivot });
@@ -777,6 +786,7 @@ export class MenuScene implements GameScene {
     this.hall?.dispose();
     this.hall = null;
     this.ksign?.dispose();
+    this.fork?.dispose();
     this.msg.remove();
     this.panel?.remove();
     this.wind?.stop(0.5);
@@ -790,7 +800,7 @@ export class MenuScene implements GameScene {
     this.terrain = null;
   }
 
-  private choose(p: Plank) {
+  private choose(p: Plank, go = false) {
     const eng = this.engine;
     p.knock = 1;
     eng.audio.play('ui_click', { volume: 0.7 });
@@ -801,6 +811,8 @@ export class MenuScene implements GameScene {
     this.particles.emit({ pos: wp, count: 3, spread: 0.4, up: 0.2, life: [0.6, 1.0], size: [0.2, 0.7], sprite: ['puff0', 'puff1', 'puff2'], color: 0xe8cfa4, alpha: 0.4, drag: 2, rot: 6, rotSpeed: 1 });
     switch (p.label) {
       case 'NEW RUN':
+        // after the first ride NEW RUN asks where to (the dunes or the Nile) before it leaves
+        if (!go && this.fork?.offer()) return;
       case 'RESUME': {
         if (this.leaving) return;
         this.leaving = true;
@@ -1010,6 +1022,10 @@ export class MenuScene implements GameScene {
 
   // ---------------------------------------------------------------- signage
   private updateMenu(dt: number) {
+    if (this.fork?.busy && !this.leaving) {
+      this.fork.update(dt);
+      return;
+    }
     const eng = this.engine;
     const inp = eng.input;
     const n = this.planks.length;

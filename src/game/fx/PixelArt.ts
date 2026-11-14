@@ -102,6 +102,9 @@ const ART: Record<string, Art> = {
     pal: { k: '#b8c0c6' },
   },
   star4: { rows: ['...w...', '...w...', '..www..', 'wwwWwww', '..www..', '...w...', '...w...'], pal: { w: '#ffffff', W: '#ffffff' } },
+  // moonlight (Mark): crescents with a soft pale rim, tinted by the particle colour
+  moon0: { rows: ['..www..', '.wWWw..', 'wWWw...', 'wWW....', 'wWWw...', '.wWWw..', '..www..'], pal: { w: '#c8d8ee', W: '#ffffff' } },
+  moon1: { rows: ['.ww..', 'wWw..', 'wW...', 'wWw..', '.ww..'], pal: { w: '#c8d8ee', W: '#ffffff' } },
   pinchA: {
     rows: [
       '......oo........',

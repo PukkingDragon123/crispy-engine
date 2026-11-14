@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { generateSubArea, SubArea, ZoneDef, findOpenSpot, type OpenSpotOpts, type Anchor } from './RegionGen';
 import { Terrain, Backdrop } from './Terrain';
-import { Env, PRESETS, AirSand } from './Env';
+import { Env, PRESETS, AirSand, type EnvPreset } from './Env';
 import { Storm } from './Storm';
 import { Colliders } from './Colliders';
 import { MAT } from './Heightfield';
@@ -11,6 +11,10 @@ import type { SurfaceInfo } from '../player/Board';
 import { globalUniforms, atmoFogUniforms, ATMO } from '../../engine/render/VoxelMaterial';
 import { smoothstep, lerp, clamp } from '../../engine/math/rand';
 import { SandWaves } from './SandWaves';
+import type { StageId } from '../meta/Stage';
+import { generateNileArea } from './NileGen';
+import { NileWater, FlatWater, NILE_LOOKS, type WaterSurface, type WaterSample } from './NileWater';
+import { BURN, resetBurn } from './NileBurn';
 
 const waterVert = /* glsl */ `
 varying vec3 vW;
@@ -53,7 +57,26 @@ export class World {
   storm: Storm;
   colliders = new Colliders();
   group = new THREE.Group();
-  water: THREE.Mesh | null = null;
+  /**
+   * The water of this sub-area: the Nile river (flowing, swells, wakes, lava after Ra's
+   * fire) or a still pool. Ask it for the surface: water.heightAt(x, z), flowAt(x, z),
+   * depthAt, isWater, lavaAt, moltenAt, sample(x, z, out); boats call wake() every frame
+   * and impacts call splash(). null where there is none.
+   */
+  water: WaterSurface | null = null;
+  /** the stage this world belongs to */
+  stage: StageId;
+  /** the Nile's own river mesh + runtime (null elsewhere) */
+  river: NileWater | null = null;
+  private waterMesh: THREE.Mesh | null = null;
+  /** optional event bus (RunScene binds ctx.events): 'nileBurn' (k), 'nileBurned' */
+  events: { emit(ev: string, ...a: any[]): void } | null = null;
+  /** listeners for the burn's progress (0..1) */
+  onBurn: ((k: number) => void)[] = [];
+  private burnState = { k: 0, ox: 0, oz: 0, maxR: 1 };
+  private burnAnim: { t: number; dur: number; resolve: () => void; ox: number; oz: number } | null = null;
+  private basePreset: EnvPreset | null = null;
+  private _ws: WaterSample = { h: 0, depth: 0, fx: 0, fz: 0, gx: 0, gz: 0, lava: 0, molten: false, amp: 0 };
   activeZone = 0;
   unlockedZone = 0;
   props: { update(dt: number, focus: THREE.Vector3): void; riseFor(stampId: string, k: number): void; group: THREE.Group } | null = null;
@@ -78,9 +101,11 @@ export class World {
   private murkOn = false;
   private _murk = new THREE.Color();
 
-  constructor(public scene: THREE.Scene, key: 'A' | 'B' | 'C', seed: number) {
+  constructor(public scene: THREE.Scene, key: 'A' | 'B' | 'C', seed: number, stage: StageId = 'desert') {
     const t0 = performance.now();
-    this.sa = generateSubArea(key, seed);
+    this.stage = stage;
+    this.sa = stage === 'nile' ? generateNileArea(key, seed) : generateSubArea(key, seed);
+    resetBurn();
     const t1 = performance.now();
     this.env = new Env(scene, this.sa.env, seed);
     this.terrain = new Terrain(this.sa.field, this.sa.wind, this.sand);
@@ -97,7 +122,8 @@ export class World {
     this.storm.wind = { x: this.sa.wind.x, z: this.sa.wind.z };
     this.group.add(this.storm.group);
     scene.add(this.group);
-    if (this.sa.waterLevel > -100) this.makeWater();
+    if (this.sa.nile) this.makeRiver();
+    else if (this.sa.waterLevel > -100) this.makeWater();
     console.log(`[world] ${key}: ${this.sa.size} m square, ${this.sa.zones.length} zones (r ${this.sa.zones.map((z) => z.r).join('/')}), ${this.sa.zones.reduce((n, z) => n + z.pois.length, 0)} sights; generate ${(t1 - t0).toFixed(0)} ms, terrain+storm ${(performance.now() - t1).toFixed(0)} ms`);
     // storm: zone 0 open, every other zone + corridor closed
     for (const z of this.sa.zones) {
@@ -109,11 +135,92 @@ export class World {
   get field() {
     return this.sa.field;
   }
+  /** the Nile stage's river network, zone themes and gate arena (null on the desert) */
+  get nile() {
+    return this.sa.nile ?? null;
+  }
+
+  private makeRiver() {
+    const nile = this.sa.nile!;
+    this.basePreset = { ...PRESETS[this.sa.env] };
+    this.river = new NileWater(this.sa.field, nile.river, NILE_LOOKS[this.sa.env] ?? NILE_LOOKS.nileDay);
+    this.water = this.river;
+    this.group.add(this.river.group);
+    const S = this.sa.size;
+    this.burnState.ox = nile.arena?.x ?? S / 2;
+    this.burnState.oz = nile.arena?.z ?? S / 2;
+    // region C: Ra has already burned the valley
+    if (nile.burned) this.burnToLava(1);
+  }
+
+  /**
+   * Ra burns the desert and the river: the fire front sweeps out from `origin` (default:
+   * the gate boss's court) across the whole valley; k = 0..1 progress. The ground chars,
+   * glowing cracks open, plants shrivel, the sky turns to fire and the river becomes
+   * flowing lava (cooled crust plates ride on it; deep molten lava burns). Never runs
+   * backwards. Emits 'nileBurn' (k) on the bound event bus and to onBurn listeners,
+   * 'nileBurned' once complete. Region C starts with k = 1.
+   */
+  burnToLava(k: number, origin?: { x: number; z: number }) {
+    if (!this.sa.nile) return;
+    const b = this.burnState;
+    if (origin && b.k <= 0) {
+      b.ox = origin.x;
+      b.oz = origin.z;
+    }
+    k = clamp(Math.max(k, b.k), 0, 1);
+    const S = this.sa.size;
+    b.maxR = Math.max(Math.hypot(b.ox, b.oz), Math.hypot(S - b.ox, b.oz), Math.hypot(b.ox, S - b.oz), Math.hypot(S - b.ox, S - b.oz)) + 60;
+    const was = b.k;
+    b.k = k;
+    BURN.value.set(b.ox, b.oz, k >= 1 ? 1e5 : 10 + k * b.maxR, Math.min(1, k * 6));
+    // the sky catches fire with the land
+    const base = this.basePreset ?? PRESETS[this.sa.env];
+    if (this.sa.env !== 'nileBurn') this.env.lerpPreset(base, PRESETS.nileBurn, smoothstep(0.0, 0.55, k));
+    const air = this.air.points.material as THREE.ShaderMaterial;
+    const pal = air.uniforms.uPal.value as THREE.Color[];
+    const ASH = [0x6a605a, 0x4a423e, 0x8a7e76, 0xff9a4a];
+    const SAND = [0xf2d49c, 0xe2b97a, 0xd2a564, 0xfbe8bc];
+    pal.forEach((c, i) => c.setHex(SAND[i]).lerp(new THREE.Color(ASH[i]), smoothstep(0.1, 0.6, k)));
+    if (k !== was) {
+      for (const f of this.onBurn) f(k);
+      this.events?.emit('nileBurn', k);
+      if (k >= 1 && was < 1) this.events?.emit('nileBurned');
+    }
+  }
+  /** the burn's progress (0 untouched .. 1 the whole valley is fire) */
+  get burnK() {
+    return this.burnState.k;
+  }
+  /** play the whole burn by itself over `dur` s of real time (cinematics can await it) */
+  igniteNile(opts: { origin?: { x: number; z: number }; dur?: number } = {}): Promise<void> {
+    if (!this.sa.nile || this.burnState.k >= 1) return Promise.resolve();
+    const o = opts.origin ?? { x: this.burnState.ox, z: this.burnState.oz };
+    return new Promise((resolve) => {
+      this.burnAnim?.resolve();
+      this.burnAnim = { t: 0, dur: opts.dur ?? 9, resolve, ox: o.x, oz: o.z };
+      this.burnToLava(Math.max(this.burnState.k, 0.001), o);
+    });
+  }
+  /** the run is over: the fire goes out (the menu and hub terrain read the same burn uniform) */
+  stopBurn() {
+    this.burnAnim?.resolve();
+    this.burnAnim = null;
+    resetBurn();
+  }
+  /** heat on a body at (x, y, z): 1 in contact with molten lava, else 0 (crust and banks are safe) */
+  heatAt(x: number, y: number, z: number) {
+    const w = this.river;
+    if (!w || this.burnState.k <= 0) return 0;
+    const s = w.sample(x, z, this._ws);
+    return s.molten && y < s.h + 0.35 ? 1 : 0;
+  }
   get zone(): ZoneDef {
     return this.sa.zones[this.activeZone];
   }
 
   private makeWater() {
+    this.water = new FlatWater(this.sa.waterLevel, (x, z) => this.sa.field.heightSmooth(x, z));
     const f = this.sa.field;
     // height texture for depth tint
     const N = 256;
@@ -140,11 +247,12 @@ export class World {
         uLevel: { value: this.sa.waterLevel },
       },
     });
-    this.water = new THREE.Mesh(new THREE.PlaneGeometry(f.size, f.size), mat);
-    this.water.rotation.x = -Math.PI / 2;
-    this.water.position.set(f.size / 2, this.sa.waterLevel, f.size / 2);
-    this.water.renderOrder = 3;
-    this.group.add(this.water);
+    const wm = (this.waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(f.size, f.size), mat));
+    (this.water as FlatWater).material = mat;
+    wm.rotation.x = -Math.PI / 2;
+    wm.position.set(f.size / 2, this.sa.waterLevel, f.size / 2);
+    wm.renderOrder = 3;
+    this.group.add(wm);
   }
 
   /** board surface query: height includes water, friction by material */
@@ -153,7 +261,29 @@ export class World {
     // the board rides the living sand too (dune waves, rings, the vortex)
     const h = f.heightSmooth(x, z) + (this.sand.n ? this.sand.offset(x, z) : 0);
     const wl = this.sa.waterLevel;
-    if (h < wl - 0.05) {
+    out.flowX = 0;
+    out.flowZ = 0;
+    out.roll = 0;
+    out.lava = false;
+    if (this.river) {
+      // the Nile: ride the swells, the current carries the board; lava rides the same
+      if (h < wl + 1.2) {
+        const s = this.river.sample(x, z, this._ws);
+        if (s.h > h + 0.01) {
+          out.h = s.h;
+          // shallows over a sandbar drag at the board; open water runs fast
+          const shallow = s.depth < 0.4 ? 1 - s.depth / 0.4 : 0;
+          out.drag = (s.lava > 0.5 ? 0.02 : 0.01) + shallow * 0.03;
+          out.speedMul = (s.lava > 0.5 ? 1.04 : 1.14) - shallow * 0.12;
+          out.kind = 'water';
+          out.flowX = s.fx;
+          out.flowZ = s.fz;
+          out.roll = (s.lava > 0.5 ? 0.8 : 0.55) + shallow * 0.6;
+          out.lava = s.lava > 0.5;
+          return out;
+        }
+      }
+    } else if (h < wl - 0.05) {
       out.h = wl;
       out.drag = 0.035;
       out.speedMul = 0.8;
@@ -201,7 +331,12 @@ export class World {
   groundAt = (x: number, z: number) => Math.max(this.sa.field.heightAt(x, z) + (this.sand.n ? this.sand.offset(x, z) : 0), this.sa.waterLevel);
   groundSmooth = (x: number, z: number) => Math.max(this.sa.field.heightSmooth(x, z) + (this.sand.n ? this.sand.offset(x, z) : 0), this.sa.waterLevel);
   normal = (x: number, z: number, out: THREE.Vector3) => {
-    if (this.sa.field.heightSmooth(x, z) < this.sa.waterLevel) return out.set(0, 1, 0);
+    if (this.sa.field.heightSmooth(x, z) < this.sa.waterLevel + 0.9) {
+      if (this.river) {
+        const s = this.river.sample(x, z, this._ws);
+        if (s.h > this.sa.field.heightSmooth(x, z) + 0.01) return out.set(-s.gx, 1, -s.gz).normalize();
+      } else if (this.sa.field.heightSmooth(x, z) < this.sa.waterLevel) return out.set(0, 1, 0);
+    }
     this.sa.field.normalAt(x, z, out);
     if (this.sand.n) {
       // tilt by the living-sand gradient: n = normalize(-(hx+gx), 1, -(hz+gz))
@@ -445,9 +580,43 @@ export class World {
     this.storm.update(dt, fx, focus);
     this.applyMurk();
     this.props?.update(dt, focus);
+    if (this.river) {
+      const ba = this.burnAnim;
+      if (ba) {
+        ba.t += rdt;
+        const k = clamp(ba.t / ba.dur, 0, 1);
+        this.burnToLava(k * k * (3 - 2 * k), { x: ba.ox, z: ba.oz });
+        if (k >= 1) {
+          this.burnAnim = null;
+          ba.resolve();
+        }
+      }
+      this.river.update(dt, time, focus, fx);
+      if (fx && this.burnState.k > 0 && this.burnState.k < 1) this.fireFront(fx, focus);
+    }
+  }
+
+  /** flames and smoke along the advancing fire front near the hunter */
+  private fireFront(fx: any, focus: THREE.Vector3) {
+    const b = BURN.value;
+    const d = Math.hypot(focus.x - b.x, focus.z - b.y);
+    if (Math.abs(d - b.z) > 90) return;
+    const a0 = Math.atan2(focus.z - b.y, focus.x - b.x);
+    for (let i = 0; i < 4; i++) {
+      const a = a0 + (Math.random() - 0.5) * (120 / Math.max(40, b.z));
+      const r = b.z - 6 + (Math.random() - 0.5) * 10;
+      const x = b.x + Math.cos(a) * r, z = b.y + Math.sin(a) * r;
+      const y = this.groundAt(x, z);
+      fx.p.emit({ pos: { x, y: y + 0.2, z }, count: 2, vel: { x: 0, y: 2.5, z: 0 }, spread: 1.2, jitter: 1.2, gravity: -2, life: [0.5, 1.0], size: [1.1, 0.4], sprite: ['flame0', 'flame1', 'flame2', 'flame3'], animate: true, additive: true, color: 0xffffff });
+      if (Math.random() < 0.5) fx.p.emit({ pos: { x, y: y + 2, z }, count: 1, vel: { x: 0.5, y: 2.2, z: 0.3 }, spread: 0.8, life: [2, 3.5], size: [2, 5.5], sprite: ['cloud0', 'cloud1', 'cloud2'], color: [0x2a201c, 0x3e302a], alpha: 0.5, drag: 0.5, rot: 6, rotSpeed: 0.3 });
+    }
   }
 
   dispose() {
+    this.burnAnim?.resolve();
+    this.burnAnim = null;
+    this.river?.dispose();
+    resetBurn();
     this.storm.dispose();
     this.terrain.dispose();
     this.backdrop.dispose();

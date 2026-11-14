@@ -17,6 +17,17 @@
 //                      re-forms elsewhere, heart first)
 //   Death: an avalanche into the dune, a last ring wave flattens the arena, the
 //   moon mask drops into the sand and cracks, and the light comes back.
+// THE MOON RULES THE TIDES OF SAND (bosses/khonsu/LunarKit): his entrance sinks the sun
+// and raises his moon over the dune (Undercover of the Night); Child of the Moon (the
+// moon draws the desert after it: a broad flood of sand rolls across the arena toward
+// the moon, then the backwash rolls back; drag the moon close first and it is a spring
+// tide), Shine a Light (moonbeams), Patience (clock dials of slow time), from phase 2
+// Lucy in the Sky with Diamonds (crescent shards) and Tomorrow Never Knows (the
+// hourglass in front of his chest stops his shots mid-air), in phase 3 November Rain
+// (the moon cracks open) and once Ruby Tuesday (blood eclipse: his heart burns open in
+// the dark while red beams spiral out of him). Yesterday rewinds a volley you slipped.
+// His first fall opens the Nile and frees Mark (meta/StageUnlocks): the cracked mask
+// lets its moonlight go, and it rides off toward the river (khonsu/MoonReveal).
 // Weak points: eyes (×2.2), head (×1.5), the moon core (×2.5 only while the
 // chest is open), hands while they are planted after a slam.
 import * as THREE from 'three';
@@ -27,7 +38,10 @@ import type { Enemy } from '../enemies/Enemies';
 import { ENEMIES } from '../enemies/EnemyDefs';
 import { SAND_MAX } from '../world/SandWaves';
 import type { SandShape, SandShapeOpts } from '../world/SandWaves';
-import type { EnvPreset } from '../world/Env';
+import { LunarKit } from './khonsu/LunarKit';
+import { LunarSky } from './khonsu/LunarSky';
+import { grantKhonsuSand } from '../meta/StageUnlocks';
+import { playMoonReveal } from './khonsu/MoonReveal';
 import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { khonsuSandSpikeModel, KS_VOXELS_PER_M } from '../models/enemies/khonsuSand';
@@ -43,11 +57,6 @@ const MOUND_W = 7.6;
 const GRAINS = ['grain0', 'grain1', 'grain2', 'grain3'];
 const PUFFS = ['puff0', 'puff1', 'puff2', 'cloud0'];
 const SANDS = [P.sand1, P.sand0, P.sand2, P.sand3];
-/** a dust-storm dusk under a pale moon (sun azimuth is kept from the zone) */
-const DUSK: Partial<EnvPreset> = {
-  zenith: 0x2b2a4a, horizon: 0xd9965a, ground: 0x9c6a3e, sunColor: 0xffc48a, sunIntensity: 2.3, sunElev: 13,
-  hemiSky: 0x8a90c8, hemiGround: 0xa86a3a, hemiIntensity: 0.95, fog: 0xc4905a, fogNear: 55, fogFar: 320, exposure: 1.06, stars: 0.4, clouds: 0.6, cloudColor: 0xf6d2b0,
-};
 const POUR_LEN: Record<string, number> = { pour_sh1: 7.5, pour_sh2: 6.2, pour_el: 6.4, pour_beak: 3.8 };
 const ARMY = ['husk', 'husk', 'mummy', 'jackal', 'sandWolf', 'gunslinger', 'bandageWhipper', 'scarab'];
 
@@ -204,11 +213,9 @@ export class KhonsuSandAvatar extends Boss {
   private spikes: Spike[] = [];
   private pit: { shape: SandShape; x: number; z: number; tick: number } | null = null;
   private coreLight: THREE.PointLight;
-  private baseEnv: EnvPreset;
-  private duskPreset: EnvPreset;
-  private duskT = 0.55;
-  private duskNow = 0;
-  private duskApplied = -1;
+  /** the night, the moon and time (bosses/khonsu/LunarKit) */
+  lunar: LunarKit;
+  private moonCds = { tide: 6, rain: 0, ruby: false };
   private sandForms = new Map<Enemy, boolean>();
   private crumbles: { batch: unknown; until: number }[] = [];
   private offKill: (() => void) | null = null;
@@ -225,6 +232,8 @@ export class KhonsuSandAvatar extends Boss {
   private handSpheres: HitSphere[];
   private eyeAxis: THREE.Vector3[];
   private dead = false;
+  private firstFall = false;
+  private maskDown = false;
 
   constructor(d: BossDeps) {
     super(d, 'khonsu_sand', { name: 'Avatar of Khonsu', title: 'Lord of the Shifting Sands', hp: 2600 * 6, scale: 1, eyes: ['glow', 0x9fd0ff] });
@@ -314,8 +323,7 @@ export class KhonsuSandAvatar extends Boss {
     this.coreLight = new THREE.PointLight(0x9fd0ff, 0, 18, 1.6);
     this.coreLight.position.set(0, 0, 1.4);
     (this.rig.nodes['core'] ?? this.root).add(this.coreLight);
-    this.baseEnv = { ...ctx.world.env.preset };
-    this.duskPreset = { ...this.baseEnv, ...DUSK, sunAzim: this.baseEnv.sunAzim };
+    this.lunar = new LunarKit(this, { scale: 2.4, elev: 21, size: 11, callout: (s) => this.callout(s) });
     spikeGeos();
     this.offKill = ctx.events.on('enemyKilled', (e: Enemy) => this.onEnemyKilled(e));
     (window as any).__khonsuSand = this; // dev handle: __khonsuSand.debug('helterSkelter')
@@ -443,6 +451,10 @@ export class KhonsuSandAvatar extends Boss {
     camPos.y = this.ground(camPos.x, camPos.z) + 2.4;
     const look = new THREE.Vector3(bx, g + 4, bz);
     cam.setCine({ pos: camPos, look, fov: 58 });
+    // Undercover of the Night: the sun slides down behind him and his moon comes up over the dune
+    this.lunar.sky.aim(LunarSky.azimOf(dx, dz));
+    this.lunar.fall(1);
+    this.callout('Undercover of the Night');
     await this.wait(0.2);
     // 1) the quake: the desert drains toward the spot
     ctx.sfx('quake_rumble', { x: bx, y: g, z: bz }, 1, 0.7);
@@ -511,12 +523,19 @@ export class KhonsuSandAvatar extends Boss {
         continue;
       }
       const p = this.phase, r = rnd.next(), d = this.distToPlayer();
+      const c = this.cds, m = this.moonCds;
       let pick: string;
-      if (d > 44) pick = r < 0.5 ? 'drift' : 'helterSkelter';
-      else if (p === 0) pick = r < 0.36 ? 'helterSkelter' : r < 0.72 ? 'mrBrownstone' : 'startMeUp';
-      else if (p === 1) pick = r < 0.26 ? 'helterSkelter' : r < 0.5 ? 'mrBrownstone' : r < 0.68 ? 'startMeUp' : this.cds.sugar <= 0 ? 'brownSugar' : 'helterSkelter';
-      else pick = r < 0.2 ? 'helterSkelter' : r < 0.38 ? 'shattered' : r < 0.54 && this.cds.together <= 0 ? 'comeTogether' : r < 0.64 && this.cds.shelter <= 0 ? 'gimmeShelter' : r < 0.76 ? 'startMeUp' : r < 0.88 && this.cds.sugar <= 0 ? 'brownSugar' : 'mrBrownstone';
+      if (d > 44) pick = r < 0.4 ? 'drift' : r < 0.7 ? 'helterSkelter' : 'shineALight';
+      else if (p === 0) pick = r < 0.24 ? 'helterSkelter' : r < 0.46 ? 'mrBrownstone' : r < 0.6 ? 'startMeUp' : r < 0.76 && m.tide <= 0 ? 'childOfTheMoon' : r < 0.88 ? 'shineALight' : 'patience';
+      else if (p === 1)
+        pick = r < 0.15 ? 'helterSkelter' : r < 0.3 ? 'mrBrownstone' : r < 0.39 ? 'startMeUp' : r < 0.48 && c.sugar <= 0 ? 'brownSugar' : r < 0.58 && m.tide <= 0 ? 'childOfTheMoon' : r < 0.68 ? 'lucy' : r < 0.77 ? 'patience' : r < 0.88 ? 'tomorrowNeverKnows' : 'shineALight';
+      else if (!m.ruby && this.frac < 0.25) pick = 'rubyTuesday';
+      else
+        pick =
+          r < 0.13 ? 'helterSkelter' : r < 0.25 ? 'shattered' : r < 0.34 && c.together <= 0 ? 'comeTogether' : r < 0.41 && c.shelter <= 0 ? 'gimmeShelter' : r < 0.51 && m.tide <= 0 ? 'springTide' : r < 0.59 && m.rain <= 0 ? 'novemberRain' : r < 0.67 ? 'tomorrowNeverKnows' : r < 0.75 ? 'lucy' : r < 0.83 && c.sugar <= 0 ? 'brownSugar' : r < 0.91 ? 'patience' : 'mrBrownstone';
       if (pick === this.lastAttack && pick !== 'drift') pick = pick === 'helterSkelter' ? 'mrBrownstone' : 'helterSkelter';
+      // a volley you slipped is not over yet: he rewinds it
+      if (p >= 1 && this.alive && this.lunar.missedFor(1.2) && this.lunar.liveBullets() >= 10 && rnd.chance(0.35)) await this.run('yesterday');
       await this.run(pick);
       await this.wait(p >= 2 ? 0.45 : 0.8);
     }
@@ -538,11 +557,30 @@ export class KhonsuSandAvatar extends Boss {
         return this.comeTogether();
       case 'gimmeShelter':
         return this.gimmeShelter();
+      case 'childOfTheMoon':
+        return this.childOfTheMoon(false);
+      case 'springTide':
+        return this.childOfTheMoon(true);
+      case 'shineALight':
+        return this.shineALight();
+      case 'lucy':
+        return this.lucyInTheSky();
+      case 'patience':
+        return this.patience();
+      case 'tomorrowNeverKnows':
+        return this.tomorrowNeverKnows();
+      case 'novemberRain':
+        return this.novemberRain();
+      case 'rubyTuesday':
+        return this.rubyTuesday();
+      case 'yesterday':
+        return this.yesterday();
       default:
         return this.drift();
     }
   }
-  /** dev/test: queue an attack by name (helterSkelter, mrBrownstone, shattered, startMeUp, brownSugar, comeTogether, gimmeShelter) */
+  /** dev/test: queue an attack by name (helterSkelter, mrBrownstone, shattered, startMeUp, brownSugar, comeTogether, gimmeShelter,
+   *  childOfTheMoon, springTide, shineALight, lucy, patience, tomorrowNeverKnows, novemberRain, rubyTuesday, yesterday) */
   debug(name: string) {
     this.queue.unshift(name);
   }
@@ -924,17 +962,169 @@ export class KhonsuSandAvatar extends Boss {
     this.glowT = 0.8;
   }
 
+  // ------------------------------------------------------------------ the moon and the tides of sand (bosses/khonsu/LunarKit)
+  /**
+   * Child of the Moon: he lifts his hands to the moon and it draws the desert after it. A broad,
+   * low flood of sand rolls across the arena toward the moon (surf it or jump the crest), then the
+   * backwash rolls home. A spring tide (the moon dragged close first) runs higher and faster.
+   */
+  private async childOfTheMoon(spring: boolean) {
+    const ctx = this.ctx;
+    const k = this.lunar;
+    this.moonCds.tide = spring ? 28 : 19;
+    if (spring) {
+      this.callout('2000 Light Years from Home');
+      this.say(['Come down, moon. Pull harder.', 'The sky is a rope, and I am pulling.']);
+      k.sky.nearT = 1;
+      ctx.sfx('quake_rumble', this.pos, 1, 0.5);
+      ctx.sfx('divine_power', this.pos, 0.9, 0.45);
+      for (let t = 0; t < 1.4; t += 0.2) {
+        ctx.shake(0.2);
+        await this.wait(0.2);
+      }
+    }
+    this.callout('Child of the Moon');
+    if (!spring && rnd.chance(0.6)) this.say(['The moon calls the sand home.', 'Tide is turning, little bones.', 'Every dune is a wave that remembers.']);
+    k.sky.nearT = Math.max(k.sky.nearT, 0.3);
+    // both hands up to the moon
+    const md = k.sky.flatDir(new THREE.Vector3());
+    this.bendT = -0.2;
+    this.turnRate = 1.4;
+    for (const s of [0, 1]) this.aim(s, this.root.localToWorld(new THREE.Vector3(s === 0 ? 10 : -10, 34, 6)), 2.2, -0.15, -0.4);
+    this.glowT = 1;
+    k.tug(spring ? 2.6 : 1.4);
+    ctx.toast(spring ? 'SPRING TIDE' : 'THE TIDE COMES IN', '#cfe8ff', 'The sand runs toward the moon: ride the swell');
+    const pp = this.playerPos();
+    // the flood forms on the far side from the moon and rolls toward it
+    const back = 30;
+    const sx = pp.x - md.x * back, sz = pp.z - md.z * back;
+    const h = spring ? 6.4 : 4.2, halfLen = spring ? 64 : 54, speed = spring ? 12.5 : 10;
+    await this.plumeLine(sx, sz, md.x, md.z, halfLen * 0.6, spring ? 1.1 : 1.3);
+    const flood = this.addSand({ kind: 'ridge', x: sx, z: sz, dir: { x: md.x, z: md.z }, speed, height: h, width: spring ? 9 : 8, halfLen, life: (back + 44) / speed + 1.5, rise: 1.0, fall: 1.6 });
+    this.waves.push({ shape: flood, kind: 'ridge', dmg: 18 + this.phase * 4, knock: 15, hit: false, crossed: false, prev: NaN });
+    ctx.sfx('whoosh_big', { x: sx, y: this.ground(sx, sz), z: sz }, 1, 0.45);
+    ctx.shake(0.35);
+    if (spring) void k.shineALight({ n: 6, gap: 0.35, pattern: 'track', dmg: 16, song: false }).catch(() => {});
+    await this.wait(back / speed + 1.6);
+    // the backwash: home again, from the moon's side
+    const p2 = this.playerPos();
+    const bx = p2.x + md.x * 26, bz = p2.z + md.z * 26;
+    k.tug(0);
+    await this.plumeLine(bx, bz, -md.x, -md.z, halfLen * 0.5, 0.9);
+    const ebb = this.addSand({ kind: 'ridge', x: bx, z: bz, dir: { x: -md.x, z: -md.z }, speed: speed + 2.5, height: h * 0.85, width: 5.5, halfLen: halfLen * 0.8, life: (26 + 40) / (speed + 2.5) + 1.2, rise: 0.7, fall: 1.3 });
+    this.waves.push({ shape: ebb, kind: 'ridge', dmg: 20 + this.phase * 4, knock: 16, hit: false, crossed: false, prev: NaN });
+    ctx.sfx('whoosh_big', { x: bx, y: this.ground(bx, bz), z: bz }, 1, 0.55);
+    await this.wait(1.2);
+    k.sky.nearT = 0;
+    this.glowT = 0.2 + this.phase * 0.3;
+    this.stopArms();
+  }
+  /** moonbeams crash down round you (one hand raised to the moon) */
+  private async shineALight() {
+    this.aim(rnd.chance(0.5) ? 0 : 1, this.root.localToWorld(new THREE.Vector3(6, 36, 4)), 2.6, -0.2, -0.3);
+    this.glowT = 1;
+    this.ctx.sfx('divine_power', this.pos, 0.7, 0.8);
+    await this.wait(0.5);
+    await this.lunar.shineALight({ n: 6 + this.phase * 2, gap: 0.22, lead: 1.1, dmg: 18 + this.phase * 4, pattern: this.phase >= 1 && rnd.chance(0.5) ? 'ring' : 'track' });
+    await this.wait(0.6);
+    this.glowT = 0.2 + this.phase * 0.3;
+    this.stopArms();
+  }
+  private async lucyInTheSky() {
+    this.bendT = -0.1;
+    for (const s of [0, 1]) this.aim(s, this.root.localToWorld(new THREE.Vector3(s === 0 ? 12 : -12, 30, 8)), 2.4, 0.2, 0);
+    if (rnd.chance(0.5)) this.say(['The sky breaks for me.', 'Catch the moon, little bones.']);
+    await this.wait(0.5);
+    await this.lunar.lucy({ n: 6 + this.phase * 2, gap: 0.28, dmg: 18 + this.phase * 3, splinters: 6 + this.phase * 2, spread: 8 });
+    await this.wait(0.6);
+    this.stopArms();
+  }
+  private async patience() {
+    this.bendT = 0.3;
+    for (const s of [0, 1]) this.aim(s, this.root.localToWorld(new THREE.Vector3(s === 0 ? 9 : -9, 2, 16)), 2.2, 0.8, 0.4);
+    if (rnd.chance(0.5)) this.say(['Wait for me.', 'Sand runs slow in my glass.']);
+    await this.lunar.patience({ n: 1 + this.phase, dur: 3.0 - this.phase * 0.2, dmg: 18 + this.phase * 3 });
+    // while you crawl, the dune rises at you
+    if (this.phase >= 1) await this.helterSkelter();
+    else await this.wait(1.6);
+    this.stopArms();
+  }
+  private coreWorld(out: THREE.Vector3) {
+    const c = this.rig.nodes['core'];
+    if (c) c.getWorldPosition(out);
+    else out.set(this.pos.x, this.pos.y + 14, this.pos.z);
+    return out;
+  }
+  /** the hourglass hangs before his chest: his shots stop dead in the air, then fly on */
+  private async tomorrowNeverKnows() {
+    this.chestT = 0.7;
+    this.glowT = 1.2;
+    this.bendT = 0.1;
+    for (const s of [0, 1]) this.aim(s, this.root.localToWorld(new THREE.Vector3(s === 0 ? 8 : -8, 16, 12)), 2.6, -0.1, -0.2);
+    this.ctx.sfx('divine_whisper', this.pos, 1, 0.6);
+    await this.wait(0.8);
+    const toP = new THREE.Vector3();
+    await this.lunar.tomorrowNeverKnows({
+      volley: () => {
+        const core = this.coreWorld(new THREE.Vector3());
+        this.fire('ring', { count: 26 + this.phase * 6, speed: 10, dmg: 9 + this.phase * 2, proj: 'sand', phase: rnd.next() }, core);
+        for (const s of [0, 1]) this.fire('fan', { count: 9 + this.phase * 2, spread: 1.3, speed: 12, dmg: 9 + this.phase * 2, proj: 'sand' }, this.handWorld(s, new THREE.Vector3()));
+      },
+      anchor: () => {
+        const pp = this.playerPos();
+        toP.set(pp.x - this.pos.x, 0, pp.z - this.pos.z).normalize();
+        return this.coreWorld(new THREE.Vector3()).addScaledVector(toP, 9).add(new THREE.Vector3(0, 4, 0));
+      },
+      hold: 1.8,
+      lead: 0.5,
+    });
+    this.chestT = 0;
+    this.glowT = 0.2 + this.phase * 0.3;
+    this.stopArms();
+  }
+  private async yesterday() {
+    this.say(['Again.', 'Yesterday was mine too.']);
+    await this.lunar.yesterday(() => this.coreWorld(new THREE.Vector3()).add(new THREE.Vector3(0, 9, 0)), 0.6);
+  }
+  private async novemberRain() {
+    this.moonCds.rain = 18;
+    this.bendT = -0.25;
+    for (const s of [0, 1]) this.aim(s, this.overhead(s), 2.4, 1.4, 0.6);
+    this.say(['Even the moon breaks for me.', 'Let it rain.']);
+    await this.lunar.novemberRain({ stage: 3, n: 12, gap: 0.18, dmg: 18, spread: 16 });
+    this.stopArms();
+  }
+  /** once, near the end: the blood eclipse; his heart burns open in the dark while red beams spiral out of him */
+  private async rubyTuesday() {
+    this.moonCds.ruby = true;
+    this.setExpr('enraged');
+    this.taunt('Goodbye, moonlight.', '#ff7a5a');
+    await this.lunar.rubyTuesday({
+      dur: 7,
+      during: async () => {
+        this.chestT = 1;
+        this.glowT = 1.6;
+        this.ctx.toast('THE HEART IS OPEN', MOONC, 'Shoot the moon core while the eclipse lasts');
+        void this.lunar.shineALight({ n: 16, gap: 0.16, lead: 1.2, dmg: 18, pattern: 'spiral', at: this.pos.clone(), blood: true, song: false }).catch(() => {});
+        await this.helterSkelter();
+      },
+    });
+    this.chestT = 0;
+    this.glowT = 0.8;
+    this.setExpr('angry');
+  }
+
   // ------------------------------------------------------------------ phases
   protected onPhase(p: number) {
     super.onPhase(p);
     if (p === 1) {
       this.taunt('The desert has many hands.', SANDC);
-      this.duskT = 0.75;
+      this.lunar.crack(1);
       this.glowT = 0.5;
       this.queue.push('brownSugar');
     } else if (p === 2) {
       this.taunt('Come together… into the sand.', SANDC);
-      this.duskT = 0.92;
+      this.lunar.crack(2);
       this.glowT = 0.8;
       this.queue.push('comeTogether');
     }
@@ -1001,7 +1191,11 @@ export class KhonsuSandAvatar extends Boss {
     this.updateSpikes(dt);
     this.updatePit(dt);
     this.updateSandForms(dt);
-    this.updateEnv(dt);
+    if (this.alive) {
+      this.moonCds.tide -= dt;
+      this.moonCds.rain -= dt;
+    }
+    this.lunar.update(dt);
     this.ambientFx(dt);
   }
   private keepMound() {
@@ -1153,14 +1347,6 @@ export class KhonsuSandAvatar extends Boss {
       const rag = (this.d.enemies as unknown as { rag?: { batch: unknown; life: number }[] }).rag;
       this.crumbles = this.crumbles.filter((c) => c.until > this.t);
       if (Array.isArray(rag)) for (const r of rag) for (const c of this.crumbles) if (r.batch === c.batch && r.life > 3) r.life = 0.55;
-    }
-  }
-
-  private updateEnv(dt: number) {
-    this.duskNow = damp(this.duskNow, this.duskT, 0.8, dt);
-    if (Math.abs(this.duskNow - this.duskApplied) > 0.004) {
-      this.duskApplied = this.duskNow;
-      this.ctx.world.env.lerpPreset(this.baseEnv, this.duskPreset, this.duskNow);
     }
   }
 
@@ -1325,6 +1511,7 @@ export class KhonsuSandAvatar extends Boss {
     const ctx = this.ctx;
     this.setExpr('defeated');
     this.taunt('The moon… sets… on the sand…', SANDC);
+    this.lunar.calm();
     ctx.engine.slowMo(0.2, 30);
     ctx.engine.tweens.after(1.4, () => ctx.engine.slowMo(1, 3), true);
     ctx.sfx('boss_death', this.pos, 1, 0.75);
@@ -1343,6 +1530,14 @@ export class KhonsuSandAvatar extends Boss {
   }
   private async deathSequence() {
     const ctx = this.ctx;
+    // the first fall opens the Nile and frees Mark (saved at once; `?reveal=1` replays the reveal)
+    let first = false;
+    try {
+      first = grantKhonsuSand();
+    } catch (e) {
+      console.warn('[khonsuSand] unlock', e);
+    }
+    this.firstFall = first || new URLSearchParams(location.search).get('reveal') === '1';
     const tw = ctx.engine.tweens;
     const fx = this.rig.material.userData.fx.value;
     this.chestT = 1;
@@ -1373,11 +1568,21 @@ export class KhonsuSandAvatar extends Boss {
     this.moundOn = false;
     this.keepMound();
     this.root.visible = false;
-    // 3) the light returns
+    // 3) the first fall frees what the moon kept: the Nile opens and Mark rides out of the cracked mask
+    if (this.firstFall) {
+      for (let t = 0; t < 4 && !this.maskDown; t += 0.1) await tw.wait(0.1);
+      await tw.wait(0.6);
+      try {
+        await playMoonReveal({ ctx, cam: this.d.cam, player: this.player, enemies: this.d.enemies, mask: this.headGroup ? this.headGroup.position.clone() : this.pos.clone(), moon: this.lunar.sky.dir.clone() });
+      } catch (e) {
+        console.warn('[khonsuSand] reveal', e);
+      }
+    }
+    // 4) the light returns
     this.ctx.toast('« Here Comes the Sun »', '#ffe3a0', 'The sands fall quiet');
-    void this.restoreEnv();
+    void this.lunar.end();
     await tw.wait(2.4);
-    // 4) bounty, then clean up
+    // 5) bounty, then clean up
     const at = this.headGroup ? this.headGroup.position.clone() : this.pos.clone();
     ctx.fx.coins({ x: at.x, y: this.ground(at.x, at.z) + 1, z: at.z }, 40);
     this.onDefeated?.(this, false);
@@ -1413,6 +1618,7 @@ export class KhonsuSandAvatar extends Boss {
       if (head.position.y < this.ground(head.position.x, head.position.z) + 1.2) break;
     }
     // impact: the mask cracks, the eyes go out
+    this.maskDown = true;
     const p = { x: head.position.x, y: this.ground(head.position.x, head.position.z) + 0.4, z: head.position.z };
     const crack = this.rig.nodes['mask_crack'];
     if (crack) crack.visible = true;
@@ -1436,15 +1642,6 @@ export class KhonsuSandAvatar extends Boss {
       mf.value.y = Math.min(0.55, t * 0.2);
     }
   }
-  private async restoreEnv() {
-    const tw = this.ctx.engine.tweens;
-    for (let t = 0; t < 4; t += 0.05) {
-      await tw.wait(0.05);
-      this.duskNow = damp(this.duskNow, 0, 1.3, 0.05);
-      this.ctx.world.env.lerpPreset(this.baseEnv, this.duskPreset, this.duskNow);
-    }
-    this.ctx.world.env.apply(this.baseEnv);
-  }
 
   dispose() {
     if (!this.root.parent && !this.headGroup?.parent && !this.offKill) return;
@@ -1465,7 +1662,7 @@ export class KhonsuSandAvatar extends Boss {
     this.sandForms.clear();
     this.crumbles = [];
     this.dead = true;
-    if (this.duskNow > 0.01 && this.alive) void this.restoreEnv();
+    if (this.alive) void this.lunar.end();
     this.body.dispose();
     this.pour.dispose();
     this.maskMat?.dispose();

@@ -60,8 +60,8 @@ import { Blueprints } from './Blueprints';
 import type { ItemId } from '../player/Items';
 import { isUnlocked, TECHNIQUES } from '../player/Techniques';
 
-export type UnlockKind = 'item' | 'ware' | 'plan' | 'trinket' | 'cards' | 'mission' | 'system' | 'cosmetic';
-export type UnlockTrack = 'tally' | 'finds' | 'studies' | 'bosses' | 'rank' | 'rides';
+export type UnlockKind = 'item' | 'ware' | 'plan' | 'trinket' | 'cards' | 'mission' | 'system' | 'cosmetic' | 'stage' | 'hero';
+export type UnlockTrack = 'tally' | 'finds' | 'studies' | 'bosses' | 'rank' | 'rides' | 'feats';
 
 export interface UnlockDef {
   /** `kind:what`, e.g. item:shield, ware:ankh, plan:gun_shotgun, trinket:jackalMask, cards:gamble */
@@ -117,6 +117,9 @@ export const UNLOCKS: UnlockDef[] = [
   // RIDES
   U('system:errands', 'rides', 1, "Thoth's Errands", 'Thoth hands out errands in his Hall now'),
   U('cards:epic', 'rides', 2, 'Epic Cards', 'Rank-ups can deal epic cards now', 'book'),
+  // GREAT DEEDS: granted by a deed itself (Unlocks.grant), never by a tally; see meta/StageUnlocks
+  U('stage:nile', 'feats', 1, 'The Nile', 'A new ride opens: surf the river against Cleopatra\'s army'),
+  U('hero:mark', 'feats', 1, 'Mark', 'The moon-mummy cat rides with you now: pick him in the hideout'),
 ];
 
 /** consumables on the shelf from the very first ride */
@@ -145,6 +148,7 @@ export const TRACK_TITLE: Record<UnlockTrack, string> = {
   bosses: 'BOSSES FELLED',
   rank: 'BOUNTY RANK',
   rides: 'RIDES',
+  feats: 'GREAT DEEDS',
 };
 
 const listeners: ((d: UnlockDef) => void)[] = [];
@@ -211,6 +215,7 @@ export const Unlocks = {
       case 'bosses': return bossesFelled();
       case 'rank': return p.bestRank;
       case 'rides': return loadSave().runs;
+      case 'feats': return 0; // deeds are granted one by one (grant), never counted
     }
   },
   has(id: string) {
@@ -285,6 +290,19 @@ export const Unlocks = {
     if (out.length || quiet) writeSave(d);
     for (const u of out) for (const l of listeners.slice()) l(u);
     return out;
+  },
+  /** a deed paid out (beating Khonsu of the Sands opens the Nile and frees Mark): true the first time */
+  grant(id: string): boolean {
+    const u = Unlocks.def(id);
+    const d = loadSave();
+    const p = prog();
+    if (!u || p.got.includes(id)) return false;
+    p.got.push(id);
+    p.reveal.push(id);
+    session.push(u);
+    writeSave(d);
+    for (const l of listeners.slice()) l(u);
+    return true;
   },
   onUnlock(fn: (d: UnlockDef) => void) {
     listeners.push(fn);

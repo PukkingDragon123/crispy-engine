@@ -191,7 +191,7 @@ class OasisWater {
   mesh: THREE.Mesh;
   u: Record<string, { value: any }>;
   private ripI = 0;
-  constructor(scene: THREE.Scene, cx: number, cz: number, half: number, seg: number, level: number, mask: [number, number], bowl: [number, number] | null, world: { water: THREE.Mesh | null; sa: { field: { size: number } } }, sky: number) {
+  constructor(scene: THREE.Scene, cx: number, cz: number, half: number, seg: number, level: number, mask: [number, number], bowl: [number, number] | null, world: { water: { material?: THREE.Material | THREE.Material[] | null } | null; sa: { field: { size: number } } }, sky: number) {
     const wm = world.water?.material as THREE.ShaderMaterial | undefined;
     const size = world.sa.field.size;
     this.u = {

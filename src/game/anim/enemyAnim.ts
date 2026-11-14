@@ -475,7 +475,8 @@ function humanoid(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
   const id = e.def.id;
   const ai = e.def.ai;
   const shamble = id === 'husk' || id === 'cactusHusk' || id === 'bomberHusk';
-  const heavy = ai === 'tank' || id === 'bandageWhipper' || id === 'mummy';
+  const meta = e.batch.meta as { shieldUp?: boolean; melee?: string; drummer?: boolean };
+  const heavy = (ai === 'tank' && !meta.shieldUp) || id === 'bandageWhipper' || id === 'mummy';
   const rider = ai === 'rider';
   const stunned = e.status.stunned() || e.flipped > 0;
   const low = a.low;
@@ -593,10 +594,21 @@ function humanoid(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
       fLx = lerp(fLx, -0.55, ready);
     }
   }
-  if (id === 'jackal') {
+  if (id === 'jackal' || meta.shieldUp) {
     aLx = -0.65;
     aLy = 0.4;
     aLz = 0.3; // shield up
+  }
+  // Nile war-drummers keep the beat on the drum at their belly while they walk
+  if (meta.drummer && st !== 'windup' && st !== 'strike' && st !== 'charge') {
+    const bt = t * 8.5 + e.quirk * 3;
+    const hl = Math.max(0, Math.sin(bt)), hr = Math.max(0, Math.sin(bt + PI));
+    aLx = -0.5 - hl * 0.35;
+    aRx = -0.5 - hr * 0.35;
+    aLz = 0.25;
+    aRz = -0.25;
+    fLx = -1.25 - hl * 0.45;
+    fRx = -1.25 - hr * 0.45;
   }
   // low health: clutch the wound with the left arm
   if (low > 0.01 && !twoHand) {
@@ -610,6 +622,17 @@ function humanoid(e: Enemy, a: EnemyAnim, env: AnimEnv, ap: AttackPhase) {
     const tense = ap.tension * Math.sin(t * 47) * 0.035;
     switch (kind) {
       case 'melee':
+        if (meta.melee === 'thrust') {
+          // spear lunge: draw the shaft back along the hip, drive the whole body through it
+          aRx = pose(aRx, 0.4, -0.2, ap) + tense;
+          fRx = pose(fRx, -0.15, 0, ap);
+          aLx = pose(aLx, -0.5, -0.2, ap);
+          tY = pose(tY, -0.35, 0.25, ap);
+          tP = pose(tP, -0.12, 0.3, ap);
+          RO(e, 0, 0, 0.42 * ap.strike + 0.1 * ap.follow);
+          lungeFx(e, env, 0.9);
+          break;
+        }
         if (heavy) {
           // two-handed overhead hammer blow
           aRx = pose(aRx, -2.75, -0.45, ap);
