@@ -30,7 +30,8 @@ const M = (i: number) => (i + 0.5) * VS;
 const mir = (v: V3): V3 => [-v[0], v[1], v[2]];
 
 // ------------------------------------------------------------------ palette
-const SK = { base: 0x8c8264, shade: 0x7a7055, hi: 0xa29878, dark: 0x5e553f, groove: 0x4e4634, belly: 0xbcae88, warm: 0x96825c, wart: 0xb0a47e, inner: 0x3a3226 };
+const SK = { base: 0x726a4e, shade: 0x5e573f, hi: 0x8a8062, dark: 0x4a4332, groove: 0x3c3628, belly: 0xa89a74, warm: 0x7e6c4a, wart: 0x9a8e6a, inner: 0x3a3226 };
+const KERL = { base: 0xc6ae80, light: 0xdccaa0, edge: 0xf2e6c4, dark: 0x4a3828 };
 const KER = { dark: 0x3a3228, base: 0x584c3a, mid: 0x7a6a50, worn: 0xb4a27c, edge: 0xdccfa8 };
 const SCU = { a: 0x7e5e36, b: 0x94713f, c: 0x5e4628, bleach: 0xcdb68a, bone: 0xe2d4ae, seam: 0x2e2216, sand: 0xb39662, scar: 0xd4c098 };
 const HSC: Pal = { top: 0xc4b48e, mid: 0x9a8a68, base: 0x5a4e3c, rim: 0x7e6e54, ring: 0x8a7a5e, crack: 0x3a3028, sand: 0x5a4e3c };
@@ -64,9 +65,9 @@ const J = {
   beads: [0, 1.042, 0.097] as V3,
   bells: [-0.461, 0.82, 0.18] as V3,
 };
-const EYE: V3 = [0.112, 1.375, 0.32];
-const EYE_FWD: V3 = norm3([0.78, 0.05, 0.62]);
-const EYE_R = 0.04;
+const EYE: V3 = [0.117, 1.376, 0.318];
+const EYE_FWD: V3 = norm3([0.68, 0.08, 0.73]);
+const EYE_R = 0.056;
 const mouthY = (z: number) => 1.262 + Math.max(0, 0.36 - z) * 0.1 - sstep(0.44, 0.53, z) * 0.05;
 
 /** cellular scales (metres) */
@@ -274,69 +275,67 @@ interface Face {
 }
 function buildFace(): Face {
   const mass = new VoxelModel('ozHead');
+  // the face is calm, clean planes in a four-tone ramp (crown light, face, cheek shade, pale throat); wrinkles are
+  // a few deliberate grooves; the beak is pale, crisp keratin
+  const tone = (X: number, Y: number, Z: number) => {
+    if (Y < 1.235) return mixc(SK.base, SK.belly, 0.6);
+    if (Y > 1.43 || (Y > 1.4 && Z > 0.26)) return SK.hi;
+    if (Math.abs(X) > 0.13 && Y < 1.34) return SK.shade;
+    return SK.base;
+  };
   fblob(mass, [
-    { c: P(0, 1.36, 0.17), r: [U(0.16), U(0.14), U(0.19)] }, // cranium
-    { c: P(0, 1.33, 0.36), r: [U(0.115), U(0.1), U(0.13)] }, // snout
-    { a: P(0, 1.375, 0.43), b: P(0, 1.27, 0.535), r0: U(0.06), r1: U(0.016) }, // the hooked upper beak
+    { c: P(0, 1.36, 0.16), r: [U(0.155), U(0.135), U(0.19)] }, // cranium
+    { c: P(0, 1.335, 0.36), r: [U(0.12), U(0.1), U(0.14)] }, // snout
+    { a: P(0, 1.39, 0.42), b: P(0, 1.255, 0.565), r0: U(0.072), r1: U(0.016) }, // the hooked upper beak
     { c: P(0.12, 1.28, 0.17), r: [U(0.075), U(0.09), U(0.11)] }, // jaw muscles
     { c: P(-0.12, 1.28, 0.17), r: [U(0.075), U(0.09), U(0.11)] },
-    { c: P(0.095, 1.445, 0.3), r: [U(0.075), U(0.042), U(0.085)] }, // the heavy brow ridges
-    { c: P(-0.095, 1.445, 0.3), r: [U(0.075), U(0.042), U(0.085)] },
-    { c: P(0.14, 1.41, 0.12), r: [U(0.05), U(0.05), U(0.06)] }, // temporal knobs
-    { c: P(-0.14, 1.41, 0.12), r: [U(0.05), U(0.05), U(0.06)] },
-    { a: P(0, 1.225, 0.1), b: P(0, 1.235, 0.44), r0: U(0.11), r1: U(0.058) }, // lower jaw
-    { c: P(0, 1.25, 0.47), r: [U(0.045), U(0.035), U(0.04)] }, // chin, curling up to the hook
+    { c: P(0.1, 1.45, 0.29), r: [U(0.07), U(0.038), U(0.08)] }, // the heavy brow ridges
+    { c: P(-0.1, 1.45, 0.29), r: [U(0.07), U(0.038), U(0.08)] },
+    { a: P(0, 1.225, 0.1), b: P(0, 1.235, 0.45), r0: U(0.11), r1: U(0.06) }, // lower jaw
+    { c: P(0, 1.252, 0.48), r: [U(0.046), U(0.036), U(0.042)] }, // chin, curling up under the hook
     { c: P(0, 1.19, 0.16), r: [U(0.11), U(0.075), U(0.13)] }, // throat
     { a: P(0, 1.2, 0.02), b: P(0, 1.23, 0.1), r0: U(0.1), r1: U(0.1) }, // neck join
-    { c: Pv(EYE), r: [U(0.05), U(0.05), U(0.05)], sub: true, k: 1.2 },
-    { c: Pv(mir(EYE)), r: [U(0.05), U(0.05), U(0.05)], sub: true, k: 1.2 },
+    { c: Pv(EYE), r: [U(0.068), U(0.066), U(0.068)], sub: true, k: 1.2 },
+    { c: Pv(mir(EYE)), r: [U(0.068), U(0.066), U(0.068)], sub: true, k: 1.2 },
   ], (x, y, z) => {
     const X = M(x), Y = M(y), Z = M(z);
     const my = mouthY(Z);
-    if (Z > 0.33 && Math.abs(Y - my) < 0.075) {
-      // the beak: dark horn, the cutting edge worn pale and nicked
-      const e = Math.abs(Y - my);
-      if (e < 0.012) return Math.floor(Z / 0.016) % 3 === 0 ? KER.dark : KER.edge;
-      if (e < 0.025) return KER.worn;
-      return Z > 0.46 ? KER.mid : Math.floor(Z / 0.03) & 1 ? KER.base : KER.dark;
+    if (Z > 0.12 && Math.abs(Y - my) < 0.009) return KERL.dark; // the long grin line
+    if (Z > 0.37 - Math.abs(X) * 0.4) {
+      // the beak: pale keratin, lighter on top, a bright worn cutting edge
+      if (Math.abs(Y - my) < 0.02) return KERL.edge;
+      return Y > 1.385 ? KERL.light : KERL.base;
     }
-    if (Z > 0.12 && Math.abs(Y - my) < 0.009) return SK.groove;
-    return hide(X, Y, Z, sstep(1.27, 1.2, Y), Y > 1.38 ? 0.05 : 0.038, 11);
-  }, { k: U(0.035), inner: SK.inner, keep: (_x, _y, z) => M(z) > -0.02, disp: (x, y, z) => (n01(x, y, z, 0.25, 5) - 0.5) * 0.7 });
-  // crow's-feet wrinkles fanning back from each eye, deep folds across the brow
+    return tone(X, Y, Z);
+  }, { k: U(0.035), inner: SK.inner, keep: (_x, _y, z) => M(z) > -0.02 });
+  // deliberate wrinkles: two crow's-feet arcs behind each eye, one fold across the brow, the cheek crease
   const surf = surfaceCells(mass);
+  const wr = { depth: 1, width: 0.5, rim: 0.6, floor: (c: number) => mixc(c, SK.groove, 0.7), cand: surf };
   for (const s of [1, -1])
-    for (let r = 0; r < 3; r++)
+    for (let r = 0; r < 2; r++)
       groove(mass, (x, y, z) => {
         const X = M(x) * s, Y = M(y), Z = M(z);
-        if (X < 0.08 || Z > EYE[2] - 0.02) return 99;
-        return (Math.hypot(Y - EYE[1], Z - EYE[2]) - (0.065 + r * 0.025)) / VS;
-      }, { depth: 1, width: 0.5, rim: 0.8, floor: (c) => mixc(c, SK.groove, 0.75), cand: surf });
-  for (let r = 0; r < 2; r++)
-    groove(mass, (x, y, z) => (M(z) > 0.33 || M(y) < 1.44 ? 99 : (M(y) - 1.47 - r * 0.03 - Math.sin(M(x) * 40) * 0.006) / VS), { depth: 1, width: 0.5, rim: 0.8, floor: (c) => mixc(c, SK.groove, 0.7), cand: surf });
-  // horn shields on the crown, warts and tubercles on the cheeks and chin
+        if (X < 0.09 || Z > EYE[2] - 0.03 || Math.abs(Y - EYE[1]) > 0.06) return 99;
+        return (Math.hypot(Y - EYE[1], Z - EYE[2]) - (0.085 + r * 0.032)) / VS;
+      }, wr);
+  groove(mass, (x, y, z) => (M(z) > 0.34 || M(z) < 0.1 || M(y) < 1.44 ? 99 : (M(y) - 1.475 - M(z) * 0.05) / VS), wr);
+  for (const s of [1, -1]) groove(mass, (x, y, z) => (M(x) * s < 0.08 || M(z) < 0.22 || M(z) > 0.4 ? 99 : (M(y) - 1.3 + (M(z) - 0.3) * 0.35) / VS), wr);
+  // a pale horn shield on the crown, two worn knobs at the temples, one tubercle under the chin
   let seed = 200;
   for (const [at, out, a, h, sp] of [
-    [[0, 1.5, 0.2], [0, 1, 0], 0.05, 0.016, 0],
-    [[0.07, 1.48, 0.33], [0.3, 1, 0.3], 0.035, 0.014, 0],
-    [[-0.07, 1.48, 0.33], [-0.3, 1, 0.3], 0.035, 0.014, 0],
-    [[0.17, 1.4, 0.2], [1, 0.5, 0], 0.03, 0.012, 0.025],
-    [[-0.17, 1.4, 0.2], [-1, 0.5, 0], 0.03, 0.012, 0.025],
-    [[0.18, 1.3, 0.2], [1, 0, 0.2], 0.025, 0.01, 0.018],
-    [[-0.18, 1.3, 0.22], [-1, 0, 0.2], 0.025, 0.01, 0.018],
-    [[0.06, 1.15, 0.3], [0.3, -1, 0.2], 0.02, 0.01, 0.022],
-    [[-0.05, 1.16, 0.34], [-0.3, -1, 0.2], 0.02, 0.01, 0.018],
-    [[0, 1.14, 0.22], [0, -1, 0], 0.022, 0.01, 0.026],
+    [[0, 1.5, 0.2], [0, 1, 0], 0.055, 0.016, 0],
+    [[0.16, 1.41, 0.12], [1, 0.6, -0.2], 0.035, 0.014, 0.03],
+    [[-0.16, 1.41, 0.12], [-1, 0.6, -0.2], 0.035, 0.014, 0.03],
+    [[0, 1.14, 0.24], [0, -1, 0], 0.024, 0.01, 0.028],
   ] as [V3, V3, number, number, number][]) {
     const o = norm3(out);
     spikePlate(mass, castIn(mass, add3(Pv(at), scl3(o, U(0.15))), scl3(o, -1)), [0, 0, 1], a, h, sp, seed++);
   }
-  // nostrils: two pits on the beak-top behind valve rims
+  // nostrils: two dark slits on the beak-top
   for (const s of [1, -1]) {
-    const c = P(s * 0.03, 1.42, 0.445);
-    ell(mass, c, [U(0.014), U(0.01), U(0.016)], KER.mid);
-    cap(mass, add3(c, [0, 1, -0.5]), add3(c, [0, 1, 0.8]), 0.6, 0.6, 0, { carve: true });
-    cap(mass, add3(c, [0, 0, -0.5]), add3(c, [0, 0, 0.8]), 0.6, 0.6, 0x14100c);
+    const c = P(s * 0.032, 1.425, 0.45);
+    cap(mass, add3(c, [0, 1, -0.6]), add3(c, [0, 1, 0.9]), 0.6, 0.6, 0, { carve: true });
+    cap(mass, add3(c, [0, 0, -0.6]), add3(c, [0, 0, 0.9]), 0.6, 0.6, 0x2a2016);
   }
   // the weathered turban: wrapped bands, a red binding, a brass amulet with a stone
   const T: V3 = [0, 1.47, 0.14];
@@ -369,7 +368,7 @@ function buildFace(): Face {
   jaw.set(Math.floor(U(0.215)), Math.floor(U(1.255)), Math.floor(U(0.52)), 0xff8a3a, VF.EMISSIVE | VF.GLOW);
   // the eye: wet, amber, slit-ish pupil
   const eye = new VoxelModel('eye_l');
-  wetEye(eye, Pv(EYE), U(EYE_R), EYE_FWD, { iris: 0xe0a030, irisEdge: 0x6a3a0a, sclera: 0x2a2014, pupil: 0x060403, irisR: 0.92, pupilR: 0.36, bigGlint: 1, smallGlint: false });
+  wetEye(eye, Pv(EYE), U(EYE_R), EYE_FWD, { iris: 0xe8a234, irisEdge: 0x6a3a0a, sclera: 0x2a1c12, pupil: 0x060403, irisR: 0.88, pupilR: 0.34, bigGlint: 2, smallGlint: true });
   // a faint warm glow in the irises so they read from under the heavy brow
   eye.forEach((x, y, z, c) => {
     const r = (c >> 16) & 255, g = (c >> 8) & 255;
@@ -390,7 +389,7 @@ function buildFace(): Face {
           if (l < r0 || l > r1 || head.has(x, y, z)) continue;
           const nn = scl3(d, 1 / l);
           if (nn[1] < cut || dot3(nn, EYE_FWD) < -0.25) continue;
-          m.set(x, y, z, nn[1] < cut + 0.18 ? SK.dark : (y & 1) ? SK.shade : SK.base);
+          m.set(x, y, z, nn[1] < cut + 0.16 ? SK.groove : nn[1] < cut + 0.32 ? SK.shade : SK.base); // a dark lid line casts the shadow
         }
     return m;
   };
@@ -406,7 +405,7 @@ function buildFace(): Face {
   // the turban's tail hanging down the back
   const tails = new VoxelModel('scarf_tails');
   tube(tails, [P(0.02, 1.43, -0.02), P(0.05, 1.33, -0.07), P(0.07, 1.21, -0.06)], [U(0.028), U(0.03), U(0.024)], (x, y) => (M(y) < 1.24 ? TURB.band : (y % 3 === 0 ? TURB.shade : TURB.base)));
-  return { head, jaw, eye, lids: { neutral: lid(0.12), squint: lid(-0.35), closed: lid(-1.1) }, coins, tails, lidAt };
+  return { head, jaw, eye, lids: { neutral: lid(0.3), squint: lid(-0.3), closed: lid(-1.1) }, coins, tails, lidAt };
 }
 
 // ================================================================== LIMBS

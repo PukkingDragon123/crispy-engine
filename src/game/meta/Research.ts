@@ -220,8 +220,8 @@ export const Research = {
       out.push(g);
     }
     writeSave();
-    // studies are a progression track too (new shop stock: meta/Unlocks)
-    Unlocks.evaluate();
+    // studies are a progression track too (new shop stock: meta/Unlocks); the reveal card shows it in the Hall
+    if (Unlocks.evaluate().length) void import('../ui/UnlockReveal').then((m) => m.UnlockReveal.ensure()).catch(() => {});
     return out;
   },
   /** give a gift: items into the satchel, plans learned, cosmetics unlocked (already owned → its worth in gold) */

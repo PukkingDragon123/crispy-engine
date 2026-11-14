@@ -546,22 +546,25 @@ function buildHead(rig: CRig) {
     const X = MB(x), Y = MB(y), Z = MB(z);
     const my = mouthYT(Z);
     // the keratin beak: dark horn, worn bright along its cutting edges
-    if (Z > 5.12 && Math.abs(Y - my) < 0.28) {
-      const e = Math.abs(Y - my);
-      if (e < 0.045) return Math.floor(Z / 0.12) & 1 ? KER.edge : KER.worn; // nicked and chipped
-      if (e < 0.09) return KER.worn;
-      return Z > 5.6 ? KER.mid : (Math.floor(Z / 0.09) & 1) ? KER.base : KER.dark;
+    if (Z > 4.55 && Math.abs(Y - my) < 0.045) return 0x3a2c20; // the long grin line
+    if (Z > 5.2 - Math.abs(X) * 0.5) {
+      // the beak: pale sand-polished keratin, lighter on top, a bright worn cutting edge
+      if (Math.abs(Y - my) < 0.12) return 0xeee0b8;
+      return Y > 2.35 ? 0xd6c49a : 0xb8a27a;
     }
-    if (Z > 4.55 && Math.abs(Y - my) < 0.04) return SK.groove;
-    return hide(X, Y, Z, sstep(1.95, 1.6, Y), 0.42, 11);
-  }, { k: UB(0.16), inner: SK.inner, innerDepth: 2, disp: (x, y, z) => (n01(x, y, z, VB / 0.4, 6) - 0.5) * 0.3, keep: (_x, _y, z) => MB(z) > 4.16 });
+    // calm planes: crown light, face, cheek shade, pale throat
+    if (Y < 1.85) return mixc(SK.shade, SK.belly, 0.5);
+    if (Y > 2.62) return SK.base;
+    if (Math.abs(X) > 0.5 && Y < 2.3) return mixc(SK.shade, SK.dark, 0.5);
+    return SK.shade;
+  }, { k: UB(0.16), inner: SK.inner, innerDepth: 2, keep: (_x, _y, z) => MB(z) > 4.16 });
   // horn shields: the frontal and parietals, prefrontals over the snout, horned brows, temporal spikes, cheek scutes
   let seed = 300;
   const shield = (at: V3, out: V3, fwd: V3, a: number, b: number, h: number, keel: number, tilt: number, spike = 0, lean = 0.9, pal = HSC) => {
     const o = norm3(out);
     const hit = castIn(mass, add3(PBv(at), scl3(o, UB(0.6))), scl3(o, -1));
     if (!hit) return;
-    plate(mass, [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5], normalAt(mass, hit, 3), fwd, { a: UB(a), b: UB(b), h: UB(h), keel, tilt, sink: 2.5, seed: seed++, sq: 2.6, spike: UB(spike), spikeLean: lean }, pal);
+    plate(mass, [hit[0] + 0.5, hit[1] + 0.5, hit[2] + 0.5], normalAt(mass, hit, 3), fwd, { a: UB(a), b: UB(b), h: UB(h), keel, tilt, sink: 2.5, seed: seed++, sq: 2.6, spike: UB(spike), spikeLean: lean, clean: true }, pal);
   };
   // a bleached bone skull-cap of big shields, dark-rimmed (the monster's armoured brow)
   shield([0, 2.76, 4.86], [0, 1, 0], [0, 0, 1], 0.26, 0.28, 0.09, 0.25, 0.3, 0, 0.9, HORN);
@@ -571,7 +574,6 @@ function buildHead(rig: CRig) {
     shield([s * 0.38, 2.74, 4.98], [s * 0.3, 1, 0], [0, 0, 1], 0.2, 0.15, 0.1, 0.3, 0.45, 0.62, 1.0, HORN); // horned brow
     shield([s * 0.52, 2.55, 4.52], [s * 0.7, 0.7, -0.2], [0, 0.3, 1], 0.17, 0.14, 0.08, 0.3, 0.45, 0.52, 1.15, HORN); // temporal horn
     shield([s * 0.64, 2.18, 4.62], [s, 0.2, 0], [0, 1, 0], 0.2, 0.18, 0.07, 0.15, 0.4);
-    shield([s * 0.6, 2.0, 5.0], [s, 0.1, 0.3], [0, 1, 0], 0.15, 0.13, 0.05, 0.15, 0.4);
   }
   // the nostrils: two slits on the beak-top behind raised valve rims that seal against the sand
   for (const s of [1, -1]) {
@@ -612,7 +614,7 @@ function buildHead(rig: CRig) {
   const E: V3 = [0.47, 2.42, 5.14];
   const fwd: V3 = [0.62, 0.04, 0.78];
   const eye = rig.part('eye_l', 'head', PBv(E));
-  wetEye(eye, PBv(E), UB(0.17), fwd, { iris: 0xd88a1c, irisEdge: 0x6a3008, sclera: 0x2a1c10, pupil: 0x060403, irisR: 0.9, pupilR: 0.36, bigGlint: 1, smallGlint: false });
+  wetEye(eye, PBv(E), UB(0.215), fwd, { iris: 0xe89a24, irisEdge: 0x6a3008, sclera: 0x2a1c10, pupil: 0x060403, irisR: 0.88, pupilR: 0.34, bigGlint: 2, smallGlint: true });
   // the irises smoulder: an old ember-glow deep under the brows
   eye.forEach((x, y, z, c) => {
     const r = (c >> 16) & 255, g = (c >> 8) & 255;
@@ -620,7 +622,7 @@ function buildHead(rig: CRig) {
   });
   rig.mirror('eye_l', 'eye_r', 'head');
   const lid = rig.part('lid_l', 'head', PBv(E), [-1.15, 0, 0]);
-  ell(lid, PBv(E), [UB(0.2), UB(0.2), UB(0.2)], (x, y, z) => (MB(y) < E[1] - 0.04 ? SK.shade : SK.base), {
+  ell(lid, PBv(E), [UB(0.25), UB(0.25), UB(0.25)], (x, y, z) => (MB(y) < E[1] - 0.04 ? SK.groove : SK.shade), {
     keep: (lx, ly, lz) => lx * lx + ly * ly + lz * lz > 0.62 && ly > -0.2 && lx * fwd[0] + ly * fwd[1] + lz * fwd[2] > -0.15,
   });
   rig.mirror('lid_l', 'lid_r', 'head');
