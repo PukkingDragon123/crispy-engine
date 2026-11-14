@@ -1,4 +1,4 @@
-// Voxel detail: a pixel-art surface layer for every voxel model, one texel per
+// Voxel detail: a pixel-art surface layer for every voxel model, 2 x 2 texels per
 // voxel face, laid on the model's own voxel grid (so it never swims, never
 // changes a shape or silhouette, and stays crisp). The pattern follows the
 // voxel's colour family: wood grain, pebbled leather, cloth weave, denim twill,
@@ -7,7 +7,7 @@
 // noise, cellular grain, weave and twill layouts), never pictures.
 //
 // Eyes (very light neutral or very dark), glowing / emissive voxels and ink stay
-// exact. The layer fades out once a voxel covers less than ~2.5 screen pixels,
+// exact. The layer fades out once a voxel covers less than ~4 screen pixels,
 // so far models keep their clean look and nothing shimmers.
 import * as THREE from 'three';
 

@@ -322,17 +322,17 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
         ${
           vd
             ? `{
-          // pixel-art detail on the model's own voxel grid (one texel per voxel face)
+          // pixel-art detail on the model's own voxel grid (2 x 2 texels per voxel face, shown while a voxel spans 3+ px)
           vec3 vdCell = vOP * vPxv.w - vPxv.xyz / 64.0;
           vec3 vdN = abs(vON);
           vec2 vdUV = vdN.y > max(vdN.x, vdN.z) ? vdCell.xz : (vdN.x > vdN.z ? vec2(vdCell.z, -vdCell.y) : vec2(vdCell.x, -vdCell.y));
           float vdPx = max(length(dFdx(vdUV)), length(dFdy(vdUV)));
-          float vdK = (1.0 - smoothstep(0.3, 0.6, vdPx)) * step(0.5, vPxv.w) * uVDOn${px ? ' * step(vPxl.x, 0.5)' : ''};
+          float vdK = (1.0 - smoothstep(0.16, 0.3, vdPx)) * step(0.5, vPxv.w) * uVDOn${px ? ' * step(vPxl.x, 0.5)' : ''};
           if (vdK > 0.001) {
             float vdL = vdLayer(vColor.rgb, vMatx.y, vMatx.x);
             if (vdL >= 0.0) {
-              ivec2 vt = ivec2(mod(floor(vdUV + 1e-3), 64.0));
-              diffuseColor.rgb *= mix(vec3(1.0), texelFetch(uVDTex, ivec3(vt, int(vdL)), 0).rgb * 2.0, vdK);
+              ivec2 vt = ivec2(mod(floor(vdUV * 2.0 + 1e-3), 64.0));
+              diffuseColor.rgb *= max(vec3(0.0), 1.0 + (texelFetch(uVDTex, ivec3(vt, int(vdL)), 0).rgb * 2.0 - 1.0) * 1.7 * vdK);
             }
           }
         }`
@@ -381,7 +381,7 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
       );
     celify(shader);
   };
-  m.customProgramCacheKey = () => 'voxel-mat-v4look-' + sway.toFixed(3) + (px ? '-px' : '') + (vd ? '-vd1' : '');
+  m.customProgramCacheKey = () => 'voxel-mat-v4look-' + sway.toFixed(3) + (px ? '-px' : '') + (vd ? '-vd3' : '');
   m.envMapIntensity = 1.0;
   return m;
 }
