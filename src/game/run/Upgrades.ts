@@ -69,6 +69,9 @@ export const rd = (v: number) => Math.round(v);
 /** a repeatable game of chance: each deal stands alone (its power is just this deal's tier) */
 export const isGame = (d: UpgradeDef) => !!d.gamble && d.maxLv > 5;
 
+/** the most tiers a card can climb (to Legendary; mythic evolutions and Legendaries stay put) */
+export const capSteps = (d: UpgradeDef, steps: number) => Math.max(0, Math.min(clampSteps(steps), 4 - RARITY[d.rarity].rank));
+
 /** the rarity a card is dealt at, `steps` tiers above its own */
 export function dealtRarity(d: UpgradeDef, steps = 0): Rarity {
   return RARITY_ORDER[Math.min(Math.max(RARITY[d.rarity].rank, 4), RARITY[d.rarity].rank + clampSteps(steps))];
@@ -481,6 +484,7 @@ export class UpgradeManager {
 
   /** an offer of this card dealt `steps` tiers up, with its powers before and after */
   offer(u: UpgradeDef, steps = 0): Offer {
+    steps = capSteps(u, steps);
     const lv = this.lv(u.id);
     const g = isGame(u);
     const fromPw = g ? 0 : this.pw(u.id), fromPwDn = g ? 0 : this.pwDn(u.id);
@@ -562,7 +566,7 @@ export class UpgradeManager {
     const id = p.id;
     const def = UPGRADE_BY_ID[id];
     if (!def) return 0;
-    const s = Math.max(0, Math.min(4, Math.round(steps ?? p.steps)));
+    const s = capSteps(def, steps ?? p.steps);
     const was = this.lv(id);
     const lv = Math.min(def.maxLv, was + 1);
     const t = (this.tiers.get(id) ?? []).slice(0, was);
@@ -588,7 +592,7 @@ export class UpgradeManager {
     const l = Math.max(0, Math.min(def.maxLv, Math.round(lv)));
     const t = (this.tiers.get(id) ?? []).slice(0, this.lv(id));
     while (t.length < this.lv(id)) t.push(0);
-    while (t.length < l) t.push(Math.max(0, Math.min(4, Math.round(steps))));
+    while (t.length < l) t.push(capSteps(def, steps));
     t.length = l;
     this.history = this.history.filter((h) => parsePick(h).id !== id);
     if (l > 0) {

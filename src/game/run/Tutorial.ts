@@ -2,7 +2,7 @@
 // cinematic. The goddess floats at Sundown's side as a guide (the scorpion-girl
 // spirit, models/characters/scorpionGirl.ts) and each step waits for the player
 // to actually do it, with a short spoken line and a floating 3D prompt (Alagard)
-// naming the keys:
+// naming the keys. The first ride is kept short (the slow reveal, meta/Unlocks):
 //   1. push (tap SHIFT, on the beat), carve (A / D) and tuck (hold SPACE)
 //   2. drift (hold SHIFT through a carve) and sling out of it
 //   3. hold SPACE to charge a jump, release, and land it
@@ -10,22 +10,24 @@
 //   5. aim (RMB) and shoot (LMB) three skull targets she raises: go for heads
 //   6. reload (R) with Pinch's timing ring (R again) for venom rounds
 //   7. kick (F)
-//   8. the QTE dodge ring: she hurls a spear of sand, SPACE as the ring closes
-//   9. grapple (Q) the scorpion totem she raises
-//  10. switching guns (3 / 4 / 5) when he carries more than one
-//  11. the tarot: she lends THE SUN, cast it (G) and empower it on its ring
-//  12. the soul jar: she fills it, he unleashes Serket's Wrath (Z)
-//  13. digging: she buries a glint, he digs it up (hold T)
-//  14. the 30 s break between waves and ringing the bell (told)
-//  15. the trail ledger and the shop compass; TAB opens the full ledger
+//   8. grapple (Q) the scorpion totem she raises
+//   9. the 30 s break between waves and ringing the bell (told)
+//  10. the trail ledger and the shop compass; TAB opens the full ledger
 // then "a hundred waves stand between you and your name", she leaves, and the
-// run begins. Every step can be passed with N (or the "next step" label), and
-// hold BACKSPACE (or click SKIP) to skip the whole lesson. On a touch screen
-// every goal and line names the gestures instead of the keys (ui/TouchControls).
+// run begins. The rest comes later, one LESSON at a time (`lesson` below): she
+// rises out of the sand during a wave break, shows one thing hands-on, and goes:
+//   dodge (the QTE ring: she hurls a spear of sand), guns (switching, 3 / 4 / 5),
+//   tarot (she lends THE SUN: cast it, empower it on its ring), ult (she fills the
+//   soul jar, he unleashes Serket's Wrath), dig (she buries a glint, he digs it up),
+//   and each move as it unlocks: sand kick, wall ride, nose manual, dune surf, the
+//   Neck Slicer. run/Progression queues them and marks them given (meta/Unlocks).
+// Every step can be passed with N (or the "next step" label), and hold BACKSPACE
+// (or click SKIP) to skip the whole lesson. On a touch screen every goal and line
+// names the gestures instead of the keys (ui/TouchControls).
 //
-// API: `new Tutorial({ ctx, player, cam })`, then every frame `update(dt)` until
-// `done`, then `dispose()`. It never touches the wave director: the caller starts
-// wave 1 when `done` turns true.
+// API: `new Tutorial({ ctx, player, cam, lesson? })`, then every frame `update(dt)`
+// until `done`, then `dispose()`. It never touches the wave director: the caller starts
+// wave 1 when `done` turns true (a lesson's caller holds the break while it runs).
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Player } from '../player/Player';
@@ -42,6 +44,8 @@ import { GlyphRings, SandVortex, SerketSpirit, guideSpot, spiritMotes, type Spir
 import { isTouchDevice } from '../ui/TouchControls';
 import { Skills } from '../player/Skills';
 import type { Dodge, DodgeResult } from '../enemies/Dodge';
+import { Unlocks, type LessonId } from '../meta/Unlocks';
+import { technique, type TechniqueId } from '../player/Techniques';
 
 /** on a touch screen the lesson names the gestures (ui/TouchControls) instead of the keys */
 const TOUCH = isTouchDevice();
@@ -51,7 +55,23 @@ export interface TutorialDeps {
   ctx: Ctx;
   player: Player;
   cam: CameraRig;
+  /** one later lesson instead of the first ride's lesson (a move, the dodge, the tarot, ...) */
+  lesson?: LessonId;
 }
+
+/** how she opens each later lesson */
+const LESSON_INTRO: Record<LessonId, string> = {
+  dodge: 'A word before the next wave, bone-rider. The big ones telegraph. Learn to read them.',
+  guns: 'Two irons on you now? Then learn to change them without dying.',
+  tarot: 'The tarot woke in your hands. Let me show you how to wring more out of a card.',
+  ult: 'Your canopic jar is brimming. Do you know what it is for? Let me show you.',
+  dig: 'The desert hides more than bones. Let me teach you to dig.',
+  sand_kick: 'You kicked off thin air back there. Again, properly this time.',
+  wall_ride: 'You beat a god. Walls should be easy. Ride one.',
+  manual: 'Rank five! Time you learned to glide on the nose.',
+  dune_surf: 'That combo had rhythm. Now let the dunes do the pushing.',
+  neck_slicer: 'Khonsu fell to you, and his secret with him. The Neck Slicer.',
+};
 
 type Wait = number | (() => boolean);
 type Script = Generator<Wait, void, number>;
@@ -135,6 +155,10 @@ export class Tutorial {
   private ledgerRestore: (() => void) | null = null;
   private dig: { site: any; tr: any } | null = null;
   private lentSun = false;
+  /** a single later lesson (null: the first ride's lesson) */
+  private lesson: LessonId | null = null;
+  /** board move callbacks chained by a move lesson (restored on dispose) */
+  private moveRestore: (() => void) | null = null;
   /** N (or the "next step" label): pass the current step */
   private stepSkip = false;
   private nextEl: HTMLDivElement;
@@ -146,6 +170,7 @@ export class Tutorial {
     this.ctx = d.ctx;
     this.player = d.player;
     this.cam = d.cam;
+    this.lesson = d.lesson ?? null;
     const scene = d.ctx.scene;
     guideSpot(this.player.pos, this.cam.yaw, this.ground, this.spot);
     this.spirit = new SerketSpirit(scene, { scale: this.spot.scale });
@@ -199,7 +224,7 @@ export class Tutorial {
     window.addEventListener('keydown', this.onNext);
     // the ledger: notice when he opens it (the scene pauses the lesson while it is up)
     const L = (this.ctx.engine.current as any)?.ledger as { toggle(v?: boolean): void; open: boolean } | undefined;
-    if (L?.toggle) {
+    if (L?.toggle && !this.lesson) {
       const orig = L.toggle;
       L.toggle = (v?: boolean) => {
         if (v ?? !L.open) this.ledgerSeen = true;
@@ -207,7 +232,7 @@ export class Tutorial {
       };
       this.ledgerRestore = () => (L.toggle = orig);
     }
-    this.co = this.script();
+    this.co = this.lesson ? this.lessonScript(this.lesson) : this.script();
   }
 
   private ground = (x: number, z: number) => this.ctx.world.groundAt(x, z);
@@ -375,8 +400,7 @@ export class Tutorial {
     this.clearGoals();
     yield* this.line('Lovely form. Very... bony.', 'laugh', 'open');
 
-    // 8. the QTE dodge ring: she hurls a spear of sand at him
-    yield* this.dodgeLesson();
+    // (the dodge ring, guns, the tarot, the soul jar and digging come later, as lessons)
 
     // 6. grapple the totem
     sp.pose = 'raise';
@@ -395,11 +419,7 @@ export class Tutorial {
     this.sinkAll();
     yield* this.line('Hooked. Nothing out here outruns you now.', 'happy', 'open');
 
-    // 10. guns, 11. the tarot, 12. the soul jar, 13. digging, 14. the break and the bell, 15. the ledger
-    yield* this.gunsLesson();
-    yield* this.tarotLesson();
-    yield* this.ultLesson();
-    yield* this.digLesson();
+    // 9. the break and the bell, 10. the ledger
     yield* this.breakLesson();
     yield* this.ledgerLesson();
     yield* this.line(say("There. You're ready, or close enough to fake it.", "There. You're ready, or close enough to fake it. When the cards wake, tap them."), 'happy', 'open');
@@ -409,6 +429,91 @@ export class Tutorial {
     yield* this.line('Sethos waits at the eye of the storm. A hundred waves stand between you and your name.', 'stern', 'open', 1.6);
     yield* this.line('Ride well, bone-rider. I will be watching.', 'happy', 'present', 1.0);
     yield* this.depart(false);
+  }
+
+  // ------------------------------------------------------------------ a later lesson
+  private *lessonScript(id: LessonId): Script {
+    this.ctx.sfx('divine_chime', null, 0.6);
+    yield 0.6;
+    yield* this.line(LESSON_INTRO[id], 'happy', 'present');
+    switch (id) {
+      case 'dodge':
+        yield* this.dodgeLesson();
+        break;
+      case 'guns':
+        yield* this.gunsLesson();
+        break;
+      case 'tarot':
+        yield* this.tarotLesson();
+        break;
+      case 'ult':
+        yield* this.ultLesson();
+        break;
+      case 'dig':
+        yield* this.digLesson();
+        break;
+      default:
+        yield* this.moveLesson(id);
+    }
+    Unlocks.markLesson(id);
+    const bye = ['Now the sand is yours again.', 'Go on. Use it.', 'That is all. Ride.'];
+    yield* this.line(bye[Math.floor(Math.random() * bye.length)], 'happy', 'open', 0.5);
+    yield* this.depart(false);
+  }
+
+  /** a newly unlocked board move, done for real: the goal ticks when the board reports it */
+  private *moveLesson(id: TechniqueId): Script {
+    const t = technique(id);
+    const b = this.player.board;
+    let n = 0, a = 0;
+    const prev = { k: b.onSandKick, w: b.onWallRide, m: b.onManual };
+    b.onSandKick = () => {
+      prev.k?.();
+      if (id === 'sand_kick') n++;
+    };
+    b.onWallRide = (on, kicked, tt) => {
+      prev.w?.(on, kicked, tt);
+      if (id !== 'wall_ride') return;
+      if (on) a++;
+      if (kicked) n++;
+    };
+    b.onManual = (on, how, tt) => {
+      prev.m?.(on, how, tt);
+      if (id === 'manual' && on) n++;
+    };
+    const off = this.ctx.events.on('neckSlicer', () => id === 'neck_slicer' && n++);
+    this.moveRestore = () => {
+      b.onSandKick = prev.k;
+      b.onWallRide = prev.w;
+      b.onManual = prev.m;
+      off();
+      this.moveRestore = null;
+    };
+    const goals: Record<string, string[]> = {
+      sand_kick: [say('SAND KICK   in the air, tap SPACE', 'SAND KICK   in the air, flick up again')],
+      wall_ride: [say('WALL RIDE   jump into a wall at an angle', 'WALL RIDE   jump into a wall at an angle'), say('KICK OFF   SPACE', 'KICK OFF   flick up')],
+      manual: [say('NOSE MANUAL   double-tap W', 'NOSE MANUAL   double-tap forward')],
+      dune_surf: [say('DUNE SURF   hold SPACE down a dune face', 'DUNE SURF   flick up and hold, down a dune')],
+      neck_slicer: [say('NECK SLICER   hold SPACE by an enemy, FIRE on the ring', 'NECK SLICER   hold jump by an enemy, shoot on the ring')],
+    };
+    this.setGoals(goals[id] ?? [t.name.toUpperCase()]);
+    yield* this.line(t.how, 'neutral', 'point', 0.6);
+    let waited = 0;
+    const limit = id === 'wall_ride' || id === 'neck_slicer' ? 60 : 40;
+    yield this.until(() => {
+      waited += this.lastDt;
+      if (id === 'dune_surf' && b.surfing) n++;
+      if (id === 'wall_ride') {
+        this.check(0, a > 0);
+        this.check(1, n > 0);
+      } else this.check(0, n > 0);
+      return n > 0 || waited > limit;
+    });
+    this.stepSkip = false;
+    yield 0.6;
+    this.clearGoals();
+    this.moveRestore?.();
+    yield* this.line(n > 0 ? 'Yes! Exactly like that.' : 'No wall, no dune, no matter. You will find one. Practice it out there.', n > 0 ? 'laugh' : 'smug', 'open');
   }
 
   // ------------------------------------------------------------------ the newer lessons
@@ -856,6 +961,8 @@ export class Tutorial {
   skip() {
     if (this.leaving || this.done) return;
     this.skipped = true;
+    if (this.lesson) Unlocks.markLesson(this.lesson);
+    this.moveRestore?.();
     this.speech?.show(false);
     this.dropDig();
     this.dig = null;
@@ -948,6 +1055,8 @@ export class Tutorial {
     b.onJump = this.prevJump;
     b.onLand = this.prevLand;
     for (const u of this.unsub) u();
+    this.moveRestore?.();
+    if (this.lesson) Unlocks.markLesson(this.lesson);
     window.removeEventListener('keydown', this.onKey);
     window.removeEventListener('keyup', this.onKey);
     window.removeEventListener('keydown', this.onNext);

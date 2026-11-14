@@ -130,7 +130,7 @@ function tablet(w: number) {
     px(c, x + o, 23 + o, 1, 1, ST.h);
   }
   // the ankh in the left end
-  ANKH.forEach((row, j) => [...row].forEach((ch, i) => ch !== '.' && px(c, 4 + i + o, 8 + j + o, 1, 1, SC[ch] ?? GD.o)));
+  ANKH.forEach((row, j) => [...row].forEach((ch, i) => ch !== '.' && px(c, 6 + i + o, 8 + j + o, 1, 1, SC[ch] ?? GD.o)));
   // the empty sun socket in the right end
   const sx = ix + iw + 8, sy = MID;
   for (let dy = -8; dy <= 8; dy++)

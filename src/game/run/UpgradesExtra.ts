@@ -159,7 +159,7 @@ export const RISK_UPGRADES: UpgradeDef[] = [
   {
     id: 'deadMansDraw', name: "Dead Man's Draw", cat: 'gamble', rarity: 'rare', maxLv: 9, icon: 'skull', gamble: 'deadman',
     desc: (l, d = l) => `Roll against a dead gunslinger, one die each: yours bone, his black. Match or beat him: a random ${winTier(l)} upgrade and +${rd(60 * l)} gold. Roll lower: he draws first, and you lose ${deadHp(d)}% of your current health and ${rd(30 * d)} gold.`,
-    pros: (l) => [`Win: a ${winTier(l)} upgrade and +${rd(60 * l)} gold`], cons: (l) => [`Lose: −${deadHp(l)}% health, −${rd(30 * l)} gold`],
+    pros: (l) => [`Win: ${aWin(l)} upgrade and +${rd(60 * l)} gold`], cons: (l) => [`Lose: −${deadHp(l)}% health, −${rd(30 * l)} gold`],
     odds: () => 'You win 7 in 12 (ties go to the living)', per: 'A game, not a level: deal it again any time.',
     lore: 'Aces and eights. He is still holding them.',
   },
@@ -198,6 +198,8 @@ function stepsOfMult(m: number) {
 const tiersUp = (l: number) => (stepsOfMult(l) > 0 ? ` (+${stepsOfMult(l)} tier${s_(stepsOfMult(l))})` : '');
 const richer = (l: number) => (stepsOfMult(l) > 0 ? ` Dealt rich: every free card climbs ${stepsOfMult(l)} more tier${s_(stepsOfMult(l))}.` : '');
 const winTier = (l: number) => `${RARITY[RARITY_ORDER[Math.min(4, 2 + stepsOfMult(l))]].name}-or-better`;
+/** "a Rare-or-better", "an Epic-or-better" */
+const aWin = (l: number) => (/^[AEIOU]/.test(winTier(l)) ? 'an ' : 'a ') + winTier(l);
 /** Dead Man's Draw: share of current health lost */
 const deadHp = (d: number) => Math.min(60, rd(30 * d));
 /** Coin Toss: share of gold lost on tails */
