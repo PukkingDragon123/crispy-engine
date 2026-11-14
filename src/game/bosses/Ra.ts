@@ -23,7 +23,7 @@
 // the core swells red, falls in on itself and flashes white), the fire drains
 // out of the world, the river runs back to water and dawn comes up.
 import * as THREE from 'three';
-import { Boss, BossDeps, HitSphere } from './Boss';
+import { Boss, BossDeps, HitSphere, Cancelled } from './Boss';
 import type { RayHit } from '../Ctx';
 import type { Hit } from '../combat/Damage';
 import type { EnvPreset } from '../world/Env';
@@ -1372,6 +1372,7 @@ export class RaSunKing extends Boss {
 
   // ------------------------------------------------------------------ targeting (falcons ride along)
   hitTest(o: THREE.Vector3, d: THREE.Vector3, maxT: number): RayHit | null {
+    if (this.dead) return null;
     // the moon covers his heart in the eclipse
     const saved = this.coreSphere.r;
     if (this.moonK > 0.5) this.coreSphere.r = 0.01;
@@ -1436,7 +1437,7 @@ export class RaSunKing extends Boss {
   update(dt: number) {
     if (this.gone || (!this.root.visible && !this.alive && !this.corpse)) return;
     for (const k of Object.keys(this.cds) as (keyof typeof this.cds)[]) this.cds[k] -= dt;
-    if (this.alive) {
+    if (this.alive && !this.dead) {
       // glide and hover
       if (this.glideTo) {
         const dx = this.glideTo.x - this.pos.x, dz = this.glideTo.z - this.pos.z, dl = Math.hypot(dx, dz) || 1;
@@ -1685,9 +1686,15 @@ export class RaSunKing extends Boss {
   }
 
   // ------------------------------------------------------------------ death: a dying star, and dawn
+  /** the fight script stops the moment he starts dying (he stays "alive" for the wave until the star is out) */
+  protected check() {
+    if (this.dead) throw new Cancelled();
+    super.check();
+  }
   die() {
-    if (!this.alive) return;
-    this.alive = false;
+    if (!this.alive || this.dead) return;
+    // `alive` stays true until the dying star has burned out and dawn is up: the wave (and the run's
+    // last results screen) waits for the whole sequence instead of cutting it off
     this.dead = true;
     const ctx = this.ctx;
     this.setExpr('defeated');
@@ -1797,6 +1804,7 @@ export class RaSunKing extends Boss {
     const bx = pp.x + ((this.pos.x - pp.x) / dl) * 7, bz = pp.z + ((this.pos.z - pp.z) / dl) * 7;
     this.pos.set(bx, this.ground(bx, bz), bz);
     ctx.fx.coins({ x: bx, y: this.pos.y + 2, z: bz }, 50);
+    this.alive = false;
     this.onDefeated?.(this, false);
     this.dispose();
   }
