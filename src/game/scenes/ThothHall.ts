@@ -1559,6 +1559,7 @@ export class ThothHall {
   dispose() {
     this.state = 'done';
     this.speech?.stop(0.1);
+    this.thoth?.th?.dispose(); // his pixel eye sprites
     hush3D(undefined, this.scene);
     this.restorePost();
     window.removeEventListener('pointerdown', this.onPDown);
