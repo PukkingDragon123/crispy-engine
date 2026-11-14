@@ -30,7 +30,7 @@ import type { RigInstance } from '../../../engine/voxel/Rig';
 import { makeVoxelMaterial, type VoxelMaterial } from '../../../engine/render/VoxelMaterial';
 import { CRig, VoxelModel, VF, blob, ell, cap, paint, exposed, thicken, splitInto, finish, mixc, mulc, h01, add3, sub3, scl3, norm3, dot3, sstep, clamp01 } from '../creatures/ckit';
 import type { V3, RigSpec, Col } from '../creatures/ckit';
-import { ThothEyes, EYE_SHAPES, cloneShape, easeShape, type EyeShape } from './thothEyes';
+import { ThothEyes, type EyeDot } from './thothEyes';
 
 // ------------------------------------------------------------------ grid
 const VS = 1 / 96;
@@ -112,10 +112,8 @@ const J = {
 };
 const HC: V3 = [0, 0.428, -0.012];
 const HR: V3 = [0.12, 0.112, 0.11];
-/** the painted eyeball: radius (m), the socket carved a touch wider */
-const EYE_BALL = 0.0525;
-const EYE_YAW = 0.3;
-const EYE_PITCH = 0.04;
+/** the pixel dot eyes sit where this ray from the head's centre leaves the head (left eye; mirrored) */
+const EYE_DIR: V3 = norm3([0.48, 0.13, 0.87]);
 const CUT_WAIST = 0.19;
 /** reed pen: from the right fist toward the nib (forward, down, a touch inward) */
 const PEN_DIR: V3 = norm3([0.22, -0.38, 0.9]);
@@ -247,26 +245,26 @@ function buildThoth(): RigSpec {
     for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, -1, 0]] as V3[]) if (head.has(x + dx, y + dy, z + dz) && !khat(x + dx, y + dy, z + dz)) return true;
     return false;
   }, C.goldL, VF.METAL);
-  // eye sockets: carved for the painted eyeballs
-  const eyeC = P(...J.eye);
-  for (const e of [eyeC, mirX(eyeC)]) ell(head, e, [U(EYE_BALL + 0.004), U(EYE_BALL + 0.004), U(EYE_BALL + 0.004)], 0, { carve: true });
   finish(head, { top: 1.03, under: 0.9, skip: (c) => c === C.goldL || c === C.blush });
-  // stand-in eyes (shown only where no animator paints the real ones): lids, a jade iris, a glint
+  // eyes: where the eye ray leaves the head. The animator lays a flat pixel dot there; the
+  // stand-in (for captures that run no animator) is one dark voxel in that surface cell.
   {
-    const el = rig.part('eye_l', 'head', eyeC);
-    const R = U(EYE_BALL - 0.002);
-    const fwd = norm3([Math.sin(EYE_YAW), -Math.sin(EYE_PITCH), Math.cos(EYE_YAW)]);
-    ell(el, eyeC, [R, R, R], (i, j, k) => {
-      const p = norm3([i + 0.5 - eyeC[0], j + 0.5 - eyeC[1], k + 0.5 - eyeC[2]]);
-      const qy = p[1];
-      if (qy > 0.58 || qy < -0.6) return C.white;
-      const g = dot3(p, fwd);
-      if (g > 0.96) return 0x0a0c16;
-      if (g > 0.9) return 0x2a9a86;
-      if (qy > 0.5) return 0x14121a;
-      return 0xfbf8f0;
-    });
-    el.set(Math.floor(eyeC[0] - 1), Math.floor(eyeC[1] + 2), Math.floor(eyeC[2] + R - 0.5), 0xffffff, VF.EMISSIVE);
+    let last: [number, number, number] | null = null;
+    let tExit = 0;
+    for (let tt = 0; tt < 0.2; tt += 0.0015) {
+      const p = add3(HC, scl3(EYE_DIR, tt));
+      const c: [number, number, number] = [Math.floor(U(p[0])), Math.floor(U(p[1])), Math.floor(U(p[2]))];
+      if (head.has(c[0], c[1], c[2])) {
+        last = c;
+        tExit = tt;
+      }
+    }
+    const cell = last ?? [Math.floor(U(0.06)), Math.floor(U(0.44)), Math.floor(U(0.09))];
+    const at = add3(HC, scl3(EYE_DIR, tExit + 0.0015));
+    head.del(cell[0], cell[1], cell[2]);
+    head.del(-1 - cell[0], cell[1], cell[2]);
+    const el = rig.part('eye_l', 'head', Pv(at));
+    el.set(cell[0], cell[1], cell[2], 0x18131e);
     rig.mirror('eye_l', 'eye_r');
   }
 
@@ -475,7 +473,7 @@ function buildThoth(): RigSpec {
   return rig.build({
     height: 0.69,
     radius: 0.14,
-    eyes: { radius: EYE_BALL, yaw: EYE_YAW, pitch: EYE_PITCH, skin: C.white },
+    eyes: { cell: VS / 2, lift: VS * 0.85, n: EYE_DIR },
     style: 'thoth-v2',
   });
 }
@@ -645,7 +643,6 @@ export class ThothAnim {
   eyes: ThothEyes;
   private moodSet: ThothMood | null = null;
   private moodLeft = 0;
-  private shape: [EyeShape, EyeShape] = [cloneShape(EYE_SHAPES.neutral), cloneShape(EYE_SHAPES.neutral)];
   private P: Record<string, Tri> = {};
   private T: Record<string, Tri> = {};
   private base: Record<string, { rot: THREE.Euler; pos: THREE.Vector3 }> = {};
@@ -659,7 +656,6 @@ export class ThothAnim {
   private coverS = new Spring(120, 11);
   private gait = 0;
   private blink = 0;
-  private blinkLen = 0.13;
   private nextBlink = 1.6;
   private doubleBlink = false;
   // head saccades: the head holds, then snaps to a new heading like a bird's
@@ -670,11 +666,9 @@ export class ThothAnim {
   private tilt = 0;
   private tTilt = 0;
   private holdT = 0;
-  // the eyes' own target (world), with micro saccades
+  // the eyes' own target (world)
   private eyeT = new THREE.Vector3();
   private eyeHas = false;
-  private micro = new THREE.Vector2();
-  private microT = 0;
   private glanceAt = new THREE.Vector3();
   private glanceLeft = 0;
   private nextGlance = 4;
@@ -746,7 +740,7 @@ export class ThothAnim {
   glance(p: THREE.Vector3, seconds = 0.8) {
     this.glanceAt.copy(p);
     this.glanceLeft = seconds;
-    this.blinkNow(0.1);
+    this.blinkNow(0.07);
   }
   /** clack the beak for `seconds` (call alongside Voice.say); with the line's text the clacks follow its syllables */
   talk(seconds: number, text?: string) {
@@ -788,10 +782,9 @@ export class ThothAnim {
     this.eyes.dispose();
   }
 
-  private blinkNow(len = 0.13) {
+  private blinkNow(len = 0.07) {
     if (this.blink > 0) return;
     this.blink = len;
-    this.blinkLen = len;
   }
   private set(n: string, x: number, y = 0, z = 0) {
     const t = this.T[n];
@@ -819,7 +812,7 @@ export class ThothAnim {
       this.prevMode = this.mode;
       this.modeT = 0;
       this.fidget = null;
-      if (this.mode === 'gasp') this.kick(-3.2), this.flutter(1.4), this.blinkNow(0.08);
+      if (this.mode === 'gasp') this.kick(-3.2), this.flutter(1.4), this.blinkNow(0.06);
       if (this.mode === 'stoptime') this.kick(-2.5), this.flutter(2);
       if (this.mode === 'delight') this.flutter(1.2);
       if (this.mode === 'giggle') this.kick(1.2);
@@ -1192,7 +1185,7 @@ export class ThothAnim {
         this.hYawT = yaw;
         this.hPitchT = pitch;
         this.holdT = 0.5 + R() * 1.2;
-        if (err > 0.6) this.blinkNow(0.11); // big head turns come with a blink
+        if (err > 0.6) this.blinkNow(0.07); // big head turns come with a blink
       }
     }
     if (R() < dt * 0.3) this.tTilt = R() < 0.55 ? (R() < 0.5 ? -0.3 : 0.3) : 0;
@@ -1251,10 +1244,9 @@ export class ThothAnim {
     if (this.nextBlink <= 0) {
       this.nextBlink = this.doubleBlink ? 0.22 : 1.6 + R() * 3.4;
       this.doubleBlink = !this.doubleBlink && R() < 0.22;
-      this.blinkNow(0.12 + R() * 0.04);
+      this.blinkNow(0.06 + R() * 0.03);
     }
     this.blink = Math.max(0, this.blink - dt);
-    const bl = this.blink > 0 ? Math.sin((1 - this.blink / this.blinkLen) * Math.PI) : 0;
 
     // ---------------------------------------------------------------- write the joints
     const rot = (n: string, x: number, y: number, z: number) => {
@@ -1290,54 +1282,23 @@ export class ThothAnim {
     const s = clamp(this.sq.step(0, dt) + chat * 0.015, -0.3, 0.3);
     this.rig.nodes.pelvis?.scale.set(1 - s * 0.45, 1 + s, 1 - s * 0.45);
 
-    // ---------------------------------------------------------------- the painted eyes
-    const want = EYE_SHAPES[mood] ?? EYE_SHAPES.neutral;
-    const ek = 1 - Math.exp(-14 * dt);
-    const surprise = mood === 'surprised' || mood === 'excited';
-    for (let i = 0; i < 2; i++) {
-      const sh = this.shape[i];
-      easeShape(sh, want, ek);
-      // curious and sly: one brow up (his left), the other a touch down
-      const asym = mood === 'curious' ? 0.1 : mood === 'sly' ? 0.12 : 0;
-      const d: EyeShape = { ...sh };
-      d.browY += i === 0 ? asym : -asym * 0.5;
-      d.browAng += i === 0 ? asym * 0.5 : 0;
-      // talking: brows bob on the stressed syllables
-      d.browY += chat * 0.06;
-      // squeezes (preen, yawn) and blinks: the upper lid comes down to a soft closed line
-      const shut = Math.max(bl, eyeSquash);
-      const closed = mood === 'happy' ? d.bot + 0.02 : d.bot + (d.top - d.bot) * 0.3;
-      d.top = d.top + (closed - d.top) * shut;
-      d.topCurve = d.topCurve + ((mood === 'happy' ? 0.62 : 0.4) - d.topCurve) * shut;
-      d.bot = Math.min(d.bot, d.top);
-      d.browY -= shut * 0.06;
-      const mesh = this.eyes.meshes[i];
-      if (!mesh) continue;
-      // gaze: each eye aims for itself (a close target makes them converge: a little cross-eyed)
-      if (this.eyeHas) {
-        mesh.updateWorldMatrix(true, false);
-        _v.copy(this.eyeT);
-        mesh.worldToLocal(_v).normalize();
-      } else _v.set(0, 0, 1);
-      this.microT -= dt * 0.5;
-      if (this.microT <= 0) {
-        this.microT = 0.25 + R() * 0.8;
-        this.micro.set((R() - 0.5) * 0.06, (R() - 0.5) * 0.05);
-      }
-      _v.x += this.micro.x;
-      _v.y += this.micro.y - bl * 0.08;
-      // keep the iris on the front of the ball
-      const lim = 0.62;
-      const ang = Math.acos(clamp(_v.z / (_v.length() || 1), -1, 1));
-      if (ang > lim) {
-        const xy = Math.hypot(_v.x, _v.y) || 1;
-        _v.set((_v.x / xy) * Math.sin(lim), (_v.y / xy) * Math.sin(lim), Math.cos(lim));
-      }
-      _v.normalize();
-      this.eyes.set(i, d, _v);
-      const pop = surprise ? 1.06 : 1;
-      mesh.scale.set(pop * (1 + bl * 0.04), pop * (1 - bl * 0.08), pop);
+    // ---------------------------------------------------------------- the pixel dot eyes
+    // the mood picks a tiny pixel shape; blinks squash the dot to a dash for a frame or two
+    let dot: EyeDot = mood === 'happy' ? 'happy' : mood === 'surprised' ? 'big' : mood === 'sleepy' ? 'sleepy' : 'dot';
+    if (eyeSquash > 0.5) dot = mood === 'happy' ? 'happy' : 'blink';
+    if (this.blink > 0 && dot !== 'happy') dot = 'blink';
+    const spark = mood === 'excited' && Math.floor(t * 7) % 3 !== 0;
+    // gaze: the dots slide one cell toward what he is looking at (both together, in head space)
+    let gx = 0, gy = 0;
+    const hn2 = this.rig.nodes.head;
+    if (this.eyeHas && hn2 && dot !== 'blink') {
+      hn2.updateWorldMatrix(true, false);
+      _v.copy(this.eyeT);
+      hn2.worldToLocal(_v);
+      _v.sub(_w.set(0, 0.14, 0.09)).normalize();
+      gx = _v.x > 0.32 ? 1 : _v.x < -0.32 ? -1 : 0;
+      gy = _v.y > 0.38 ? 1 : _v.y < -0.38 ? -1 : 0;
     }
-    this.eyes.time(t);
+    for (let i = 0; i < 2; i++) this.eyes.set(i, dot, gx, gy, spark);
   }
 }
