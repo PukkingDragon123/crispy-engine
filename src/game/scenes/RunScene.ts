@@ -1,5 +1,6 @@
 // The run: one sub-area of Serket's Reach, 100-wave structure, player,
 // enemies, pickups, HUD, world transformations. Orchestrates all systems.
+import type { StageId, HeroId } from '../meta/Stage';
 import * as THREE from 'three';
 import type { Engine, GameScene } from '../../engine/Engine';
 import { World } from '../world/World';
@@ -85,6 +86,10 @@ import { ULT_INFO } from '../player/Ultimate';
 export interface RunOptions {
   area: 'A' | 'B' | 'C';
   seed: number;
+  /** which stage this run rides: the desert (default) or the Nile */
+  stage?: StageId;
+  /** which hero rides: Sundown (default) or Mark, the moon-mummy cat */
+  hero?: HeroId;
   startWave?: number;
   look?: { hat: string; outfit: string; board: string };
   /** play the Serket opening cinematic */
@@ -645,7 +650,7 @@ export class RunScene implements GameScene {
   }
 
   private spawnBoss(wave: number) {
-    const b = makeBoss({ ctx: this.ctx, player: this.player, enemies: this.enemies, qte: this.qte, cam: this.camRig, cloth: this.cloth }, wave);
+    const b = makeBoss({ ctx: this.ctx, player: this.player, enemies: this.enemies, qte: this.qte, cam: this.camRig, cloth: this.cloth, stage: this.opts.stage ?? 'desert' }, wave);
     const p = this.director.spawnPoint(18, 26) ?? { x: this.player.pos.x + 20, z: this.player.pos.z };
     b.place(p.x, p.z, Math.atan2(this.player.pos.x - p.x, this.player.pos.z - p.z));
     this.adoptBoss(b);

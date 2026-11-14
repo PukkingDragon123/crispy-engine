@@ -2,6 +2,7 @@
 // cloth capes, weak-point hit spheres, multi-phase coroutine move scripts
 // that cancel safely on death/escape, telegraphed attack helpers, QTE hooks,
 // dramatic intros, escapes and deaths.
+import type { StageId } from '../meta/Stage';
 import { speak3D } from '../fx/WorldSpeech';
 import * as THREE from 'three';
 import type { Ctx, RayHit } from '../Ctx';
@@ -37,6 +38,8 @@ export interface BossDeps {
   qte: Qte;
   cam: CameraRig;
   cloth: ClothRenderer;
+  /** the stage this boss is fought on; bosses may restyle their arena by it */
+  stage?: StageId;
 }
 
 let BOSS_ID = 900000;

@@ -1,4 +1,5 @@
 import './style.css';
+import type { StageId, HeroId } from './game/meta/Stage';
 import { Engine } from './engine/Engine';
 import { DebugTerrainScene } from './game/scenes/DebugTerrainScene';
 import { RunScene } from './game/scenes/RunScene';
@@ -69,6 +70,8 @@ async function main() {
         area: (params.get('area') as 'A' | 'B' | 'C') ?? 'A',
         seed: params.get('seed') ? +params.get('seed')! : Math.floor(Math.random() * 99999),
         startWave: +(params.get('wave') ?? 1),
+        stage: (params.get('stage') as StageId) ?? d.stage ?? 'desert',
+        hero: (params.get('hero') as HeroId) ?? d.hero ?? 'sundown',
         intro,
         look: d.look,
         gun: d.gun,

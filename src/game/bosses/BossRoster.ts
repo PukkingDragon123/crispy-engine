@@ -9,8 +9,13 @@ import { KhonsuAvatar } from './Khonsu';
 import { Thornback } from './Thornback';
 import { KhonsuSandAvatar } from './KhonsuSand';
 import { Ironclad } from './Ironclad';
+import { makeNileBoss } from './NileRoster';
 
 export function makeBoss(d: BossDeps, wave: number): Boss {
+  if (d.stage === 'nile') {
+    const nb = makeNileBoss(d, wave);
+    if (nb) return nb;
+  }
   if (wave >= 100) return new Sethos(d, 3);
   if (wave === 85) return new Sethos(d, 2);
   if (wave === 75) return new KhonsuSandAvatar(d);

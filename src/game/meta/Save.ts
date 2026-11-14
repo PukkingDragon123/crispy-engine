@@ -27,6 +27,9 @@ export interface SaveData {
   /** the treasure-hunt collection: relic ids dug up so far (any region) */
   relics: string[];
   seenIntro: boolean;
+  /** the stage and hero picked for the next ride (absent = desert / Sundown) */
+  stage?: import('./Stage').StageId;
+  hero?: import('./Stage').HeroId;
   /** the slow-reveal progression (meta/Unlocks.ts): Anubis' tally, unlocks granted, news, lessons; absent on old saves */
   prog?: ProgSave;
 }
