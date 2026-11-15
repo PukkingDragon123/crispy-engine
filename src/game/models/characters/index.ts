@@ -20,7 +20,7 @@ import { markRig as markBase } from './mark';
 import { crescentBoardModel as crescentBase, markBatonRig as batonBase, moonCrestModel as crestBase } from './markGear';
 
 export { HAT_IDS, OUTFIT_IDS, SUNDOWN_EXPRESSIONS, SUNDOWN_VS, skeletonFigure, figureRig } from './skeleton';
-export { SUNDOWN_HD_VS, BOARD_BACK_SOCKET, attachBoardOnBack } from './sundown';
+export { SUNDOWN_HD_VS, BOARD_BACK_SOCKET, attachBoardOnBack, getPerchAnchors, PERCH_NAMES } from './sundown';
 export type { BoardBackOpts } from './sundown';
 export type { CowboyLook, HatId, OutfitId, SkeletonFigure, FigurePart } from './skeleton';
 export { DEFAULT_GUN } from './revolver';

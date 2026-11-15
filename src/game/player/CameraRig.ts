@@ -52,6 +52,15 @@ export class CameraRig {
 
   constructor(public camera: THREE.PerspectiveCamera, public groundAt: (x: number, z: number) => number) {}
 
+  /** fit the follow framing to the hero's body: rig meta.cam { height, shoulder, dist } (absent: keep the defaults) */
+  fitHero(meta: Record<string, unknown> | undefined) {
+    const c = meta?.cam as { height?: number; shoulder?: number; dist?: number } | undefined;
+    if (!c) return;
+    if (typeof c.height === 'number') this.height = c.height;
+    if (typeof c.shoulder === 'number') this.shoulder = c.shoulder;
+    if (typeof c.dist === 'number') this.dist = c.dist;
+  }
+
   addTrauma(t: number) {
     this.trauma = Math.min(1, this.trauma + t * this.shakeScale);
   }

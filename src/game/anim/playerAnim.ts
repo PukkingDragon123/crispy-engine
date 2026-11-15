@@ -268,6 +268,18 @@ export class PlayerAnim {
   hatZ = new SpringF(0, 2.4, 0.35);
   coatX = new SpringF(0, 1.6, 0.45);
   coatZ = new SpringF(0, 1.6, 0.45);
+  // stylized (toon) rigs only: squash and stretch, the hat popping on the head, the bounce and the head bobble
+  /** 0..1 from the rig's meta.toon (Sundown): weight of the cartoon layer; 0 leaves the pose exactly as before */
+  toon = 0;
+  /** head-local hat brim grip (meta.hatGrip, metres), for the hat hold and the hat-adjust fidget */
+  hatGrip: THREE.Vector3 | null = null;
+  /** vertical stretch (+) / squash (-) of the whole body about the soles, underdamped so it overshoots */
+  squash = new SpringF(0, 3.4, 0.3);
+  /** the hat lifts off the head on a hard landing and drops back with a wobble (metres) */
+  hatPop = new SpringF(0, 4.2, 0.26);
+  /** secondary bounce of the hips over the dunes (metres) and the head's lagging bobble (radians) */
+  bounce = new SpringF(0, 2.8, 0.24);
+  headBob = new SpringF(0, 3.3, 0.26);
 
   // blend weights
   aimW = 0;
@@ -382,7 +394,26 @@ export class PlayerAnim {
     if (hd) this.neck.copy(hd);
     this.shoulderH = this.pelvisRest.y + (to?.y ?? 0.08) + this.shL.y;
     this.scale = (this.l1Leg + this.l2Leg) / 0.667;
-    this.stanceHalf = Math.abs(this.hipL.x) + 0.13 * this.scale;
+    const meta = rig.geo.spec.meta as { toon?: number; hatGrip?: number[] } | undefined;
+    this.toon = typeof meta?.toon === 'number' ? clamp01(meta.toon) : 0;
+    this.hatGrip = Array.isArray(meta?.hatGrip) && meta.hatGrip.length === 3 ? new THREE.Vector3().fromArray(meta.hatGrip) : null;
+    // a cartoon rider stands wider on the deck
+    this.stanceHalf = Math.abs(this.hipL.x) + (0.13 + 0.055 * this.toon) * this.scale;
+    if (this.toon > 0) {
+      // snappier springs with a little overshoot: the body pops into a pose and settles, the hat flops
+      const tn = this.toon;
+      this.crouch.freq = lerp(3.2, 4.0, tn);
+      this.crouch.zeta = lerp(0.7, 0.48, tn);
+      this.lean.zeta = lerp(0.55, 0.42, tn);
+      this.yaw.freq = lerp(5, 6.2, tn);
+      this.yaw.zeta = lerp(0.85, 0.62, tn);
+      this.headYaw.freq = this.headPitch.freq = lerp(4.2, 5.4, tn);
+      this.headYaw.zeta = this.headPitch.zeta = lerp(0.85, 0.6, tn);
+      this.hatX.zeta = this.hatZ.zeta = lerp(0.35, 0.22, tn);
+      this.hatX.freq = this.hatZ.freq = lerp(2.4, 2.9, tn);
+      this.handL.x.zeta = this.handL.y.zeta = this.handL.z.zeta = lerp(0.45, 0.34, tn);
+      this.gunSway.x.zeta = this.gunSway.y.zeta = this.gunSway.z.zeta = lerp(0.5, 0.38, tn);
+    }
     this.ready = true;
   }
 
@@ -410,6 +441,7 @@ export class PlayerAnim {
 
     // --------------------------------------------------------- derived input
     const acc = this.v0.copy(b.vel).sub(this.prevVel).multiplyScalar(idt);
+    const vyWas = this.prevVel.y;
     this.prevVel.copy(b.vel);
     if (!Number.isFinite(acc.x + acc.y + acc.z)) {
       acc.set(0, 0, 0);
@@ -434,6 +466,19 @@ export class PlayerAnim {
       this.recUpper.kick(-4.5 * s);
       this.recBody.kick(3 * s);
       this.lastShotT = t;
+      const tn = this.toon;
+      if (tn > 0) {
+        // cartoon recoil: the whole arm chain bucks harder, the head snaps back, the body flinches and the hat jumps
+        this.recWrist.kick(-9 * s * tn);
+        this.recFore.kick(-5 * s * tn);
+        this.recUpper.kick(-2.5 * s * tn);
+        this.recBody.kick(2.2 * s * tn);
+        this.nod.kick(-2.6 * s * tn);
+        this.squash.kick(-0.55 * s * tn);
+        this.hatX.kick(-0.9 * s * tn);
+        this.hatZ.kick((Math.random() - 0.5) * 0.8 * s * tn);
+        this.hatPop.kick(0.1 * s * tn);
+      }
     }
     // hurt flinch
     if (I.hurtFlash > this.prevHurt + 0.4) {
@@ -543,6 +588,39 @@ export class PlayerAnim {
     if (takeoff) this.ollie.kick(-11 * clamp(0.6 + b.vel.y / 12, 0.5, 1.3));
     if (landed) this.ollie.kick(5);
     this.ollie.step(0, dt);
+    // ---- cartoon squash and stretch (toon rigs): crouch-squash anticipation while the jump charges, a stretch
+    // through the pop and the rise, a squash on the landing that overshoots and settles; the hat and head follow through
+    const tn = this.toon;
+    if (tn > 0) {
+      const chg = grounded ? b.jumpCharge : 0;
+      if (takeoff) {
+        const pop = clamp(0.7 + b.vel.y / 14, 0.6, 1.4);
+        this.squash.kick(2.4 * pop * tn);
+        this.hatPop.kick(-0.25 * tn);
+        this.hatX.kick(1.1 * tn);
+        this.headBob.kick(-1.2 * tn);
+      }
+      if (landed) {
+        const imp = clamp(-vyWas / 9, 0.35, 1.6);
+        this.squash.kick(-2.9 * imp * tn);
+        this.hatPop.kick(0.55 * imp * tn);
+        this.hatX.kick(-1.6 * imp * tn);
+        this.hatZ.kick((Math.random() - 0.5) * 1.2 * imp * tn);
+        this.headBob.kick(3.2 * imp * tn);
+        this.bounce.kick(0.35 * imp * tn);
+        this.handL.kick(0.25 * imp, -0.9 * imp, 0.15);
+        this.gunSway.kick(0.1 * imp, -0.6 * imp, 0.1);
+      }
+      const airS = grounded ? 0 : clamp(b.vel.y * 0.011, -0.05, 0.075);
+      this.squash.step((-0.085 * chg - 0.025 * this.driftW + airS) * tn, dt);
+      // bumps in the sand kick the hips (vertical acceleration); a gentle washboard bob at speed
+      this.bounce.step(clamp(acc.y * 0.0012, -0.03, 0.04) * tn * (grounded ? 1 : 0), dt);
+      this.headBob.step(clamp(acc.y * 0.0022, -0.12, 0.18) * tn, dt);
+      this.hatPop.step(0, dt);
+      const sq = clamp(this.squash.x, -0.2, 0.2) * (1 - this.aimW * 0.55) * (1 - this.deadW);
+      const side = 1 / Math.sqrt(1 + sq);
+      I.rig.root.scale.set(side, 1 + sq, side);
+    }
     this.lean.step(b.lean, dt);
     this.lag.step(this.lean.x, dt);
     // the board banks INTO the carve (positive lean = left turn = heel side for this stance)
@@ -593,7 +671,8 @@ export class PlayerAnim {
     let cT = 0.12 + clamp(spd / 40, 0, 0.18) + b.compress * 0.5 + this.driftW * 0.25 + heel * 0.2 + toe * 0.1 + this.boostW * 0.14 + this.stunW * 0.15 + this.lowW * 0.08 - this.idleW * 0.05 + this.pushBody * 0.34 + this.wrapW * 0.15 + this.manualW * 0.06 + this.wallW * 0.32;
     cT += this.airW * (0.36 + this.grabW * 0.5 + flipTuck * 0.3 - falling * 0.3);
     cT += this.deadW * 0.8 + ab.crouch;
-    if (takeoff) this.crouch.kick(-3.5); // legs extend: the pop
+    cT += tn * (0.05 + charge * 0.14 - this.airW * 0.06);
+    if (takeoff) this.crouch.kick(-3.5 - 1.6 * tn); // legs extend: the pop
     this.crouch.step(cT, dt);
     const crouch = this.crouch.x;
     this.accX.step(clamp(accX * 0.012, -0.5, 0.5), dt);
@@ -648,14 +727,19 @@ export class PlayerAnim {
 
     // ------------------------------------------------------------------ pelvis
     const land = I.landX;
-    const drop = (0.025 + crouch * 0.2 + Math.max(0, -land) * 0.3 + this.absorb.x + pbob) * sc;
+    // toon: idle weight shifts from foot to foot (a lazy shift, hold, shift back), a little toe-tap bob, and the
+    // springy bounce over the sand while riding
+    const shift = this.idleW * tn * Math.tanh(Math.sin(t * 0.62 + 0.4) * 2.4);
+    const tap = this.idleW * tn * Math.pow(Math.max(0, Math.sin(t * 4.4)), 6) * (0.5 + 0.5 * Math.sin(t * 0.37));
+    const wash = tn * (1 - this.idleW) * (grounded ? 1 : 0) * clamp(spd / 16, 0, 1) * (0.5 + 0.5 * Math.sin(t * (6.5 + spd * 0.12))) * 0.012;
+    const drop = (0.025 + crouch * 0.2 + Math.max(0, -land) * 0.3 + this.absorb.x + pbob + this.bounce.x + wash + tap * 0.012 + Math.abs(shift) * 0.008) * sc;
     const ext = Math.max(0, land) * 0.08 * sc;
     const hz = (-0.015 - crouch * 0.06 - heel * 0.06 + toe * 0.035 + this.pushBody * 0.06 - this.deadW * 0.04 + ab.hipZ) * sc;
-    const hx = (-this.accX.x * 0.08 + fbm(t * 0.35, 1) * 0.03 * this.idleW + this.pushBody * 0.07 + this.manualW * (0.08 + clamp(b.manualBal, -1, 1) * 0.03) + ab.hipX) * sc;
+    const hx = (-this.accX.x * 0.08 + fbm(t * 0.35, 1) * 0.03 * this.idleW + this.pushBody * 0.07 + this.manualW * (0.08 + clamp(b.manualBal, -1, 1) * 0.03) + ab.hipX + shift * 0.055) * sc;
     const stw = b.stumble > 0 ? Math.sin(t * 19) * Math.min(1, b.stumble * 2.5) : 0;
     const px = 0.05 + crouch * 0.3 + toe * 0.1 - heel * 0.03 + this.deadW * 0.3 + ab.px;
     const py = 0.16 + (this.yaw.x - 0.38) * 0.28 + this.pushBody * 0.14;
-    const pz = -hx * 1.6 + this.ollie.x * 0.85 + stw * 0.12;
+    const pz = -hx * 1.6 + this.ollie.x * 0.85 + stw * 0.12 - shift * 0.05;
     const pelvis = n['pelvis'];
     if (pelvis) {
       pelvis.position.set(this.pelvisRest.x + hx, this.pelvisRest.y - drop + ext, this.pelvisRest.z + hz);
@@ -672,10 +756,10 @@ export class PlayerAnim {
     // ------------------------------------------------------------------ torso
     this.flinch.step(0, dt);
     this.recBody.step(0, dt);
-    const breathe = Math.sin(t * (1.5 + this.lowW * 1.6)) * (0.016 + this.lowW * 0.03 + this.idleW * 0.012);
+    const breathe = Math.sin(t * (1.5 + this.lowW * 1.6)) * (0.016 + this.lowW * 0.03 + this.idleW * (0.012 + 0.014 * tn));
     const tx = crouch * 0.2 + heel * 0.28 + toe * 0.05 - this.recBody.x * 0.1 + this.flinch.x * 0.12 + breathe - this.accZ.x * 0.15 + this.deadW * 0.75 + this.boostW * 0.2 + this.lowW * 0.12 - aimPitch * 0.14 * this.aimW + ab.tx + this.airW * this.grabW * 0.55 + (this.lag.x - this.lean.x) * 0.25 + this.pushBody * 0.16 + charge * 0.14 + this.manualW * 0.06 + this.wallW * 0.15;
     const ty = this.yaw.x - py;
-    const tz = this.accX.x * 0.14 - pz * 0.55 + stw * 0.25 + this.stunW * Math.sin(t * 1.7) * 0.1 + ab.tz + this.recBody.x * 0.04;
+    const tz = this.accX.x * 0.14 - pz * 0.55 + stw * 0.25 + this.stunW * Math.sin(t * 1.7) * 0.1 + ab.tz + this.recBody.x * 0.04 + shift * 0.07;
     const torso = n['torso'];
     if (!torso) return;
     torso.rotation.set(tx, ty, tz);
@@ -727,13 +811,29 @@ export class PlayerAnim {
     if (relW > 0.003) {
       const ph = R.phase;
       if (ph !== this.lastPhase) {
-        if (ph === 'eject') this.wristP.kick(-9);
-        if (ph === 'close') this.wristR.kick(14);
-        if (ph === 'open') this.wristR.kick(-4);
+        const tn = this.toon;
+        if (ph === 'eject') {
+          this.wristP.kick(-9 - 5 * tn);
+          // toon: a sharp downward flick that bobs the whole body, eyes on the empties
+          this.nod.kick(2.2 * tn);
+          this.squash.kick(-0.5 * tn);
+        }
+        if (ph === 'close') {
+          this.wristR.kick(14 + 6 * tn);
+          // toon: the snap shut lands with a cocky little bounce and a hat jump
+          this.nod.kick(-2.4 * tn);
+          this.squash.kick(0.9 * tn);
+          this.hatPop.kick(0.18 * tn);
+          this.hatX.kick(-0.6 * tn);
+        }
+        if (ph === 'open') this.wristR.kick(-4 - 2 * tn);
         this.lastPhase = ph;
       }
       if (R.inserted !== this.lastInserted) {
-        if (R.inserted > this.lastInserted) this.wristR.kick(-3.5);
+        if (R.inserted > this.lastInserted) {
+          this.wristR.kick(-3.5 - 1.5 * this.toon);
+          this.bounce.kick(0.06 * this.toon);
+        }
         this.lastInserted = R.inserted;
       }
       let rx = -0.05, ry = 0.17, rz = 0.44;
@@ -837,13 +937,16 @@ export class PlayerAnim {
     // hat hold at high speed
     const head = n['head'];
     if (this.hatW > 0.01 && head) {
-      head.localToWorld(this.v6.set(0.03 * sc, 0.2 * sc, 0.17 * sc)).applyMatrix4(this.mT);
+      if (this.hatGrip) head.localToWorld(this.v6.copy(this.hatGrip)).applyMatrix4(this.mT);
+      else head.localToWorld(this.v6.set(0.03 * sc, 0.2 * sc, 0.17 * sc)).applyMatrix4(this.mT);
       T.lerp(this.v6, this.hatW);
       pole.lerp(this.v5.set(0.9, -0.2, -0.3), this.hatW);
     }
     // idle fidgets: hat adjust (1)
     if (this.fidget === 1 && head) {
-      head.localToWorld(this.v6.set(0.05 * sc, 0.21 * sc + Math.sin(this.fidgetK * PI * 3) * 0.015, 0.15 * sc)).applyMatrix4(this.mT);
+      const wig = Math.sin(this.fidgetK * PI * 3) * 0.015;
+      if (this.hatGrip) head.localToWorld(this.v6.set(this.hatGrip.x + 0.02, this.hatGrip.y + wig, this.hatGrip.z - 0.02)).applyMatrix4(this.mT);
+      else head.localToWorld(this.v6.set(0.05 * sc, 0.21 * sc + wig, 0.15 * sc)).applyMatrix4(this.mT);
       T.lerp(this.v6, this.fidgetW);
       pole.lerp(this.v5.set(0.9, -0.2, -0.3), this.fidgetW);
     }
@@ -972,9 +1075,11 @@ export class PlayerAnim {
     this.v5.set(0, 1, 0).lerp(this.upT, stab).normalize();
     lookQuat(this.v6, this.v5, head.quaternion);
     this.nod.step(0, dt);
-    let nod = this.nod.x + this.deadW * 0.35;
+    let nod = this.nod.x + this.deadW * 0.35 + this.headBob.x;
     if (I.expression === 'laugh') nod += Math.abs(Math.sin(t * 11)) * 0.12;
     head.rotateX(nod);
+    // toon: the big head lolls a little against the idle weight shift
+    if (this.toon > 0 && this.idleW > 0.01) head.rotateZ(-Math.tanh(Math.sin(t * 0.62 + 0.1) * 2.4) * 0.07 * this.idleW * this.toon);
     if (this.stunW > 0.01) head.rotateZ(Math.sin(t * 2.3) * 0.25 * this.stunW);
     if (this.wrapW > 0.01) head.rotateY(Math.sin(t * 7) * 0.4 * this.wrapW);
   }
@@ -992,6 +1097,11 @@ export class PlayerAnim {
       this.hatZ.step(clamp(accX * 0.004 + b.speed * 0.004, -0.3, 0.35), dt);
       this.hatX.step(clamp(-accZ * 0.004 + this.airW * -0.08, -0.3, 0.3), dt);
       hat.rotation.set(this.hatX.x, 0, this.hatZ.x);
+      if (this.toon > 0) {
+        // the hat lifts off the crown on a hard landing and drops back (rest position from the rig)
+        const rest = I.rig.geo.parts[I.rig.geo.index['hat']]?.offset;
+        if (rest) hat.position.set(rest.x, rest.y + clamp(this.hatPop.x, -0.015, 0.06), rest.z);
+      }
     }
     // coat tails: blown toward the tail, flared behind
     const coat = n['coat'];

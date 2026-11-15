@@ -3,13 +3,13 @@
 //
 // DESIGN UNITS: every shape is authored in design units u on the legacy humanoid layout (see
 // skeleton.ts J) and rasterised by the sculpt kit (sculpt.ts) at S = 1.5 voxels per unit.
-// REALISTIC PROPORTIONS: the body is not rasterised on that cartoon layout any more. Each body part
-// goes through a Warp (torso/pelvis, each arm, each leg) onto a realistic adult figure: about 7.4
-// heads, 1.83 m to the crown, legs half his height, arms to mid-thigh, a real neck, man-sized hands
-// and boots. The head family (head, jaw, eyes, brows, hat, hair, mask, glasses) is not warped: its
-// voxels are exactly as sculpted, on a grid (1/114 m) fine enough that the same head is a realistic
-// 25 cm. Joints / pivots / sockets are the legacy joints mapped through the same warps, so every
-// animation that works in joint angles still fits.
+// STYLIZED PROPORTIONS: the body is not rasterised on that layout as is. Each body part goes through a
+// Warp (torso/pelvis, each arm, each leg) onto a chunky cartoon figure: about 4.5 heads, 1.53 m to the
+// crown, short legs, a longer trunk, a short neck, short arms, big blocky hands, chunky boots. The head
+// family (head, jaw, eyes, brows, hair, mask, glasses) is not warped: its voxels are exactly as sculpted,
+// on a grid (1/84 m) that makes the same head a big 34 cm; the stetsons go through a size-up hat warp.
+// Joints / pivots / sockets are the legacy joints mapped through the same warps, so every animation that
+// works in joint angles still fits.
 // Mirror plane: geometric x = 0. Character LEFT = +X, faces +Z, origin on the ground.
 //
 // Half zombie, half human. His LEFT half lives: sun-dark weathered skin, a strong
@@ -44,7 +44,7 @@ import { SKIN, STUB, STUB_DOT, SCAR, LIP, NAIL, BROWHAIR, HEYE, ROT, BRUISE, MEA
 import { installHairSway, type HairChain } from './hairSway';
 
 /** metres per voxel of the HD player build */
-export const SUNDOWN_HD_VS = 1 / 114;
+export const SUNDOWN_HD_VS = 1 / 84;
 const S = 1.5; // voxels per design unit
 /** metres per output unit (one design unit of the unwarped head family) */
 const UH = S * SUNDOWN_HD_VS;
@@ -92,27 +92,35 @@ const SKULL_TOP = 63;
 const mg = (p: V3): V3 => [-p[0], p[1], p[2]];
 const vx = (p: V3): V3 => [p[0] * S, p[1] * S, p[2] * S];
 
-// ================================================================== PROPORTION WARPS (design layout -> realistic figure, output units)
-/** the head family sits HEAD_DY output units above its design height (an integer number of voxels: 120) */
-const HEAD_DY = 80;
+// ================================================================== PROPORTION WARPS (design layout -> stylized figure, output units)
+// STYLIZED CARTOON PROPORTIONS (user note, latest: "more cartoony, not that tall"): a big head on a short,
+// chunky body, about 4.5 heads to the crown (1.53 m), short legs under a longer trunk, a short neck, big
+// blocky hands, chunky boots and a chunky hat. The head family keeps its exact sculpt; the grid (1/84 m)
+// sets its size (34 cm), and the warps below fit the body to it.
+/** the head family sits HEAD_DY output units above its design height (an integer number of voxels: 33) */
+const HEAD_DY = 22;
 /** horizontal scale of the trunk (output units per design unit): width, and a slimmer depth */
-const BODY_K = 1.9;
-const BODY_KZ = 1.7;
+const BODY_K = 1.62;
+const BODY_KZ = 1.46;
 /** design z = 0 (the limb axes) in output space; keeps the neck (design z -1.5) right under the head */
 const Z0 = -1.5 + 1.5 * BODY_KZ;
-/** height map of the trunk and legs: ankle 9 cm, knee 53 cm, hip 95 cm, waist 1.11 m, shoulder joint 1.52 m, a sloped
- *  trapezius and a real neck (the cartoon layout had the chin sunk between the shoulders), chin 1.64 m, crown 1.89 m */
-const Y_BODY: [number, number][] = [[0, 0], [3, 6.6], [15.5, 40.5], [24, 72], [29.5, 84.5], [42.5, 115.5], [44, 119], [46, 126], [52, 140]];
-/** height map of the hanging arm: elbow 1.18 m, wrist 0.91 m, grip 0.80 m, fingertips at mid-thigh */
-const Y_ARM: [number, number][] = [[15, 48.5], [21.5, 61.1], [25.6, 69], [33, 90], [42.5, 115.5], [52, 138.8]];
-/** the trunk; it narrows into a real neck above the shoulders (the popped collar closes round it) */
-const W_BODY = new Warp(Y_BODY, [[43, BODY_K], [45.6, 1.55]], [[43, BODY_KZ], [45.6, 1.5]], 0, 0, -1.5, -1.5);
-/** arms: a fuller, longer arm round the shoulder axis; the hand narrows to a real hand below the wrist, the
- *  shoulder cap (stump, pauldron) a little above it */
-const W_ARM = (s: number) => new Warp(Y_ARM, [[24.2, 1.35], [25.6, 2.3], [41, 2.3], [43.5, 2.0]], [[24.2, 1.55], [25.6, 2.3], [41, 2.3], [43.5, 2.0]], s * 8, s * 8 * BODY_K, 0, Z0);
-/** legs: long thighs, a little more girth below the hip, man-sized boots */
-const W_LEG = (s: number) => new Warp(Y_BODY, [[0, 2.3]], [[0, 2.3]], s * 4, s * 4 * BODY_K, 0, Z0);
+/** height map of the trunk and legs: ankle 9 cm (tall chunky boot heel), knee 30 cm, hip 56 cm, waist 70 cm,
+ *  shoulder joint 1.12 m, a short cartoon neck, chin 1.19 m, crown 1.53 m */
+const Y_BODY: [number, number][] = [[0, 0], [3, 5], [15.5, 16.8], [24, 31.4], [29.5, 39.2], [42.5, 62.6], [44, 65.4], [46, 68], [52, 75]];
+/** height map of the hanging arm: elbow 86 cm, wrist 66 cm, grip 58 cm, short cartoon arms with the fists at the hip */
+const Y_ARM: [number, number][] = [[15, 25.4], [21.5, 32.2], [25.6, 37], [33, 48.2], [42.5, 62.6], [52, 75]];
+/** the trunk; a short thick neck above the shoulders (the popped collar closes round it) */
+const W_BODY = new Warp(Y_BODY, [[43, BODY_K], [45.6, 1.12]], [[43, BODY_KZ], [45.6, 1.1]], 0, 0, -1.5, -1.5);
+/** arms: stocky round the shoulder axis; big blocky cartoon hands (as broad as the forearm), the shoulder cap
+ *  (stump, pauldron) a little tighter */
+const W_ARM = (s: number) => new Warp(Y_ARM, [[23.6, 1.95], [25.6, 1.6], [41, 1.6], [43.5, 1.42]], [[23.6, 2.0], [25.6, 1.6], [41, 1.6], [43.5, 1.42]], s * 8, s * 8 * BODY_K, 0, Z0);
+/** legs: stubby thick thighs, chunky boots that flare at the sole */
+const W_LEG = (s: number) => new Warp(Y_BODY, [[1, 1.82], [6, 1.7], [12, 1.62]], [[1, 1.6], [6, 1.55], [12, 1.62]], s * 4, s * 4 * BODY_K, 0, Z0);
 const WA_L = W_ARM(1), WA_R = W_ARM(-1), WL_L = W_LEG(1), WL_R = W_LEG(-1);
+/** the cowboy hats (stetson family) are sculpted a size up round the hat pivot: a broader brim and a taller, chunkier
+ *  crown, so the hat reads big over the big head (the band seat at the brim stays put) */
+const W_HAT = new Warp([[50, 50], [59, 59], [75, 59 + 16 * 1.16]], [[56, 1.12], [60, 1.1], [66, 1.08]], [[56, 1.1], [60, 1.08], [66, 1.06]], 0, 0, -0.9, -0.9);
+const STETSONS: HatId[] = ['stetson', 'bandit'];
 /** the warp new sculpts are made with (null: the unwarped head family) */
 let WARP: Warp | null = null;
 const sc = (name: string) => new Sc(name, S, WARP);
@@ -2120,15 +2128,17 @@ function buildHat(id: HatId, o: OutfitId) {
     case 'tophat':
       return tophat();
     case 'bandit':
-      return stetson(ramp(0x34302e, 0x242120, 0x4a4542, 0x141212), 0xb8bcc4, { gambler: true, studs: true, feather: TOON.red.base });
+      return warped(W_HAT, () => stetson(ramp(0x34302e, 0x242120, 0x4a4542, 0x141212), 0xb8bcc4, { gambler: true, studs: true, feather: TOON.red.base }));
     case 'wig':
       return frogWigHat(54); // Mama Frog's fabulous wig
     default:
-      if (o === 'sheriff') return stetson(ramp(0x5a4a3c, 0x45382c, 0x726050, 0x2c2218), TOON.black.base);
-      return stetson(TOON.hat, 0x2a201c, { battered: true, studs: true, feather: 0x3a2a20 });
+      if (o === 'sheriff') return warped(W_HAT, () => stetson(ramp(0x5a4a3c, 0x45382c, 0x726050, 0x2c2218), TOON.black.base));
+      return warped(W_HAT, () => stetson(TOON.hat, 0x2a201c, { battered: true, studs: true, feather: 0x3a2a20 }));
   }
 }
 const HAT_TOP: Record<HatId, number> = { stetson: 67.3, duck: 73.3, sombrero: 72.8, nemes: 64.6, tophat: 75.5, bandit: 66.2, wig: FROG_WIG_TOP };
+/** the hat's top in head-family units (the stetsons through their size-up warp) */
+const hatTopOf = (id: HatId) => (STETSONS.includes(id) ? W_HAT.Y(HAT_TOP[id]) : HAT_TOP[id]);
 
 // ================================================================== OUTLAW MASK (cloth tied over the lower face)
 /** the cloth wraps the jaw like a loose cylinder: rows [y, half width, half depth, centre z] (head frame) */
@@ -2474,7 +2484,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   WARP = null; // everything below is the unwarped head family (or picks its warp explicitly)
 
   const hat = buildHat(look.hat, o);
-  const topY = HAT_TOP[look.hat];
+  const topY = hatTopOf(look.hat);
 
   // ---- hair locks, glasses, and every cell two meshes would share (they would z-fight)
   const hair = hairy ? hairLocks() : null;
@@ -2577,6 +2587,10 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     eye_r: sock('head', mg(J.eye)),
     mouth: sock('jaw', [0, 47.5, 6]),
     hat_top: sock('hat', [0, topY, -1]),
+    // Pinch's perches (empty anchors on the head bone, +Z out of the face): on the hat crown, in either eye socket
+    perch_hat: sock('head', [0, crownTop(hat, topY) + 0.15, -1.2]),
+    perch_eyeL: sock('head', [J.eye[0], J.eye[1], J.eye[2] - 0.6]),
+    perch_eyeR: sock('head', [-J.eye[0], J.eye[1], J.eye[2] - 0.6]),
     // the cloth tails flutter from the mask knot (or from the back of the neck bandana)
     bandana_anchor: mask ? sock('mask', [0.45, 48.9, -8.75]) : sock('torso', [0, 45.2, -5.6]),
     // the sandboard rides between the shoulder blades, held by the sling (see attachBoardOnBack)
@@ -2613,6 +2627,12 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     meta: {
       look,
       hd: true,
+      // stylized cartoon rig: PlayerAnim layers squash and stretch, overshoot, a broader stance and the bounce on it
+      toon: 1,
+      // third-person camera fitted to the short body (CameraRig.fitHero)
+      cam: { height: 1.02, shoulder: 0.95, dist: 2.55 },
+      // where the free hand takes the hat brim (head-local metres): the front of the brim, a touch to his left
+      hatGrip: mm([2.2, 59.6, 11.2]).map((v, i) => v - mm(J.neck)[i]),
       height: (topY + HEAD_DY) * UH,
       skullTop: (SKULL_TOP + 0.5 + HEAD_DY) * UH,
       hatTop: (topY + HEAD_DY) * UH,
@@ -2645,12 +2665,51 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   };
 }
 
+/** top of the hat's crown over the head's midline (design units); `fallback` when the hat has no cell there */
+function crownTop(hat: VoxelModel, fallback: number) {
+  let top = -1e9;
+  hat.forEach((x, y, z) => {
+    if (Math.abs((x + 0.5) / S) < 0.8 && Math.abs((z + 0.5) / S + 1.2) < 0.8) top = Math.max(top, (y + 1) / S);
+  });
+  return top > -1e9 ? top : fallback;
+}
+
+// ================================================================== PINCH'S PERCHES
+/** names of the empty perch anchors on Sundown's head bone (sockets of the same name in the spec) */
+export const PERCH_NAMES = { hat: 'perch_hat', eyeL: 'perch_eyeL', eyeR: 'perch_eyeR' } as const;
+/**
+ * Pinch's perch anchors on a Sundown rig: `perch_hat` (on the hat crown), `perch_eyeL` / `perch_eyeR`
+ * (in the left / right eye socket; character left = +X). All three are empty Object3Ds parented to the
+ * `head` bone, +Z pointing out of the face. Pass the RigInstance root (or anything above it). Finds the
+ * anchors by name; on a fresh RigInstance it names them, adding an empty Object3D called exactly
+ * `perch_hat` / `perch_eyeL` / `perch_eyeR` at the rig socket of that name (idempotent).
+ * Missing keys mean the rig has no such perch (another hero).
+ */
+export function getPerchAnchors(root: THREE.Object3D): { hat?: THREE.Object3D; eyeL?: THREE.Object3D; eyeR?: THREE.Object3D } {
+  const out: { hat?: THREE.Object3D; eyeL?: THREE.Object3D; eyeR?: THREE.Object3D } = {};
+  for (const [k, name] of Object.entries(PERCH_NAMES) as [keyof typeof PERCH_NAMES, string][]) {
+    let a = root.getObjectByName(name);
+    if (!a) {
+      const sock = root.getObjectByName('socket:' + name);
+      if (sock?.parent) {
+        a = new THREE.Object3D();
+        a.name = name;
+        a.position.copy(sock.position);
+        a.quaternion.copy(sock.quaternion);
+        sock.parent.add(a);
+      }
+    }
+    if (a) out[k] = a;
+  }
+  return out;
+}
+
 // ================================================================== BOARD ON THE BACK
 export const BOARD_BACK_SOCKET = 'board_back';
 export interface BoardBackOpts {
   /** material for a {model, voxelSize} or BufferGeometry board (default: the rig's material) */
   material?: THREE.Material;
-  /** sideways tilt across the back in radians (default 0.7: nose up over his right shoulder, clear of his head, Pinch and his hair) */
+  /** sideways tilt across the back in radians (default 0.9: nose up over his right shoulder, clear of his big hat, Pinch and his hair) */
   tilt?: number;
   /** how far the board centre hangs below the socket, metres (default 0.17) */
   drop?: number;
@@ -2685,7 +2744,7 @@ export function attachBoardOnBack(rig: RigInstance, board: { model: VoxelModel; 
   const box = new THREE.Box3().setFromObject(obj);
   const holder = new THREE.Group();
   holder.name = 'board_back';
-  holder.rotation.z = opts.tilt ?? 0.7;
+  holder.rotation.z = opts.tilt ?? 0.9;
   const inner = new THREE.Group();
   inner.rotation.x = -Math.PI / 2; // board +Z (nose) -> up, deck +Y -> away from his back
   holder.add(inner);
