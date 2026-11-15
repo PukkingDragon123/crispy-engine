@@ -1,0 +1,17 @@
+// SteamPipe app build for dustUP.
+// npm run desktop:steam -- --steam-appid=<AppID> --depot-windows=<DepotID> --depot-linux=<DepotID>
+// fills the @...@ tokens in the copy under <out>/steam/scripts/. Paths are relative to this file.
+"AppBuild"
+{
+	"AppID" "@APP_ID@"
+	"Desc" "dustUP @VERSION@"
+	"ContentRoot" "../content/"
+	"BuildOutput" "../output/"
+	"Preview" "0"
+	"SetLive" ""
+	"Depots"
+	{
+		"@DEPOT_WINDOWS@" "depot_build_windows.vdf"
+		"@DEPOT_LINUX@" "depot_build_linux.vdf"
+	}
+}

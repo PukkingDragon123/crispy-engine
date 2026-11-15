@@ -1,0 +1,14 @@
+// Windows x64 depot: everything under <ContentRoot>/windows/ lands in the install folder root.
+"DepotBuild"
+{
+	"DepotID" "@DEPOT_WINDOWS@"
+	"FileMapping"
+	{
+		"LocalPath" "windows/*"
+		"DepotPath" "."
+		"Recursive" "1"
+	}
+	// steam_appid.txt is only for local testing; Steam passes the app id itself
+	"FileExclusion" "steam_appid.txt"
+	"FileExclusion" "*.pdb"
+}

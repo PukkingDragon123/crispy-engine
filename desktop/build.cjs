@@ -2,10 +2,14 @@
 // Builds the game with vite and packages it as a desktop app with Electron.
 //
 //   node desktop/build.cjs [--platforms=win32,linux] [--out=DIR] [--smoke] [--skip-vite]
+//                          [--steam [--steam-appid=N] [--depot-windows=N] [--depot-linux=N] [--zip]]
 //
-// npm scripts: desktop:win (Windows x64), desktop:linux (Linux x64), desktop:all (both).
+// npm scripts: desktop:win (Windows x64), desktop:linux (Linux x64), desktop:all (both + smoke),
+// desktop:steam (both, as unzipped SteamPipe depot folders).
 // Output: <out>/dustUP-win-x64.zip and/or <out>/dustUP-linux-x64.zip. <out> defaults to
 // ./release/desktop (gitignored); everything intermediate goes to <out>/.work, never into dist/.
+// --steam writes <out>/steam/{content/windows,content/linux,scripts,output} instead (see
+// desktop/steam/steam_upload.md); zips are skipped there unless --zip is given.
 //
 // Electron zips are fetched from GitHub releases (or $ELECTRON_MIRROR, e.g.
 // https://npmmirror.com/mirrors/electron/) with curl, checked against SHASUMS256.txt and cached in
@@ -35,6 +39,10 @@ const CACHE = path.join(OUT, '.electron-cache');
 const PLATFORMS = opt('platforms', 'win32').split(',').map((s) => s.trim()).filter(Boolean);
 const ARCH = 'x64';
 const LABEL = { win32: 'win', linux: 'linux', darwin: 'mac' };
+const STEAM = flag('steam');
+const STEAM_DEPOT = { win32: 'windows', linux: 'linux' };
+// the steamworks.js native binaries each platform keeps (the others are left out of its package)
+const STEAM_NATIVE = { win32: 'win64', linux: 'linux64' };
 
 const rootPkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const electronVersion = JSON.parse(fs.readFileSync(require.resolve('electron/package.json', { paths: [ROOT] }), 'utf8')).version;
@@ -103,7 +111,18 @@ function stageApp() {
     fs.cpSync(game, path.join(WORK, 'game-cache'), { recursive: true });
   }
   if (!fs.existsSync(path.join(game, 'index.html'))) throw new Error('vite build produced no index.html');
-  for (const f of ['main.cjs', 'icon.png', 'icon.ico']) fs.copyFileSync(path.join(__dirname, f), path.join(stage, f));
+  for (const f of ['main.cjs', 'preload.cjs', 'steam.cjs', 'icon.png', 'icon.ico'])
+    fs.copyFileSync(path.join(__dirname, f), path.join(stage, f));
+  // steamworks.js (prebuilt N-API binaries, loaded only when a Steam app id is present)
+  const swSrc = path.dirname(require.resolve('steamworks.js/package.json', { paths: [ROOT] }));
+  const swDst = path.join(stage, 'node_modules', 'steamworks.js');
+  fs.mkdirSync(path.join(swDst, 'dist'), { recursive: true });
+  for (const f of ['index.js', 'package.json', 'LICENSE']) fs.copyFileSync(path.join(swSrc, f), path.join(swDst, f));
+  for (const d of Object.values(STEAM_NATIVE))
+    fs.cpSync(path.join(swSrc, 'dist', d), path.join(swDst, 'dist', d), {
+      recursive: true,
+      filter: (f) => !f.endsWith('.lib'),
+    });
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
   pkg.version = rootPkg.version;
   delete pkg.scripts;
@@ -113,14 +132,55 @@ function stageApp() {
 }
 
 const LINUX_LAUNCHER = `#!/bin/sh
-# Starts dustUP. Falls back to --no-sandbox when the Chromium sandbox cannot start (no setuid
-# chrome-sandbox and unprivileged user namespaces restricted, as on Ubuntu 24.04+).
+# Starts dustUP. Falls back to --no-sandbox when the Chromium sandbox cannot start: running as
+# root, or no setuid chrome-sandbox while unprivileged user namespaces are unavailable or
+# restricted (Ubuntu 24.04+, some container runtimes).
 DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$DIR"
 EXTRA=""
-if [ "$(id -u)" = "0" ]; then EXTRA="--no-sandbox"; fi
-if [ ! -u "$DIR/chrome-sandbox" ] && [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null)" = "1" ]; then EXTRA="--no-sandbox"; fi
+if [ "$(id -u)" = "0" ]; then
+  EXTRA="--no-sandbox"
+elif [ ! -u "$DIR/chrome-sandbox" ]; then
+  if [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null)" = "1" ] ||
+     ! unshare --user true >/dev/null 2>&1; then
+    EXTRA="--no-sandbox"
+  fi
+fi
 exec "$DIR/dustUP" $EXTRA "$@"
 `;
+
+function fillSteamTokens(text) {
+  const map = {
+    '@APP_ID@': opt('steam-appid', ''),
+    '@DEPOT_WINDOWS@': opt('depot-windows', ''),
+    '@DEPOT_LINUX@': opt('depot-linux', ''),
+    '@VERSION@': rootPkg.version,
+  };
+  for (const [k, v] of Object.entries(map)) if (v) text = text.split(k).join(v);
+  return text;
+}
+
+function writeSteamKit(results) {
+  const root = path.join(OUT, 'steam');
+  const scripts = path.join(root, 'scripts');
+  fs.mkdirSync(scripts, { recursive: true });
+  fs.mkdirSync(path.join(root, 'output'), { recursive: true });
+  const built = new Set(results.map((r) => STEAM_DEPOT[r.platform]));
+  let app = fs.readFileSync(path.join(__dirname, 'steam', 'app_build.vdf'), 'utf8');
+  // a depot that was not built this time is dropped from the app build
+  if (!built.has('windows')) app = app.replace(/^.*depot_build_windows\.vdf.*\n/m, '');
+  if (!built.has('linux')) app = app.replace(/^.*depot_build_linux\.vdf.*\n/m, '');
+  fs.writeFileSync(path.join(scripts, 'app_build.vdf'), fillSteamTokens(app));
+  for (const d of ['windows', 'linux'])
+    if (built.has(d)) {
+      const f = `depot_build_${d}.vdf`;
+      fs.writeFileSync(path.join(scripts, f), fillSteamTokens(fs.readFileSync(path.join(__dirname, 'steam', f), 'utf8')));
+    }
+  fs.copyFileSync(path.join(__dirname, 'steam', 'steam_upload.md'), path.join(root, 'steam_upload.md'));
+  const left = fs.readdirSync(scripts).filter((f) => /@[A-Z_]+@/.test(fs.readFileSync(path.join(scripts, f), 'utf8')));
+  if (left.length) console.log(`note: ${left.join(', ')} still hold @...@ placeholders (pass --steam-appid / --depot-windows / --depot-linux)`);
+  console.log(`steam kit: ${root}`);
+}
 
 async function main() {
   console.log(`dustUP desktop build: electron ${electronVersion}, platforms ${PLATFORMS.join(', ')}, out ${OUT}`);
@@ -145,7 +205,11 @@ async function main() {
       buildVersion: rootPkg.version,
       appCopyright: 'dustUP',
       icon: path.join(__dirname, platform === 'win32' ? 'icon.ico' : 'icon.png'),
-      asar: true,
+      // native Steam binaries must sit on disk, not inside app.asar
+      asar: { unpack: '*.{node,dll,so,dylib}' },
+      ignore: Object.entries(STEAM_NATIVE)
+        .filter(([p]) => p !== platform)
+        .map(([, d]) => new RegExp(`^/node_modules/steamworks\\.js/dist/${d}(/|$)`)),
       prune: false,
       derefSymlinks: true,
       win32metadata: {
@@ -171,14 +235,32 @@ async function main() {
       fs.writeFileSync(path.join(final, 'dustUP.sh'), LINUX_LAUNCHER, { mode: 0o755 });
       fs.copyFileSync(path.join(__dirname, 'icon.png'), path.join(final, 'dustUP.png'));
     }
+    const readme = fs.readFileSync(path.join(__dirname, 'README-players.txt'), 'utf8');
+    fs.writeFileSync(path.join(final, 'README.txt'), platform === 'win32' ? readme.replace(/\r?\n/g, '\r\n') : readme);
     // the extracted Electron files come out world-writable; tighten that before archiving
     if (process.platform !== 'win32') run('chmod', ['-R', 'go-w', final]);
-    const zipFile = path.join(OUT, folder + '.zip');
-    zipDir(path.dirname(final), folder, zipFile);
-    const mb = (fs.statSync(zipFile).size / 1048576).toFixed(1);
-    results.push({ platform, dir: final, zip: zipFile, mb });
-    console.log(`packaged ${platform}-${ARCH}: ${zipFile} (${mb} MB)`);
+    const res = { platform, dir: final, zip: null, mb: null };
+    if (!STEAM || flag('zip')) {
+      const zipFile = path.join(OUT, folder + '.zip');
+      zipDir(path.dirname(final), folder, zipFile);
+      res.zip = zipFile;
+      res.mb = (fs.statSync(zipFile).size / 1048576).toFixed(1);
+      console.log(`packaged ${platform}-${ARCH}: ${zipFile} (${res.mb} MB)`);
+    }
+    if (STEAM && STEAM_DEPOT[platform]) {
+      const depot = path.join(OUT, 'steam', 'content', STEAM_DEPOT[platform]);
+      fs.rmSync(depot, { recursive: true, force: true });
+      fs.mkdirSync(path.dirname(depot), { recursive: true });
+      fs.cpSync(final, depot, { recursive: true, verbatimSymlinks: true });
+      // local testing only (the depot scripts exclude it): 480 is Valve's Spacewar test app
+      const appid = opt('steam-appid', '480');
+      if (appid !== 'none') fs.writeFileSync(path.join(depot, 'steam_appid.txt'), appid + '\n');
+      res.depot = depot;
+      console.log(`depot folder ${platform}-${ARCH}: ${depot}`);
+    }
+    results.push(res);
   }
+  if (STEAM) writeSteamKit(results);
 
   if (flag('smoke')) {
     const linux = results.find((r) => r.platform === 'linux');
@@ -191,6 +273,8 @@ async function main() {
       '--use-gl=angle',
       '--use-angle=swiftshader-webgl',
       '--enable-unsafe-swiftshader',
+      // software rendering is slow enough to trip the GPU hang watchdog while the menu builds
+      '--disable-gpu-watchdog',
       `--smoke-test=${shot}`,
     ];
     if (has('xvfb-run')) run('xvfb-run', ['-a', '-s', '-screen 0 1600x900x24', exe, ...smokeArgs]);
@@ -198,7 +282,10 @@ async function main() {
     console.log(`smoke screenshot: ${shot}`);
   }
   console.log('\ndone:');
-  for (const r of results) console.log(`  ${r.zip}  ${r.mb} MB`);
+  for (const r of results) {
+    if (r.zip) console.log(`  ${r.zip}  ${r.mb} MB`);
+    if (r.depot) console.log(`  ${r.depot}/`);
+  }
 }
 
 main().catch((e) => {

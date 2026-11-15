@@ -4,19 +4,24 @@
 // workers, fetch() of the audio files and the bundled font all load same-origin with no file:// or
 // CORS quirks, and localStorage lives under one stable origin inside a stable userData folder.
 //
-// Flags (also readable from the environment, see below):
+// Window: starts true fullscreen (Esc stays with the game); F11 or Alt+Enter toggles to a normal
+// framed window that can be moved, resized and closed. The last mode and size are remembered.
+//
+// Flags (some also readable from the environment, see below):
+//   --windowed / --fullscreen   force the start mode for this launch
 //   --dev            enable devtools (F12 / Ctrl+Shift+I) and forward the page console to stdout
 //   --log-console    forward the page console to stdout without enabling devtools
 //   --no-vsync       uncap the frame rate (off by default: it burns GPU and can tear)
-//   --windowed       start in a normal window instead of maximized
 //   --game-dir=PATH  serve the game from PATH instead of the bundled ./game folder
+//   --steam-appid=N, --no-steam, --no-steam-overlay   see steam.cjs
 //   --smoke-test[=out.png]  boot, wait for the menu (window.__ready), optionally capture it, then
 //                    exit 0 on success or 1 on a timeout or a page error
 'use strict';
 
-const { app, BrowserWindow, Menu, protocol, session, screen } = require('electron');
+const { app, BrowserWindow, Menu, protocol, session, screen, ipcMain } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const { setupSteam } = require('./steam.cjs');
 
 const argv = process.argv.slice(1);
 const flag = (name) => argv.includes('--' + name);
@@ -58,6 +63,9 @@ if (flag('no-vsync')) {
   app.commandLine.appendSwitch('disable-gpu-vsync');
   app.commandLine.appendSwitch('disable-frame-rate-limit');
 }
+
+// ---------------------------------------------------------------- Steam (optional, before ready)
+const steam = setupSteam({ app, ipcMain, argv, origin: ORIGIN, log: (m) => console.log(m) });
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -132,6 +140,34 @@ async function serve(request) {
   }
 }
 
+// ---------------------------------------------------------------- window state
+const STATE_FILE = () => path.join(app.getPath('userData'), 'window-state.json');
+
+function loadWindowState() {
+  try {
+    const s = JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8'));
+    return s && typeof s === 'object' ? s : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveWindowState(w) {
+  if (SMOKE || !w || w.isDestroyed()) return;
+  try {
+    const s = { fullscreen: w.isFullScreen(), maximized: w.isMaximized(), bounds: w.getNormalBounds() };
+    fs.writeFileSync(STATE_FILE(), JSON.stringify(s));
+  } catch {}
+}
+
+function visibleBounds(b) {
+  if (!b || !(b.width > 0) || !(b.height > 0)) return null;
+  const area = screen.getDisplayMatching(b).workArea;
+  const ix = Math.min(b.x + b.width, area.x + area.width) - Math.max(b.x, area.x);
+  const iy = Math.min(b.y + b.height, area.y + area.height) - Math.max(b.y, area.y);
+  return ix > 120 && iy > 80 ? b : null; // a usable piece of the title bar must be on screen
+}
+
 // ---------------------------------------------------------------- window
 let win = null;
 const smokeErrors = [];
@@ -144,19 +180,25 @@ function createWindow() {
   const work = screen.getPrimaryDisplay().workAreaSize;
   const minW = Math.min(1280, work.width);
   const minH = Math.min(720, work.height);
+  const saved = loadWindowState();
+  const startFull = SMOKE ? false : flag('windowed') ? false : flag('fullscreen') ? true : saved.fullscreen !== false;
+  const bounds = visibleBounds(saved.bounds);
   win = new BrowserWindow({
     title: 'dustUP',
-    width: Math.max(minW, Math.min(1600, work.width)),
-    height: Math.max(minH, Math.min(900, work.height)),
+    width: bounds ? Math.max(minW, bounds.width) : Math.max(minW, Math.min(1600, work.width)),
+    height: bounds ? Math.max(minH, bounds.height) : Math.max(minH, Math.min(900, work.height)),
+    ...(bounds ? { x: bounds.x, y: bounds.y } : { center: true }),
     minWidth: minW,
     minHeight: minH,
-    frame: false,
+    frame: true,
+    fullscreen: startFull,
     fullscreenable: true,
     autoHideMenuBar: true,
     backgroundColor: '#040309',
     show: false,
     icon: path.join(__dirname, process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -173,10 +215,11 @@ function createWindow() {
   win.on('page-title-updated', (e) => e.preventDefault());
 
   win.once('ready-to-show', () => {
-    if (!flag('windowed') && !SMOKE) win.maximize();
+    if (!startFull && saved.maximized && !SMOKE && !flag('windowed')) win.maximize();
     win.show();
     win.focus();
   });
+  win.on('close', () => saveWindowState(win));
 
   const wc = win.webContents;
   wc.on('before-input-event', (e, input) => {
@@ -216,6 +259,10 @@ function createWindow() {
       } else console.log(line);
     });
   }
+  wc.on('preload-error', (_e, file, err) => {
+    console.error('[dustUP] preload failed:', file, err);
+    smokeErrors.push('preload: ' + err);
+  });
   wc.on('render-process-gone', (_e, details) => {
     console.error('[dustUP] renderer gone:', details.reason);
     if (SMOKE) app.exit(1);
@@ -235,9 +282,13 @@ async function runSmoke(wc) {
     if (ready) break;
     await new Promise((r) => setTimeout(r, 1000));
   }
-  const scene = await wc
-    .executeJavaScript('(window.__engine && window.__engine.current && window.__engine.current.constructor.name) || null')
-    .catch(() => null);
+  const probe = await wc
+    .executeJavaScript(
+      `({ scene: (window.__engine && window.__engine.current && window.__engine.current.constructor.name) || null,
+          bridge: typeof window.steam === 'object' && typeof window.steam.unlock === 'function',
+          steam: !!(window.steam && window.steam.isAvailable()) })`,
+    )
+    .catch(() => ({}));
   if (ready) await new Promise((r) => setTimeout(r, 4000));
   if (SMOKE_SHOT) {
     try {
@@ -247,10 +298,11 @@ async function runSmoke(wc) {
       console.error('[smoke] capture failed', e);
     }
   }
-  const ok = ready && smokeErrors.length === 0;
+  const ok = ready && probe.bridge === true && smokeErrors.length === 0;
   console.log(
-    `[smoke] ${ok ? 'PASS' : 'FAIL'} ready=${ready} scene=${scene} errors=${smokeErrors.length} ` +
-      `seconds=${((Date.now() - t0) / 1000).toFixed(1)} userData=${app.getPath('userData')}`,
+    `[smoke] ${ok ? 'PASS' : 'FAIL'} ready=${ready} scene=${probe.scene} bridge=${probe.bridge} ` +
+      `steam=${probe.steam}${steam.appId ? ` steamApp=${steam.appId}` : ''}${steam.reason && steam.appId ? ` steamReason="${steam.reason}"` : ''} ` +
+      `errors=${smokeErrors.length} seconds=${((Date.now() - t0) / 1000).toFixed(1)} userData=${app.getPath('userData')}`,
   );
   app.exit(ok ? 0 : 1);
 }
