@@ -28,8 +28,10 @@
 ## Current art direction (latest user notes win)
 - Realistic lighting with an anime-painted look: cel light ramp, black ink outlines, and lots of 2D pixel-art particles
   for dust, sand and trails. "Lighting 100× better, super realistic and anime-painted".
-- Not cartoony. Sundown (latest note): half zombie, half human, with hair: rotted and exposed skull and teeth on part of
-  the face, living skin on the rest; punk cowboy outfit, mask and shades kept.
+- World and enemies are not cartoony. Sundown (latest note): stylized cartoon but handsome (heroic animated-lead
+  proportions, never fat or squat, never weird); a tough late-80s hard-rock cowboy (original, not a real person): long
+  curly hair, stubble, a cigarette with pixel smoke, leather vest, band-style tee, bullet belts, hat and shades. The
+  half-zombie trait stays as a small, cool accent (one cheek or jaw with exposed teeth and bone), the rest handsome.
 - Codex is now Thoth's Hall: Thoth is a tiny, very cute ibis-headed god, 10,000 years old but talks like a child,
   collects creatures. Latest note: Thoth is lower resolution but more stylized, like a real animated character, with
   simple 1-pixel 2D dot eyes; cool, funny and alive. His hall is a beautiful library run by worm librarians (bookworms): real eyeless earthworms with physics bodies.
