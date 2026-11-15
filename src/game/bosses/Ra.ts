@@ -511,7 +511,7 @@ export class RaSunKing extends Boss {
     ctx.sfx('quake_rumble', pp, 1, 0.5);
     ctx.sfx('thunder', null, 0.9, 0.6);
     this.eclT = 0.75; // the light dims before he comes
-    for (let t = 0; t < 2.4; t += 1 / 30) {
+    for (let t0 = this.t, t = 0; t < 2.4; t = this.t - t0) {
       const k = t / 2.4;
       cam.setCine({ pos: camA, look: sky.clone().lerp(new THREE.Vector3(spot.x, g + 40, spot.z), 0.2), fov: 62 });
       for (let i = 0; i < 36; i++) rift.points[i].copy(riftPts[i]);
@@ -532,7 +532,7 @@ export class RaSunKing extends Boss {
     this.root.visible = true;
     this.yRate = 80;
     const fall = 2.3;
-    for (let t = 0; t < fall; t += 1 / 30) {
+    for (let t0 = this.t, t = 0; t < fall; t = this.t - t0) {
       const k = t / fall;
       this.liftNow = this.lift = 120 * (1 - k * k);
       this.root.updateMatrixWorld(true);
@@ -562,7 +562,7 @@ export class RaSunKing extends Boss {
     this.headUp = 0.25;
     for (const s of [0, 1]) this.aim(s, this.local(s === 0 ? 14 : -14, 20, 4), 1.6, -0.1, -0.3);
     ctx.sfx('whoosh_big', at, 1, 0.5);
-    for (let t = 0; t < 1.7; t += 1 / 30) {
+    for (let t0 = this.t, t = 0; t < 1.7; t = this.t - t0) {
       const k = t / 1.7;
       this.root.updateMatrixWorld(true);
       const c = this.discWorld(_a);
@@ -583,7 +583,7 @@ export class RaSunKing extends Boss {
     this.headUp = -0.1;
     this.eyeGlowT = 1.6;
     ctx.sfx('divine_chime', head, 0.8, 0.6);
-    for (let t = 0; t < 0.9; t += 1 / 30) {
+    for (let t0 = this.t, t = 0; t < 0.9; t = this.t - t0) {
       cam.setCine({ pos: camD, look: head.clone().add(new THREE.Vector3(0, 1.2, 0)), fov: 40 - t * 3 });
       await this.wait(1 / 30);
     }
@@ -595,7 +595,7 @@ export class RaSunKing extends Boss {
     ctx.shake(0.9);
     this.callout('Sun King');
     this.taunt('I was old when your river was young. Kneel in my light, and burn.', SUNC);
-    for (let t = 0; t < 2.4; t += 1 / 30) {
+    for (let t0 = this.t, t = 0; t < 2.4; t = this.t - t0) {
       cam.setCine({ pos: camD.clone().addScaledVector(fwd, t * 0.8), look: head.clone().add(new THREE.Vector3(0, 1.2, 0)), fov: 37 - t });
       this.breathFire(0.6);
       await this.wait(1 / 30);
@@ -1733,7 +1733,7 @@ export class RaSunKing extends Boss {
     this.anim.jaw = 0.5;
     for (const s of [0, 1]) this.aim(s, this.local(s === 0 ? 2 : -2, 26, 4), 1.4, 1.2, 0.4);
     this.coreScaleT = 1.3;
-    for (let t = 0; t < 3.0; t += 0.05) {
+    for (let t0 = this.t, t = 0; t < 3.0; t = this.t - t0) {
       await tw.wait(0.05);
       const k = t / 3;
       fx.y = Math.min(0.92, k * 1.1);
@@ -1764,7 +1764,7 @@ export class RaSunKing extends Boss {
     });
     const s0 = star ? star.scale.x : 1;
     ctx.sfx('quake_rumble', this.pos, 1, 0.4);
-    for (let t = 0; t < 2.2; t += 0.05) {
+    for (let t0 = this.t, t = 0; t < 2.2; t = this.t - t0) {
       await tw.wait(0.05);
       const k = t / 2.2;
       if (star) {
@@ -1776,7 +1776,7 @@ export class RaSunKing extends Boss {
       this.coronaBurst(1.5 + k * 2);
     }
     ctx.sfx('time_slow', null, 1, 0.4);
-    for (let t = 0; t < 0.7; t += 0.05) {
+    for (let t0 = this.t, t = 0; t < 0.7; t = this.t - t0) {
       await tw.wait(0.05);
       const k = t / 0.7;
       if (star) star.scale.setScalar(s0 * (1.9 - k * 1.75));
@@ -1821,7 +1821,7 @@ export class RaSunKing extends Boss {
     this.envHeld = true;
     const p0 = { ...ctx.world.env.preset };
     const w0 = NILE_BURN.value.w;
-    for (let t = 0; t < 6; t += 0.05) {
+    for (let r0 = ctx.engine.realTime, t = 0; t < 6; t = ctx.engine.realTime - r0) {
       await tw.wait(0.05, true);
       const k = t / 6, e = k * k * (3 - 2 * k);
       NILE_BURN.value.w = w0 * (1 - e);

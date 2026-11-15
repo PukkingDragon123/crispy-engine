@@ -158,7 +158,7 @@ async function playRaWrath(d: WrathDeps) {
     const camA = pp.clone().addScaledVector(flat, -7).addScaledVector(side, 2.5);
     camA.y = Math.max(pp.y, ctx.world.groundAt(camA.x, camA.z)) + 1.5;
     rig.root.visible = true;
-    for (let k = 0; k < 1; k += 1 / 75) {
+    for (let r0 = eng.realTime, k = 0; k < 1; k = (eng.realTime - r0) / 2.5) {
       env.apply(mixEnv(base, WRATH, k));
       fx.value.y = 1 - k; // he burns in out of the glare
       rig.root.position.y = at.y - 60 * (1 - k) * (1 - k);
@@ -173,7 +173,7 @@ async function playRaWrath(d: WrathDeps) {
     const camB = pp.clone().addScaledVector(flat, -3).add(new THREE.Vector3(0, 1.4, 0));
     camB.y = Math.max(camB.y, ctx.world.groundAt(camB.x, camB.z) + 1.4);
     ctx.sfx('divine_power', pp, 1, 0.45);
-    for (let k = 0; k < 1; k += 1 / 30) {
+    for (let r0 = eng.realTime, k = 0; k < 1; k = eng.realTime - r0) {
       eye = k;
       cam.setCine({ pos: camB, look: h, fov: 16 - k * 3 });
       await wait(1 / 30);
@@ -185,7 +185,7 @@ async function playRaWrath(d: WrathDeps) {
     ctx.shake(0.9);
     speak3D(eng, 'setAvatar', 'You broke my vessel. Then I come myself, and the river burns.', n['head'], { key: 'ra:wrath', lift: 4 * SC, side: 6 * SC, size: 0.3, px: 64, wrap: 26, color: '#fff1dc', glow: '#ffb050', hdr: 1.8, hold: 3.4 });
     ctx.toast('« Sympathy for the Devil »', '#ffc860', 'Ra');
-    for (let k = 0; k < 2.6; k += 1 / 30) {
+    for (let r0 = eng.realTime, k = 0; k < 2.6; k = eng.realTime - r0) {
       cam.setCine({ pos: camB, look: h, fov: 13 });
       await wait(1 / 30);
     }
@@ -203,12 +203,14 @@ async function playRaWrath(d: WrathDeps) {
     let si = 0, ts = 0;
     // the world's own burn spreads out from where the first beam lands (NILE WORLD's igniteNile)
     const ignited = world.igniteNile ? (void world.igniteNile({ origin: { x: strikes[0].x, z: strikes[0].z }, dur: 5.5 }), true) : false;
-    for (let k = 0; k < 5.2; k += 1 / 30) {
+    let prevK = 0;
+    for (let r0 = eng.realTime, k = 0; k < 5.2; k = eng.realTime - r0) {
       const kk = k / 5.2;
       if (!ignited) world.burnToLava?.(Math.min(1, kk * 1.25), { x: strikes[0].x, z: strikes[0].z });
       cam.setCine({ pos: camC.clone().add(new THREE.Vector3(0, kk * 6, 0)), look: pp.clone().addScaledVector(flat, 20).add(new THREE.Vector3(0, 6 + kk * 10, 0)), fov: 60 + kk * 8 });
       // the beams walk across the land
-      ts += 1 / 30;
+      ts += k - prevK;
+      prevK = k;
       const hit = strikes[Math.min(strikes.length - 1, si)];
       for (let j = 0; j < 2; j++) {
         const eyeP = eyeWorld(j, new THREE.Vector3());
@@ -237,7 +239,7 @@ async function playRaWrath(d: WrathDeps) {
     if (!ignited) world.burnToLava?.(1);
     // 4) he sinks back into the sun; the land is burning
     jaw = 0;
-    for (let k = 0; k < 1; k += 1 / 45) {
+    for (let r0 = eng.realTime, k = 0; k < 1; k = (eng.realTime - r0) / 1.5) {
       fx.value.y = k;
       cam.setCine({ pos: camC.clone().add(new THREE.Vector3(0, 6, 0)), look: pp.clone().addScaledVector(flat, 20).add(new THREE.Vector3(0, 16, 0)), fov: 68 });
       await wait(1 / 30);

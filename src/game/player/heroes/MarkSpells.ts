@@ -197,7 +197,7 @@ export class MarkSpells implements HeroSpells, HeroUlt {
     const S = MARK_SPELLS.beam;
     const r = S.radius * (big ? 1.7 : 1) * Math.sqrt(this.p.stats.get('explosionRadius') || 1);
     this.beams.push({ at, t: -delay, life: S.life * (big ? 1.2 : 1), r, dmg: S.dmg * power * (big ? 2.4 : 1), tick: 0, struck: false, big });
-    this.ctx.fx.ring({ x: at.x, y: at.y + 0.1, z: at.z }, 0xcfe2ff, r * 2, delay + 0.1);
+    this.ctx.fx.ring({ x: at.x, y: at.y + 0.1, z: at.z }, 0xcfe2ff, r * 1.2, delay + 0.1);
     this.ctx.fx.glyphs({ x: at.x, y: at.y + 0.4, z: at.z }, 0xbcd8ff, 8, r * 0.7);
   }
 
@@ -218,7 +218,7 @@ export class MarkSpells implements HeroSpells, HeroUlt {
         ctx.sfx('explosion_big', at, b.big ? 1 : 0.6, 1.4);
         ctx.sfx('divine_power', at, 0.8, b.big ? 0.9 : 1.15);
         ctx.fx.light({ x: at.x, y: at.y + 2, z: at.z }, 0xcfe2ff, b.big ? 14 : 8, 0.5, b.r * 5);
-        ctx.fx.ring({ x: at.x, y: at.y + 0.15, z: at.z }, 0xeef7ff, b.r * 2.6, 0.5);
+        ctx.fx.ring({ x: at.x, y: at.y + 0.15, z: at.z }, 0xeef7ff, b.r * 1.4, 0.45);
         ctx.shake(b.big ? 0.6 : 0.3);
         ctx.events.emit('groundMark', at.x, at.z, b.r, 2);
         ctx.particles.emit({ pos: { x: at.x, y: at.y + 0.3, z: at.z }, count: b.big ? 70 : 36, vel: { x: 0, y: 4, z: 0 }, spread: b.r * 2.2, life: [0.4, 0.9], size: [0.12, 0.02], sprite: ['moon0', 'moon1', 'spark', 'star4'], color: MOONLIGHT, additive: true, drag: 2, gravity: 3 });

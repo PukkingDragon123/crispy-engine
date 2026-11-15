@@ -740,11 +740,22 @@ export class MarkKit implements HeroKit {
     p.cam.punch(0.04, 0, -3, 0);
   }
 
-  /** a pixel smear and moonlight along the swing */
+  /** the swing's wake: an arc of pixel moonlight traced where the baton (or staff) cut */
   private swingFx(mv: Move, c: THREE.Vector3) {
-    const at = _v2.copy(c).addScaledVector(mv.dir, 1.0);
-    this.p.smear(at, mv.def.round ? 2.2 : 1.4);
-    this.ctx.particles.emit({ pos: at, count: 6, vel: { x: mv.dir.x * 3, y: 0.5, z: mv.dir.z * 3 }, spread: 2, life: [0.15, 0.35], size: [0.06, 0.01], sprite: ['moon1', 'dot3'], color: MOONLIGHT, additive: true, drag: 3 });
+    const P = this.ctx.particles;
+    const a0 = Math.atan2(mv.dir.x, mv.dir.z);
+    const round = !!mv.def.round;
+    const n = round ? 26 : 12;
+    const span = round ? Math.PI * 2 : 1.9;
+    const side = mv.name === 'm2' || mv.name === 'a2' ? -1 : 1;
+    const r = mv.def.staff ? 1.25 : 0.95;
+    for (let i = 0; i < n; i++) {
+      const k = i / (n - 1);
+      const a = a0 + side * (k - 0.5) * span;
+      const y = c.y + (round ? 0 : (0.5 - k) * 0.6 * (mv.name === 'launch' ? -2 : 1));
+      const tx = Math.cos(a) * side, tz = -Math.sin(a) * side;
+      P.emit({ pos: { x: c.x + Math.sin(a) * r, y, z: c.z + Math.cos(a) * r }, count: 1, vel: { x: tx * 1.5, y: 0.2, z: tz * 1.5 }, life: [0.14 + k * 0.12, 0.2 + k * 0.14], size: [0.09, 0.02], sprite: k > 0.7 ? 'moon1' : 'streak', color: MOONLIGHT, additive: true, stretch: 0.03, drag: 4, delay: k * 0.05 });
+    }
   }
 
   /** where an attack goes: the view, eased onto the nearest foe in front within reach */
