@@ -2529,16 +2529,16 @@ function skullScorpion(hs: Sc) {
 
 /** the tail's resting curve (output units, rig space): from the base of the spine up his back and over the left
  *  shoulder, the stinger poised beside his head */
-const TAIL_P: V3[] = [[0, 49.6, -5.4], [0.6, 56.6, -12.0], [2.0, 67.6, -14.8], [5.6, 79.0, -14.0], [12.0, 86.5, -7.0], [13.4, 89.0, -0.8]];
-const TAIL_R = [2.3, 2.1, 1.92, 1.76, 1.6];
-const TAIL_TIP: V3 = [12.6, 85.6, 5.1];
+const TAIL_P: V3[] = [[0, 49.6, -5.4], [0.8, 54.8, -15.2], [2.6, 65.5, -22.6], [6.4, 79.5, -22.0], [12.4, 90.0, -12.6], [14.2, 93.0, -2.8]];
+const TAIL_R = [2.7, 2.5, 2.3, 2.1, 1.9];
+const TAIL_TIP: V3 = [13.6, 89.6, 4.4];
 /** one metasoma segment: a waisted bleached-bone vertebra under a dorsal chitin plate with a bone keel and
  *  lateral spines, a ball knuckle at its root (output units) */
 function tailSeg(name: string, a: V3, b: V3, r: number) {
   const m = sc(name);
   const d = vnorm(vsub(b, a)), L = vlen(vsub(b, a));
   const mid = vmul(vadd(a, b), 0.5);
-  let up = vsub(mid, [6, 70, -4]); // away from the inside of the curl
+  let up = vsub(mid, [6, 72, -8]); // away from the inside of the curl
   up = vnorm(vsub(up, vmul(d, vdot(up, d))));
   const side = vnorm(vcross(d, up));
   const lo: V3 = [Math.min(a[0], b[0]) - r - 1.5, Math.min(a[1], b[1]) - r - 1.5, Math.min(a[2], b[2]) - r - 1.5];
@@ -2574,7 +2574,7 @@ function telson(a: V3, tip: V3) {
   const down = vnorm(vsub([0, -1, 0], vmul(d, vdot([0, -1, 0], d))));
   const side = vnorm(vcross(d, down));
   const bc = vadd(a, vmul(d, L * 0.36));
-  m.oell(bc, [d, down, side], [L * 0.36, 1.8, 1.75], (x, y, z) => (vdot(vsub([x, y, z], bc), down) > 0.9 ? BN.shade : BN.base));
+  m.oell(bc, [d, down, side], [L * 0.36, 2.1, 2.0], (x, y, z) => (vdot(vsub([x, y, z], bc), down) > 0.9 ? BN.shade : BN.base));
   // the iron ring round the bulb's root, riveted
   const rc = vadd(a, vmul(d, L * 0.14));
   m.region(vsub(rc, [3, 3, 3]), vadd(rc, [3, 3, 3]), (x, y, z) => {

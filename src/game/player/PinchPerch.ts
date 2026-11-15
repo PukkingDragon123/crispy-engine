@@ -6,6 +6,7 @@
 //   eyeR     in the bare skull socket, claws and the point of his tail peeking out (idle, after kills)
 //   eyeL     on the living brow, peering down over the shades
 //   shoulder on the torn sleeve stump
+//   tail     riding the top of Sundown's scorpion tail (a rig with a `perch_tail` anchor), up from the shoulder
 // Between perches he scuttles along a little graph of waypoints over the head, the brim, the
 // temples, the jaw and the neck (tetrapod gait from PinchMotion), every waypoint expressed in the
 // frame of a bone so the route rides along with the animation.
@@ -23,7 +24,7 @@ import type { RigInstance } from '../../engine/voxel/Rig';
 import type { EventBus } from '../Ctx';
 import { PinchMotion, PinchMode } from './PinchMotion';
 
-export type PerchId = 'hat' | 'eyeL' | 'eyeR' | 'shoulder';
+export type PerchId = 'hat' | 'eyeL' | 'eyeR' | 'shoulder' | 'tail';
 type Spot = PerchId | 'hatIn';
 type WP = Spot | 'crownL' | 'crownR' | 'crownB' | 'brimL' | 'brimR' | 'brimB' | 'lipL' | 'lipR' | 'templeL' | 'templeR' | 'bridge' | 'jawL' | 'neckL' | 'here';
 
@@ -53,7 +54,7 @@ const EDGES: [WP, WP][] = [
   ['crownL', 'brimL'], ['crownR', 'brimR'], ['crownB', 'brimB'], ['brimB', 'hatIn'],
   ['brimL', 'lipL'], ['brimR', 'lipR'], ['lipL', 'templeL'], ['lipR', 'templeR'],
   ['templeL', 'eyeL'], ['templeR', 'eyeR'], ['eyeL', 'bridge'], ['bridge', 'eyeR'],
-  ['templeL', 'jawL'], ['eyeL', 'jawL'], ['jawL', 'neckL'], ['neckL', 'shoulder'],
+  ['templeL', 'jawL'], ['eyeL', 'jawL'], ['jawL', 'neckL'], ['neckL', 'shoulder'], ['shoulder', 'tail'],
 ];
 const ADJ = new Map<WP, WP[]>();
 for (const [a, b] of EDGES) {
@@ -104,7 +105,7 @@ export class PinchPerch {
   private host!: PerchHost;
   private head: THREE.Object3D | null = null;
   private torso: THREE.Object3D | null = null;
-  private anchors: Partial<Record<'hat' | 'eyeL' | 'eyeR' | 'shoulder', THREE.Object3D>> = {};
+  private anchors: Partial<Record<'hat' | 'eyeL' | 'eyeR' | 'shoulder' | 'tail', THREE.Object3D>> = {};
   private hatBox: THREE.Box3 | null = null;
   private route: Pt[] | null = null;
   private routeS = 0;
@@ -163,6 +164,7 @@ export class PinchPerch {
       eyeR: eR ?? host.sockets['eye_r'] ?? undefined,
       eyeL: eL ?? host.sockets['eye_l'] ?? undefined,
       shoulder: host.sockets['shoulder_l'] ?? undefined,
+      tail: by('perch_tail') ?? undefined,
     };
     // the hat's extent in head space: the brim edge and the back of the crown for the routes
     this.hatBox = null;
@@ -292,8 +294,8 @@ export class PinchPerch {
   // ------------------------------------------------------------------ internals
   private pick(idle: boolean): PerchId {
     const w: [PerchId, number][] = idle
-      ? [['eyeR', 0.42], ['hat', 0.24], ['eyeL', 0.14], ['shoulder', 0.2]]
-      : [['hat', 0.42], ['shoulder', 0.42], ['eyeR', 0.1], ['eyeL', 0.06]];
+      ? [['eyeR', 0.38], ['hat', 0.22], ['eyeL', 0.12], ['shoulder', 0.16], ['tail', 0.14]]
+      : [['hat', 0.38], ['shoulder', 0.36], ['eyeR', 0.1], ['eyeL', 0.06], ['tail', 0.1]];
     const opts = w.filter(([id]) => id !== this.spot && this.spotPt(id));
     let r = Math.random() * opts.reduce((a, [, x]) => a + x, 0);
     for (const [id, x] of opts) if ((r -= x) <= 0) return id;
@@ -302,6 +304,7 @@ export class PinchPerch {
   private dwellFor(s: Spot, idle: boolean) {
     if (s === 'eyeR' || s === 'eyeL') return rnd(4.5, 9);
     if (s === 'hat') return rnd(6, 14);
+    if (s === 'tail') return rnd(5, 10);
     if (s === 'shoulder') return idle ? rnd(9, 22) : rnd(6, 14);
     return 3;
   }
@@ -310,6 +313,7 @@ export class PinchPerch {
     if (s === 'eyeR' || s === 'eyeL') return 'peek';
     const rough = (d.speed01 ?? 0) > 0.35;
     if (s === 'hat') return rough ? 'cling' : 'peek';
+    if (s === 'tail') return rough ? 'cling' : 'idle';
     if (rough) return 'cling';
     return this.idleT > 25 && this.dwell > 4 ? 'sleep' : 'idle';
   }
@@ -482,6 +486,12 @@ export class PinchPerch {
     return { frame, p, n };
   }
   private wpNow(w: WP): Pt | null {
+    if (w === 'tail') {
+      // on top of the scorpion tail, riding its segment
+      const a = this.anchors.tail;
+      if (!a?.parent) return null;
+      return { frame: a.parent, p: a.position.clone().add(_v.set(0, 0.004, 0)), n: UPV.clone() };
+    }
     if (w === 'shoulder' || w === 'neckL') {
       const f = this.torso;
       if (!f) return null;
@@ -563,7 +573,7 @@ export class PinchPerch {
   }
   /** the perch pose (world) for a spot */
   private spotQuat(s: Spot, out: THREE.Quaternion) {
-    const f = s === 'shoulder' ? this.torso : this.head;
+    const f = s === 'shoulder' ? this.torso : s === 'tail' ? (this.anchors.tail?.parent ?? null) : this.head;
     if (!f) return out.identity();
     f.getWorldQuaternion(out);
     // yaw, pitch (positive: nose down), roll in the bone's frame

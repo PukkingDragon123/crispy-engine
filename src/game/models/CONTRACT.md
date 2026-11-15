@@ -149,6 +149,14 @@ Sockets: `hand_r`, `hand_l`, `head_top`, `back`, `shoulder_l`, `shoulder_r`, `hi
     follow camera, `meta.hatGrip` is the brim grip. Pinch's perches: empty sockets `perch_hat` (hat crown),
     `perch_eyeL` / `perch_eyeR` (eye sockets; the right one is the bare skull socket) on `head`, +Z out of the face;
     `getPerchAnchors(root)` returns them by exact name.
+    SCORPION REVENANT (user note, latest): Serket's curse has grown a scorpion skeleton into him. A little cartoony,
+    lean and wiry: 1/96 m grid, about 5.3 heads, 1.59 m to the crown (1.65 m with the hat), a keyed V-shaped trunk warp.
+    A rigged bone scorpion tail from the lower spine over the left shoulder: `tail1`..`tail5` (parent pelvis, chained)
+    and `stinger` (iron-ringed telson, glowing venom tip), socket `tail_tip`, `meta.tail.parts`; PlayerAnim curls,
+    flicks and whips it, jabs it on `melee` / `counter` (`tailJab`) and snaps it on kills (`tailSnap`). Chitin plates
+    over the sternum and collarbones, segmented pauldrons, bone-and-chitin gauntlets with serrated pincer spurs,
+    median-eye beads on the brow, chitin ridges on the bare temple. Pinch can also perch on the tail (`perch_tail`
+    on `tail4`; `getPerchAnchors` returns it as `tail`).
     The 1/36 `skeleton.ts` build stays only as the base for `skeletonFigure()` (enemies).
   - parts: humanoid + `jaw`, `hat` (parent head), `coat` (parent pelvis), modelled `eye_l`/`eye_r` (glowing pupils).
   - socket `board_back` (torso, between the shoulder blades); mount a board with
