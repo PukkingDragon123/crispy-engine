@@ -7,12 +7,14 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:admin": "VITE_ADMIN=1 vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "desktop:win": "node desktop/build.cjs --platforms=win32",
     "desktop:linux": "node desktop/build.cjs --platforms=linux",
     "desktop:all": "node desktop/build.cjs --platforms=win32,linux --smoke",
-    "desktop:steam": "node desktop/build.cjs --platforms=win32,linux --steam"
+    "desktop:steam": "node desktop/build.cjs --platforms=win32,linux --steam",
+    "desktop:admin": "node desktop/build.cjs --platforms=win32 --admin"
   },
   "dependencies": {
     "@fontsource/cinzel-decorative": "^5.3.0",

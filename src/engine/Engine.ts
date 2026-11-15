@@ -63,6 +63,8 @@ export class Engine {
   frame = 0;
   /** user/game requested time scale */
   timeScale = 1;
+  /** the admin testing mode's time scale (always 1 in a normal game): multiplies every scaled step */
+  adminScale = 1;
   private targetScale = 1;
   private scaleLambda = 8;
   private hitStopLeft = 0;
@@ -457,7 +459,7 @@ export class Engine {
       }
       // time scale
       this.timeScale = damp(this.timeScale, this.targetScale, this.scaleLambda, rdt);
-      let scale = this.paused ? 0 : this.timeScale;
+      let scale = this.paused ? 0 : this.timeScale * this.adminScale;
       if (this.hitStopLeft > 0) {
         this.hitStopLeft -= rdt;
         scale = Math.min(scale, this.hitStopScale);

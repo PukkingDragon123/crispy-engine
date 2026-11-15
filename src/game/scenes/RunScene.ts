@@ -253,6 +253,8 @@ export class RunScene implements GameScene {
   private waveIntroT = 0;
   private gameOver = false;
   ready = false;
+  /** the admin testing mode hides the HUD for screenshots (it hides the 2D layers itself) */
+  hudOff = false;
 
   constructor(public engine: Engine, public opts: RunOptions) {}
 
@@ -1351,7 +1353,7 @@ export class RunScene implements GameScene {
     if (!this.ready || this.trial) return;
     this.hud3d.update(this.lastRdt);
     this.gearHud.update(this.lastRdt);
-    this.hud3d.render(renderer);
+    if (!this.hudOff) this.hud3d.render(renderer);
   }
 
   private updateHud(rdt: number) {

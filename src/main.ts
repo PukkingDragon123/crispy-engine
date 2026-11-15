@@ -29,6 +29,9 @@ export const music = new Music(engine.audio, 'audio/');
 (window as any).__music = music;
 engine.onAfterUpdate.push((dt, rdt) => music.update(rdt));
 engine.start();
+// the admin testing mode (a VITE_ADMIN=1 build, ?admin=1, the desktop app's --admin): its own chunk, never loaded otherwise
+if (import.meta.env.VITE_ADMIN === '1' || params.get('admin') === '1')
+  void import('./game/admin/AdminMode').then((m) => m.installAdmin(engine)).catch((e) => console.warn('[admin] failed to load', e));
 
 async function bootAssets() {
   // the pixel atlas renders onomatopoeia with Alagard: make sure it is decoded first

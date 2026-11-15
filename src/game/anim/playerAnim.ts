@@ -286,6 +286,14 @@ export class PlayerAnim {
   private snapT = 9;
   /** the trap jaw's expression pose, damped (the snap plays over it) */
   private jawBase = 0;
+  /** a scorpion tail (meta.tail.parts, root first): per-joint lag springs for the curl (x) and the sway (y) */
+  tailNodes: THREE.Object3D[] = [];
+  private tailP: SpringF[] = [];
+  private tailY: SpringF[] = [];
+  private strikeT = 9;
+  private strikeAmp = 0;
+  private flickT = 4;
+  private tailShot = false;
 
   // blend weights
   aimW = 0;
@@ -403,6 +411,10 @@ export class PlayerAnim {
     const meta = rig.geo.spec.meta as { toon?: number; hatGrip?: number[]; stanceWide?: number; trapJaw?: boolean } | undefined;
     this.toon = typeof meta?.toon === 'number' ? clamp01(meta.toon) : 0;
     this.trap = !!meta?.trapJaw;
+    const tp = (meta as { tail?: { parts?: string[] } } | undefined)?.tail?.parts ?? [];
+    this.tailNodes = tp.map((n) => rig.nodes[n]).filter((o): o is THREE.Group => !!o);
+    this.tailP = this.tailNodes.map((_, i) => new SpringF(0, 3.2 - i * 0.25, 0.32));
+    this.tailY = this.tailNodes.map((_, i) => new SpringF(0, 2.6 - i * 0.2, 0.36));
     this.hatGrip = Array.isArray(meta?.hatGrip) && meta.hatGrip.length === 3 ? new THREE.Vector3().fromArray(meta.hatGrip) : null;
     // a cartoon rider stands wider on the deck
     this.stanceHalf = Math.abs(this.hipL.x) + (0.13 + (meta?.stanceWide ?? 0.055) * this.toon) * this.scale;
@@ -422,6 +434,15 @@ export class PlayerAnim {
       this.gunSway.x.zeta = this.gunSway.y.zeta = this.gunSway.z.zeta = lerp(0.5, 0.38, tn);
     }
     this.ready = true;
+  }
+
+  /** the scorpion tail strikes forward over the shoulder (melee, counters); no-op without a tail */
+  tailJab() {
+    if (this.tailNodes.length && this.strikeT > 0.3) (this.strikeT = 0), (this.strikeAmp = 1);
+  }
+  /** a quick tail snap (kills) */
+  tailSnap() {
+    if (this.tailNodes.length && this.strikeT > 0.3) (this.strikeT = 0), (this.strikeAmp = 0.5);
   }
 
   /** snap the iron trap jaw shut (kills, the reload close); no-op on other jaws */
@@ -478,6 +499,7 @@ export class PlayerAnim {
       this.recUpper.kick(-4.5 * s);
       this.recBody.kick(3 * s);
       this.lastShotT = t;
+      this.tailShot = true;
       const tn = this.toon;
       if (tn > 0) {
         // cartoon recoil: the whole arm chain bucks harder, the head snaps back, the body flinches and the hat jumps
@@ -784,6 +806,46 @@ export class PlayerAnim {
     this.solveFreeArm(I, heel, toe, charge, spinRate, takeoff, landed, stw);
     this.solveHead(I, f);
     this.accessories(I, accX, accZ);
+    this.tailAnim(I, accX, accZ, takeoff, landed);
+  }
+
+  /** the scorpion tail: a slow curl breath and idle flicks, lag behind the ride's accelerations, a whip on the jump
+   *  and the landing, a twitch per shot, and the strike (wind back, jab forward over the shoulder, recover) */
+  private tailAnim(I: PlayerAnimIn, accX: number, accZ: number, takeoff: boolean, landed: boolean) {
+    const n = this.tailNodes.length;
+    if (!n) return;
+    const dt = I.dt, t = I.time;
+    this.strikeT += dt;
+    const st = this.strikeT, A = this.strikeAmp;
+    let strike = 0;
+    if (st < 0.09) strike = -0.22 * A * smooth(st / 0.09);
+    else if (st < 0.19) strike = lerp(-0.22 * A, 0.6 * A, easeOutCubic((st - 0.09) / 0.1));
+    else if (st < 0.55) strike = lerp(0.6 * A, 0, smooth((st - 0.19) / 0.36));
+    if (this.idleW > 0.5) {
+      this.flickT -= dt;
+      if (this.flickT <= 0) {
+        this.flickT = 3 + Math.random() * 4;
+        this.tailP[n - 1].kick(5);
+        this.tailP[n - 2]?.kick(3);
+      }
+    }
+    if (takeoff) this.tailP[0].kick(-2.2);
+    if (landed) {
+      this.tailP[0].kick(2.6);
+      this.tailP[Math.min(2, n - 1)].kick(1.5);
+    }
+    if (this.tailShot) {
+      this.tailP[n - 1].kick(2.2);
+      this.tailShot = false;
+    }
+    const breath = Math.sin(t * 0.7) * 0.05 * (0.4 + this.idleW);
+    const pitch = strike + breath - clamp(accZ * 0.004, -0.2, 0.2) - this.airW * 0.1 - this.deadW * 0.4;
+    const yaw = Math.sin(t * 0.9 + 0.6) * 0.07 * (0.5 + this.idleW) + clamp(-accX * 0.005, -0.25, 0.25);
+    for (let i = 0; i < n; i++) {
+      this.tailP[i].step(i ? this.tailP[i - 1].x * 0.92 : pitch, dt);
+      this.tailY[i].step(i ? this.tailY[i - 1].x * 0.9 : yaw, dt);
+      this.tailNodes[i].rotation.set(clamp(this.tailP[i].x, -1.2, 1.2) * (i ? 0.55 : 0.35), clamp(this.tailY[i].x, -1, 1) * 0.4, 0);
+    }
   }
 
   private solveLeg(thigh: THREE.Object3D | undefined, shin: THREE.Object3D | undefined, footRig: THREE.Vector3, hip: THREE.Vector3, pelvis: THREE.Object3D, footYaw: number) {

@@ -44,7 +44,7 @@ import { SKIN, STUB, STUB_DOT, SCAR, LIP, NAIL, BROWHAIR, HEYE, ROT, BRUISE, MEA
 import { installHairSway, type HairChain } from './hairSway';
 
 /** metres per voxel of the HD player build */
-export const SUNDOWN_HD_VS = 1 / 125;
+export const SUNDOWN_HD_VS = 1 / 96;
 const S = 1.5; // voxels per design unit
 /** metres per output unit (one design unit of the unwarped head family) */
 const UH = S * SUNDOWN_HD_VS;
@@ -70,6 +70,8 @@ const SOLE = 0x1b1513;
 const HEEL = ramp(0x4b3527, 0x37261b, 0x604534, 0x22150d);
 const STITCH = 0x9c9aa4;
 const VENOM = 0x8cf03c;
+/** dark amber chitin (Serket's curse grown over his bones): plates, gauntlets, the tail's armour */
+const CHI = ramp(0x6e4220, 0x4c2c14, 0xa86a30, 0x2e1a0c);
 const M = VF.METAL;
 markBone(BN.base, BN.shade, BN.hi, ENAMEL);
 
@@ -92,26 +94,31 @@ const SKULL_TOP = 63;
 const mg = (p: V3): V3 => [-p[0], p[1], p[2]];
 const vx = (p: V3): V3 => [p[0] * S, p[1] * S, p[2] * S];
 
-// ================================================================== PROPORTION WARPS (design layout -> realistic figure, output units)
-/** the head family sits HEAD_DY output units above its design height (an integer number of voxels: 120) */
-const HEAD_DY = 84;
-/** horizontal scale of the trunk (output units per design unit): width, and a slimmer depth */
-const BODY_K = 1.9;
-const BODY_KZ = 1.7;
-/** design z = 0 (the limb axes) in output space; keeps the neck (design z -1.5) right under the head */
-const Z0 = -1.5 + 1.5 * BODY_KZ;
-/** height map of the trunk and legs: ankle 9 cm, knee 53 cm, hip 95 cm, waist 1.11 m, shoulder joint 1.52 m, a sloped
- *  trapezius and a real neck (the cartoon layout had the chin sunk between the shoulders), chin 1.64 m, crown 1.89 m */
-const Y_BODY: [number, number][] = [[0, 0], [3, 6.6], [15.5, 40.5], [24, 72], [29.5, 84.5], [42.5, 115.5], [44, 119], [46, 130], [52, 144]];
-/** height map of the hanging arm: elbow 1.18 m, wrist 0.91 m, grip 0.80 m, fingertips at mid-thigh */
-const Y_ARM: [number, number][] = [[15, 48.5], [21.5, 61.1], [25.6, 69], [33, 90], [42.5, 115.5], [52, 138.8]];
-/** the trunk; it narrows into a real neck above the shoulders (the popped collar closes round it) */
-const W_BODY = new Warp(Y_BODY, [[43, BODY_K], [45.6, 1.55]], [[43, BODY_KZ], [45.6, 1.5]], 0, 0, -1.5, -1.5);
-/** arms: a fuller, longer arm round the shoulder axis; the hand narrows to a real hand below the wrist, the
- *  shoulder cap (stump, pauldron) a little above it */
-const W_ARM = (s: number) => new Warp(Y_ARM, [[24.2, 1.35], [25.6, 2.3], [41, 2.3], [43.5, 2.0]], [[24.2, 1.55], [25.6, 2.3], [41, 2.3], [43.5, 2.0]], s * 8, s * 8 * BODY_K, 0, Z0);
-/** legs: long thighs, a little more girth below the hip, man-sized boots */
-const W_LEG = (s: number) => new Warp(Y_BODY, [[0, 2.3]], [[0, 2.3]], s * 4, s * 4 * BODY_K, 0, Z0);
+// ================================================================== PROPORTION WARPS (design layout -> lean cartoon revenant, output units)
+// A little cartoony (user note, latest): about 5.3 heads, 1.59 m to the crown, a slightly bigger head and hands,
+// lean and wiry with a V (broad shoulders, narrow waist and hips), never fat or squat. The head family keeps
+// its exact sculpt; the grid (1/96 m) makes it 30 cm, and the warps below fit the body to it.
+/** the head family sits HEAD_DY output units above its design height (an integer number of voxels: 57) */
+const HEAD_DY = 38;
+/** trunk width and depth by design height (output units per design unit): narrow hips, a slim waist, a broad
+ *  chest and shoulders (the V), a lean neck */
+const BODY_KX: [number, number][] = [[24, 1.2], [27.5, 1.12], [31, 1.06], [35, 1.2], [38.5, 1.38], [41.5, 1.52], [43.4, 1.52], [45.6, 1.22]];
+const BODY_KZ: [number, number][] = [[24, 1.08], [29, 0.98], [32, 0.98], [36, 1.15], [40.5, 1.22], [43.4, 1.2], [45.6, 1.15]];
+/** height map of the trunk and legs: ankle 8 cm, knee 40 cm, hip 72 cm, waist 86 cm, shoulder joint 1.2 m, a short
+ *  visible neck, chin 1.29 m, crown 1.59 m */
+const Y_BODY: [number, number][] = [[0, 0], [3, 4.8], [15.5, 25.6], [24, 46], [29.5, 55], [36, 65.6], [42.5, 76.8], [44, 78.6], [46, 84], [52, 90]];
+/** height map of the hanging arm: elbow 93 cm, wrist 71 cm, grip 64 cm, fingertips at mid-thigh */
+const Y_ARM: [number, number][] = [[15, 34.6], [21.5, 41.2], [25.6, 45.5], [33, 59.6], [42.5, 76.8], [52, 90]];
+/** the trunk (x and z scale with height; the neck column stays centred under the head) */
+const W_BODY = new Warp(Y_BODY, BODY_KX, BODY_KZ, 0, 0, -1.5, -1.5);
+const KX_AT = (y: number) => W_BODY.kx(y);
+const Z0_AT = (y: number) => -1.5 + 1.5 * W_BODY.kz(y);
+/** design z = 0 (the limb axes) at the shoulders, in output space */
+const Z0 = Z0_AT(42.5);
+/** arms: lean and wiry; big cartoon hands; the shoulder cap a little tighter */
+const W_ARM = (s: number) => new Warp(Y_ARM, [[23.6, 1.72], [25.6, 1.62], [33, 1.66], [40.5, 1.78], [43.5, 1.62]], [[23.6, 1.8], [25.6, 1.62], [33, 1.64], [40.5, 1.72], [43.5, 1.58]], s * 8, s * 8 * KX_AT(42.5), 0, Z0);
+/** legs: long and lean, worn boots */
+const W_LEG = (s: number) => new Warp(Y_BODY, [[1, 1.84], [5, 1.72], [12, 1.66], [20, 1.78]], [[1, 1.8], [5, 1.66], [12, 1.64], [20, 1.72]], s * 4, s * 4 * KX_AT(24), 0, Z0_AT(24));
 const WA_L = W_ARM(1), WA_R = W_ARM(-1), WL_L = W_LEG(1), WL_R = W_LEG(-1);
 /** the warp new sculpts are made with (null: the unwarped head family) */
 let WARP: Warp | null = null;
@@ -672,6 +679,7 @@ function buildHead(hair: boolean): HeadBuild {
     stitch(hs, a, b);
     hs.ell(b, [0.3, 0.3, 0.3], SOCK.deep, { mode: 'paint' });
   }
+  skullScorpion(hs);
   if (hair) hairCap(hs);
   shadeRamps(head, [BN, SKIN, ROT, HAIR], true);
   shadeRamps(jaw, [BN, SKIN, ROT], false);
@@ -1660,7 +1668,7 @@ function punkArmR(m: Sc) {
     const d = Math.hypot(y - 40.0, z);
     return d > 1.0 ? TOON.linen.base : d > 0.62 ? TOON.red.base : d > 0.3 ? 0x1c1a20 : TOON.linen.hi;
   });
-  punkPauldron(m);
+  scorpPauldron(m, -1, true);
   shadeRamps(m.m, [LEA, BN], true);
 }
 
@@ -1687,40 +1695,22 @@ function punkArmL(m: Sc) {
   }
   // short spikes on the outer face of the stump
   for (const z of [-1.3, 0, 1.3]) spike(m, [ax + 2.05, 41.85, z], vnorm([1, 0.32, z * 0.18]), 1.85, 0.64);
+  scorpPauldron(m, 1, false); // a smaller segmented plate over the stump (Pinch's perch is on top of it)
   shadeRamps(m.m, [LEA, BN, SKIN, ROT], true);
 }
 
 function punkForeR(m: Sc) {
   deadForearm(m, -1);
   hand(m, -1, true);
-  // spiked leather wrist cuff
-  const c: V3 = [-8.55, 26.7, -0.1];
-  m.region([c[0] - 2, 25.8, -2], [c[0] + 2, 27.6, 2], (x, y, z) => {
-    const d = Math.hypot(x - c[0], z - c[2]);
-    return d < 1.68 && d > 0.95 && y > 25.95 && y < 27.45;
-  }, (x, y) => (y > 27.2 || y < 26.2 ? LEA_EDGE : LEA.base));
-  for (const [dx, dz] of [[-1, 0], [0, 1], [0, -1], [-0.7, 0.7], [-0.7, -0.7]] as [number, number][]) {
-    const d = vnorm([dx, 0, dz]);
-    spike(m, vadd(c, vmul(d, 1.62)), d, 1.45, 0.54);
-  }
-  shadeRamps(m.m, [LEA, BN, ROT], true);
+  gauntlet(m, -1);
+  shadeRamps(m.m, [LEA, BN, ROT, CHI], true);
 }
 
 function punkForeL(m: Sc) {
   livingForearm(m, 1);
   livingHand(m, 1);
-  // studded leather band on the left wrist
-  const c: V3 = [8.55, 26.65, -0.1];
-  m.region([c[0] - 2, 25.8, -2], [c[0] + 2, 27.6, 2], (x, y, z) => {
-    const d = Math.hypot(x - c[0], z - c[2]);
-    return d < 1.58 && d > 0.95 && y > 26.0 && y < 27.3;
-  }, LEA.base);
-  for (let a = 0; a < 6; a++) {
-    const th = (a / 6) * Math.PI * 2 + 0.3;
-    const d: V3 = [Math.cos(th), 0, Math.sin(th)];
-    stud(m, vadd(c, vmul(d, 1.55)), d, 0.42, true);
-  }
-  shadeRamps(m.m, [LEA, BN, SKIN], true);
+  gauntlet(m, 1);
+  shadeRamps(m.m, [LEA, BN, SKIN, CHI], true);
 }
 
 function punkPelvis(m: Sc) {
@@ -2465,6 +2455,148 @@ function bearTrap(head: VoxelModel): VoxelModel {
   return jw.m;
 }
 
+// ================================================================== SERKET'S CURSE: THE SCORPION IN HIS BONES
+// A carapace of bone and dark amber chitin has grown over the human skeleton: plates down the breastbone and
+// over the collarbones, segmented pauldrons, gauntlets with serrated pincer spurs, median-eye beads on the
+// brow, and a segmented bone scorpion tail from the base of his spine, its stinger glowing with Serket's venom.
+
+/** overlapping chitin plates down the breastbone (the ribs stay open at the sides) and over the collarbones */
+function carapace(m: Sc) {
+  for (let k = 0; k < 5; k++) {
+    const yc = 42.3 - k * 1.55, w = 2.3 - k * 0.12;
+    m.region([-w - 0.3, yc - 1.15, 2.6], [w + 0.3, yc + 0.95, 6.4], (x, y, z) => {
+      const zs = 4.75 - 0.13 * x * x + (yc - y) * 0.14; // each plate leans out at its lower edge, over the next
+      const ex = Math.abs(x) / w, ey = (y - yc) / (y < yc ? 1.05 : 0.9);
+      return ex * ex + ey * ey < 1 && z > zs - 0.6 && z < zs;
+    }, (x, y) => (y < yc - 0.65 ? BN.hi : Math.abs(x) < 0.3 ? CHI.hi : CHI.base));
+  }
+  for (const s of [1, -1]) m.path([[s * 1.6, 43.55, 3.95], [s * 3.6, 44.05, 3.5], [s * 5.8, 44.1, 1.9], [s * 7.0, 43.8, 0.55]], (t) => 0.52 - 0.1 * t, (x, y) => (y > 44.05 ? CHI.hi : CHI.base));
+}
+
+/** a segmented scorpion pauldron: overlapping curved plates over the shoulder, bone-rimmed, a bone keel, spines */
+function scorpPauldron(m: Sc, s: number, big: boolean) {
+  const n = big ? 3 : 2;
+  for (let k = 0; k < n; k++) {
+    const c: V3 = [s * (8.35 + k * 0.18), 43.05 - k * 1.05, -0.15];
+    const r: V3 = [big ? 3.15 - k * 0.1 : 2.7 - k * 0.1, 2.25, big ? 3.35 - k * 0.1 : 2.9];
+    const yLo = c[1] - 1.3;
+    m.shell(c, r, 0.72, (x, y, z) => (y < yLo + 0.32 ? BN.hi : (Math.floor((Math.atan2(z, (x - c[0]) * s) + 3) * 2.4) & 1) ? CHI.base : CHI.shade), (x, y) => y > yLo && (k === 0 || y < c[1] + 1.15));
+  }
+  m.path([[s * 7.0, 45.2, -2.5], [s * 8.4, 45.35, -0.1], [s * 9.3, 44.85, 2.3]], () => 0.42, BN.hi); // the keel
+  if (big)
+    for (const [z, h] of [[-1.5, 2.3], [1.0, 2.7]] as [number, number][]) // two curved bone spines, swept back
+      m.path([[s * 10.6, 43.5, z], [s * 11.6, 44.4 + h * 0.3, z - 0.5], [s * 12.1, 44.6 + h * 0.6, z - 1.4]], (t) => 0.6 - 0.5 * t, (x, y) => (y > 45.5 ? BN.hi : BN.base));
+}
+
+/** a bone-and-chitin gauntlet round a forearm: three overlapping bands, a serrated pincer spur on the outside */
+function gauntlet(m: Sc, s: number) {
+  const cx = s * 8.55, cz = -0.15;
+  for (let k = 0; k < 3; k++) {
+    const y0 = 26.1 + k * 1.85, y1 = y0 + 1.85;
+    m.region([cx - 2.3, y0, -2.4], [cx + 2.3, y1, 2.1], (x, y, z) => {
+      const R = lerp(1.6, 1.45, k / 2) + 0.28 * ((y - y0) / (y1 - y0)); // each band flares toward the elbow, over the next
+      const d = Math.hypot(x - cx, (z - cz) / 0.95);
+      return d < R && d > R - 0.55 && y < y1;
+    }, (x, y) => (y > y1 - 0.32 ? BN.hi : CHI.base));
+  }
+  // the pincer spur: a curved bone blade on the outer side of the wrist, swept back, teeth on its inner edge
+  const pts: V3[] = [[s * 10.0, 26.8, 0.25], [s * 11.0, 28.5, 0.4], [s * 11.25, 30.5, 0.1]];
+  m.path(pts, (t) => 0.66 - 0.48 * t, (x, y) => (y > 29.6 ? BN.hi : BN.base));
+  for (const t of [0.25, 0.45, 0.65]) {
+    const a = pts[0], b = pts[2];
+    const p: V3 = [lerp(a[0], b[0], t) - s * 0.45, lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
+    m.cap(p, [p[0] - s * 0.45, p[1] + 0.3, p[2]], 0.2, 0.07, BN.hi);
+  }
+}
+
+/** the scorpion touches on his skull: glossy median-eye beads on the brow, chitin ridges over the bare temple */
+function skullScorpion(hs: Sc) {
+  const H = hs.m;
+  const front = (x: number, y: number) => {
+    const i = vi(x), j = vi(y);
+    for (let l = 30; l > -10; l--) if (H.has(i, j, l)) return cen(l);
+    return 6.4;
+  };
+  for (const [x, y, r] of [[0.58, 58.05, 0.44], [-0.58, 58.05, 0.44], [1.45, 57.8, 0.28], [-1.45, 57.8, 0.28]] as [number, number, number][]) {
+    const c: V3 = [x, y, front(x, y) + r * 0.3];
+    hs.ell(c, [r, r, r * 0.85], (xx, yy) => (xx < c[0] && yy > c[1] ? 0x9cff5a : 0x0d0f12), { flags: M });
+  }
+  for (const pts of [[[-4.9, 57.7, 3.7], [-6.2, 56.7, 1.2], [-6.6, 55.1, -1.2]], [[-4.4, 56.0, 4.6], [-5.85, 54.0, 2.9], [-6.5, 52.9, 0.3]]] as V3[][]) {
+    const p2 = pts.map((p) => [p[0] - 0.25, p[1], p[2]] as V3);
+    hs.path(p2, (t) => 0.42 - 0.12 * t, (x, y) => (y > 56.2 ? CHI.hi : CHI.base));
+  }
+}
+
+/** the tail's resting curve (output units, rig space): from the base of the spine up his back and over the left
+ *  shoulder, the stinger poised beside his head */
+const TAIL_P: V3[] = [[0, 49.6, -5.4], [0.6, 56.6, -12.0], [2.0, 67.6, -14.8], [5.6, 79.0, -14.0], [12.0, 86.5, -7.0], [13.4, 89.0, -0.8]];
+const TAIL_R = [2.3, 2.1, 1.92, 1.76, 1.6];
+const TAIL_TIP: V3 = [12.6, 85.6, 5.1];
+/** one metasoma segment: a waisted bleached-bone vertebra under a dorsal chitin plate with a bone keel and
+ *  lateral spines, a ball knuckle at its root (output units) */
+function tailSeg(name: string, a: V3, b: V3, r: number) {
+  const m = sc(name);
+  const d = vnorm(vsub(b, a)), L = vlen(vsub(b, a));
+  const mid = vmul(vadd(a, b), 0.5);
+  let up = vsub(mid, [6, 70, -4]); // away from the inside of the curl
+  up = vnorm(vsub(up, vmul(d, vdot(up, d))));
+  const side = vnorm(vcross(d, up));
+  const lo: V3 = [Math.min(a[0], b[0]) - r - 1.5, Math.min(a[1], b[1]) - r - 1.5, Math.min(a[2], b[2]) - r - 1.5];
+  const hi: V3 = [Math.max(a[0], b[0]) + r + 1.5, Math.max(a[1], b[1]) + r + 1.5, Math.max(a[2], b[2]) + r + 1.5];
+  const local = (x: number, y: number, z: number) => {
+    const q = vsub([x, y, z], a), t = vdot(q, d) / L;
+    const rad = vsub(q, vmul(d, t * L)), rr = vlen(rad);
+    return { t, rr, u: rr > 1e-6 ? vdot(rad, up) / rr : 0 };
+  };
+  const prof = (t: number) => r * (0.74 + 0.18 * Math.sin(Math.PI * clamp(t, 0, 1)));
+  m.region(lo, hi, (x, y, z) => {
+    const { t, rr, u } = local(x, y, z);
+    if (t < -0.06 || t > 1.0) return false;
+    const plate = t > 0.2 && u > -0.25 ? r * (1.0 + 0.08 * u) : 0;
+    return rr < Math.max(prof(t), plate);
+  }, (x, y, z) => {
+    const { t, rr, u } = local(x, y, z);
+    if (rr > prof(t) * 0.97) return t > 0.9 ? BN.hi : u > 0.9 ? CHI.hi : (Math.floor(t * 6) & 1) ? CHI.base : CHI.shade;
+    return t < 0.12 ? BN.shade : BN.base;
+  });
+  m.ell(a, [r * 0.82, r * 0.82, r * 0.82], BN.shade); // the knuckle it turns on
+  m.path([vadd(a, vadd(vmul(d, L * 0.3), vmul(up, r * 1.02))), vadd(a, vadd(vmul(d, L * 0.95), vmul(up, r * 1.05)))], () => 0.36, BN.hi); // keel
+  for (const sd of [1, -1]) {
+    const p = vadd(a, vadd(vmul(d, L * 0.6), vmul(side, sd * r * 0.9)));
+    m.cap(p, vadd(p, vadd(vmul(side, sd * 1.0), vmul(d, -0.5))), 0.34, 0.1, BN.hi);
+  }
+  return m;
+}
+/** the telson: a bulb of bone ringed with riveted iron, and the curved stinger, its point glowing with venom */
+function telson(a: V3, tip: V3) {
+  const m = sc('stinger');
+  const d = vnorm(vsub(tip, a)), L = vlen(vsub(tip, a));
+  const down = vnorm(vsub([0, -1, 0], vmul(d, vdot([0, -1, 0], d))));
+  const side = vnorm(vcross(d, down));
+  const bc = vadd(a, vmul(d, L * 0.36));
+  m.oell(bc, [d, down, side], [L * 0.36, 1.8, 1.75], (x, y, z) => (vdot(vsub([x, y, z], bc), down) > 0.9 ? BN.shade : BN.base));
+  // the iron ring round the bulb's root, riveted
+  const rc = vadd(a, vmul(d, L * 0.14));
+  m.region(vsub(rc, [3, 3, 3]), vadd(rc, [3, 3, 3]), (x, y, z) => {
+    const q = vsub([x, y, z], rc), t = vdot(q, d);
+    const rr = vlen(vsub(q, vmul(d, t)));
+    return Math.abs(t) < 0.42 && rr < 1.95 && rr > 1.2;
+  }, (x, y, z) => ironCol(x, y, z, vdot(vsub([x, y, z], rc), down) < -0.8 ? 0.8 : 0), { flags: M });
+  for (const ang of [0, 2.1, 4.2]) {
+    const n = vnorm(vadd(vmul(down, Math.cos(ang)), vmul(side, Math.sin(ang))));
+    rivet(m, vadd(rc, vmul(n, 1.9)), n, 0.32);
+  }
+  // the aculeus: a curved bone hook, the last third wet with glowing venom
+  const p0 = vadd(a, vmul(d, L * 0.68));
+  const pts: V3[] = [p0, vadd(p0, vadd(vmul(d, L * 0.2), vmul(down, 0.35))), vadd(tip, vmul(down, 0.6))];
+  const sm = spline(pts, 6);
+  for (let i = 1; i < sm.length; i++) {
+    const t = i / (sm.length - 1);
+    m.cap(sm[i - 1], sm[i], lerp(0.95, 0.16, (i - 1) / (sm.length - 1)), lerp(0.95, 0.16, t), t > 0.66 ? VENOM : t > 0.5 ? BN.hi : BN.base, { flags: t > 0.66 ? VF.GLOW : VF.SOLID });
+  }
+  return { m, tip: vadd(tip, vmul(down, 0.6)) };
+}
+
 // ================================================================== SUNGLASSES (round punk shades over the sockets)
 const FRAME = ramp(0x34363d, 0x1c1d22, 0x8c919c, 0x0c0c0e); // gunmetal
 const LENS = { top: 0x0f1015, mid: 0x171a22, low: 0x252c3a, streak: 0xaebdd6, crack: 0xd6dde8 };
@@ -2587,6 +2719,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   WARP = W_BODY;
   const torso = sc('torso');
   torsoBody(torso);
+  carapace(torso);
   if (punk) punkTorso(torso);
   else if (coatish) dusterTorso(torso, LK.coat, LK.trim);
   else if (o === 'vest') vestTorso(torso, LK.coat, LK.trim, false);
@@ -2761,6 +2894,16 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   P('thigh_l', thighL.m, J.hip, 'pelvis');
   P('shin_l', shinL.m, J.knee, 'thigh_l');
   P('thigh_r', thighR.m, mg(J.hip), 'pelvis');
+  // the scorpion tail: five bone segments and the stinger, chained from the pelvis (sculpted in rig space)
+  const tailNames = ['tail1', 'tail2', 'tail3', 'tail4', 'tail5'];
+  tailNames.forEach((n, k) => {
+    const seg = tailSeg(n, TAIL_P[k], TAIL_P[k + 1], TAIL_R[k]);
+    shadeRamps(seg.m, [BN, CHI], true);
+    parts.push({ name: n, model: seg.m, pivot: vx(TAIL_P[k]), attach: vx(TAIL_P[k]), parent: k ? tailNames[k - 1] : 'pelvis' });
+  });
+  const sting = telson(TAIL_P[5], TAIL_TIP);
+  shadeRamps(sting.m.m, [BN], true);
+  parts.push({ name: 'stinger', model: sting.m.m, pivot: vx(TAIL_P[5]), attach: vx(TAIL_P[5]), parent: 'tail5' });
   P('shin_r', shinR.m, mg(J.knee), 'thigh_r');
   let skirt: ReturnType<typeof dusterSkirt> | null = null;
   if (coatish) {
@@ -2795,6 +2938,9 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     perch_hat: sock('head', [0, crownTop(hat, topY) + 0.15, -1.2]),
     perch_eyeL: sock('head', [J.eye[0], J.eye[1], J.eye[2] - 0.6]),
     perch_eyeR: sock('head', [-J.eye[0], J.eye[1], J.eye[2] - 0.6]),
+    // the venom tip of the stinger, and Pinch's perch on top of the fourth tail segment
+    tail_tip: { part: 'stinger', at: vx(sting.tip) },
+    perch_tail: { part: 'tail4', at: vx(vadd(vmul(vadd(TAIL_P[3], TAIL_P[4]), 0.5), [-0.4, TAIL_R[3] + 0.5, -0.6])) },
     // the cloth tails flutter from the mask knot (or from the back of the neck bandana)
     bandana_anchor: mask ? sock('mask', [0.45, 48.9, -8.75]) : sock('torso', [0, 44.1, -5.45]),
     // the sandboard rides between the shoulder blades, held by the sling (see attachBoardOnBack)
@@ -2837,8 +2983,10 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
       stanceWide: 0.02,
       // the iron bear-trap jaw: PlayerAnim snaps it shut on kills and the reload close, and chews when idle
       trapJaw: true,
+      // the scorpion tail chain (root first): PlayerAnim curls, flicks, jabs and whips it
+      tail: { parts: [...tailNames, 'stinger'] },
       // third-person camera fitted to his height (CameraRig.fitHero)
-      cam: { height: 1.2, shoulder: 0.94, dist: 2.65 },
+      cam: { height: 1.08, shoulder: 0.95, dist: 2.55 },
       // where the free hand takes the hat brim (head-local metres): the front of the brim, a touch to his left
       hatGrip: mm([2.2, 59.6, 11.2]).map((v, i) => v - mm(J.neck)[i]),
       height: (topY + HEAD_DY) * UH,
@@ -2886,7 +3034,7 @@ function crownTop(hat: VoxelModel, fallback: number) {
 
 // ================================================================== PINCH'S PERCHES
 /** names of the empty perch anchors on Sundown's head bone (sockets of the same name in the spec) */
-export const PERCH_NAMES = { hat: 'perch_hat', eyeL: 'perch_eyeL', eyeR: 'perch_eyeR' } as const;
+export const PERCH_NAMES = { hat: 'perch_hat', eyeL: 'perch_eyeL', eyeR: 'perch_eyeR', tail: 'perch_tail' } as const;
 /**
  * Pinch's perch anchors on a Sundown rig: `perch_hat` (on the hat crown), `perch_eyeL` / `perch_eyeR`
  * (in the left / right eye socket; character left = +X; the right one is the bare skull socket). All three
@@ -2895,8 +3043,8 @@ export const PERCH_NAMES = { hat: 'perch_hat', eyeL: 'perch_eyeL', eyeR: 'perch_
  * Object3D called exactly `perch_hat` / `perch_eyeL` / `perch_eyeR` at the rig socket of that name
  * (idempotent). Missing keys mean the rig has no such perch (another hero).
  */
-export function getPerchAnchors(root: THREE.Object3D): { hat?: THREE.Object3D; eyeL?: THREE.Object3D; eyeR?: THREE.Object3D } {
-  const out: { hat?: THREE.Object3D; eyeL?: THREE.Object3D; eyeR?: THREE.Object3D } = {};
+export function getPerchAnchors(root: THREE.Object3D): { hat?: THREE.Object3D; eyeL?: THREE.Object3D; eyeR?: THREE.Object3D; tail?: THREE.Object3D } {
+  const out: { hat?: THREE.Object3D; eyeL?: THREE.Object3D; eyeR?: THREE.Object3D; tail?: THREE.Object3D } = {};
   for (const [k, name] of Object.entries(PERCH_NAMES) as [keyof typeof PERCH_NAMES, string][]) {
     let a = root.getObjectByName(name);
     if (!a) {

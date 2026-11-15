@@ -14,6 +14,7 @@
 //   --no-vsync       uncap the frame rate (off by default: it burns GPU and can tear)
 //   --game-dir=PATH  serve the game from PATH instead of the bundled ./game folder
 //   --steam-appid=N, --no-steam, --no-steam-overlay   see steam.cjs
+//   --admin          the admin testing mode (the page opens with ?admin=1: F1 or ` for the panel)
 //   --smoke-test[=out.png]  boot, wait for the menu (window.__ready), optionally capture it, then
 //                    exit 0 on success or 1 on a timeout or a page error
 'use strict';
@@ -34,6 +35,7 @@ const DEV = flag('dev') || process.env.DUSTUP_DEV === '1';
 const SMOKE = flag('smoke-test') || opt('smoke-test') !== null;
 const SMOKE_SHOT = opt('smoke-test');
 const LOG_CONSOLE = DEV || SMOKE || flag('log-console');
+const ADMIN = flag('admin') || process.env.DUSTUP_ADMIN === '1';
 const GAME_DIR = path.resolve(opt('game-dir') || process.env.DUSTUP_GAME_DIR || path.join(__dirname, 'game'));
 const SCHEME = 'app';
 const HOST = 'dustup';
@@ -268,7 +270,7 @@ function createWindow() {
     if (SMOKE) app.exit(1);
   });
 
-  win.loadURL(`${ORIGIN}/index.html`);
+  win.loadURL(`${ORIGIN}/index.html${ADMIN ? '?admin=1' : ''}`);
   if (SMOKE) runSmoke(wc);
 }
 

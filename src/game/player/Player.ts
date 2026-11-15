@@ -23,6 +23,7 @@ import { Weapons } from './Weapons';
 import { installHairSway } from '../models/characters/hairSway';
 import { CigSmoke } from './CigSmoke';
 import type { HeroKit } from './heroes/HeroKit';
+import { CHEATS } from '../admin/Cheats';
 
 export interface PlayerVisuals {
   rig: RigSpec;
@@ -270,7 +271,10 @@ export class Player {
     });
     // a landed counter: safe for a beat, the view punches in on the impact
     // a kill: the iron trap jaw snaps shut with a clack (no-op on other jaws)
-    ctx.events.on('enemyKilled', () => this.pa.snapJaw());
+    ctx.events.on('enemyKilled', () => (this.pa.snapJaw(), this.pa.tailSnap()));
+    // melee and counters: the scorpion tail strikes (no-op without a tail)
+    ctx.events.on('melee', () => this.pa.tailJab());
+    ctx.events.on('counter', () => this.pa.tailJab());
     ctx.events.on('counter', () => {
       this.invuln = Math.max(this.invuln, 0.55);
       this.cam.punch(-0.03, 0, -3.4, 0);
@@ -511,6 +515,12 @@ export class Player {
     this.updateAssist(dt, this.aiming && !wasAiming);
     if (inp.touchMode) this.touchAssist(dt);
     else this.followCarve(dt, fx);
+    // admin testing mode: the cylinder (or Mark's crests in hand) never runs dry
+    if (CHEATS.infAmmo && this.alive) {
+      const k = this.kit as { crestsHand?: number; crestsMax?: number } | null;
+      if (k && typeof k.crestsMax === 'number') k.crestsHand = k.crestsMax;
+      else if (this.ammo < this.maxAmmo) this.ammo = this.maxAmmo;
+    }
     if (this.kit) {
       this.kit.update(dt);
       if (this.alive) this.updateGrapple(dt);
@@ -1335,7 +1345,7 @@ export class Player {
   // ------------------------------------------------------------- damage
   /** returns damage dealt */
   takeHit(hit: Hit, from?: THREE.Vector3): number {
-    if (!this.alive) return 0;
+    if (!this.alive || CHEATS.god) return 0;
     if (this.dodgeT > 0 && hit.source !== 'thorns') {
       this.perfectDodge();
       return 0;
@@ -1366,6 +1376,8 @@ export class Player {
   }
 
   applyDamage(amount: number, source: string, isTick: boolean) {
+    // admin testing mode: god mode takes nothing (storms, lava, statuses included)
+    if (CHEATS.god) return 0;
     let a = amount;
     if (this.shield > 0) {
       const s = Math.min(this.shield, a);

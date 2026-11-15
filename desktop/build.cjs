@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Builds the game with vite and packages it as a desktop app with Electron.
 //
-//   node desktop/build.cjs [--platforms=win32,linux] [--out=DIR] [--smoke] [--skip-vite]
+//   node desktop/build.cjs [--platforms=win32,linux] [--out=DIR] [--smoke] [--skip-vite] [--admin]
 //                          [--steam [--steam-appid=N] [--depot-windows=N] [--depot-linux=N] [--zip]]
 //
 // npm scripts: desktop:win (Windows x64), desktop:linux (Linux x64), desktop:all (both + smoke),
-// desktop:steam (both, as unzipped SteamPipe depot folders).
+// desktop:steam (both, as unzipped SteamPipe depot folders), desktop:admin (Windows x64 with the admin
+// testing mode built in: VITE_ADMIN=1, packaged as dustUP-ADMIN-win-x64.zip).
 // Output: <out>/dustUP-win-x64.zip and/or <out>/dustUP-linux-x64.zip. <out> defaults to
 // ./release/desktop (gitignored); everything intermediate goes to <out>/.work, never into dist/.
 // --steam writes <out>/steam/{content/windows,content/linux,scripts,output} instead (see
@@ -40,6 +41,9 @@ const PLATFORMS = opt('platforms', 'win32').split(',').map((s) => s.trim()).filt
 const ARCH = 'x64';
 const LABEL = { win32: 'win', linux: 'linux', darwin: 'mac' };
 const STEAM = flag('steam');
+// --admin: the web build carries the admin testing mode (VITE_ADMIN=1) and the outputs say so
+const ADMIN = flag('admin');
+const GAME_CACHE = path.join(WORK, ADMIN ? 'game-cache-admin' : 'game-cache');
 const STEAM_DEPOT = { win32: 'windows', linux: 'linux' };
 // the steamworks.js native binaries each platform keeps (the others are left out of its package)
 const STEAM_NATIVE = { win32: 'win64', linux: 'linux64' };
@@ -103,12 +107,12 @@ function stageApp() {
   fs.rmSync(stage, { recursive: true, force: true });
   fs.mkdirSync(stage, { recursive: true });
   const game = path.join(stage, 'game');
-  if (flag('skip-vite') && fs.existsSync(path.join(WORK, 'game-cache', 'index.html'))) {
-    fs.cpSync(path.join(WORK, 'game-cache'), game, { recursive: true });
+  if (flag('skip-vite') && fs.existsSync(path.join(GAME_CACHE, 'index.html'))) {
+    fs.cpSync(GAME_CACHE, game, { recursive: true });
   } else {
-    run('npx', ['vite', 'build', '--outDir', game, '--emptyOutDir'], { cwd: ROOT });
-    fs.rmSync(path.join(WORK, 'game-cache'), { recursive: true, force: true });
-    fs.cpSync(game, path.join(WORK, 'game-cache'), { recursive: true });
+    run('npx', ['vite', 'build', '--outDir', game, '--emptyOutDir'], { cwd: ROOT, env: { ...process.env, VITE_ADMIN: ADMIN ? '1' : '' } });
+    fs.rmSync(GAME_CACHE, { recursive: true, force: true });
+    fs.cpSync(game, GAME_CACHE, { recursive: true });
   }
   if (!fs.existsSync(path.join(game, 'index.html'))) throw new Error('vite build produced no index.html');
   for (const f of ['main.cjs', 'preload.cjs', 'steam.cjs', 'icon.png', 'icon.ico'])
@@ -183,7 +187,7 @@ function writeSteamKit(results) {
 }
 
 async function main() {
-  console.log(`dustUP desktop build: electron ${electronVersion}, platforms ${PLATFORMS.join(', ')}, out ${OUT}`);
+  console.log(`dustUP desktop build: electron ${electronVersion}, platforms ${PLATFORMS.join(', ')}, out ${OUT}${ADMIN ? ', admin testing mode' : ''}`);
   fs.mkdirSync(WORK, { recursive: true });
   for (const p of PLATFORMS) ensureElectronZip(p);
   const stage = stageApp();
@@ -221,7 +225,7 @@ async function main() {
       },
     });
     const built = paths[0];
-    const folder = `dustUP-${LABEL[platform] || platform}-${ARCH}`;
+    const folder = `dustUP${ADMIN ? '-ADMIN' : ''}-${LABEL[platform] || platform}-${ARCH}`;
     const final = path.join(path.dirname(built), folder);
     if (path.resolve(built) !== path.resolve(final)) {
       fs.rmSync(final, { recursive: true, force: true });
