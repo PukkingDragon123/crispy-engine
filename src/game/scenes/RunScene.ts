@@ -326,7 +326,7 @@ export class RunScene implements GameScene {
       rig: (() => {
         // the wardrobe can take the bandana mask or the shades off: build that look directly
         const lk = look as { hat: string; outfit: string; mask?: boolean; shades?: boolean };
-        if (lk.mask === false || lk.shades === false) {
+        if (lk.mask === true || lk.shades === false) {
           try {
             return CH.skeletonCowboyRig({ hat: lk.hat, outfit: lk.outfit, mask: lk.mask, shades: lk.shades } as any);
           } catch {

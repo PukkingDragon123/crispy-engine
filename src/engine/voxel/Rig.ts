@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { VoxelModel } from './VoxelModel';
 import { buildVoxelGeometry } from './Mesher';
 import { makeVoxelMaterial, sharedVoxelMaterial, VoxelMaterial } from '../render/VoxelMaterial';
+import { trackRig } from '../render/RigLod';
 
 export type V3 = [number, number, number];
 
@@ -177,6 +178,8 @@ export class RigInstance {
       groups[s.part].add(sg);
       this.sockets[k] = sg;
     }
+    // far away it draws a merged distant version (render/RigLod.ts)
+    trackRig(this);
   }
   /** reset all joints to rest pose */
   resetPose() {

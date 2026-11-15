@@ -15,7 +15,7 @@
 import * as THREE from 'three';
 import { PixelFx, clamp01, TAU, uiSfx } from './HudKit';
 import { blitObj, blitSquashObj, glint, pixelText, pixelTextWidth } from './HudSprites';
-import { UI, px, sprite, HUD_PAL, type PixelSprite } from './PixelUI';
+import { UI, px, sprite, spritePixels, HUD_PAL, type PixelSprite } from './PixelUI';
 import { HUD_ART as ART } from './HudArt';
 
 const WR = 19; // the old case radius (HUD px): the touch layer's watch offset is built on it
@@ -116,9 +116,16 @@ export class OutlawHud {
       cv.height = body.h;
     }
     const g = cv.getContext('2d', { willReadFrequently: true })!;
-    g.clearRect(0, 0, cv.width, cv.height);
-    g.drawImage(sprite(body), 0, 0);
-    const img = g.getImageData(0, 0, cv.width, cv.height);
+    // every frame: start from the case's own pixels (drawing the GPU sprite canvas into this CPU
+    // one and reading it back stalled each frame on the GPU)
+    const bodyCv = sprite(body), pix = spritePixels(bodyCv);
+    let img: ImageData;
+    if (pix && pix.width === cv.width && pix.height === cv.height) img = new ImageData(new Uint8ClampedArray(pix.data), pix.width, pix.height);
+    else {
+      g.clearRect(0, 0, cv.width, cv.height);
+      g.drawImage(bodyCv, 0, 0);
+      img = g.getImageData(0, 0, cv.width, cv.height);
+    }
     const d = img.data;
     const cx = (body.w - 1) / 2, cy = cx + 10;
     const elapsed = (1 - frac) * TAU;

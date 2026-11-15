@@ -321,6 +321,13 @@ export const SWAP_LIT: Record<string, string> = Object.fromEntries(Object.keys(H
 export const SWAP_FLASH: Record<string, string> = Object.fromEntries(Object.keys(HUD_PAL).map((c) => [c, c === 'k' || c === 'K' ? '#7a4a22' : '#fff8e8']));
 
 const spriteCache = new WeakMap<PixelSprite, Map<string, HTMLCanvasElement>>();
+/** the pixels each sprite canvas was made from: readers use these instead of reading the canvas
+ *  back (a GPU canvas read-back stalls the frame until the GPU has caught up) */
+const spritePix = new WeakMap<HTMLCanvasElement, ImageData>();
+/** the authored pixels behind a sprite canvas (undefined for any other canvas) */
+export function spritePixels(cv: HTMLCanvasElement): ImageData | undefined {
+  return spritePix.get(cv);
+}
 /**
  * An authored sprite as a canvas (cached per sprite and swap). `swap` maps palette chars
  * to colours (a palette swap); `key` names the swap for the cache (default: its JSON).
@@ -361,6 +368,7 @@ export function sprite(def: PixelSprite, swap?: Record<string, string>, key?: st
     }
   }
   c.putImageData(img, 0, 0);
+  spritePix.set(cv, img);
   m.set(k, cv);
   return cv;
 }

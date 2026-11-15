@@ -21,6 +21,7 @@ import { PlayerAnim } from '../anim/playerAnim';
 import { CastAnim } from '../anim/castAnim';
 import { Weapons } from './Weapons';
 import { installHairSway } from '../models/characters/hairSway';
+import { CigSmoke } from './CigSmoke';
 import type { HeroKit } from './heroes/HeroKit';
 
 export interface PlayerVisuals {
@@ -182,6 +183,8 @@ export class Player {
   private kickPhase = 0;
   /** procedural board animation (springs, IK, choreography) */
   private pa = new PlayerAnim();
+  /** his cigarette's smoke curl and exhales */
+  private smoke: CigSmoke;
   /** skill cast poses (grenade / flick / whistle) layered over the riding pose */
   private cast = new CastAnim();
   private castReady = false;
@@ -232,6 +235,8 @@ export class Player {
     this.rig = new RigInstance(buildRigGeo(vis.rig, vis.rig.name + ':player'), { material: this.material });
     // the follow camera fits the hero's height (Sundown's short cartoon body; no-op for rigs without meta.cam)
     cam.fitHero(vis.rig.meta);
+    // his cigarette smokes (no-op for rigs without meta.smoke)
+    this.smoke = new CigSmoke(ctx, this.rig);
     // his hair locks swing with speed and wind (no-op on rigs without hair)
     installHairSway(this.rig);
     this.gun = new RigInstance(buildRigGeo(vis.gun, vis.gun.name + ':player'), { material: this.material });
@@ -524,6 +529,7 @@ export class Player {
       this.animate(dt);
       this.kit?.post(dt, this.pa);
       this.dodgeVisuals(dt);
+      this.smoke.update(dt, this.pa.idleW > 0.8, this.alive && this.rig.root.visible);
     }
     this.barrelSmoke(dt);
     if (this.ctx.faces) {
@@ -1477,6 +1483,7 @@ export class Player {
   }
 
   dispose() {
+    this.smoke.dispose();
     this.kit?.dispose();
     this.weapons?.dispose();
     this.root.removeFromParent();

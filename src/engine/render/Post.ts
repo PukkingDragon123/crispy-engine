@@ -347,6 +347,14 @@ export class PostStack {
     this.outline.camera = camera as THREE.PerspectiveCamera;
   }
 
+  /** MSAA samples of the scene target (the adaptive resolution trades 4x for 2x under load) */
+  setSamples(n: number) {
+    const rt = this.composer.renderTarget1;
+    if (rt.samples === n) return;
+    rt.samples = n;
+    rt.dispose(); // three allocates it again, with the new sample count, on its next use
+  }
+
   setSize(w: number, h: number, pixelRatio: number) {
     this.composer.setPixelRatio(pixelRatio);
     this.composer.setSize(w, h);

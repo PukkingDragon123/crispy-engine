@@ -129,17 +129,22 @@ Sockets: `hand_r`, `hand_l`, `head_top`, `back`, `shoulder_l`, `shoulder_r`, `hi
 - `skeletonCowboyRig(look: CowboyLook): RigSpec` — `CowboyLook { hat: HatId; outfit: OutfitId }`
   - `HatId = 'stetson' | 'duck' | 'sombrero' | 'nemes' | 'tophat' | 'bandit'`
   - `OutfitId = 'bare' | 'punk' | 'duster' | 'poncho' | 'vest' | 'sheriff' | 'pharaoh'` (`punk` = the biker-jacket default look)
-  - Sundown is the HD build (`characters/sundown.ts`, 1/84 m) with STYLIZED CARTOON proportions (user note, latest:
-    "more cartoony, not that tall"): about 4.5 heads, 1.53 m to the crown (about 1.6 m with the hat), a big 34 cm
-    head, short legs under a longer trunk (hip 0.56 m), a short neck, short arms with the fists at the hip, big
-    blocky hands, chunky boots and a chunky stetson. Shapes are still authored on the legacy design grid; each body
-    part is rasterised through a `Warp` (sculpt.ts) onto that figure, the stetsons through a size-up hat warp, and the
-    head family (head, jaw, eyes, brows, hair, mask, glasses) is unwarped. Joints/sockets go through the same warps,
-    so read heights from `meta` (hipY, kneeY, shoulderY, hatTop, chinY...) and positions from sockets/nodes, never
-    from constants. `meta.toon = 1` switches on PlayerAnim's cartoon layer (squash and stretch, overshoot, the wider
-    stance, hat pop, bounce); `meta.cam` fits the follow camera (CameraRig.fitHero); `meta.hatGrip` is the brim grip.
-    Pinch's perches: empty sockets `perch_hat` (hat crown), `perch_eyeL` / `perch_eyeR` (eye sockets) on `head`,
-    +Z out of the face; `getPerchAnchors(root)` returns them as Object3Ds named exactly that.
+  - Sundown is the HD build (`characters/sundown.ts`, 1/96 m), a HEROIC CARTOON rocker cowboy (user note, latest:
+    "more cartoon but handsome, not weird"; tough late-80s hard-rock look, an original design): about 5.7 heads,
+    1.71 m to the crown (1.8 m with the hat), broad shoulders over a V-shaped trunk, slim waist, narrow hips, long
+    lean legs, a lean neck, hands and boots a touch stylized. Long voluminous curly dark hair in four sway chains
+    (`hair_l`, `hair_r`, `hair_bl`, `hair_br`, each + `2`), stubble, round shades over two modelled living eyes (the
+    right iris glows Serket green), and a modelled cigarette (`cig` part on the jaw, `cig_tip` socket, glowing
+    ember; `CigSmoke` curls pixel smoke from it, `meta.smoke`). The zombie accent is one clean gap through the
+    right cheek showing the side teeth and bone. Default ('punk') outfit: sleeveless studded black leather vest
+    over a torn original band-style tee, a bullet bandolier that slings the board, a loose bullet belt on the
+    hips, bare arms (barbed-wire tattoo), living fists with silver rings, studded wristbands and a sweatband, a
+    neckerchief, ripped jeans, harness boots, the rocker stetson. The outlaw mask is opt-in (`look.mask === true`).
+    Each body part is rasterised through a `Warp` (sculpt.ts); the head family is unwarped. Read heights from
+    `meta` and positions from sockets/nodes, never from constants. `meta.toon = 1` keeps PlayerAnim's cartoon layer
+    (`meta.stanceWide` sets its extra stance), `meta.cam` fits the follow camera, `meta.hatGrip` is the brim grip.
+    Pinch's perches: empty sockets on `head`, +Z out of the face: `perch_hat` (hat crown), `perch_eyeL` (left eye
+    socket), `perch_eyeR` (the cheek gap on the zombie side); `getPerchAnchors(root)` returns them by exact name.
     The 1/36 `skeleton.ts` build stays only as the base for `skeletonFigure()` (enemies).
   - parts: humanoid + `jaw`, `hat` (parent head), `coat` (parent pelvis), modelled `eye_l`/`eye_r` (glowing pupils).
   - socket `board_back` (torso, between the shoulder blades); mount a board with

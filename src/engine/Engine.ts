@@ -7,6 +7,7 @@ import { Tweens, Ease, reportError } from './Tween';
 import { AudioEngine } from './audio/AudioEngine';
 import { globalUniforms } from './render/VoxelMaterial';
 import { clamp, damp } from './math/rand';
+import { lodBefore, lodAfter } from './render/RigLod';
 
 export interface GameScene {
   scene: THREE.Scene;
@@ -106,6 +107,8 @@ export class Engine {
    * VRAM) for the rest of the session, run after run. setScene releases them (see releaseDrawn).
    */
   private drawn = new Set<THREE.BufferGeometry>();
+  /** empty draws skipped so far (see the renderBufferDirect wrapper; read by perf tools) */
+  skippedDraws = 0;
 
   constructor(public container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', stencil: false });
@@ -143,8 +146,10 @@ export class Engine {
     r.renderBufferDirect = (camera, scene, geometry, material, object, group) => {
       // nothing to draw (an empty instance batch or particle pool): three would still bind the
       // program, upload uniforms and issue an empty draw, in the shadow pass too
-      if ((object as THREE.InstancedMesh).isInstancedMesh && (object as THREE.InstancedMesh).count === 0) return;
-      if (geometry.drawRange.count === 0) return;
+      if (((object as THREE.InstancedMesh).isInstancedMesh && (object as THREE.InstancedMesh).count === 0) || geometry.drawRange.count === 0) {
+        this.skippedDraws++;
+        return;
+      }
       this.drawn.add(geometry);
       rbd(camera, scene, geometry, material, object, group);
     };
@@ -186,7 +191,11 @@ export class Engine {
 
   applyQuality(q: Partial<Quality>) {
     Object.assign(this.quality, q);
-    if (q.pixelRatio !== undefined) this.renderScale = 1;
+    if (q.pixelRatio !== undefined) {
+      this.renderScale = 1;
+      this.post.setSamples(4);
+    }
+    if (this.current) this.capShadows(this.current.scene);
     this.renderer.shadowMap.enabled = this.quality.shadows;
     this.post.bloom.enabled = this.quality.bloom;
     this.resize();
@@ -238,6 +247,7 @@ export class Engine {
     }
     // some scenes finish building over later frames
     if (load) while ((s as { ready?: boolean }).ready === false && this.current === s) await this.nextFrame();
+    if (this.current === s) this.capShadows(s.scene);
     if (fade > 0 || this.loader?.shown) void this.fadeIn(fade, light(color));
     else {
       this.covered = false;
@@ -265,6 +275,21 @@ export class Engine {
       }
     }
     this.drawn.clear();
+  }
+
+  /**
+   * Hold every shadow map in a scene to quality.shadowSize (scenes ask for 2048 to 4096; the low
+   * setting and phones get the smaller map they chose). Never raises a map a scene made smaller.
+   */
+  capShadows(root: THREE.Object3D) {
+    const cap = this.quality.shadowSize;
+    root.traverse((o) => {
+      const sh = (o as THREE.DirectionalLight).shadow;
+      if (!(o as THREE.Light).isLight || !sh || (sh.mapSize.x <= cap && sh.mapSize.y <= cap)) return;
+      sh.mapSize.set(Math.min(sh.mapSize.x, cap), Math.min(sh.mapSize.y, cap));
+      sh.map?.dispose();
+      sh.map = null;
+    });
   }
 
   /** resolves after the engine has rendered `n` more frames */
@@ -368,6 +393,8 @@ export class Engine {
       if (next === this.renderScale) return;
       this.renderScale = next;
       this.post.setSize(this.width, this.height, this.quality.pixelRatio * next);
+      // deep under load the edge smoothing goes 4x to 2x as well (the ink lines carry the edges)
+      this.post.setSamples(next < 0.75 ? 2 : 4);
       a.cool = 2.5;
     };
     if (slow) {
@@ -460,7 +487,15 @@ export class Engine {
         this.guardCamera(cur.camera);
         guard('audio', () => this.audio.setListener(cur.camera));
         if (!this.covered && !this.contextLost) {
-          guard('render', () => this.post.render(rdt));
+          guard('render', () => {
+            const rp = this.post.renderPass;
+            lodBefore(rp.scene, rp.camera, this.post.composer.renderTarget1.height);
+            try {
+              this.post.render(rdt);
+            } finally {
+              lodAfter();
+            }
+          });
           guard('postRender', () => cur.postRender?.(this.renderer));
         }
       }

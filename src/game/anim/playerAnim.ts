@@ -394,11 +394,11 @@ export class PlayerAnim {
     if (hd) this.neck.copy(hd);
     this.shoulderH = this.pelvisRest.y + (to?.y ?? 0.08) + this.shL.y;
     this.scale = (this.l1Leg + this.l2Leg) / 0.667;
-    const meta = rig.geo.spec.meta as { toon?: number; hatGrip?: number[] } | undefined;
+    const meta = rig.geo.spec.meta as { toon?: number; hatGrip?: number[]; stanceWide?: number } | undefined;
     this.toon = typeof meta?.toon === 'number' ? clamp01(meta.toon) : 0;
     this.hatGrip = Array.isArray(meta?.hatGrip) && meta.hatGrip.length === 3 ? new THREE.Vector3().fromArray(meta.hatGrip) : null;
     // a cartoon rider stands wider on the deck
-    this.stanceHalf = Math.abs(this.hipL.x) + (0.13 + 0.055 * this.toon) * this.scale;
+    this.stanceHalf = Math.abs(this.hipL.x) + (0.13 + (meta?.stanceWide ?? 0.055) * this.toon) * this.scale;
     if (this.toon > 0) {
       // snappier springs with a little overshoot: the body pops into a pose and settles, the hat flops
       const tn = this.toon;

@@ -9,7 +9,7 @@
 // The HUD's pieces themselves are authored pixel sprites (HudArt.ts, PixelUI.sprite).
 import * as THREE from 'three';
 import { IconFactory } from './IconFactory';
-import { UI } from './PixelUI';
+import { UI, spritePixels } from './PixelUI';
 import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import type { PixelFx } from './HudKit';
 
@@ -445,8 +445,13 @@ export function variant(src: Sprite | HTMLCanvasElement, kind: 'flash' | 'dim' |
   o.width = cv.width;
   o.height = cv.height;
   const c = o.getContext('2d', { willReadFrequently: true })!;
-  c.drawImage(cv, 0, 0);
-  const img = c.getImageData(0, 0, o.width, o.height);
+  const pix = spritePixels(cv);
+  let img: ImageData;
+  if (pix) img = new ImageData(new Uint8ClampedArray(pix.data), pix.width, pix.height);
+  else {
+    c.drawImage(cv, 0, 0);
+    img = c.getImageData(0, 0, o.width, o.height);
+  }
   const d = img.data;
   for (let k = 0; k < d.length; k += 4) {
     if (!d[k + 3]) continue;
@@ -516,7 +521,7 @@ function glintSpots(cv: HTMLCanvasElement) {
   let s = glintSpotsMap.get(cv);
   if (s) return s;
   s = [];
-  const d = cv.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, cv.width, cv.height).data;
+  const d = (spritePixels(cv) ?? cv.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, cv.width, cv.height)).data;
   const W = cv.width, H = cv.height;
   const lum = (x: number, y: number) => {
     if (x < 0 || y < 0 || x >= W || y >= H) return -1;
