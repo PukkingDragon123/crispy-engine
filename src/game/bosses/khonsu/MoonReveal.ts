@@ -81,10 +81,11 @@ export function buildRider(mat: THREE.ShaderMaterial): { root: THREE.Group; rig:
     set('pelvis', 0.12, 0, 0);
     set('torso', 0.32, 0.15, 0);
     set('head', -0.2, -0.75, 0);
-    set('thigh_l', -0.55, 0, 0.32);
-    set('shin_l', 0.85, 0, 0);
-    set('thigh_r', 0.35, 0, -0.3);
-    set('shin_r', 0.7, 0, 0);
+    // feet spread along the deck (his sides), knees bent in a low crouch
+    set('thigh_l', -0.5, 0, 0.36);
+    set('shin_l', 0.9, 0, 0);
+    set('thigh_r', -0.42, 0, -0.34);
+    set('shin_r', 0.8, 0, 0);
     set('arm_l', 0.2, 0, 1.15);
     set('fore_l', -0.3, 0, 0.2);
     set('arm_r', -0.3, 0, -1.05);
