@@ -48,7 +48,7 @@ export const LEDGER: LedgerPage[] = [
   },
   {
     id: 'ironJaw', name: 'The Iron Jaw', title: page('II'), model: '@hero',
-    lore: 'The trap crushed his skull past saving, and Serket spent a whole night trying to pry the iron off what was left. It had bitten into the bone for good. So she kept the teeth and taught them to talk. Rusted iron now clamps his scorpion mouthparts: it snaps on every kill, clacks on every reload and holds a cigarette better than lips ever did.',
+    lore: 'The trap ruined his old skull for good, and Serket spent a whole night trying to pry the iron off what was left. It had bitten into the bone for keeps. So she kept the teeth, polished them up and taught them to talk. Now an iron grille clamps his scorpion mouthparts: it snaps on every kill, clacks on every reload and holds a cigarette better than lips ever did.',
     hint: 'Fall once, and stand before the jackal.',
     via: ['legend:anubis'],
     need: { stat: 'deaths', n: 1 },

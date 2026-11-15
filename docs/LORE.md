@@ -5,6 +5,7 @@ the tortoise's gossip) should agree with this page. When the game and this page 
 
 **Tone:** a campfire tall tale told by someone who was almost there. Western myth with Egyptian gods in it. Dry
 jokes, big hats, bigger gods. Dark things happen, but we tell them with a squint and a grin, never with gore.
+Sundown is cool and heroic, not scary: clean bone, a confident look, a good hat.
 
 ---
 
@@ -44,13 +45,13 @@ needed something to call him. The flats are called **Sundown Flats** now. Every 
 
 ### The Iron Jaw
 
-The trap had crushed his skull past saving, and Serket spent a whole night trying to pry the iron off what was left.
-It had bitten so deep it had become part of the bone. So she did the sensible thing: she kept the teeth and taught
-them to talk.
+The trap had ruined his old skull for good, and Serket spent a whole night trying to pry the iron off what was left.
+It had bitten so deep it had become part of the bone. So she did the sensible thing: she kept the teeth, polished
+them up and taught them to talk.
 
-The bear trap's rusted iron teeth are clamped into his mouthparts now, the scorpion chelicerae Serket gave him. They
-snap shut when he kills, clack when he reloads, and hold a cigarette better than any lip ever did. He does not talk
-much. When he does, it sounds like a gate closing.
+The bear trap is a grille of polished iron teeth clamped over his mouthparts now, the scorpion chelicerae Serket gave
+him. It snaps shut when he kills, clacks when he reloads, and holds a cigarette better than any lip ever did. He does
+not talk much. When he does, it sounds like a gate closing.
 
 ### The Remaking
 
@@ -73,8 +74,10 @@ it by halves. Nothing of the man's face survived the trap, so nothing of it came
   skeletal pincers, for everything else. (Thoth thinks this is the best thing that has ever happened. Ozymandias
   notes that he still pays with one hand.)
 - The Black Stinger's tail grew out of his spine: segmented bone, a green venom stinger at the tip.
-- The cigarette, the hat and the shades were his idea. Serket says a scorpion in shades is ridiculous. He says so is
-  a goddess in a sandstorm.
+- The hair came back anyway, long and curly, out from under the hat. Serket insists the hair was not her idea. The
+  hair disagrees.
+- The cigarette and the hat were his idea. Serket says a scorpion in a hat is ridiculous. He says so is a goddess in a
+  sandstorm.
 
 Nobody would know him now. That is half the point: the face on his old wanted posters belonged to a man who died.
 

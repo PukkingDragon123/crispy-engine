@@ -71,7 +71,7 @@ const HEEL = ramp(0x4b3527, 0x37261b, 0x604534, 0x22150d);
 const STITCH = 0x9c9aa4;
 const VENOM = 0x8cf03c;
 /** dark amber chitin (Serket's curse grown over his bones): plates, gauntlets, the tail's armour */
-const CHI = ramp(0x6e4220, 0x4c2c14, 0xa86a30, 0x2e1a0c);
+const CHI = ramp(0x9c5c26, 0x713f19, 0xd28d3e, 0x4a2a12);
 const M = VF.METAL;
 markBone(BN.base, BN.shade, BN.hi, ENAMEL);
 
@@ -1029,12 +1029,6 @@ const INCISION: V3[] = [[-2.35, 33.7, 0], [-2.05, 31.4, 0], [-1.75, 29.2, 0], [-
 function torsoSkinCol(x: number, y: number, z: number, i: number, j: number, l: number): number {
   const [, hz, zc] = envAt(FLESH_ENV, clamp(y, 29.2, 44.4));
   const front = z > zc + hz * 0.5;
-  const di = distPoly([x, y, 0], INCISION);
-  if (front && y < 34) {
-    if (di < 0.3) return MEAT.dark;
-    if (di < 0.85) return ROT.base;
-    if (di < 1.4) return ROT.hi;
-  }
   if (front) {
     if (x > 0.6 && x < 5.4 && Math.abs(y - (37.0 + 0.06 * (x - 0.6) ** 2)) < 0.26) return SKIN.shade; // under the pectoral
     if (Math.abs(x) < 0.3 && y < 41.8) return SKIN.shade; // the sternum / belly line
@@ -1067,12 +1061,12 @@ function torsoBody(m: Sc) {
       // the torn-open cavity: only a dark inner wall is left behind the bones
       const r = depth(x, y, z);
       if (r > 0.72) return;
-      m.m.set(i, j, l, r > 0.6 ? MEAT.dark : CAVITY);
+      m.m.set(i, j, l, r > 0.6 ? CHI.dark : 0x3a2618);
       return;
     }
     const cord = y > 43.2 && Math.abs(Math.abs(x) - 1.5 + (y - 43.2) * 0.12) < 0.25 && z > neckZ(y); // neck cords
     const healthy = cord ? SKIN.shade : torsoSkinCol(x, y, z, i, j, l);
-    m.m.set(i, j, l, d < 0.3 ? ROT.dark : d < 0.75 ? ROT.base : healthy);
+    m.m.set(i, j, l, d < 0.35 ? SKIN.shade : healthy);
   });
   // bones show only where the flesh is gone
   const bn = sc('torso_bones');
@@ -1083,8 +1077,8 @@ function torsoBody(m: Sc) {
   });
   // the neck on the dead side: the sternocleidomastoid and a scalene stripped to sinew, strung from behind the
   // ear to the collarbone
-  strand(m, [[-2.2, 47.6, -1.9], [-1.95, 45.4, -0.2], [-1.15, 43.4, 1.7]], 0.46, 0.4, SINEW.base, SINEW.shade, 0.3);
-  strand(m, [[-2.55, 47.2, -2.9], [-2.75, 45.2, -2.2], [-3.4, 43.6, -1.3]], 0.38, 0.34, SINEW.shade, SINEW.base, 0.3);
+  strand(m, [[-2.2, 47.6, -1.9], [-1.95, 45.4, -0.2], [-1.15, 43.4, 1.7]], 0.46, 0.4, CART, CART_SH, 0.3);
+  strand(m, [[-2.55, 47.2, -2.9], [-2.75, 45.2, -2.2], [-3.4, 43.6, -1.3]], 0.38, 0.34, CART_SH, CART, 0.3);
   // the living side: a defined sternocleidomastoid from behind the ear down to the notch of the throat
   m.cap([2.2, 47.4, -1.9], [0.95, 43.5, 1.55], 0.62, 0.5, (x, y) => (y < 43.9 ? SKIN.shade : SKIN.base), { mode: 'under' });
   // crude stitches across the incision down the right of the belly
@@ -1100,7 +1094,7 @@ function bellyBody(m: Sc) {
   const f = sc('belly');
   const hxy = (y: number) => lerp(5.75, 5.45, clamp((y - 25.4) / 3.9, 0, 1));
   f.region([-7, 25.2, -6], [7, WAIST_CUT, 4.5], (x, y, z) => y < WAIST_CUT && Math.pow(Math.abs(x) / hxy(y), 2.5) + Math.pow(Math.abs(z + 1.0) / 3.95, 2.5) <= 1, SKIN.base);
-  const sdf = (x: number, y: number, z: number) => ell3(x, y, z, [-5.4, 28.0, 0.8], [2.4, 1.9, 3.2]) + 0.25 * Math.sin(y * 3.1 + z * 1.3);
+  const sdf = (_x: number, _y: number, _z: number) => 9; // the belly is whole
   f.m.forEach((i, j, l) => {
     const [x, y, z] = f.at(i, j, l);
     const d = sdf(x, y, z);
@@ -1109,11 +1103,7 @@ function bellyBody(m: Sc) {
       return;
     }
     let c: number = SKIN.base;
-    const di = distPoly([x, y, 0], INCISION);
-    if (z > 1.0 && di < 0.3) c = MEAT.dark;
-    else if (z > 1.0 && di < 0.85) c = ROT.base;
-    else if (z > 1.0 && di < 1.4) c = ROT.hi;
-    else if (Math.abs(x - 0.35) < 0.3 && Math.abs(y - 28.35) < 0.3 && z > 2.2) c = SKIN.dark; // navel
+    if (Math.abs(x - 0.35) < 0.3 && Math.abs(y - 28.35) < 0.3 && z > 2.2) c = SKIN.dark; // navel
     else if (x > 1.4 && x < 4.8 && z > 1.4 && Math.abs(y - (26.5 + (x - 1.4) * 0.62)) < 0.24) c = SKIN.shade; // the cut of the hip
     m.m.set(i, j, l, rotEdgeCol(d, x, y, z, c));
   });
@@ -1210,7 +1200,7 @@ function livingHand(m: Sc, s: number) {
     const tip: V3 = [x + spread * 1.15, p2[1] - 1.0 * L, 0.95];
     m.sweep([p0, p1, p2, tip], (t) => [0.36, 0.5, lerp(0.62, 0.5, t)], K, 0.2);
     m.ell(tip, [0.36, 0.42, 0.5], (xx, yy, zz) => (zz > tip[2] + 0.15 && yy < tip[1] + 0.2 ? NAIL : K)); // nail
-    if (i < 2) m.ell([x, 22.45, 0.85], [0.4, 0.4, 0.3], MEAT.shade, { mode: 'paint' }); // split knuckles
+
   });
   m.path([[s * 7.5, 24.4, 0.6], [s * 6.4, 22.9, 1.05], [s * 6.0, 21.45, 1.5], [s * 6.1, 20.45, 1.75]], (t) => 0.56 - 0.14 * t, K); // thumb
 }
@@ -1672,7 +1662,7 @@ function punkArmR(m: Sc) {
 }
 
 function punkArmL(m: Sc) {
-  livingUpperArm(m, 1);
+  upperArmFlesh(m, 1, SKIN.base);
   const ax = 8.0;
   // the torn-off sleeve: a short ragged stump on the shoulder
   const teeth = [0.0, 0.95, 0.3, 1.25, 0.45, 0.0, 0.85, 0.2, 1.05, 0.4];
@@ -1699,14 +1689,14 @@ function punkArmL(m: Sc) {
 }
 
 function punkForeR(m: Sc) {
-  deadForearm(m, -1);
+  forearm(m, -1); // clean bone
   hand(m, -1, true);
   gauntlet(m, -1);
   shadeRamps(m.m, [LEA, BN, ROT, CHI], true);
 }
 
 function punkForeL(m: Sc) {
-  livingForearm(m, 1);
+  forearmFlesh(m, 1, SKIN.base);
   livingHand(m, 1);
   gauntlet(m, 1);
   shadeRamps(m.m, [LEA, BN, SKIN, CHI], true);
@@ -1795,8 +1785,7 @@ function punkThigh(m: Sc, s: number) {
     m.ell([s * 3.6, 16.75, 0.3], [1.75, 2.05, 1.72], SKIN.base, { mode: 'under' }); // the living knee
     m.ell([s * 3.6, 16.2, 1.65], [0.8, 0.85, 0.5], SKIN.hi, { mode: 'under' });
   } else {
-    m.cap([s * 3.9, 21.5, -0.4], [s * 3.65, 17.8, 0.1], 1.85, 1.75, (x, y, z) => (Math.abs(y - 19.6) < 0.25 ? MEAT.dark : ROT.base), { mode: 'under' });
-    femur(m, s, 21.0);
+    m.cap([s * 3.9, 21.5, -0.4], [s * 3.65, 17.8, 0.1], 1.85, 1.75, SKIN.base, { mode: 'under' });
   }
   // white weft threads bridging the hole
   m.region([rip.cx - 2, rip.cy - 2, 0], [rip.cx + 2, rip.cy + 2, 3.2], (x, y, z) => {
@@ -1819,7 +1808,7 @@ function punkShin(m: Sc, s: number) {
     m.walls([s * 3.6 - 2.2, 13.8, -0.6], [s * 3.6 + 2.2, 16, 3.4], (x, y, z) => z > -0.2 && ripMask(x, y, s * 3.6, 16.95, 1.45, 1.45), (x, y, z) => (z > 0.6 ? FRAY : DEN.dark));
   }
   if (s > 0) m.region([s * 3.6 - 2, 14.0, -1], [s * 3.6 + 2, 15.5, 2.4], (x, y, z) => y < 15.5 && ((x - s * 3.6) / 1.75) ** 2 + ((y - 16.75) / 2.05) ** 2 + ((z - 0.3) / 1.72) ** 2 <= 1, SKIN.base, { mode: 'under' });
-  else tibia(m, s, 10.4);
+
   cowboyBoot(m, s, BOOT, { harness: true, spur: true });
   greaves(m, s);
   shadeRamps(m.m, [DEN, BOOT, BN, SKIN], true);
@@ -2329,14 +2318,14 @@ function burnHole(models: VoxelModel[]) {
 // bolted into the skull and the cheekbones (the living skin of the left cheek stitched down to it), the lower
 // arc is the rig's `jaw` part and swings on the hinge axis. Leaf springs under the hinges, rivets, a ring and
 // a short chain under the chin. Pixel-art iron: pitting, rust patches and rust runs, bright worn tooth tips.
-const IRON = ramp(0x79736b, 0x58524c, 0xbdb4a7, 0x352f2a);
-const IRON_EDGE = 0xeae3d5;
+const IRON = ramp(0x8f8a83, 0x67625c, 0xcdc6ba, 0x3c3833);
+const IRON_EDGE = 0xf4efe4;
 const RUST = { base: 0x8a4a2a, dark: 0x45230f, hi: 0xa8653a, run: 0x96512e };
 /** the hinge axis of the trap (design units, head family): the lower jaw swings round it */
 const J_TRAP: V3 = [0, 47.0, 1.0];
 /** the jaw arcs: half-ellipses round the mouth (A wide, B deep from the hinge line zc), band T thick; the upper
  *  band's height, the lower band's, the tooth height H and pitch P along the arc */
-const TR = { A: 6.4, B: 8.0, zc: 1.0, T: 1.2, upTop: 49.35, upBot: 48.1, loTop: 45.9, loBot: 44.6, H: 2.1, P: 3.45 };
+const TR = { A: 6.4, B: 8.0, zc: 1.0, T: 1.2, upTop: 49.35, upBot: 48.1, loTop: 45.9, loBot: 44.6, H: 1.75, P: 4.2 };
 const trapE = (x: number, z: number) => Math.hypot(x / TR.A, (z - TR.zc) / TR.B);
 const trapPhi = (x: number, z: number) => Math.atan2(x / TR.A, (z - TR.zc) / TR.B);
 const trapU = (x: number, z: number) => (trapPhi(x, z) * (TR.A + TR.B)) / 2;
@@ -2348,8 +2337,7 @@ function trapTooth(x: number, z: number, h: number, ph: number) {
   const w = 0.44 * (1 - h / TR.H) + 0.05;
   const d = Math.abs(u - Math.round(u));
   // a small barb on one flank of each tooth: the serration
-  const barb = Math.abs(h - TR.H * 0.45) < 0.16 && u - Math.round(u) > 0 && d < w + 0.09;
-  return d < w || barb;
+  return d < w;
 }
 /** forged iron, pixel-art: pitting, worn bright edges (k: 0..1 wear) */
 function ironCol(x: number, y: number, z: number, k: number) {
@@ -2361,16 +2349,9 @@ function ironCol(x: number, y: number, z: number, k: number) {
 }
 /** rust over the iron (matte): blotches, and runs streaking down the band from the rivets */
 function rustCol(x: number, y: number, z: number): number | null {
-  const inner = trapE(x, z) < 1 - (0.55 * TR.T) / ((TR.A + TR.B) / 2);
-  const root = Math.abs(y - TR.upBot) < 0.35 || Math.abs(y - TR.loTop) < 0.35;
-  if ((inner || root) && vhash(Math.floor(x * S), Math.floor(y * S), Math.floor(z * S)) < 0.7) return RUST.dark;
-  const b = blotch(x * 1.35 + 3.1, y * 1.35, z * 1.35);
-  if (b > 0.7) return RUST.hi;
-  if (b > 0.46) return RUST.base;
-  const u = trapU(x, z);
-  const run = Math.abs((((u * 0.85) % 2.6) + 2.6) % 2.6 - 1.3);
-  if (run < 0.16 && vhash(Math.floor(x * S), 0, Math.floor(z * S)) < 0.6) return RUST.run;
-  return b < -0.75 ? RUST.dark : null;
+  // polished iron: only a faint warm patina in the deepest corners
+  const root = Math.abs(y - TR.upBot) < 0.25 || Math.abs(y - TR.loTop) < 0.25;
+  return root && vhash(Math.floor(x * S), Math.floor(y * S), Math.floor(z * S)) < 0.25 ? RUST.hi : null;
 }
 /** a domed iron rivet at p (n outward) */
 function rivet(m: Sc, p: V3, n: V3, r = 0.42) {
@@ -2481,15 +2462,15 @@ function scorpionHead(hair: boolean): { head: VoxelModel; brow_l: VoxelModel; br
   hs.ell([0, 52.3, 7.75], [0.75, 1.1, 1.1], 0, { mode: 'carve' });
   // the ocular ridge across the front, and the sockets the median eyes sit in
   hs.ell([0, 54.5, 4.4], [5.1, 1.75, 2.0], BN.hi, { p: 2.4 });
-  for (const s of [1, -1]) hs.ell([s * J_EYE[0], J_EYE[1], J_EYE[2]], [1.4, 1.35, 1.2], 0, { mode: 'carve' });
-  hs.walls([-5, 52, 4], [5, 56, 7.2], (x, y, z) => ((Math.abs(x) - J_EYE[0]) / 1.4) ** 2 + ((y - J_EYE[1]) / 1.35) ** 2 + ((z - J_EYE[2]) / 1.2) ** 2 <= 1, SOCK.deep);
+  for (const s of [1, -1]) hs.ell([s * J_EYE[0], J_EYE[1], J_EYE[2]], [1.75, 1.65, 1.4], 0, { mode: 'carve' });
+  hs.walls([-5.5, 51.6, 3.6], [5.5, 56.4, 7.6], (x, y, z) => ((Math.abs(x) - J_EYE[0]) / 1.75) ** 2 + ((y - J_EYE[1]) / 1.65) ** 2 + ((z - J_EYE[2]) / 1.4) ** 2 <= 1, BN.shade);
   // keels: lateral keels sweeping back over the sides, a median keel up the crown; granular
   for (const s of [1, -1]) {
     hs.path([[s * 4.7, 54.4, 5.0], [s * 5.7, 56.2, 1.9], [s * 6.0, 57.7, -1.7], [s * 5.5, 58.5, -5.0]], () => 0.5, BN.hi);
     hs.path([[s * 4.9, 51.6, 5.2], [s * 6.0, 52.6, 1.6], [s * 6.3, 53.6, -2.4]], () => 0.42, BN.hi);
   }
   hs.path([[0, 56.2, 5.3], [0, 59.3, 3.1], [0, 61.6, -1.0]], () => 0.45, BN.hi);
-  hs.region([-7, 49, -9], [7, 63, 9], () => true, (x, y, z) => (vhash(Math.floor(x * S), Math.floor(y * S), Math.floor(z * S)) < 0.08 ? BN.hi : null), { mode: 'paint' });
+
   // lateral eyes: a cluster of three glossy beads at each front corner
   for (const s of [1, -1])
     for (const [dx, dy, dz, r] of [[0, 0, 0, 0.44], [0.55, -0.4, -0.35, 0.34], [-0.15, -0.6, -0.55, 0.3]] as [number, number, number, number][]) {
@@ -2503,27 +2484,45 @@ function scorpionHead(hair: boolean): { head: VoxelModel; brow_l: VoxelModel; br
   shadeRamps(hs.m, [BN, CHI, HAIR], true);
   // small chitin keels over each median eye (expressions tilt them)
   const br = sc('brow');
-  for (const s of [1, -1]) br.path([[s * 4.6, 55.35, 5.4], [s * 3.2, 55.85, 6.15], [s * 1.9, 55.55, 6.0]], () => 0.46, CHI.hi);
+  // heavy, low brow plates: a cool gunslinger squint (the inner ends a touch lower)
+  for (const s of [1, -1]) br.sweep([[s * 5.05, 56.05, 4.9], [s * 3.4, 56.15, 6.45], [s * 1.6, 55.65, 6.55]], (t) => [0.62, 0.5 - 0.06 * t, 0.62], (x, y) => (y > 56.2 ? CHI.hi : CHI.base), 0.15);
   const brow_l = splitOff(br, 'brow_l', (x) => x > 0);
   const brow_r = splitOff(br, 'brow_r', (x) => x < 0);
   return { head: hs.m, brow_l, brow_r };
 }
 /** a median eye: a glossy black dome with a catch-light (left), or Serket's green burning in it (right) */
 function scorpEye(s: number, v: EyeVar) {
-  const m = sc(s > 0 ? 'eye_l' : 'eye_r');
+  // a clear glossy eye: off-white ball, a big iris (warm amber; the right one Serket green, softly lit), a dark pupil
+  // and a catch-light, under a heavy upper lid of bone (the cocky squint; expressions move the lids)
+  const m = new VoxelModel(s > 0 ? 'eye_l' : 'eye_r');
   const c: V3 = [s * J_EYE[0], J_EYE[1], J_EYE[2]];
-  if (v === 'shut') {
-    m.ell(c, [1.2, 1.15, 1.0], (x, y) => (y > c[1] ? BN.hi : BN.shade)); // a bone lid
-    return m.m;
-  }
-  const r = v === 'wide' ? 1.32 : 1.2;
-  const glow = s < 0 && v !== 'dead';
-  m.ell(c, [r, r, r * 0.95], (x, y, z) => {
-    const glint = (x - c[0]) * s < -0.15 && y > c[1] + 0.3;
-    if (s < 0) return v === 'dead' ? 0x3c4438 : z > c[2] + 0.55 && Math.hypot(x - c[0], y - c[1]) < (v === 'intense' ? 0.8 : 0.6) ? EYE.core : EYE.ring;
-    return glint && v !== 'dead' ? 0xe2eaf2 : v === 'dead' ? 0x5a5f63 : v === 'dim' ? 0x22262a : 0x0f1114;
-  }, { flags: glow ? (v === 'dim' ? VF.EMISSIVE : VF.GLOW) : M });
-  return m.m;
+  const R = 1.5;
+  const lidTop = v === 'wide' ? 1.1 : v === 'intense' ? 0.12 : v === 'shut' || v === 'dead' ? -2 : 0.42;
+  const lidBot = v === 'intense' ? -0.95 : -1.25;
+  const iris = v === 'dead' ? 0x8a8f8c : s < 0 ? 0x5fd03a : 0xd8902c, irisSh = s < 0 ? 0x2f7a1e : 0x9a5a1a;
+  const i0 = Math.floor((c[0] - R) * S) - 1, i1 = Math.ceil((c[0] + R) * S) + 1;
+  const j0 = Math.floor((c[1] - R) * S) - 1, j1 = Math.ceil((c[1] + R) * S) + 1;
+  const l0 = Math.floor((c[2] - R) * S) - 1, l1 = Math.ceil((c[2] + R) * S) + 1;
+  for (let i = i0; i <= i1; i++)
+    for (let j = j0; j <= j1; j++) {
+      let front = -1e9;
+      for (let l = l0; l <= l1; l++) {
+        const x = cen(i) - c[0], y = cen(j) - c[1], z = cen(l) - c[2];
+        if (x * x + y * y + z * z > R * R) continue;
+        front = l;
+        const lid = y > lidTop || y < lidBot;
+        m.set(i, j, l, lid ? (y > 0 ? BN.hi : BN.shade) : 0xece6da, lid ? VF.SOLID : M);
+      }
+      if (front < -1e8) continue;
+      const x = cen(i) - c[0], y = cen(j) - c[1];
+      if (y > lidTop || y < lidBot) continue;
+      const d = Math.hypot(x + s * 0.1, y + 0.1);
+      const glint = Math.abs(x - s * -0.45) < 0.34 && Math.abs(y - 0.25) < 0.34 && v !== 'dead' && v !== 'dim';
+      if (glint) m.set(i, j, front, 0xffffff, VF.EMISSIVE);
+      else if (d < 0.42 && v !== 'dead') m.set(i, j, front, 0x0b0c0e, M);
+      else if (d < 1.02) m.set(i, j, front, y > 0.2 ? irisSh : iris, s < 0 && v !== 'dead' ? VF.EMISSIVE : M);
+    }
+  return m;
 }
 /** the chelicerae: two big jaws of bone under the anterior plate, their fingers curling down in front of the iron
  *  trap, bound to it by riveted iron rings */
@@ -2565,7 +2564,7 @@ function chelaHand(s: number, w: V3, dir: V3) {
   const mc = vadd(w, vmul(d, 4.2));
   m.oell(mc, [d, up, side], [4.8, 3.1, 2.8], (x, y, z) => {
     const q = vsub([x, y, z], mc);
-    return vdot(q, up) > 0.9 ? CHI.base : vhash(Math.floor(x * S), Math.floor(y * S), Math.floor(z * S)) < 0.08 ? BN.hi : BN.base;
+    return vdot(q, up) > 0.9 ? CHI.base : vdot(q, up) > 0.2 ? BN.hi : BN.base;
   });
   for (const k of [-1.4, 1.4]) m.path([vadd(mc, vadd(vmul(d, -3.7), vadd(vmul(up, 2.7), vmul(side, k)))), vadd(mc, vadd(vmul(d, 3.6), vadd(vmul(up, 2.4), vmul(side, k * 0.8))))], () => 0.42, BN.hi);
   m.ell(w, [1.75, 1.75, 1.75], BN.shade); // the wrist knuckle
@@ -2982,7 +2981,8 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
 
   // ---- hair locks, glasses, and every cell two meshes would share (they would z-fight)
   const hair = hairy ? hairLocks() : null;
-  const shades = look.shades !== false;
+  // no shades any more (user note): his eyes show
+  const shades = false as boolean;
   const glassCache = new Map<string, VoxelModel>();
   const glassesOf = (l: EyeVar, r: EyeVar) => {
     let m = glassCache.get(l + r);

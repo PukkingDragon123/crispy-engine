@@ -853,11 +853,11 @@ export class PlayerAnim {
       const flare = 0.08 + Math.abs(this.lean.x) * 0.35 + carve * 0.2 + this.airW * 0.5 + this.driftW * 0.25 + this.stunW * 0.2;
       const breathe = Math.sin(t * 0.9 + s * 1.3) * 0.06 * (0.4 + this.idleW);
       c.spread.step(flare + breathe * 0.5, dt);
-      c.pitch.step(-0.1 + sp + breathe - this.airW * 0.25 + this.deadW * 0.6, dt);
+      c.pitch.step(-0.32 + sp + breathe - this.airW * 0.2 + this.deadW * 0.8, dt); // held up and ready
       c.wrist.step(Math.sin(t * 1.3 + s * 1.7) * 0.18 * (0.3 + this.idleW) - sp * 0.3, dt);
       c.open.step(Math.max(so, snapOpen, 0.05 + this.airW * 0.25), dt);
       c.n[0].rotation.set(c.pitch.x, -s * c.spread.x * 0.3, s * c.spread.x);
-      c.n[1].rotation.set(c.pitch.x * 0.45 - 0.05, 0, 0);
+      c.n[1].rotation.set(c.pitch.x * 0.45 - 0.28, 0, 0);
       c.n[2].rotation.set(c.wrist.x, 0, 0);
       c.n[3].rotation.set(clamp(c.open.x, -0.1, 1.0), 0, 0);
     }
