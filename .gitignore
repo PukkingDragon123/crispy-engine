@@ -4,3 +4,7 @@ dist/
 .DS_Store
 /scratch/
 __pycache__/
+
+# desktop (Electron) packaging outputs
+/release/
+*.part

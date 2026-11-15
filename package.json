@@ -8,7 +8,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "desktop:win": "node desktop/build.cjs --platforms=win32",
+    "desktop:linux": "node desktop/build.cjs --platforms=linux",
+    "desktop:all": "node desktop/build.cjs --platforms=win32,linux --smoke"
   },
   "dependencies": {
     "@fontsource/cinzel-decorative": "^5.3.0",
@@ -17,7 +20,9 @@
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "@electron/packager": "20.3.0",
     "@types/three": "^0.186.0",
+    "electron": "45.2.1",
     "typescript": "^5.9.3",
     "vite": "^7.3.7"
   }

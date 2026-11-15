@@ -1,0 +1,9 @@
+{
+  "name": "dustup-desktop",
+  "productName": "dustUP",
+  "version": "0.1.0",
+  "description": "dustUP - a voxel sandboarding bullet-hell bounty hunt through a mythic Egyptian desert.",
+  "private": true,
+  "main": "main.cjs",
+  "author": "dustUP"
+}
