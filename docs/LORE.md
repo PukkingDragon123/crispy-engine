@@ -44,11 +44,13 @@ needed something to call him. The flats are called **Sundown Flats** now. Every 
 
 ### The Iron Jaw
 
-Serket tried for a whole night to pry the trap off him. The iron had bitten so deep it had become part of the bone.
-So she did the sensible thing: she taught it to talk.
+The trap had crushed his skull past saving, and Serket spent a whole night trying to pry the iron off what was left.
+It had bitten so deep it had become part of the bone. So she did the sensible thing: she kept the teeth and taught
+them to talk.
 
-The bear trap is his jaw now. It snaps shut when he kills, clacks when he reloads, and it holds a cigarette better
-than any lip ever did. He does not talk much. When he does, it sounds like a gate closing.
+The bear trap's rusted iron teeth are clamped into his mouthparts now, the scorpion chelicerae Serket gave him. They
+snap shut when he kills, clack when he reloads, and hold a cigarette better than any lip ever did. He does not talk
+much. When he does, it sounds like a gate closing.
 
 ### The Remaking
 
@@ -59,15 +61,23 @@ causes, found two things on the dunes that night:
 - the empty carapace of **Aqrab, the Black Stinger**, her champion: a scorpion-man who had held the storm wall for a
   thousand years and fell to Set on the night it broke.
 
-One had a will and no body. The other had a body and no will. Serket stitched them together.
+One had a will and no body. The other had a body and no will. Serket stitched them together, and she did not do
+it by halves. Nothing of the man's face survived the trap, so nothing of it came back. The remaking was total.
 
-- Bone-chitin plates grew over his ribcage like armour grows over a knight.
-- The Black Stinger's tail grew out of his spine: segmented bone, a green venom stinger at the tip.
-- In one empty socket she set a drop of her own venom so she could watch the world through it: the green
+- His head is the Black Stinger's: a skull of bone carapace, a scorpion's head, with the trap's iron teeth set into
+  its chelicerae.
+- In one of its median eyes she set a drop of her own venom so she could watch the world through it: the green
   **Serket eye**.
-- She grew back half his face. The other half she left bare so he would remember what happened to it.
-- The hair grew back on its own. Serket insists the hair was not her idea. The hair disagrees.
-- The cigarette, the hat and the shades were his idea.
+- Bone-chitin plates grew over his ribcage like armour grows over a knight.
+- He has four arms. His own two, bone and quick, for the gun and the grip; and below them the Black Stinger's great
+  skeletal pincers, for everything else. (Thoth thinks this is the best thing that has ever happened. Ozymandias
+  notes that he still pays with one hand.)
+- The Black Stinger's tail grew out of his spine: segmented bone, a green venom stinger at the tip.
+- The cigarette, the hat and the shades were his idea. Serket says a scorpion in shades is ridiculous. He says so is
+  a goddess in a sandstorm.
+
+Nobody would know him now. That is half the point: the face on his old wanted posters belonged to a man who died. The
+new posters have a scorpion skull on them and no name at all.
 
 He woke up on Sundown Flats with his own wanted poster flapping on the signpost: DEAD OR ALIVE, SUNDOWN, NAME
 UNKNOWN, $1,000,000. Set put that price on his skull, because a dead man Set cannot keep is a problem. There is also
@@ -120,13 +130,13 @@ Pinch is **the last of Serket's brood**. Set stole the rest of her scorpions in 
 giant scorpions that hunt the dunes now. Pinch refuses to look at them.
 
 When Aqrab fell, he was carrying one last egg in the joint of his shell. Serket did not notice it until the remaking
-was done and the egg cracked open in the hunter's eye socket. Pinch hatched first and saw Sundown second. Scorpions
+was done and the egg cracked open in an empty socket of the hunter's new skull. Pinch hatched first and saw Sundown second. Scorpions
 imprint. Pinch has been trying to raise him ever since. ("Pinch, you have raised him well," Serket told him. Pinch
 took it as a compliment. Sundown did not.)
 
 Because they came out of the same shell, they are bound: Pinch can never wander far, and Sundown can never quite get
-rid of him. Pinch lives in the hat by day and curls up in the warm eye socket at night, which is why the Serket eye
-glows brighter when he sleeps. He talks in clicks. Serket translates when she feels like it, and he is mostly saying
+rid of him. Pinch lives in the hat by day and curls up in that warm empty socket at night, right beside the Serket eye,
+which is why it glows brighter when he sleeps. He talks in clicks. Serket translates when she feels like it, and he is mostly saying
 that Sundown is rusty, reckless and snores. He adores him. He milks his own venom for the bullets. Do not ask how.
 
 He insists the phantom scorpions that sometimes hatch from Sundown's kills are his cousins. He insists Big Bertha is
@@ -268,7 +278,7 @@ Ozymandias keeps saying "it is always noon here." He means it as a joke. It is l
 6. **The Night of the Storm** (year zero). Set's storm wall rolls over Serket's Reach. Aqrab falls at the wall.
    Sethos buys Calloway. The bear trap closes on Sundown Flats at sundown.
 7. **The First Weighing.** The heart is heavy. Serket takes it on credit.
-8. **The Remaking.** Bone and carapace, the iron jaw, the Serket eye. Pinch hatches.
+8. **The Remaking.** Bone and carapace, a scorpion skull, four arms, the iron teeth, the Serket eye. Pinch hatches.
 9. **Soon after.** Calloway dies anyway and is buried with his star. Set raises him as the Dust Marshal. Set lays the
    railroad through the Duat and puts the Ironclad on it.
 10. **The Ride** (the game). Sundown wakes on Sundown Flats under his own wanted poster. Serket rises out of the sand
