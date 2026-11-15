@@ -3,15 +3,15 @@
 //   hat      on top of the crown, looking around (clinging when the ride gets rough)
 //   (inside) tucked under the back of the brim, out of sight: where he bolts when Sundown is hit
 //            or the board is flying, and where he climbs out of again once it is calm
-//   eyeR     his burrow: the gap in Sundown's right cheek, claws and face poking out (idle, after kills)
-//   eyeL     beside the left eye, on the cheekbone at the rim of the shades
+//   eyeR     in the bare skull socket, claws and the point of his tail peeking out (idle, after kills)
+//   eyeL     on the living brow, peering down over the shades
 //   shoulder on the torn sleeve stump
 // Between perches he scuttles along a little graph of waypoints over the head, the brim, the
 // temples, the jaw and the neck (tetrapod gait from PinchMotion), every waypoint expressed in the
 // frame of a bone so the route rides along with the animation.
 //
 // Anchors: Sundown's head bone carries empty Object3Ds named `perch_hat`, `perch_eyeL`, `perch_eyeR`
-// (looked up by name; perch_eyeR is the cheek gap); without them the rig sockets hat_top / eye_l / eye_r /
+// (looked up by name; perch_eyeR is the bare skull socket); without them the rig sockets hat_top / eye_l / eye_r /
 // shoulder_l stand in, and without those the head bone plus fixed offsets. The route waypoints over the
 // hat, the hair, the face and the shoulder are snapped onto the real surfaces by raycasts against the
 // host's meshes (once per host, cached in bone space), so he walks on felt, curls and skin, not through them.
@@ -29,7 +29,7 @@ type WP = Spot | 'crownL' | 'crownR' | 'crownB' | 'brimL' | 'brimR' | 'brimB' | 
 
 /** Pinch's scale while he lives on Sundown (rig scale 1 is ~0.55 m long; this makes him ~20 cm, tail and claws
  *  included: big enough to read from the riding camera) */
-export const PINCH_PERCH_SCALE = 0.36;
+export const PINCH_PERCH_SCALE = 0.32;
 
 export interface PerchHost {
   root: THREE.Object3D;
@@ -545,16 +545,15 @@ export class PinchPerch {
         const s = w === 'templeL' ? 1 : -1;
         return onHead(g.hc.clone().add(_v.set(s, 0.12, 0.3).normalize().multiplyScalar(g.R)));
       }
-      case 'eyeR': {
-        // his burrow: the gap in the right cheek; sunk into it to the shoulders, legs inside the head,
-        // only his claws and face poking out of the hole
-        const a = g.eR.clone().add(_v.set(0, 0, -this.eyeDepth));
-        const out = a.clone().sub(g.hc).setY(0).normalize();
-        return { frame: h, p: a.addScaledVector(out, -0.032).add(_v.set(0, -0.003, 0)), n: out.clone().add(_v.set(0, 0.25, 0)).normalize() };
+      case 'eyeR':
+        // tucked in the bare socket behind the cracked lens, sunk to the waist, front half poking out past its
+        // outer rim (his home in the skull)
+        return { frame: h, p: g.eR.clone().add(_v.set(-0.012, -0.016, -0.014)), n: new THREE.Vector3(-0.6, 0.3, 0.7).normalize() };
+      case 'eyeL': {
+        // on the living brow, peering down over the shades (snapped onto the brow, under the brim)
+        const pt = onHead(g.eL.clone().add(_v.set(0.012, 0.032, 0.002)), this.meshesOf(['head', 'brow_l', 'glasses']));
+        return { ...pt, n: new THREE.Vector3(0.2, 1, 0.4).normalize() };
       }
-      case 'eyeL':
-        // beside the left eye, on the cheekbone at the outer rim of the shades (cast onto the skin, not the lens)
-        return onHead(g.eL.clone().add(_v.set(0.045, -0.03, -0.035)), this.meshesOf(['head', 'jaw', 'hair_l', 'hair_l2']));
       case 'bridge':
         return onHead(new THREE.Vector3(0, (g.eR.y + g.eL.y) / 2 + 0.05, (g.eL.z + 0.02)));
       case 'jawL':
@@ -569,7 +568,7 @@ export class PinchPerch {
     f.getWorldQuaternion(out);
     // yaw, pitch (positive: nose down), roll in the bone's frame
     const [yaw, pitch, roll] =
-      s === 'eyeR' ? [-1.25, 0.12, 0.08] : s === 'eyeL' ? [1.0, 0.18, -0.25] : s === 'shoulder' ? [0.3, 0, 0] : s === 'hatIn' ? [Math.PI, 0.4, 0] : [0, 0, 0];
+      s === 'eyeR' ? [-1.2, 0.1, 0.1] : s === 'eyeL' ? [-0.3, 0.55, -0.12] : s === 'shoulder' ? [0.3, 0, 0] : s === 'hatIn' ? [Math.PI, 0.4, 0] : [0, 0, 0];
     _e.set(pitch, yaw, roll, 'YXZ');
     return out.multiply(_q2.setFromEuler(_e));
   }

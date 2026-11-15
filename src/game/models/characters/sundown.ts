@@ -20,7 +20,7 @@
 // torn cheek, crude black stitches where someone sewed him shut, a glowing Serket-
 // green eye deep in the bare socket, the right breast torn open over the ribs and a
 // skeletal right hand on the gun. Scraggly black hair falls from under the hat to
-// the shoulders in rigged locks (hair_l, hair_r, hair_b chains) that sway on their
+// the shoulders in rigged locks (hair_l, hair_r, hair_bl, hair_br chains) that sway on their
 // own (hairSway.ts).
 //
 // Look ('punk', the default): a cropped black biker jacket thrown open over the
@@ -700,7 +700,7 @@ function hairCap(h: Sc) {
     const d = headRotSdf(x, y, z);
     if (d < 0.35) return false;
     const cl = clumpOf(x, y, z);
-    let t = (0.5 + 0.3 * sstep((58.6 - y) / 1.4)) * (1 + 0.22 * cl);
+    let t = (0.6 + 0.65 * sstep((58.6 - y) / 2.4)) * (1 + 0.3 * cl);
     if (d < 1.4) t = cl > 0.2 ? t * 0.75 : 0;
     const n = Math.pow(Math.abs(x) / (6.75 + t), 2.15) + Math.pow(Math.abs(y - 55.4) / (8.1 + t), 2.15) + Math.pow(Math.abs(z + 0.8) / (7.45 + t), 2.15);
     return n <= 1;
@@ -728,110 +728,97 @@ interface HairLock {
   pivot: V3;
 }
 /**
- * The swaying locks, each a two-segment chain hung from the head: hair_l (left, tucked behind the
- * living ear, down to the shoulder), hair_r (a few thin, half-grey strands behind the rotted temple)
- * and hair_b (the curtain down the back of the neck). Pivots in design units.
+ * Long, voluminous, curly dark hair spilling from under the hat (late-80s hard rock): tight ringlets that
+ * open up as they fall, framing the living side of the face, resting on the shoulders and falling down the
+ * upper back; on the rotted side they hang only from behind the bare temple. Four swaying
+ * two-segment chains hung from the head: hair_l / hair_r (the sides, to the shoulders), hair_bl / hair_br
+ * (the back, past the shoulders). Pivots in design units (head family).
  */
 function hairLocks(): { locks: HairLock[]; chains: HairChain[] } {
   const R = rng(7412);
   const locks: HairLock[] = [];
-  type St = { pts: V3[]; r0: number; r1: number; col: number; tip: number | null };
-  const build = (name: string, cut: number, st: St[]) => {
+  /** one ringlet: a centreline off the scalp at angle th, wound into a spiral that widens down the lock */
+  type Curl = { th: number; y0: number; yEnd: number; puff: number; back: number; phase: number; r0: number };
+  const ringlet = (c: Curl): { pts: V3[]; face: number[] } => {
+    const pts: V3[] = [], face: number[] = [];
+    const n: V3 = [Math.sin(c.th), 0, Math.cos(c.th)], tg: V3 = [Math.cos(c.th), 0, -Math.sin(c.th)];
+    for (let y = c.y0; y >= c.yEnd; y -= 0.28) {
+      const k = (c.y0 - y) / Math.max(1, c.y0 - c.yEnd);
+      const gap = 0.85 + c.puff * sstep((c.y0 - y) / 7) + 0.07 * (55.4 - Math.min(y, 55.4));
+      const p = scalpPt(c.th, y, gap);
+      p[2] -= c.back * k * k;
+      const rc = lerp(0.12, 0.62, sstep(k * 2.2)) * (1 - 0.25 * k);
+      const ph = c.phase + (c.y0 - y) * 1.45;
+      pts.push([p[0] + rc * (Math.cos(ph) * n[0] + Math.sin(ph) * tg[0]), y, p[2] + rc * (Math.cos(ph) * n[2] + Math.sin(ph) * tg[2])]);
+      face.push(Math.cos(ph) * (rc > 0.2 ? 1 : 0.3));
+    }
+    return { pts, face };
+  };
+  /** curl shading: the crest of each turn catches the light, the inside of the spiral falls into shadow */
+  const HC = { base: 0x30251f, shade: 0x150f0d, hi: 0x5c4434, glint: 0x84644c };
+  const build = (name: string, cut: number, curls: Curl[]) => {
     const m = sc(name);
-    for (const s of st) strand(m, s.pts, s.r0, s.r1, s.col, s.tip, 0.28);
-    shadeRamps(m.m, [HAIR], true);
+    curls.forEach((c, k) => {
+      const { pts, face } = ringlet(c);
+      for (let i = 1; i < pts.length; i++) {
+        const t0 = (i - 1) / (pts.length - 1), t1 = i / (pts.length - 1), f = face[i];
+        const col = f > 0.82 && (i + k) % 3 === 0 ? HC.glint : f > 0.42 ? HC.hi : f < -0.4 ? HC.shade : HC.base;
+        m.cap(pts[i - 1], pts[i], lerp(c.r0, c.r0 * 0.72, t0), lerp(c.r0, c.r0 * 0.72, t1), col);
+      }
+      const tip = pts[pts.length - 1];
+      if (R() < 0.4) m.ell(tip, [0.34, 0.34, 0.34], HAIR_TIP);
+    });
     const [up, lo] = splitY(m.m, S, cut, name, name + '2');
-    const avg = (pick: (s: St) => V3): V3 => {
+    const avg = (pick: (c: Curl) => V3): V3 => {
       const a: V3 = [0, 0, 0];
-      for (const s of st) {
-        const p = pick(s);
-        a[0] += p[0] / st.length;
-        a[1] += p[1] / st.length;
-        a[2] += p[2] / st.length;
+      for (const c of curls) {
+        const p = pick(c);
+        for (let i = 0; i < 3; i++) a[i] += p[i] / curls.length;
       }
       return a;
     };
-    const root = avg((s) => s.pts[0]);
-    const mid = avg((s) => {
-      let best = s.pts[0];
-      for (const p of s.pts) if (Math.abs(p[1] - cut) < Math.abs(best[1] - cut)) best = p;
-      return best;
-    });
+    const root = avg((c) => scalpPt(c.th, c.y0, 0.8));
+    const mid = avg((c) => scalpPt(c.th, cut, 1.6));
     mid[1] = cut;
     locks.push({ name, parent: 'head', model: up, pivot: root });
     locks.push({ name: name + '2', parent: name, model: lo, pivot: mid });
   };
-  const cols = [HAIR.base, HAIR_ALT, HAIR.shade, HAIR.base, HAIR_ALT];
-  const tip = () => (R() < 0.45 ? HAIR_TIP : null);
-  const flick = (pts: V3[], out: number, th: number) => {
-    // scraggly tips: the last point curls out and a little forward or back
-    const p = pts[pts.length - 1];
-    pts.push([p[0] + Math.sin(th) * out, p[1] - 0.7, p[2] + Math.cos(th) * out + (R() - 0.5) * 0.4]);
-  };
-  // ---- left: from the temple, swept back over the top of the ear, down behind it to the shoulder
-  const L: St[] = [];
-  for (let k = 0; k < 10; k++) {
-    const stray = k === 3 || k === 8;
-    const th0 = 1.12 + k * 0.14 + (R() - 0.5) * 0.05;
-    const y0 = 57.5 - 0.22 * k + (R() - 0.5) * 0.3;
-    const yEnd = 46.3 + R() * 1.7 + (stray ? 1.5 : 0);
-    const thEnd = Math.max(th0, 2.06) + 0.04 * k + (R() - 0.5) * 0.08;
-    const pts: V3[] = [];
-    for (let y = y0; y >= yEnd; y -= 0.9) {
-      const th = lerp(th0, thEnd, sstep((y0 - y) / 2.6)) + 0.035 * Math.sin(y * 1.3 + k);
-      const gap = lerp(0.85, 1.25, sstep((y0 - y) / 1.2)) + 0.11 * (55.4 - Math.min(y, 55.4)) + 0.2 * Math.sin(y * 0.9 + k * 2.1);
-      pts.push(scalpPt(th, y, gap));
+  // ---- the sides: on the living left, curls from the temple over and behind the ear (two framing the cheek),
+  // resting on the shoulder and falling behind it; on the rotted right only from behind the bare temple, so
+  // the skull still shows
+  for (const s of [1, -1]) {
+    const C: Curl[] = [];
+    if (s > 0)
+      for (const [th0, yE] of [[0.94, 44.2], [1.0, 42.8], [1.07, 41.6]] as [number, number][])
+        C.push({ th: th0, y0: 58.0, yEnd: yE + R() * 0.6, puff: 1.3, back: 0.3, phase: R() * 6.3, r0: 0.7 });
+    const n = s > 0 ? 12 : 8;
+    for (let k = 0; k < n; k++) {
+      const th = s * ((s > 0 ? 1.13 : 1.98) + k * (s > 0 ? 0.08 : 0.07) + (R() - 0.5) * 0.04);
+      const behind = Math.abs(th) > 1.6;
+      C.push({ th, y0: (s > 0 ? 57.8 : 57.2) - 0.08 * k + (R() - 0.5) * 0.4, yEnd: (behind ? 35.4 : 39.4) + R() * 1.8, puff: 2.5 + R() * 1.0, back: behind ? 2.4 : 1.0, phase: R() * 6.3, r0: 0.74 + R() * 0.1 });
     }
-    flick(pts, stray ? 0.9 : 0.45, thEnd);
-    L.push({ pts, r0: stray ? 0.46 : 0.58, r1: stray ? 0.4 : 0.44, col: cols[k % cols.length], tip: tip() });
+    build(s > 0 ? 'hair_l' : 'hair_r', 49.4, C);
   }
-  build('hair_l', 51.4, L);
-  // ---- right: thin and patchy behind the bare temple, two dead grey strands
-  const Rr: St[] = [];
-  for (let k = 0; k < 6; k++) {
-    const th0 = -(2.18 + k * 0.12) + (R() - 0.5) * 0.04;
-    const y0 = 56.6 - 0.2 * k;
-    const yEnd = 47.3 + R() * 2.2;
-    const pts: V3[] = [];
-    for (let y = y0; y >= yEnd; y -= 0.9) {
-      const gap = lerp(0.8, 1.1, sstep((y0 - y) / 1.2)) + 0.1 * (55.4 - Math.min(y, 55.4)) + 0.25 * Math.sin(y * 1.1 + k * 1.7);
-      pts.push(scalpPt(th0 + 0.04 * Math.sin(y * 1.5 + k), y, gap));
+  // ---- the back: a curtain of ringlets down past the shoulders, longest at the middle
+  for (const s of [1, -1]) {
+    const C: Curl[] = [];
+    for (let k = 0; k < 9; k++) {
+      const th = s * (2.0 + k * 0.142 + (R() - 0.5) * 0.04);
+      const mid = 1 - Math.abs(Math.abs(th) - Math.PI) / 1.2;
+      C.push({ th, y0: 57.3 + (R() - 0.5) * 0.5, yEnd: 34.4 - 2.6 * clamp(mid, 0, 1) + R() * 1.4, puff: 2.3 + R() * 0.9, back: 0.6, phase: R() * 6.3, r0: 0.76 + R() * 0.1 });
     }
-    flick(pts, 0.7, th0);
-    const grey = k === 1 || k === 4;
-    Rr.push({ pts, r0: 0.5, r1: 0.42, col: grey ? HAIR_GREY : k & 1 ? HAIR.shade : HAIR_ALT, tip: grey ? null : tip() });
+    build(s > 0 ? 'hair_bl' : 'hair_br', 46.0, C);
   }
-  build('hair_r', 52.0, Rr);
-  // ---- back: a curtain from under the brim down the back of the neck, resting toward the collar;
-  // the right side (where the board rides) stays shorter
-  const B: St[] = [];
-  for (let k = 0; k < 13; k++) {
-    const stray = k === 4 || k === 10;
-    let th = 2.45 + (k / 12) * 1.27 + (R() - 0.5) * 0.04;
-    if (th > Math.PI) th -= Math.PI * 2;
-    const right = Math.sin(th) < -0.2;
-    const y0 = 56.9 + (R() - 0.5) * 0.5;
-    const yEnd = (right ? 46.8 : 44.7) + R() * 1.3 + (stray ? 1.2 : 0);
-    const pts: V3[] = [];
-    for (let y = y0; y >= yEnd; y -= 0.9) {
-      let gap = lerp(0.85, 1.3, sstep((y0 - y) / 1.1)) + 0.18 * Math.sin(y * 0.8 + k * 1.9);
-      if (y < 50) gap -= 0.21 * (50 - y);
-      pts.push(scalpPt(th + 0.03 * Math.sin(y * 1.2 + k), y, Math.max(gap, -0.1)));
-    }
-    flick(pts, stray ? 0.8 : 0.35, th);
-    B.push({ pts, r0: stray ? 0.46 : 0.6, r1: stray ? 0.4 : 0.44, col: cols[(k + 2) % cols.length], tip: tip() });
-  }
-  build('hair_b', 50.6, B);
   return {
     locks,
     chains: [
       { parts: ['hair_l', 'hair_l2'], lim: [-0.3, 0.95, -0.1, 0.7], phase: 0 },
-      { parts: ['hair_r', 'hair_r2'], lim: [-0.3, 0.95, -0.7, 0.1], phase: 1.7, stiff: 130 },
-      { parts: ['hair_b', 'hair_b2'], lim: [-0.28, 1.05, -0.45, 0.45], phase: 3.1, stiff: 95 },
+      { parts: ['hair_r', 'hair_r2'], lim: [-0.3, 0.95, -0.7, 0.1], phase: 1.7 },
+      { parts: ['hair_bl', 'hair_bl2'], lim: [-0.28, 1.05, -0.2, 0.45], phase: 3.1, stiff: 95 },
+      { parts: ['hair_br', 'hair_br2'], lim: [-0.28, 1.05, -0.45, 0.2], phase: 4.4, stiff: 95 },
     ],
   };
 }
-
 
 // ================================================================== BONES
 const zSpine = (y: number) => {
@@ -2270,6 +2257,48 @@ function outlawMask(o: OutfitId) {
   return { head: mh.m, jaw: mj.m, R };
 }
 
+// ================================================================== THE CIGARETTE (clamped in the bare teeth on the rotted side)
+/** where the cigarette sits in the right corner of the mouth (bare teeth), and its glowing tip (design units, head family) */
+const CIG_A: V3 = [-1.6, 47.3, 5.2];
+const CIG_B: V3 = [-3.95, 45.75, 10.9];
+/** a hand-rolled smoke clamped in the teeth: tan filter, white paper, a grey ash collar and a glowing ember tip
+ *  (rides the jaw; with the mask up it pokes out through a burnt hole in the cloth) */
+function cigarette() {
+  const m = sc('cig');
+  const d = vnorm(vsub(CIG_B, CIG_A)), L = vlen(vsub(CIG_B, CIG_A));
+  const tAt = (x: number, y: number, z: number) => vdot(vsub([x, y, z], CIG_A), d) / L;
+  m.cap(CIG_A, CIG_B, 0.5, 0.48, (x, y, z) => {
+    const t = tAt(x, y, z);
+    if (t < 0.3) return (Math.floor((x + y * 2 + z) * S) & 3) === 0 ? 0xb98445 : 0xd9a35f; // the cork filter, flecked
+    if (t > 0.93) return 0x8e8a84; // ash
+    if (Math.abs(t - 0.31) < 0.025) return 0xc9a24a; // the gold band at the filter
+    return y > CIG_A[1] + (CIG_B[1] - CIG_A[1]) * t ? 0xfbf8f0 : 0xe4ded2;
+  });
+  m.ell(vadd(CIG_B, vmul(d, 0.25)), [0.5, 0.5, 0.5], (x, y, z) => (tAt(x, y, z) > 1.05 ? 0xffd07a : 0xff6a1f), { flags: VF.GLOW });
+  return m.m;
+}
+/** a burnt hole in the mask cloth where the cigarette pokes through: cut round it, a scorched, singed rim */
+function burnHole(models: VoxelModel[]) {
+  const d = vnorm(vsub(CIG_B, CIG_A)), L = vlen(vsub(CIG_B, CIG_A));
+  const dist = (p: V3) => {
+    const t = clamp(vdot(vsub(p, CIG_A), d) / L, 0, 1);
+    return vlen(vsub(p, vadd(CIG_A, vmul(d, t * L))));
+  };
+  const cloth = new Set([...Object.values(MASK_LOOK).flatMap((k) => [k.r.base, k.r.shade, k.r.hi, k.r.dark, k.print, k.dim]), TOON.linen.base, TOON.linen.hi].map((c) => c & 0xffffff));
+  for (const m of models) {
+    const del: V3[] = [], scorch: [number, number, number, number][] = [];
+    m.forEach((i, j, l, c, f) => {
+      if (!cloth.has(c & 0xffffff)) return;
+      const p: V3 = [cen(i), cen(j), cen(l)];
+      const r = dist(p) + 0.12 * Math.sin(p[0] * 7 + p[1] * 5);
+      if (r < 0.62) del.push([i, j, l]);
+      else if (r < 1.0) scorch.push([i, j, l, r < 0.8 ? 0x1c120e : 0x4a2a1e]);
+    });
+    for (const [i, j, l] of del) m.del(i, j, l);
+    for (const [i, j, l, c] of scorch) m.set(i, j, l, c);
+  }
+}
+
 // ================================================================== SUNGLASSES (round punk shades over the sockets)
 const FRAME = ramp(0x34363d, 0x1c1d22, 0x8c919c, 0x0c0c0e); // gunmetal
 const LENS = { top: 0x0f1015, mid: 0x171a22, low: 0x252c3a, streak: 0xaebdd6, crack: 0xd6dde8 };
@@ -2488,10 +2517,15 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   const head = hd.head, jaw = hd.jaw;
   if (mask) {
     mask.jaw.forEach((x, y, z, c, f) => jaw.set(x, y, z, c, f)); // the chin cloth rides the jaw
+    burnHole([mask.head, jaw]); // the cigarette pokes out through the cloth
     dedupe(head, mask.head);
     dedupe(jaw, mask.head);
   }
   dedupe(jaw, head);
+  const cig = cigarette();
+  dedupe(cig, jaw);
+  dedupe(cig, head);
+  if (mask) dedupe(cig, mask.head);
   dedupe(hd.brow_l, head);
   dedupe(hd.brow_r, head);
   if (shades) {
@@ -2540,6 +2574,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   P('eye_r', eye('r', 'normal'), mg(J.eye), 'head');
   P('brow_l', hd.brow_l, J.brow, 'head');
   P('brow_r', hd.brow_r, mg(J.brow), 'head');
+  P('cig', cig, J.jaw, 'jaw');
   P('hat', hat, J.hat, 'head');
   for (const lk of hair?.locks ?? []) P(lk.name, lk.model, lk.pivot, lk.parent);
   if (shades) P('glasses', glassesOf('normal', 'normal'), J.neck, 'head');
@@ -2576,6 +2611,9 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     eye_l: sock('head', J.eye),
     eye_r: sock('head', mg(J.eye)),
     mouth: sock('jaw', [0, 47.5, 6]),
+    // the cigarette's ember, and where he blows the smoke out (the burnt hole in the mask, or the bare teeth)
+    cig_tip: sock('cig', vadd(CIG_B, vmul(vnorm(vsub(CIG_B, CIG_A)), 0.55))),
+    mouth_corner: sock('jaw', mask ? [-2.55, 46.9, 7.1] : [-1.9, 47.2, 6.0]),
     hat_top: sock('hat', [0, topY, -1]),
     // Pinch's perches (empty anchors on the head bone, +Z out of the face): on the hat crown, in either eye socket
     // (perch_eyeR is the bare skull socket on the rotted side)
@@ -2646,6 +2684,8 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
       expressions,
       // rigged hair locks that sway on their own once installHairSway(rig) runs (attachBoardOnBack does it)
       hair: hairChains.length ? { chains: hairChains } : undefined,
+      // the cigarette (CigSmoke curls its smoke from the cig_tip socket and exhales from mouth_corner)
+      smoke: { tip: 'cig_tip', mouth: 'mouth_corner' },
       cloth: {
         coat: clothCoat ? [LK.coat.base, LK.coat.shade, LK.trim.base] : undefined,
         coatStyle: poncho ? 'poncho' : clothCoat ? 'tails' : undefined,
