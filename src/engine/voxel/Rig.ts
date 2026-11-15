@@ -130,6 +130,15 @@ export function buildRigGeo(spec: RigSpec, cacheKey?: string): RigGeo {
   return rg;
 }
 
+/** a rig already built under this cache key (lets a caller skip re-sculpting its spec) */
+export function cachedRigGeo(key: string): RigGeo | undefined {
+  return rigCache.get(key);
+}
+/** register a rig built elsewhere (e.g. meshed in a worker) under a cache key */
+export function putRigGeo(key: string, rg: RigGeo) {
+  rigCache.set(key, rg);
+}
+
 export function clearRigCache(name?: string) {
   if (name) rigCache.delete(name);
   else rigCache.clear();

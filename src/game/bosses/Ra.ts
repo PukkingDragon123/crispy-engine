@@ -28,7 +28,8 @@ import type { RayHit } from '../Ctx';
 import type { Hit } from '../combat/Damage';
 import type { EnvPreset } from '../world/Env';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
-import { buildRigGeo, RigInstance, RigGeo } from '../../engine/voxel/Rig';
+import { buildRigGeo, cachedRigGeo, RigInstance, RigGeo } from '../../engine/voxel/Rig';
+import { loadRaGeos, raHDReady, RA_RIG_KEY } from './nile/raGeo';
 import type { RigSpec } from '../../engine/voxel/Rig';
 import { modelEntry } from '../models/lookup';
 import type { VoxelMaterial } from '../../engine/render/VoxelMaterial';
@@ -105,6 +106,9 @@ export interface RaGeos {
 let GEOS: RaGeos | null = null;
 export function raGeos(): RaGeos {
   if (GEOS) return GEOS;
+  // meshed off-thread a few waves ahead (raGeo.ts); the tiny falcon is built here either way
+  const W = raHDReady();
+  if (W) return (GEOS = { ...W, falcon: buildRigGeo(fireFalconRig(), 'ra_falcon') });
   const g = (r: { model: any; voxelSize: number; pivot?: [number, number, number] }, pv: [number, number, number] | 'center' | 'bottom' = 'center') => buildVoxelGeometry(r.model, { voxelSize: r.voxelSize, pivot: r.pivot ?? pv });
   GEOS = {
     head: g(raHeadHD()),
@@ -121,13 +125,12 @@ export function raGeos(): RaGeos {
 let RIG: RigGeo | null = null;
 /** Ra's body rig (the boss and the wrath apparition share one build) */
 export function raRigGeo(): RigGeo {
-  if (!RIG) RIG = buildRigGeo(modelEntry('ra')!() as RigSpec, 'boss:ra');
+  if (!RIG) RIG = cachedRigGeo(RA_RIG_KEY) ?? buildRigGeo(modelEntry('ra')!() as RigSpec, RA_RIG_KEY);
   return RIG;
 }
-/** build Ra's rig and his close-up parts ahead of time (loading screens) */
+/** build Ra's rig and his close-up parts ahead of time, off the main thread (called through NILE_PREWARM) */
 export function prewarmRa() {
-  raRigGeo();
-  raGeos();
+  void loadRaGeos();
 }
 
 // ----------------------------------------------------------------------------- arm IK data (as the Khonsu colossus)

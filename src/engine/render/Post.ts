@@ -290,7 +290,6 @@ export class SunShaftPass extends Pass {
 
 const _sv = new THREE.Vector3();
 const _fw = new THREE.Vector3();
-const _db = new THREE.Vector2();
 
 export class PostStack {
   composer: EffectComposer;
@@ -348,7 +347,8 @@ export class PostStack {
     if (!on && g.value < 0.01) g.value = 0;
     const ou = this.outline.material.uniforms;
     ou.uAO.value = on ? 0.62 : 0;
-    if (cam.isPerspectiveCamera) ou.uProjY.value = cam.projectionMatrix.elements[5] * 0.5 * this.renderer.getDrawingBufferSize(_db).y;
+    // the scene's own target height (the 3D view may render below the canvas resolution, see Engine.renderScale)
+    if (cam.isPerspectiveCamera) ou.uProjY.value = cam.projectionMatrix.elements[5] * 0.5 * this.composer.renderTarget1.height;
     // sun shafts only when the camera faces the sun
     let amt = 0;
     if (on && cam.isPerspectiveCamera) {

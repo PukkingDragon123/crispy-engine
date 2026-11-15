@@ -5,7 +5,7 @@ import type { Boss, BossDeps } from './Boss';
 import { CrocodileChampion } from './Crocodile';
 import { Warship } from './Warship';
 import { loadWarshipGeo } from './nile/warshipGeo';
-import { RaSunKing } from './Ra';
+import { RaSunKing, prewarmRa } from './Ra';
 import { Sphinx, prewarmSphinx } from './Sphinx';
 import { Cleopatra, prewarmCleopatra } from './Cleopatra';
 
@@ -22,7 +22,12 @@ NILE_BOSSES.cleopatra = (d, tier) => new Cleopatra(d, tier);
 /** optional warm-ups per boss id (e.g. an off-thread geometry build started a few waves early) */
 export const NILE_PREWARM: Record<string, (ctx: BossDeps['ctx']) => void> = {};
 NILE_PREWARM.sphinx = (ctx) => prewarmSphinx(ctx);
-NILE_PREWARM.cleopatra = () => prewarmCleopatra();
+// her fall wakes Ra's wrath (his colossal apparition): his geometry is carved off-thread with her court
+NILE_PREWARM.cleopatra = () => {
+  prewarmCleopatra();
+  prewarmRa();
+};
+NILE_PREWARM.ra = () => prewarmRa();
 NILE_PREWARM.warship = () => void loadWarshipGeo();
 /** call on every Nile wave start: warms the bosses of the next few waves */
 export function nilePrewarm(ctx: BossDeps['ctx'], wave: number) {

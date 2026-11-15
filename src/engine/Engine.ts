@@ -69,6 +69,18 @@ export class Engine {
   fps = 60;
   private lastT = performance.now();
   quality: Quality = { pixelRatio: Math.min(window.devicePixelRatio, 1.5), shadows: true, shadowSize: 2048, bloom: true, particles: 1, drawDistance: 260 };
+  /**
+   * adaptive resolution: the 3D view renders at quality.pixelRatio x renderScale while the canvas
+   * (and the live 3D HUD drawn over it) stays at full resolution. Lowered when frames run long,
+   * raised back when there is headroom (see adaptResolution)
+   */
+  renderScale = 1;
+  /** adaptive resolution on (off under automation, so headless screenshots stay full resolution; ?adaptive=1 / 0 forces it) */
+  adaptive = (() => {
+    const a = new URLSearchParams(location.search).get('adaptive');
+    return a !== null ? a !== '0' : !navigator.webdriver;
+  })();
+  private ad = { t: 0, n: 0, long: 0, stall: false, cool: 3, hold: 0, base: 1 / 60, raiseFails: 0, raisedAt: -1e9 };
   width = window.innerWidth;
   height = window.innerHeight;
   overlay: HTMLDivElement;
@@ -87,6 +99,13 @@ export class Engine {
   onAfterUpdate: ((dt: number, rdt: number) => void)[] = [];
   private emptyScene = new THREE.Scene();
   private emptyCam = new THREE.PerspectiveCamera();
+  /**
+   * every geometry the renderer has drawn since the last scene switch. three keeps a vertex-array
+   * binding state per drawn geometry, holding its attribute arrays and GPU buffers, until that
+   * geometry is disposed; a scene left without disposing its meshes kept all of them (JS heap and
+   * VRAM) for the rest of the session, run after run. setScene releases them (see releaseDrawn).
+   */
+  private drawn = new Set<THREE.BufferGeometry>();
 
   constructor(public container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', stencil: false });
@@ -120,8 +139,13 @@ export class Engine {
       }
       (this.current as { contextRestored?: () => void } | null)?.contextRestored?.();
     });
+    const rbd = r.renderBufferDirect.bind(r);
+    r.renderBufferDirect = (camera, scene, geometry, material, object, group) => {
+      this.drawn.add(geometry);
+      rbd(camera, scene, geometry, material, object, group);
+    };
     this.post = new PostStack(r, this.emptyScene, this.emptyCam, this.width, this.height);
-    this.post.setSize(this.width, this.height, this.quality.pixelRatio);
+    this.post.setSize(this.width, this.height, this.quality.pixelRatio * this.renderScale);
     this.input = new Input(r.domElement);
     this.audio = new AudioEngine();
 
@@ -148,7 +172,7 @@ export class Engine {
     this.height = window.innerHeight;
     this.renderer.setPixelRatio(this.quality.pixelRatio);
     this.renderer.setSize(this.width, this.height);
-    this.post.setSize(this.width, this.height, this.quality.pixelRatio);
+    this.post.setSize(this.width, this.height, this.quality.pixelRatio * this.renderScale);
     if (this.current) {
       this.current.camera.aspect = this.width / this.height;
       this.current.camera.updateProjectionMatrix();
@@ -158,6 +182,7 @@ export class Engine {
 
   applyQuality(q: Partial<Quality>) {
     Object.assign(this.quality, q);
+    if (q.pixelRatio !== undefined) this.renderScale = 1;
     this.renderer.shadowMap.enabled = this.quality.shadows;
     this.post.bloom.enabled = this.quality.bloom;
     this.resize();
@@ -178,6 +203,7 @@ export class Engine {
       reportError('scene exit', e);
     }
     this.tweens.clear();
+    this.releaseDrawn(s.scene);
     this.current = s;
     this.post.setSceneCamera(s.scene, s.camera);
     s.camera.aspect = this.width / this.height;
@@ -197,6 +223,29 @@ export class Engine {
       this.covered = false;
       this.fadeEl.style.opacity = '0';
     }
+  }
+
+  /**
+   * Free the GPU side of everything the outgoing scene drew, except what the incoming scene already
+   * holds. Safe for shared or cached geometry: three uploads a disposed geometry again the next
+   * time it is drawn, so a cache reused by the next scene only costs a re-upload.
+   */
+  private releaseDrawn(keep: THREE.Object3D) {
+    if (location.search.includes('keepgeo=1')) return this.drawn.clear(); // TEMP perf A/B
+    const kept = new Set<THREE.BufferGeometry>();
+    keep.traverse((o) => {
+      const g = (o as THREE.Mesh).geometry;
+      if (g) kept.add(g);
+    });
+    for (const g of this.drawn) {
+      if (kept.has(g)) continue;
+      try {
+        g.dispose();
+      } catch (e) {
+        reportError('releaseDrawn', e);
+      }
+    }
+    this.drawn.clear();
   }
 
   /** resolves after the engine has rendered `n` more frames */
@@ -268,6 +317,60 @@ export class Engine {
     this.tweens.run(time, (k) => (u.w = strength * (1 - k)), Ease.outQuad, { real: true });
   }
 
+  /**
+   * Adaptive resolution. Frame intervals are judged per second against the display's own refresh
+   * period (the shortest steady interval seen): a second whose average runs 30 % over it lowers the
+   * 3D render scale a step (to 0.6 at least); 8 s at the refresh rate tries a step back up, and a
+   * step up that has to be taken back waits longer before the next try. Seconds holding a stall
+   * (a scene build, a shader compile) are ignored: those are not the steady cost of drawing.
+   */
+  private adaptResolution(rdt: number) {
+    const a = this.ad;
+    if (!this.adaptive || this.covered || this.contextLost || document.hidden) {
+      a.t = a.n = 0;
+      a.stall = false;
+      return;
+    }
+    a.t += rdt;
+    a.n++;
+    if (rdt >= 0.1) a.stall = true;
+    a.cool = Math.max(0, a.cool - rdt);
+    if (a.t < 1) return;
+    const avg = a.t / a.n;
+    const stall = a.stall;
+    a.t = a.n = 0;
+    a.stall = false;
+    if (stall) return;
+    // the refresh period: creeps up slowly, snaps down to any faster steady second
+    a.base = avg < a.base ? avg : a.base + (avg - a.base) * 0.02;
+    const slow = avg > a.base * 1.3 && avg > 1 / 55;
+    const set = (k: number) => {
+      const next = clamp(Math.round(k * 20) / 20, 0.6, 1);
+      if (next === this.renderScale) return;
+      this.renderScale = next;
+      this.post.setSize(this.width, this.height, this.quality.pixelRatio * next);
+      a.cool = 2.5;
+    };
+    if (slow) {
+      a.hold = 0;
+      a.long++;
+      if (a.long >= 2 && a.cool <= 0 && this.renderScale > 0.6) {
+        // a step up that did not hold: wait longer before the next try
+        if (this.realTime - a.raisedAt < 8) a.raiseFails++;
+        set(this.renderScale - 0.1);
+        a.long = 0;
+      }
+    } else {
+      a.long = 0;
+      a.hold++;
+      if (this.renderScale < 1 && a.cool <= 0 && a.hold >= 8 + Math.min(4, a.raiseFails) * 8) {
+        set(this.renderScale + 0.05);
+        a.raisedAt = this.realTime;
+        a.hold = 0;
+      }
+    }
+  }
+
   start() {
     const loop = () => {
       requestAnimationFrame(loop);
@@ -277,6 +380,11 @@ export class Engine {
       rdt = clamp(rdt, 0, 0.1);
       this.fps = damp(this.fps, 1 / Math.max(rdt, 1e-3), 3, rdt);
       this.realTime += rdt;
+      try {
+        this.adaptResolution(rdt);
+      } catch (e) {
+        reportError('adapt', e);
+      }
       // time scale
       this.timeScale = damp(this.timeScale, this.targetScale, this.scaleLambda, rdt);
       let scale = this.paused ? 0 : this.timeScale;

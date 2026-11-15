@@ -230,6 +230,8 @@ export class Player {
     this.stats = new StatSheet({ vit: 5, def: 3, phys: 5, magic: 6, mob: 5, luck: 1 });
     this.material = makeVoxelMaterial();
     this.rig = new RigInstance(buildRigGeo(vis.rig, vis.rig.name + ':player'), { material: this.material });
+    // the follow camera fits the hero's height (Sundown's short cartoon body; no-op for rigs without meta.cam)
+    cam.fitHero(vis.rig.meta);
     // his hair locks swing with speed and wind (no-op on rigs without hair)
     installHairSway(this.rig);
     this.gun = new RigInstance(buildRigGeo(vis.gun, vis.gun.name + ':player'), { material: this.material });

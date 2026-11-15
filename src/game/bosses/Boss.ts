@@ -7,7 +7,7 @@ import { speak3D } from '../fx/WorldSpeech';
 import * as THREE from 'three';
 import type { Ctx, RayHit } from '../Ctx';
 import type { ExternalTarget, Enemies } from '../enemies/Enemies';
-import { buildRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
+import { buildRigGeo, cachedRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { StatusSet, StatusResist } from '../combat/Status';
 import { Hit, resolveHit } from '../combat/Damage';
 import type { Player } from '../player/Player';
@@ -97,7 +97,10 @@ export abstract class Boss implements ExternalTarget {
     this.maxHp = this.hp = opts.hp;
     this.scale = opts.scale ?? 1;
     const e = modelEntry(rigKey);
-    let spec = e?.() as RigSpec | undefined;
+    // a rig built before (an earlier fight, or warmed off-thread) skips re-sculpting its spec:
+    // for the colossi that is seconds of main-thread work on the spawn frame
+    const cached = cachedRigGeo('boss:' + rigKey);
+    let spec = (cached?.spec ?? e?.()) as RigSpec | undefined;
     if (!spec?.parts) spec = placeholderHumanoid(0x9a6a4a);
     this.rig = new RigInstance(buildRigGeo(spec, 'boss:' + rigKey), { ownMaterial: true });
     this.root.add(this.rig.root);
