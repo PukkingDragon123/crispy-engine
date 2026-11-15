@@ -15,6 +15,8 @@ import { hideoutOpen } from './game/meta/HideoutGate';
 const params = new URLSearchParams(location.search);
 const engine = new Engine(document.getElementById('app')!);
 if (params.get('q') === 'low') engine.applyQuality({ shadows: false, pixelRatio: 0.5, bloom: false, shadowSize: 512 });
+// phones and tablets: a 1024 sun shadow map (scenes ask for 2048 to 4096; the adaptive resolution does the rest)
+else if (matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches) engine.applyQuality({ shadowSize: 1024 });
 (window as any).__engine = engine;
 // anything that still escapes (a rejected cinematic promise, an event handler) is logged, never fatal
 window.addEventListener('unhandledrejection', (e) => console.error('[dustUP] unhandled rejection', e.reason));

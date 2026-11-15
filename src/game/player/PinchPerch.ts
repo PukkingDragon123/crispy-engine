@@ -3,16 +3,18 @@
 //   hat      on top of the crown, looking around (clinging when the ride gets rough)
 //   (inside) tucked under the back of the brim, out of sight: where he bolts when Sundown is hit
 //            or the board is flying, and where he climbs out of again once it is calm
-//   eyeR     in the bare skull socket, claws and the point of his tail peeking out (idle, after kills)
-//   eyeL     on the living brow, peering down over the shades
+//   eyeR     his burrow: the gap in Sundown's right cheek, claws and face poking out (idle, after kills)
+//   eyeL     beside the left eye, on the cheekbone at the rim of the shades
 //   shoulder on the torn sleeve stump
 // Between perches he scuttles along a little graph of waypoints over the head, the brim, the
 // temples, the jaw and the neck (tetrapod gait from PinchMotion), every waypoint expressed in the
 // frame of a bone so the route rides along with the animation.
 //
 // Anchors: Sundown's head bone carries empty Object3Ds named `perch_hat`, `perch_eyeL`, `perch_eyeR`
-// (looked up by name); without them the rig sockets hat_top / eye_l / eye_r / shoulder_l stand in,
-// and without those the head bone plus fixed offsets.
+// (looked up by name; perch_eyeR is the cheek gap); without them the rig sockets hat_top / eye_l / eye_r /
+// shoulder_l stand in, and without those the head bone plus fixed offsets. The route waypoints over the
+// hat, the hair, the face and the shoulder are snapped onto the real surfaces by raycasts against the
+// host's meshes (once per host, cached in bone space), so he walks on felt, curls and skin, not through them.
 //
 // Errands (the sting leap, the reload hop) are driven by their owner: `update(dt, { away: true, mode })`
 // only animates; `homeWorld()` is where to come back to; `land()` snaps him back onto the perch.
@@ -25,8 +27,9 @@ export type PerchId = 'hat' | 'eyeL' | 'eyeR' | 'shoulder';
 type Spot = PerchId | 'hatIn';
 type WP = Spot | 'crownL' | 'crownR' | 'crownB' | 'brimL' | 'brimR' | 'brimB' | 'lipL' | 'lipR' | 'templeL' | 'templeR' | 'bridge' | 'jawL' | 'neckL' | 'here';
 
-/** Pinch's scale while he lives on Sundown (rig scale 1 is ~0.55 m long; this makes him ~15 cm, tail and claws included) */
-export const PINCH_PERCH_SCALE = 0.27;
+/** Pinch's scale while he lives on Sundown (rig scale 1 is ~0.55 m long; this makes him ~20 cm, tail and claws
+ *  included: big enough to read from the riding camera) */
+export const PINCH_PERCH_SCALE = 0.36;
 
 export interface PerchHost {
   root: THREE.Object3D;
@@ -82,6 +85,10 @@ const _m2 = new THREE.Matrix4();
 const _e = new THREE.Euler(0, 0, 0, 'YXZ');
 const _s = new THREE.Vector3();
 const UPV = new THREE.Vector3(0, 1, 0);
+const _ray = new THREE.Raycaster();
+const _mi = new THREE.Matrix4();
+/** the host's head-family parts he can walk on (the mesh child of each node) */
+const HEAD_PARTS = ['head', 'jaw', 'hat', 'glasses', 'brow_l', 'brow_r', 'mask', 'hair_l', 'hair_l2', 'hair_r', 'hair_r2', 'hair_bl', 'hair_bl2', 'hair_br', 'hair_br2', 'hair_b', 'hair_b2'];
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 
 interface Pt {
@@ -118,6 +125,8 @@ export class PinchPerch {
   private here: Pt | null = null;
   private eyeDepth = 0;
   private g: ReturnType<PinchPerch['geoNow']> | null = null;
+  /** waypoints snapped onto the host's surfaces (bone space), built once per host */
+  private snaps = new Map<string, Pt | null>();
 
   constructor(
     public rig: RigInstance,
@@ -168,6 +177,7 @@ export class PinchPerch {
     }
     this.route = null;
     this.g = null;
+    this.snaps.clear();
   }
 
   /** Sundown got hit: into the hat */
@@ -420,8 +430,11 @@ export class PinchPerch {
     const eR = this.local(h, this.anchors.eyeR, new THREE.Vector3(-0.044, 0.105, 0.09)).add(_v.set(0, 0, this.eyeDepth));
     const eL = this.local(h, this.anchors.eyeL, new THREE.Vector3(0.044, 0.105, 0.09)).add(_v.set(0, 0, this.eyeDepth));
     const hat = this.local(h, this.anchors.hat, new THREE.Vector3(0, 0.29, -0.01));
-    const hc = new THREE.Vector3(0, (eR.y + eL.y) / 2 + 0.012, (eR.z + eL.z) / 2 - 0.088);
-    const R = Math.max(0.07, Math.hypot(eR.x, eR.z - hc.z) * 1.02);
+    // the head's centre and radius from the true eye pivots (the eye sockets of the rig), not the perches
+    const sL = this.host.sockets['eye_l'], sR = this.host.sockets['eye_r'];
+    const pL = sL ? this.local(h, sL, eL) : eL, pR = sR ? this.local(h, sR, eR) : eR;
+    const hc = new THREE.Vector3(0, (pR.y + pL.y) / 2 + 0.012, (pR.z + pL.z) / 2 - 0.088);
+    const R = Math.max(0.07, Math.hypot(pL.x, pL.z - hc.z) * 1.02);
     const hb = this.hatBox;
     const brimY = hb ? hb.min.y + 0.012 : hc.y + 0.075;
     const brimX = hb ? Math.max(-hb.min.x, hb.max.x) * 0.9 : R + 0.05;
@@ -433,60 +446,119 @@ export class PinchPerch {
   }
   private wp(w: WP): Pt | null {
     if (w === 'here') return this.here;
-    if (w === 'shoulder') {
-      const f = this.torso;
-      if (!f) return null;
-      const p = this.local(f, this.anchors.shoulder, new THREE.Vector3(0.16, 0.42, 0));
-      return { frame: f, p: p.add(_v.set(0, 0.004, 0)), n: UPV.clone() };
+    if (this.snaps.has(w)) return this.snaps.get(w)!;
+    const pt = this.wpNow(w);
+    if (w !== 'hat') this.snaps.set(w, pt); // the hat perch follows its anchor live
+    return pt;
+  }
+  /** the mesh children of these host parts */
+  private meshesOf(names: string[]) {
+    const out: THREE.Object3D[] = [];
+    for (const n of names) {
+      const node = this.host.nodes[n];
+      if (node) for (const c of node.children) if ((c as THREE.Mesh).isMesh && c.visible) out.push(c);
     }
-    if (w === 'neckL') {
+    return out;
+  }
+  /**
+   * Cast a ray in a bone's frame (from, dir: frame-local) against host meshes; the first hit as a frame-local
+   * point lifted `lift` m off the surface, with the surface normal (facing back along the ray).
+   */
+  private cast(frame: THREE.Object3D, from: THREE.Vector3, dir: THREE.Vector3, meshes: THREE.Object3D[], lift = 0.004): Pt | null {
+    if (!meshes.length) return null;
+    this.host.root.updateWorldMatrix(true, true);
+    const o = frame.localToWorld(from.clone());
+    const d = dir.clone().transformDirection(frame.matrixWorld);
+    _ray.set(o, d);
+    _ray.near = 0;
+    _ray.far = 2;
+    const hit = _ray.intersectObjects(meshes, false)[0];
+    if (!hit || !hit.face) return null;
+    _mi.copy(frame.matrixWorld).invert();
+    const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).transformDirection(_mi);
+    const dl = dir.clone().normalize();
+    if (n.dot(dl) > 0) n.negate();
+    const p = frame.worldToLocal(hit.point.clone()).addScaledVector(n, lift);
+    return { frame, p, n };
+  }
+  private wpNow(w: WP): Pt | null {
+    if (w === 'shoulder' || w === 'neckL') {
       const f = this.torso;
       if (!f) return null;
-      const p = this.local(f, this.anchors.shoulder, new THREE.Vector3(0.16, 0.42, 0)).add(_v.set(-0.07, 0.075, 0.015));
-      return { frame: f, p, n: new THREE.Vector3(0.6, 0.6, 0.3).normalize() };
+      const sh = this.local(f, this.anchors.shoulder, new THREE.Vector3(0.16, 0.42, 0));
+      const meshes = this.meshesOf(['torso', 'arm_l', 'head', 'jaw', 'hair_l', 'hair_l2', 'hair_bl', 'hair_bl2']);
+      if (w === 'shoulder') {
+        // out on the top of the left shoulder, past the curls resting on it
+        const top = sh.clone().add(_v.set(0.03, 0.3, 0.01));
+        return this.cast(f, top, new THREE.Vector3(0, -1, 0), meshes) ?? { frame: f, p: sh.add(_v.set(0.03, 0.004, 0)), n: UPV.clone() };
+      }
+      // the side of the neck between jaw and shoulder: over the hair hanging there
+      const c = sh.clone().add(_v.set(-0.12, 0.08, 0.0));
+      const out = new THREE.Vector3(1, 0.15, 0.35).normalize();
+      return this.cast(f, c.clone().addScaledVector(out, 0.4), out.clone().negate(), meshes) ?? { frame: f, p: sh.add(_v.set(-0.07, 0.075, 0.015)), n: new THREE.Vector3(0.6, 0.6, 0.3).normalize() };
     }
     const h = this.head;
     if (!h) return null;
     const g = this.geo();
-    const out = (p: THREE.Vector3) => ({ frame: h, p, n: p.clone().sub(g.hc).normalize() });
+    const all = this.meshesOf(HEAD_PARTS);
+    const hatM = this.meshesOf(['hat']);
+    /** snap a head-space guess onto the outermost surface along the ray from the head's centre */
+    const onHead = (p: THREE.Vector3, meshes = all): Pt => {
+      const dir = p.clone().sub(g.hc).normalize();
+      return this.cast(h, g.hc.clone().addScaledVector(dir, 0.6), dir.clone().negate(), meshes) ?? { frame: h, p, n: dir };
+    };
+    /** the brim's top at head-space (x, z), cast straight down onto the hat */
+    const onBrim = (x: number, z: number): Pt => this.cast(h, new THREE.Vector3(x, g.hat.y + 0.2, z), new THREE.Vector3(0, -1, 0), hatM) ?? { frame: h, p: new THREE.Vector3(x, g.brimY + 0.01, z), n: UPV.clone() };
     switch (w) {
       case 'hat':
         return { frame: h, p: g.hat.clone(), n: UPV.clone() };
       case 'crownL':
-      case 'crownR': {
-        const s = w === 'crownL' ? 1 : -1;
-        return { frame: h, p: g.hat.clone().add(_v.set(s * 0.045, -0.035, 0)), n: new THREE.Vector3(s, 0.4, 0).normalize() };
+      case 'crownR':
+      case 'crownB': {
+        // on the side of the tall crown, a little below its top edge
+        const dir = w === 'crownB' ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(w === 'crownL' ? 1 : -1, 0, 0);
+        const y = g.hat.y - 0.045;
+        const c = new THREE.Vector3(g.hat.x, y, g.hat.z);
+        return this.cast(h, c.clone().addScaledVector(dir, 0.6), dir.clone().negate(), hatM) ?? { frame: h, p: c.addScaledVector(dir, 0.1), n: dir };
       }
-      case 'crownB':
-        return { frame: h, p: g.hat.clone().add(_v.set(0, -0.035, -0.05)), n: new THREE.Vector3(0, 0.4, -1).normalize() };
       case 'brimL':
       case 'brimR': {
         const s = w === 'brimL' ? 1 : -1;
-        return { frame: h, p: new THREE.Vector3(s * g.brimX * 0.85, g.brimY + 0.01, g.hc.z), n: UPV.clone() };
+        return onBrim(s * g.brimX * 0.8, g.hc.z + 0.01);
       }
       case 'brimB':
-        return { frame: h, p: new THREE.Vector3(0, g.brimY + 0.01, g.brimZ), n: UPV.clone() };
+        return onBrim(0, g.brimZ * 0.92);
       case 'lipL':
       case 'lipR': {
+        // over the side edge of the brim: find the edge just under the brim top, hang off it
         const s = w === 'lipL' ? 1 : -1;
-        return { frame: h, p: new THREE.Vector3(s * (g.brimX * 0.85 + 0.006), g.brimY - 0.012, g.hc.z), n: new THREE.Vector3(s, -0.3, 0).normalize() };
+        const top = onBrim(s * g.brimX * 0.8, g.hc.z + 0.01);
+        const y = top.p.y - 0.008;
+        const edge = this.cast(h, new THREE.Vector3(s * 0.6, y, g.hc.z + 0.01), new THREE.Vector3(-s, 0, 0), hatM, 0.006);
+        return edge ? { frame: h, p: edge.p.add(_v.set(0, -0.006, 0)), n: new THREE.Vector3(s, -0.3, 0).normalize() } : { frame: h, p: new THREE.Vector3(s * (g.brimX * 0.85 + 0.006), g.brimY - 0.012, g.hc.z), n: new THREE.Vector3(s, -0.3, 0).normalize() };
       }
       case 'hatIn':
         return { frame: h, p: new THREE.Vector3(0, g.brimY - 0.03, g.hc.z - g.R * 0.8), n: new THREE.Vector3(0, 0, -1) };
       case 'templeL':
       case 'templeR': {
+        // under the brim at the temple, over the curls
         const s = w === 'templeL' ? 1 : -1;
-        return out(g.hc.clone().add(_v.set(s, 0.3, 0.35).normalize().multiplyScalar(g.R * 1.03)));
+        return onHead(g.hc.clone().add(_v.set(s, 0.12, 0.3).normalize().multiplyScalar(g.R)));
       }
-      case 'eyeR':
-        // tucked in the bare socket behind the cracked lens, front half poking out past its outer rim
-        return { frame: h, p: g.eR.clone().add(_v.set(-0.006, -0.016, -0.004)), n: new THREE.Vector3(-0.6, 0.3, 0.7).normalize() };
+      case 'eyeR': {
+        // his burrow: the gap in the right cheek; sunk into it to the shoulders, legs inside the head,
+        // only his claws and face poking out of the hole
+        const a = g.eR.clone().add(_v.set(0, 0, -this.eyeDepth));
+        const out = a.clone().sub(g.hc).setY(0).normalize();
+        return { frame: h, p: a.addScaledVector(out, -0.032).add(_v.set(0, -0.003, 0)), n: out.clone().add(_v.set(0, 0.25, 0)).normalize() };
+      }
       case 'eyeL':
-        return { frame: h, p: g.eL.clone().add(_v.set(0.012, 0.032, 0.002)), n: new THREE.Vector3(0.2, 1, 0.4).normalize() };
+        // beside the left eye, on the cheekbone at the outer rim of the shades (cast onto the skin, not the lens)
+        return onHead(g.eL.clone().add(_v.set(0.045, -0.03, -0.035)), this.meshesOf(['head', 'jaw', 'hair_l', 'hair_l2']));
       case 'bridge':
-        return out(new THREE.Vector3(0, (g.eR.y + g.eL.y) / 2 + 0.034, (g.eR.z + g.eL.z) / 2 + 0.006));
+        return onHead(new THREE.Vector3(0, (g.eR.y + g.eL.y) / 2 + 0.05, (g.eL.z + 0.02)));
       case 'jawL':
-        return out(g.hc.clone().add(_v.set(0.8, -0.75, 0.25).normalize().multiplyScalar(g.R * 1.05)));
+        return onHead(g.hc.clone().add(_v.set(0.8, -0.75, 0.25).normalize().multiplyScalar(g.R * 1.05)));
     }
     return null;
   }
@@ -497,7 +569,7 @@ export class PinchPerch {
     f.getWorldQuaternion(out);
     // yaw, pitch (positive: nose down), roll in the bone's frame
     const [yaw, pitch, roll] =
-      s === 'eyeR' ? [-1.2, 0.1, 0.1] : s === 'eyeL' ? [-0.3, 0.55, -0.12] : s === 'shoulder' ? [0.3, 0, 0] : s === 'hatIn' ? [Math.PI, 0.4, 0] : [0, 0, 0];
+      s === 'eyeR' ? [-1.25, 0.12, 0.08] : s === 'eyeL' ? [1.0, 0.18, -0.25] : s === 'shoulder' ? [0.3, 0, 0] : s === 'hatIn' ? [Math.PI, 0.4, 0] : [0, 0, 0];
     _e.set(pitch, yaw, roll, 'YXZ');
     return out.multiply(_q2.setFromEuler(_e));
   }

@@ -33,7 +33,7 @@ import { SUNDOWN_EXPRESSIONS } from './skeleton';
 import { frogWigHat, FROG_WIG_TOP } from '../enemies/frog';
 import type { CowboyLook, HatId, OutfitId } from './skeleton';
 import { Sc, Warp, Col, clamp, lerp, sstep, vadd, vsub, vmul, vdot, vcross, vlen, vnorm, distPoly, spline, resample, shadeRamps, splitOff } from './sculpt';
-import { SKIN, STUB, STUB_DOT, SCAR, LIP, NAIL, BROWHAIR, HEYE, ROT, BRUISE, MEAT, SINEW, CAVITY, THREAD_BLK, HAIR, HAIR_ALT, HAIR_TIP, HAIR_GREY, rng, vhash, dedupe, skinOver, rotEdgeCol, blotch, markBone, boneEdgeCol, stitch, strand, splitY } from './fleshKit';
+import { SKIN as SKIN_SHARED, STUB, STUB_DOT, SCAR, LIP, NAIL, BROWHAIR, HEYE, ROT, BRUISE, MEAT, SINEW, CAVITY, THREAD_BLK, HAIR, HAIR_ALT, HAIR_TIP, HAIR_GREY, rng, vhash, dedupe, skinOver, rotEdgeCol, blotch, markBone, boneEdgeCol, stitch, strand, splitY } from './fleshKit';
 import { installHairSway, type HairChain } from './hairSway';
 
 /** metres per voxel of the HD player build */
@@ -63,6 +63,13 @@ const SOLE = 0x1b1513;
 const HEEL = ramp(0x4b3527, 0x37261b, 0x604534, 0x22150d);
 const STITCH = 0x9c9aa4;
 const VENOM = 0x8cf03c;
+/** his living skin: a warm, clean sun-tan (Sundown's own ramp; fleshKit's SKIN stays as the shared default) */
+const SKIN = ramp(0xcf9a74, 0xad7a58, 0xe2b48e, 0x7a4b36);
+void SKIN_SHARED;
+/** a clean five-o'clock shadow: one tone between skin and shade, sparse darker flecks */
+const STUBBLE = 0xa8775a, STUBBLE_FLECK = 0x8a5d43;
+/** the cheek gap's rim: a clean dark outline, not a wound */
+const GAP_RIM = 0x3d2a24;
 const M = VF.METAL;
 markBone(BN.base, BN.shade, BN.hi, ENAMEL);
 
@@ -99,8 +106,8 @@ const BODY_KZ: [number, number][] = [[24, 1.16], [29, 1.06], [32, 1.06], [36, 1.
 /** height map of the trunk and legs: ankle 8 cm, knee 47 cm, hip 86 cm, waist 1.0 m, shoulder joint 1.34 m, a lean
  *  neck, chin 1.41 m, crown 1.71 m */
 const Y_BODY: [number, number][] = [[0, 0], [3, 5.2], [15.5, 30], [24, 55], [29.5, 64.5], [36, 75], [42.5, 85.6], [44, 88.6], [46, 92], [52, 99]];
-/** height map of the hanging arm: elbow 1.04 m, wrist 0.79 m, grip 0.72 m, fingertips at mid-thigh */
-const Y_ARM: [number, number][] = [[15, 38.6], [21.5, 45.9], [25.6, 50.5], [33, 66.4], [42.5, 85.6], [52, 99]];
+/** height map of the hanging arm: elbow 1.05 m, wrist 0.83 m, grip 0.75 m, fingertips at mid-thigh */
+const Y_ARM: [number, number][] = [[15, 41.2], [21.5, 48.3], [25.6, 52.9], [33, 67.4], [42.5, 85.6], [52, 99]];
 /** the trunk (x and z scale with height; the neck column stays centred under the head) */
 const W_BODY = new Warp(Y_BODY, BODY_KX, BODY_KZ, 0, 0, -1.5, -1.5);
 /** output x of a design-x limb axis on the trunk at height y, and the output z of design z = 0 there */
@@ -440,12 +447,12 @@ const keyAt = (k: [number, number][], v: number) => {
  *  jaw bone show through it; everything else is living skin. */
 function headRotSdf(x: number, y: number, z: number) {
   const jag = 0.1 * Math.sin(y * 3.1 + z * 1.3) + 0.07 * Math.sin(z * 4.3 - y * 1.7 + 0.4);
-  const d = (Math.hypot((x + 4.15) / 1.75, (y - 47.7) / 1.8, (z - 3.2) / 2.4) - 1) * 1.75;
-  return Math.max(d, 0.6 - z) + jag;
+  const d = (Math.hypot((x + 4.75) / 1.4, (y - 47.8) / 1.5, (z - 2.7) / 1.7) - 1) * 1.4;
+  return Math.max(d, 0.9 - z) + jag * 0.6;
 }
 /** skin colour just outside the gap: a crisp raw rim, then a thin bruised line, then healthy skin */
 function gapEdgeCol(d: number, healthy: number) {
-  return d < 0.26 ? MEAT.dark : healthy;
+  return d < 0.24 ? GAP_RIM : healthy;
 }
 /** bone colour just inside the gap: a dark wet rim, then clean bone */
 const gapBoneCol = (c: number, _d: number) => c;
@@ -549,21 +556,21 @@ function faceSkinCol(x: number, y: number, z: number, i: number, j: number, l: n
   // lips
   if (!jaw && y < 48.0 && ax < 1.95 && z > 5.55) return LIP;
   if (jaw && y > 46.25 && ax < 1.85 && z > 5.35) return LIP;
-  if (ax > 1.9 && ax < 2.45 && y > 46.9 && y < 47.75 && z > 4.2) return SKIN.dark; // mouth corners
+  if (x < -1.9 && x > -2.35 && y > 46.95 && y < 47.6 && z > 4.2) return SKIN.dark; // the right mouth corner
   // an old knife scar down the left cheek (no stubble grows on it)
-  if (x > 0 && z > 2.2 && distPoly([x, y, 0], [[5.3, 52.8, 0], [4.65, 51.05, 0], [3.85, 48.55, 0]]) < 0.3) return SCAR;
-  // eye bags, the lid crease and crow's feet round the living eye
-  if (x > 1.4 && x < 5.4 && y > 51.95 && y < 52.7 && z > 5.3) return SKIN.shade;
-  if (x > 1.8 && x < 5.2 && y > 54.7 && y < 55.35 && z > 5.6) return SKIN.shade;
-  if (x > 5.2 && x < 6.4 && z > 2 && (distPoly([x, y, 0], [[5.3, 53.95, 0], [6.25, 54.45, 0]]) < 0.17 || distPoly([x, y, 0], [[5.3, 53.4, 0], [6.3, 53.2, 0]]) < 0.17)) return SKIN.shade;
-  // two weathered lines across the forehead
-  if (x > 0.7 && x < 4.4 && z > 4 && (Math.abs(y - 58.05 - 0.08 * x) < 0.2 || Math.abs(y - 58.75 - 0.05 * x) < 0.18)) return SKIN.shade;
+  if (x > 0 && z > 2.2 && distPoly([x, y, 0], [[5.3, 52.8, 0], [4.65, 51.05, 0], [3.85, 48.55, 0]]) < 0.28) return SCAR;
+  // the half-smirk: the left corner of the mouth pulled up round the cigarette, a short crease beside it
+  if (!jaw && x > 1.8 && x < 2.8 && z > 4.0 && Math.abs(y - (47.45 + (x - 1.8) * 0.55)) < 0.3) return SKIN.dark;
+  if (x > 2.3 && z > 3.8 && distPoly([x, y, 0], [[2.55, 49.45, 0], [2.95, 48.35, 0], [2.9, 47.7, 0]]) < 0.16) return SKIN.shade;
+  // the lid creases, and the hollows under the cheekbones
+  if (ax > 1.8 && ax < 5.2 && y > 54.75 && y < 55.3 && z > 5.6) return SKIN.shade;
+  if (!jaw && ax > 3.4 && ax < 5.4 && z > 2.6 && Math.abs(y - (50.05 - (ax - 3.4) * 0.22)) < 0.2) return SKIN.shade;
   // stubble: the jaw, chin and upper lip (thinning out toward the cheekbones)
   const top = 50.1 + 0.4 * Math.sin(x * 2.1) - (ax < 1.4 && z > 6.2 ? 9 : 0);
   if ((jaw || y < top) && z > -2.8 && y > 42.5) {
     const h = vhash(i, j, l);
-    if (y > top - 0.7 && !jaw) return h < 0.3 ? STUB_DOT : h < 0.6 ? STUB : SKIN.base;
-    return h < 0.16 ? STUB_DOT : STUB;
+    if (y > top - 0.7 && !jaw) return h < 0.4 ? STUBBLE : SKIN.base;
+    return h < 0.07 ? STUBBLE_FLECK : STUBBLE;
   }
   if (jaw && Math.abs(x - 0.1) < 0.35 && Math.abs(y - 44.6) < 0.35) return SKIN.shade; // the cleft of a hard chin
   return SKIN.base;
@@ -579,7 +586,15 @@ function composeFace(bone: VoxelModel, skin: VoxelModel, name: string, jaw: bool
   skin.forEach((i, j, l) => {
     const x = cen(i), y = cen(j), z = cen(l);
     const d = headRotSdf(x, y, z);
-    if (d < 0) return;
+    if (d < 0) {
+      // the gap is a shallow pit: half a unit down, clean bone with the molars in two rows and the dark
+      // line of the bite between them
+      if (d > -0.5) return;
+      const bite = jaw ? y > 47.1 : y < 47.55;
+      const teeth = jaw ? y > 45.9 : y < 48.6;
+      out.set(i, j, l, bite ? SOCK.void : teeth ? (l % 3 === 0 ? SOCK.mid : ENAMEL) : y > 48.6 ? BN.base : BN.shade);
+      return;
+    }
     const c = skin.get(i, j, l)! & 0xffffff;
     const base = c === (SKIN.base & 0xffffff) ? faceSkinCol(x, y, z, i, j, l, jaw) : c;
     out.set(i, j, l, gapEdgeCol(d, base));
@@ -596,7 +611,7 @@ function composeFace(bone: VoxelModel, skin: VoxelModel, name: string, jaw: bool
       lip.push([ni, nj, nl]);
     }
   });
-  for (const [i, j, l] of lip) out.set(i, j, l, MEAT.dark);
+  for (const [i, j, l] of lip) out.set(i, j, l, GAP_RIM);
   return out;
 }
 
@@ -621,18 +636,17 @@ function buildHead(hair: boolean): HeadBuild {
   f.ell([0, 55.4, -0.8], [6.75, 8.1, 7.45], K, { p: 2.15, mode: 'under' });
   f.ell([0, 50.0, -4.4], [4.4, 2.9, 3.05], K, { p: 2.2, mode: 'under' });
   for (const s of [1, -1]) {
-    f.ell([s * 4.4, 51.6, 4.35], [1.9, 1.5, 1.85], K, { p: 2.2, mode: 'under' }); // cheekbone
+    f.ell([s * 4.45, 51.75, 4.4], [2.0, 1.4, 1.95], K, { p: 2.3, mode: 'under' }); // cheekbone, high and defined
     f.ell([s * 5.45, 51.4, 1.2], [1.25, 1.2, 2.9], K, { mode: 'under' }); // over the zygomatic arch
     f.ell([s * 4.9, 48.9, 2.5], [1.45, 1.95, 2.5], K, { mode: 'under' }); // masseter: a square, hard jaw
     f.ell([s * 4.65, 49.3, -2.4], [1.65, 1.85, 1.75], K, { mode: 'under' }); // under the ear
   }
   f.ell([0, 48.7, 4.35], [3.3, 1.5, 2.25], K, { p: 2.3, mode: 'under' }); // muzzle over the upper teeth
-  // the nose: long and strong, broken once (a bump on the bridge, a kink to his left)
-  f.cap([0, 55.7, 6.45], [0.12, 51.2, 7.9], 0.88, 1.02, K, { mode: 'under' });
-  f.ell([0.15, 50.6, 7.8], [0.98, 0.9, 0.88], K, { mode: 'under' });
-  for (const s of [1, -1]) f.ell([s * 0.95 + 0.1, 50.2, 7.05], [0.64, 0.6, 0.72], K, { mode: 'under' });
-  f.ell([0.22, 53.5, 7.2], [0.5, 0.5, 0.42], K, { mode: 'under' });
-  for (const s of [1, -1]) f.ell([s * 0.55 + 0.15, 49.85, 7.45], [0.34, 0.26, 0.5], SKIN.dark, { mode: 'paint' }); // nostrils
+  // the nose: straight and defined, a clean bridge and a firm tip
+  f.cap([0, 55.7, 6.45], [0, 51.3, 7.85], 0.8, 0.96, K, { mode: 'under' });
+  f.ell([0, 50.7, 7.75], [0.92, 0.84, 0.84], K, { mode: 'under' });
+  for (const s of [1, -1]) f.ell([s * 0.92, 50.25, 7.05], [0.6, 0.56, 0.7], K, { mode: 'under' });
+  for (const s of [1, -1]) f.ell([s * 0.55, 49.85, 7.45], [0.32, 0.24, 0.5], SKIN.dark, { mode: 'paint' }); // nostrils
   humanEar(f, 1);
   humanEar(f, -1);
   // the eye openings, and the parting of the lips (the jaw part carries everything below it)
@@ -642,29 +656,24 @@ function buildHead(hair: boolean): HeadBuild {
   // ---- jaw: skin over the mandible, a square chin, the lower lip
   const g = sc('jaw_skin');
   skinOver(sk.jaw.m, g.m, K);
-  g.ell([0, 44.75, 5.5], [2.35, 1.45, 1.35], K, { p: 2.6, mode: 'under' });
+  g.ell([0, 44.6, 5.6], [2.6, 1.55, 1.45], K, { p: 2.9, mode: 'under' }); // a square, forward chin
   for (const s of [1, -1]) {
-    g.sweep([[s * 5.0, 46.0, -1.7], [s * 4.7, 45.3, 1.6], [s * 3.6, 44.9, 4.2], [s * 1.7, 44.7, 5.55], [0, 44.65, 5.95]], () => [1.1, 1.2, 1.05], K, 0.3, { mode: 'under' });
-    g.ell([s * 5.1, 45.95, -1.5], [1.2, 1.25, 1.35], K, { mode: 'under' }); // the angle of the jaw
+    g.sweep([[s * 5.15, 46.0, -1.7], [s * 4.85, 45.2, 1.6], [s * 3.75, 44.75, 4.2], [s * 1.8, 44.55, 5.6], [0, 44.5, 6.0]], () => [1.2, 1.25, 1.1], K, 0.3, { mode: 'under' }); // a hard jawline
+    g.ell([s * 5.2, 45.9, -1.4], [1.4, 1.4, 1.5], K, { p: 2.4, mode: 'under' }); // the angle of the jaw
   }
   g.ell([0, 46.75, 5.7], [1.85, 0.48, 0.72], K, { mode: 'under' }); // lower lip
   g.region([-8, 47.34, -6], [8, 51, 10], () => true, 0, { mode: 'carve' });
   const jaw = composeFace(sk.jaw.m, g.m, 'jaw', true);
   const hs = sc('head');
   hs.m = head;
-  // ---- the cheek gap: three cords of sinew still strung across it, and a few neat black stitches where
-  // someone sewed its upper rim back to the cheekbone
-  for (const [a, b] of [[[-3.35, 49.35, 5.35], [-3.45, 46.15, 5.25]], [[-4.75, 49.4, 4.55], [-4.85, 46.1, 4.3]]] as [V3, V3][]) {
-    const mid: V3 = [(a[0] + b[0]) / 2 - 0.12, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2 + 0.3];
-    strand(hs, [a, mid, b], 0.36, 0.3, SINEW.base, SINEW.shade, 0.3);
-  }
-  for (const x of [-3.0, -4.15, -5.25]) {
-    const y = 49.8 - 0.12 * (x + 3), zs = (xx: number, yy: number) => {
-      const i = vi(xx), j = vi(yy);
-      for (let l = 20; l > -5; l--) if (head.has(i, j, l)) return cen(l);
-      return 5;
+  // ---- the cheek gap: a few neat black stitches where someone sewed its upper rim back to the cheekbone
+  for (const z of [1.55, 2.5, 3.4]) {
+    const y = 49.35 - 0.1 * (z - 1.5), xs = (yy: number, zz: number) => {
+      const j = vi(yy), l = vi(zz);
+      for (let i = -20; i < 0; i++) if (head.has(i, j, l)) return cen(i);
+      return -6;
     };
-    stitch(hs, [x + 0.2, y + 0.75, zs(x + 0.2, y + 0.75) + 0.25], [x - 0.2, y - 0.45, zs(x - 0.2, y - 0.45) + 0.25], 0.2);
+    stitch(hs, [xs(y + 0.75, z) - 0.25, y + 0.75, z + 0.15], [xs(y - 0.4, z) - 0.25, y - 0.4, z - 0.15], 0.2);
   }
   if (hair) hairCap(hs);
   shadeRamps(head, [BN, SKIN, ROT, HAIR], true);
@@ -746,8 +755,8 @@ function hairLocks(): { locks: HairLock[]; chains: HairChain[] } {
   const locks: HairLock[] = [];
   /** one ringlet: a centreline off the scalp at angle th, wound into a spiral that widens down the lock */
   type Curl = { th: number; y0: number; yEnd: number; puff: number; back: number; phase: number; r0: number };
-  const ringlet = (c: Curl): V3[] => {
-    const pts: V3[] = [];
+  const ringlet = (c: Curl): { pts: V3[]; face: number[] } => {
+    const pts: V3[] = [], face: number[] = [];
     const n: V3 = [Math.sin(c.th), 0, Math.cos(c.th)], tg: V3 = [Math.cos(c.th), 0, -Math.sin(c.th)];
     for (let y = c.y0; y >= c.yEnd; y -= 0.28) {
       const k = (c.y0 - y) / Math.max(1, c.y0 - c.yEnd);
@@ -757,21 +766,23 @@ function hairLocks(): { locks: HairLock[]; chains: HairChain[] } {
       const rc = lerp(0.12, 0.62, sstep(k * 2.2)) * (1 - 0.25 * k);
       const ph = c.phase + (c.y0 - y) * 1.45;
       pts.push([p[0] + rc * (Math.cos(ph) * n[0] + Math.sin(ph) * tg[0]), y, p[2] + rc * (Math.cos(ph) * n[2] + Math.sin(ph) * tg[2])]);
+      face.push(Math.cos(ph) * (rc > 0.2 ? 1 : 0.3));
     }
-    return pts;
+    return { pts, face };
   };
-  /** dark hair with a curl-banded sheen and a few warm tips */
-  const hairCol = (seed: number) => (x: number, y: number, z: number) => {
-    const v = Math.sin(y * 2.9 + x * 1.2 + z * 1.05 + seed);
-    return v > 0.62 ? HAIR.hi : v < -0.55 ? HAIR.shade : seed % 3 < 1 ? HAIR_ALT : HAIR.base;
-  };
+  /** curl shading: the crest of each turn catches the light, the inside of the spiral falls into shadow */
+  const HC = { base: 0x30251f, shade: 0x150f0d, hi: 0x5c4434, glint: 0x84644c };
   const build = (name: string, cut: number, curls: Curl[]) => {
     const m = sc(name);
     curls.forEach((c, k) => {
-      const pts = ringlet(c);
-      m.path(pts, (t) => lerp(c.r0, c.r0 * 0.72, t), hairCol(k * 1.7 + 0.3));
+      const { pts, face } = ringlet(c);
+      for (let i = 1; i < pts.length; i++) {
+        const t0 = (i - 1) / (pts.length - 1), t1 = i / (pts.length - 1), f = face[i];
+        const col = f > 0.82 && (i + k) % 3 === 0 ? HC.glint : f > 0.42 ? HC.hi : f < -0.4 ? HC.shade : HC.base;
+        m.cap(pts[i - 1], pts[i], lerp(c.r0, c.r0 * 0.72, t0), lerp(c.r0, c.r0 * 0.72, t1), col);
+      }
       const tip = pts[pts.length - 1];
-      if (R() < 0.4) m.ell(tip, [0.36, 0.36, 0.36], HAIR_TIP);
+      if (R() < 0.4) m.ell(tip, [0.34, 0.34, 0.34], HAIR_TIP);
     });
     const [up, lo] = splitY(m.m, S, cut, name, name + '2');
     const avg = (pick: (c: Curl) => V3): V3 => {
@@ -791,10 +802,15 @@ function hairLocks(): { locks: HairLock[]; chains: HairChain[] } {
   // ---- the sides: from the temples, over and behind the ears, a mass of curls resting on the shoulders
   for (const s of [1, -1]) {
     const C: Curl[] = [];
+    // the living side: two framing curls falling past the cheekbone to the jaw; the zombie side is tucked
+    // back behind the ear so the cheek gap shows
+    if (s > 0)
+      for (const [th0, yE] of [[0.98, 45.6], [1.06, 44.8]] as [number, number][])
+        C.push({ th: th0, y0: 57.9, yEnd: yE + R() * 0.6, puff: 0.7, back: 0.4, phase: R() * 6.3, r0: 0.62 });
     for (let k = 0; k < 10; k++) {
-      const th = s * (1.12 + k * 0.088 + (R() - 0.5) * 0.04);
+      const th = s * ((s > 0 ? 1.14 : 1.42) + k * (s > 0 ? 0.088 : 0.07) + (R() - 0.5) * 0.04);
       const behind = Math.abs(th) > 1.6;
-      C.push({ th, y0: 57.7 - 0.1 * k + (R() - 0.5) * 0.4, yEnd: (behind ? 40.6 : 43.4) + R() * 1.6, puff: 1.5 + R() * 0.9, back: behind ? 2.0 : 1.1, phase: R() * 6.3, r0: 0.7 + R() * 0.12 });
+      C.push({ th, y0: 57.7 - 0.1 * k + (R() - 0.5) * 0.4, yEnd: (behind ? 40.6 : 43.4) + R() * 1.6, puff: 1.5 + R() * 0.9, back: behind ? 2.0 : 1.1, phase: R() * 6.3, r0: 0.62 + R() * 0.1 });
     }
     build(s > 0 ? 'hair_l' : 'hair_r', 50.2, C);
   }
@@ -804,7 +820,7 @@ function hairLocks(): { locks: HairLock[]; chains: HairChain[] } {
     for (let k = 0; k < 9; k++) {
       const th = s * (2.0 + k * 0.142 + (R() - 0.5) * 0.04);
       const mid = 1 - Math.abs(Math.abs(th) - Math.PI) / 1.2;
-      C.push({ th, y0: 57.3 + (R() - 0.5) * 0.5, yEnd: 38.6 - 2.2 * clamp(mid, 0, 1) + R() * 1.4, puff: 1.3 + R() * 0.8, back: 0.6, phase: R() * 6.3, r0: 0.72 + R() * 0.12 });
+      C.push({ th, y0: 57.3 + (R() - 0.5) * 0.5, yEnd: 38.6 - 2.2 * clamp(mid, 0, 1) + R() * 1.4, puff: 1.3 + R() * 0.8, back: 0.6, phase: R() * 6.3, r0: 0.66 + R() * 0.1 });
     }
     build(s > 0 ? 'hair_bl' : 'hair_br', 47.6, C);
   }
@@ -1067,10 +1083,11 @@ function bellyBody(m: Sc) {
 // ---- arms
 /** a fleshed upper arm (deltoid, biceps, triceps) */
 function upperArmFlesh(m: Sc, s: number, K: number) {
-  m.ell([s * 7.95, 41.75, -0.1], [1.95, 1.75, 1.85], K);
-  m.cap([s * 8.1, 41.2, -0.05], [s * 8.0, 34.0, 0.05], 1.42, 1.15, K);
-  m.ell([s * 8.2, 37.4, 0.55], [1.15, 2.1, 1.1], K);
-  m.ell([s * 7.9, 37.8, -0.65], [1.1, 2.3, 1.0], K);
+  m.ell([s * 8.0, 41.75, -0.1], [1.98, 1.78, 1.88], K); // the deltoid cap
+  m.ell([s * 8.45, 40.1, 0.1], [1.22, 1.85, 1.38], K); // the deltoid's point running down the outside
+  m.cap([s * 8.1, 41.2, -0.05], [s * 8.0, 34.0, 0.05], 1.42, 1.12, K);
+  m.ell([s * 8.15, 37.2, 0.75], [1.32, 2.15, 1.3], K); // biceps
+  m.ell([s * 7.95, 37.9, -0.75], [1.25, 2.4, 1.18], K); // triceps
   m.ell([s * 8.0, 33.85, -0.05], [1.2, 0.8, 1.05], K);
 }
 /** his living left upper arm: whole, but sewn round the biceps where it was once half torn off */
@@ -1114,8 +1131,9 @@ function deadUpperArm(m: Sc, s: number) {
 /** a fleshed forearm to the wrist */
 function forearmFlesh(m: Sc, s: number, K: number) {
   m.ell([s * 8.2, 32.55, -0.45], [1.25, 1.0, 1.15], K); // elbow
-  m.ell([s * 8.55, 30.9, 0.15], [1.3, 1.85, 1.2], K); // the meaty top of the forearm
-  m.cap([s * 8.35, 32.2, -0.1], [s * 8.65, 26.7, -0.05], 1.25, 0.98, K);
+  m.ell([s * 8.55, 30.8, 0.2], [1.45, 2.0, 1.35], K); // the meaty top of the forearm
+  m.ell([s * 8.1, 31.2, -0.45], [1.15, 1.7, 1.1], K); // the flexors underneath
+  m.cap([s * 8.35, 32.2, -0.1], [s * 8.65, 26.7, -0.05], 1.3, 1.0, K);
   m.ell([s * 8.65, 26.3, -0.05], [1.05, 0.7, 0.92], K); // wrist
 }
 /** his living left forearm: weathered skin, a necrotic gash on the outside sewn over the ulna */
@@ -2344,7 +2362,7 @@ function cigarette() {
 const FRAME = ramp(0x34363d, 0x1c1d22, 0x8c919c, 0x0c0c0e); // gunmetal
 const LENS = { top: 0x0f1015, mid: 0x171a22, low: 0x252c3a, streak: 0xaebdd6, crack: 0xd6dde8 };
 const LENS_C = (s: number): V3 => [(s * 10) / 3, 53.75, 7.35];
-const LENS_R = 2.2;
+const LENS_R = 1.82;
 /** the glow of his dead eye seen through the tint, per eye variant (2x2 voxel columns in front of the pupil);
  *  the living eye does not glow */
 function lensGlow(m: Sc, s: number, v: EyeVar) {
@@ -2387,15 +2405,15 @@ function sunglasses(vl: EyeVar, vr: EyeVar) {
       return r >= LENS_R - 0.1 && r <= LENS_R + 0.42 && z >= 6.85 && z <= 7.7;
     }, (x, y) => (y > c[1] + 1.2 ? FRAME.hi : FRAME.base), { flags: M });
     // hinge + temple arm running back along the skull, hooking down behind
-    g.rbox([s * 5.75, 54.5, 7.0], [0.42, 0.42, 0.45], 0.15, FRAME.base, { flags: M });
+    g.rbox([s * 5.5, 54.3, 7.0], [0.42, 0.42, 0.45], 0.15, FRAME.base, { flags: M });
     // the living side hooks over the ear; the dead side rests over the bare skull's ear hole
     const tx = s > 0 ? [6.95, 7.2, 7.0, 6.45] : [6.45, 6.6, 6.4, 6.0];
-    g.path([[s * 5.95, 54.55, 6.75], [s * tx[0], 54.75, 4.0], [s * tx[1], 54.95, -0.8], [s * tx[2], 54.6, -2.9], [s * tx[3], 53.3, -3.9]], (t) => 0.3 - 0.05 * t, (x, y, z) => (z < -2.4 ? FRAME.dark : FRAME.base), { flags: M });
+    g.path([[s * 5.7, 54.35, 6.75], [s * tx[0], 54.75, 4.0], [s * tx[1], 54.95, -0.8], [s * tx[2], 54.6, -2.9], [s * tx[3], 53.3, -3.9]], (t) => 0.3 - 0.05 * t, (x, y, z) => (z < -2.4 ? FRAME.dark : FRAME.base), { flags: M });
     // nose pad
     g.ell([s * 1.15, 52.75, 6.85], [0.3, 0.42, 0.25], 0x9aa2b0, { flags: M });
   }
   // keyhole bridge arching over the nose
-  g.path([[-1.25, 54.35, 7.7], [-0.75, 55.05, 7.9], [0, 55.25, 7.95], [0.75, 55.05, 7.9], [1.25, 54.35, 7.7]], () => 0.27, FRAME.hi, { flags: M });
+  g.path([[-1.6, 54.25, 7.65], [-0.85, 54.95, 7.9], [0, 55.15, 7.95], [0.85, 54.95, 7.9], [1.6, 54.25, 7.65]], () => 0.27, FRAME.hi, { flags: M });
   // a crack across the right lens (+ a chipped rim edge)
   const cr = LENS_C(-1);
   const crack: V3[] = [[cr[0] - 1.75, cr[1] + 1.2, 7], [cr[0] - 0.9, cr[1] + 0.55, 7], [cr[0] - 0.45, cr[1] + 0.85, 7], [cr[0] + 0.35, cr[1] - 0.1, 7], [cr[0] + 0.25, cr[1] - 0.95, 7]];
@@ -2658,7 +2676,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     perch_hat: sock('head', [0, crownTop(hat, topY) + 0.15, -1.2]),
     perch_eyeL: sock('head', [J.eye[0], J.eye[1], J.eye[2] - 0.6]),
     // on the zombie side Pinch peeks out of the cheek gap
-    perch_eyeR: sock('head', [-4.45, 48.6, 4.4]),
+    perch_eyeR: sock('head', [-5.45, 47.8, 2.85]),
     // the cloth tails flutter from the mask knot (or from the back of the neck bandana)
     bandana_anchor: mask ? sock('mask', [0.45, 48.9, -8.75]) : sock('torso', [0, 45.2, -5.6]),
     // the sandboard rides between the shoulder blades, held by the sling (see attachBoardOnBack)

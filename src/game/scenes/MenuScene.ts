@@ -940,7 +940,7 @@ export class MenuScene implements GameScene {
       q.appendChild(o);
     }
     q.value = eng.quality.bloom ? 'high' : 'low';
-    q.onchange = () => eng.applyQuality(q.value === 'low' ? { shadows: false, pixelRatio: 0.6, bloom: false, shadowSize: 512 } : { shadows: true, pixelRatio: Math.min(window.devicePixelRatio, 1.5), bloom: true, shadowSize: 2048 });
+    q.onchange = () => eng.applyQuality(q.value === 'low' ? { shadows: false, pixelRatio: 0.6, bloom: false, shadowSize: 512 } : { shadows: true, pixelRatio: Math.min(window.devicePixelRatio, 1.5), bloom: true, shadowSize: 4096 });
     row('Quality', q);
     const sens = document.createElement('input');
     sens.type = 'range';

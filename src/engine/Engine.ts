@@ -69,7 +69,7 @@ export class Engine {
   private hitStopScale = 0.02;
   fps = 60;
   private lastT = performance.now();
-  quality: Quality = { pixelRatio: Math.min(window.devicePixelRatio, 1.5), shadows: true, shadowSize: 2048, bloom: true, particles: 1, drawDistance: 260 };
+  quality: Quality = { pixelRatio: Math.min(window.devicePixelRatio, 1.5), shadows: true, shadowSize: 4096, bloom: true, particles: 1, drawDistance: 260 }; // shadowSize caps scene shadow maps (capShadows): 4096 lets every scene keep its own
   /**
    * adaptive resolution: the 3D view renders at quality.pixelRatio x renderScale while the canvas
    * (and the live 3D HUD drawn over it) stays at full resolution. Lowered when frames run long,
@@ -81,7 +81,7 @@ export class Engine {
     const a = new URLSearchParams(location.search).get('adaptive');
     return a !== null ? a !== '0' : !navigator.webdriver;
   })();
-  private ad = { t: 0, n: 0, long: 0, stall: false, cool: 3, hold: 0, base: 1 / 60, raiseFails: 0, raisedAt: -1e9 };
+  private ad = { t: 0, n: 0, max: 0, long: 0, cool: 3, hold: 0, raiseFails: 0, raisedAt: -1e9 };
   width = window.innerWidth;
   height = window.innerHeight;
   overlay: HTMLDivElement;
@@ -362,32 +362,28 @@ export class Engine {
   }
 
   /**
-   * Adaptive resolution. Frame intervals are judged per second against the display's own refresh
-   * period (the shortest steady interval seen): a second whose average runs 30 % over it lowers the
-   * 3D render scale a step (to 0.6 at least); 8 s at the refresh rate tries a step back up, and a
-   * step up that has to be taken back waits longer before the next try. Seconds holding a stall
-   * (a scene build, a shader compile) are ignored: those are not the steady cost of drawing.
+   * Adaptive resolution. Frame intervals are judged one second at a time, leaving out that second's
+   * single worst frame when it is a stall (a scene build or shader compile, not the steady cost of
+   * drawing). A second under 50 fps for two seconds running lowers the 3D render scale a step (to
+   * 0.6 at least); 8 s at 58 fps or better tries a step back up, and a step up that has to be taken
+   * back waits longer before the next try.
    */
-  private adaptResolution(rdt: number) {
+  private adaptResolution(raw: number) {
     const a = this.ad;
-    if (!this.adaptive || this.covered || this.contextLost || document.hidden) {
-      a.t = a.n = 0;
-      a.stall = false;
+    if (!this.adaptive || this.covered || this.contextLost || document.hidden || this.paused) {
+      a.t = a.n = a.max = 0;
       return;
     }
-    a.t += rdt;
+    a.t += raw;
     a.n++;
-    if (rdt >= 0.1) a.stall = true;
-    a.cool = Math.max(0, a.cool - rdt);
-    if (a.t < 1) return;
-    const avg = a.t / a.n;
-    const stall = a.stall;
-    a.t = a.n = 0;
-    a.stall = false;
-    if (stall) return;
-    // the refresh period: creeps up slowly, snaps down to any faster steady second
-    a.base = avg < a.base ? avg : a.base + (avg - a.base) * 0.02;
-    const slow = avg > a.base * 1.3 && avg > 1 / 55;
+    a.max = Math.max(a.max, raw);
+    a.cool = Math.max(0, a.cool - raw);
+    if (a.t < 1 || a.n < 3) return;
+    // the bucket without its worst frame; a lone frame 4x slower than the rest is a stall
+    const rest = (a.t - a.max) / (a.n - 1);
+    const stall = a.max > 0.12 && a.max > rest * 4;
+    const avg = stall ? rest : a.t / a.n;
+    a.t = a.n = a.max = 0;
     const set = (k: number) => {
       const next = clamp(Math.round(k * 20) / 20, 0.6, 1);
       if (next === this.renderScale) return;
@@ -397,7 +393,7 @@ export class Engine {
       this.post.setSamples(next < 0.75 ? 2 : 4);
       a.cool = 2.5;
     };
-    if (slow) {
+    if (avg > 1 / 50) {
       a.hold = 0;
       a.long++;
       if (a.long >= 2 && a.cool <= 0 && this.renderScale > 0.6) {
@@ -408,7 +404,7 @@ export class Engine {
       }
     } else {
       a.long = 0;
-      a.hold++;
+      if (avg < 1 / 58) a.hold++;
       if (this.renderScale < 1 && a.cool <= 0 && a.hold >= 8 + Math.min(4, a.raiseFails) * 8) {
         set(this.renderScale + 0.05);
         a.raisedAt = this.realTime;
@@ -448,13 +444,14 @@ export class Engine {
     const loop = () => {
       requestAnimationFrame(loop);
       const now = performance.now();
-      let rdt = (now - this.lastT) / 1000;
+      const raw = (now - this.lastT) / 1000;
+      let rdt = raw;
       this.lastT = now;
       rdt = clamp(rdt, 0, 0.1);
       this.fps = damp(this.fps, 1 / Math.max(rdt, 1e-3), 3, rdt);
       this.realTime += rdt;
       try {
-        this.adaptResolution(rdt);
+        this.adaptResolution(raw);
       } catch (e) {
         reportError('adapt', e);
       }
