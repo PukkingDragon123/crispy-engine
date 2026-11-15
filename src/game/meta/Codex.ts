@@ -18,6 +18,7 @@ import { GEAR, GEAR_IDS, GearDef } from '../player/Equipment';
 import { ITEMS } from '../player/Items';
 import { SUBAREAS } from '../world/RegionGen';
 import { blueprintDefs, RELICS, REGION_NAMES, WEAPON_UPGRADES } from './Blueprints';
+import { LEDGER, type LoreStat } from './Lore';
 import type { EventBus } from '../Ctx';
 
 export type CodexCat = 'bounty' | 'boss' | 'wildlife' | 'loot' | 'blueprint' | 'place' | 'legend';
@@ -133,8 +134,8 @@ const PLACE_LORE: Record<string, string> = {
 };
 
 const LEGENDS: { id: string; name: string; title: string; model: string; lore: string; hint: string; via?: string[] }[] = [
-  { id: 'sundown', name: 'Sundown', title: 'The Bounty Hunter Who Came Back', model: '@hero', lore: 'A skeleton in a good hat with a fast gun and a faster board. He has died more times than he will admit, and woken up at home every time. Nobody knows how. He prefers not to ask.', hint: 'You.' },
-  { id: 'pinch', name: 'Pinch', title: 'Small, Loyal, Mostly Asleep', model: 'pinch', lore: 'A scorpion who rides on Sundown\'s shoulder. Claims to be his partner. Is mostly his alarm clock.', hint: 'Always close by.' },
+  { id: 'sundown', name: 'Sundown', title: 'The Bounty Hunter Who Came Back', model: '@hero', lore: 'A dead bounty hunter that Serket remade as a scorpion revenant: a scorpion skull with iron trap teeth, four arms, a stinger tail and a good hat. He has died more times than he will admit, and woken up at home every time. He prefers not to ask how.', hint: 'You.' },
+  { id: 'pinch', name: 'Pinch', title: 'Small, Loyal, Mostly Asleep', model: 'pinch', lore: 'The last of Serket\'s brood. Lives in Sundown\'s hat by day and in an empty socket of his skull by night. Claims to be his partner. Is mostly his alarm clock.', hint: 'Always close by.' },
   { id: 'mamaToad', name: 'Mama Toad', title: 'Keeper of the Hearth', model: 'mama_toad', lore: 'She found the hideout before Sundown did and she let him stay. Knits, cooks, worries, and never once asks where the bodies came from.', hint: 'Home.' },
   { id: 'serket', name: 'Serket', title: 'Scorpion Goddess of the Reach', model: 'serket_avatar', lore: 'The goddess of the stinging things, who heals the poisoned and poisons the proud. She sent Sundown into the storm. She has her reasons.', hint: 'She is waiting at the start of every story.' },
   { id: 'anubis', name: 'Anubis', title: 'Weigher of Hearts', model: 'anubis', lore: 'The jackal who keeps the scales of the dead. Fall once in the Reach and you stand before him. Pass his trial and you walk back up into the sun.', hint: 'Only the dead meet him.' },
@@ -287,7 +288,10 @@ function placeEntries(): CodexEntry[] {
 }
 
 function legendEntries(): CodexEntry[] {
-  return LEGENDS.map((l, i) => ({ key: 'legend:' + l.id, cat: 'legend', id: l.id, n: i + 1, name: l.name, title: l.title, lore: l.lore, model: l.model, hint: l.hint, pts: { sight: 25 }, via: l.via }));
+  const out: CodexEntry[] = LEGENDS.map((l, i) => ({ key: 'legend:' + l.id, cat: 'legend', id: l.id, n: i + 1, name: l.name, title: l.title, lore: l.lore, model: l.model, hint: l.hint, pts: { sight: 25 }, via: l.via }));
+  // Sundown's Ledger: the pages of his own story (meta/Lore), opened through play (Codex.loreCheck)
+  for (const p of LEDGER) out.push({ key: 'legend:' + p.id, cat: 'legend', id: p.id, n: out.length + 1, name: p.name, title: p.title, lore: p.lore, model: p.model, hint: p.hint, pts: { sight: 20 }, via: p.via });
+  return out;
 }
 
 let SECTIONS: CodexSection[] | null = null;
@@ -302,7 +306,7 @@ function build() {
     { cat: 'loot', name: 'Loot & Gear', tab: 'LOOT', color: 0x9a6a1a, blurb: 'What a hunter wears, carries, drinks and throws, and the treasure he digs up.', epigraph: '"Finders keepers."', entries: lootEntries() },
     { cat: 'blueprint', name: 'Blueprints', tab: 'PLANS', color: 0x1e4a6e, blurb: 'Plans found on the trail, gun parts for the bench and boards for the garage, drawn to scale.', epigraph: '"Measure twice. Shoot once."', entries: blueprintEntries() },
     { cat: 'place', name: 'Places', tab: 'PLACES', color: 0x8a4a2a, blurb: 'Every stretch of Serket\'s Reach you have ridden.', epigraph: '"The map is not the desert."', entries: placeEntries() },
-    { cat: 'legend', name: 'Legends', tab: 'LEGENDS', color: 0x2a5a5a, blurb: 'Gods, friends and the odd tortoise.', epigraph: '"Some stories walk on their own."', entries: legendEntries() },
+    { cat: 'legend', name: 'Legends', tab: 'LEGENDS', color: 0x2a5a5a, blurb: 'Gods, friends, the odd tortoise, and the pages of Sundown\'s Ledger.', epigraph: '"Some stories walk on their own."', entries: legendEntries() },
   ];
   BY_KEY = new Map();
   for (const s of SECTIONS) for (const e of s.entries) BY_KEY.set(e.key, e);
@@ -358,6 +362,31 @@ function entryPoints(e: CodexEntry, f: number) {
 }
 function entryMax(e: CodexEntry) {
   return (e.pts.sight ?? 0) + (e.pts.kill ?? 0) + (e.pts.master ?? 0);
+}
+
+/** a saved tally that the Ledger's pages and studies wait on (`live.wave`: this ride's wave, not banked yet) */
+export function loreStat(stat: LoreStat, live?: { wave?: number }): number {
+  const d = loadSave();
+  switch (stat) {
+    case 'runs': return d.runs;
+    case 'kills': return d.kills;
+    case 'wave': return Math.max(d.bestWave, live?.wave ?? 0);
+    case 'deaths': return d.prog?.deaths ?? 0;
+    case 'studies': return (d.book as { r?: { done?: string[] } }).r?.done?.length ?? 0;
+    case 'found': {
+      build();
+      let n = 0;
+      for (const s of SECTIONS!) n += Codex.sectionStats(s).found;
+      return n;
+    }
+    case 'bosses': {
+      build();
+      const f = flags();
+      let n = 0;
+      for (const s of SECTIONS!) if (s.cat === 'boss') for (const e of s.entries) if ((f[e.key] ?? 0) & F_CLAIM) n++;
+      return n;
+    }
+  }
 }
 
 export const RANKS: { title: string; at: number }[] = [
@@ -497,6 +526,32 @@ export const Codex = {
     }
     for (const r of d.relics ?? []) Codex.discover('loot', 'relic_' + r, 'kill', true);
     if (d.seenIntro || d.runs > 0) Codex.discover('legend', 'serket', 'sight', true);
+    // the Ledger pages the save has already earned
+    Codex.loreCheck(true);
+  },
+  /** open the Ledger pages whose moment has come: a key known or claimed, a tally reached, an unlock granted */
+  loreCheck(quiet = false, live?: { wave?: number }) {
+    build();
+    const f = flags();
+    const got = loadSave().prog?.got ?? [];
+    for (const p of LEDGER) {
+      if ((f['legend:' + p.id] ?? 0) & F_SEEN) continue;
+      const open =
+        !!p.via?.some((k) => (f[k] ?? 0) & (F_SEEN | F_CLAIM)) ||
+        !!p.claim?.some((k) => (f[k] ?? 0) & F_CLAIM) ||
+        (!!p.need && loreStat(p.need.stat, live) >= p.need.n) ||
+        (!!p.unlock && got.includes(p.unlock));
+      if (open) Codex.discover('legend', p.id, 'sight', quiet);
+    }
+  },
+  /** a boss walked in (or went down, `beaten`): the Ledger pages that wait on it by name */
+  loreBoss(name: string, beaten: boolean) {
+    for (const p of LEDGER) if ((beaten ? p.beat : p.meet)?.test(name)) Codex.discover('legend', p.id, 'sight');
+  },
+  /** the hunter walks into Thoth's Hall: Thoth's own page, and whatever the save has already earned */
+  hallVisit() {
+    for (const p of LEDGER) if (p.hall) Codex.discover('legend', p.id, 'sight', true);
+    Codex.loreCheck(true);
   },
   /** boss id from a live Boss (by name and title) */
   bossId(name: string, title = ''): string | null {
@@ -532,11 +587,17 @@ export const Codex = {
     on('bossIntro', (b: any) => {
       const id = b && Codex.bossId(b.name, b.title);
       if (id) Codex.discover('boss', id, 'sight');
+      if (b?.name) Codex.loreBoss(b.name, false);
     });
     on('bossDefeated', (b: any, escaped: boolean) => {
       const id = b && Codex.bossId(b.name, b.title);
       if (id) Codex.discover('boss', id, escaped ? 'sight' : 'kill');
+      if (b?.name && !escaped) Codex.loreBoss(b.name, true);
+      Codex.loreCheck();
     });
+    on('bossKilled', (b: any) => b?.name && Codex.loreBoss(b.name, true));
+    // a wave won: the Ledger pages that wait on how far he has ridden
+    on('intermission', (x: { next?: number }) => Codex.loreCheck(false, { wave: Math.max(0, (x?.next ?? 1) - 1) }));
     on('gearChanged', (_slot: string, id: string | null) => id && Codex.discover('loot', id, 'kill'));
     on('itemUsed', (id: string) => id && Codex.discover('loot', 'item_' + id, 'kill'));
     on('blueprintFound', (id: string) => {

@@ -809,14 +809,12 @@ function hairLocks(): { locks: HairLock[]; chains: HairChain[] } {
   // the skull still shows
   for (const s of [1, -1]) {
     const C: Curl[] = [];
-    if (s > 0)
-      for (const [th0, yE] of [[0.94, 44.2], [1.0, 42.8], [1.07, 41.6]] as [number, number][])
-        C.push({ th: th0, y0: 58.0, yEnd: yE + R() * 0.6, puff: 1.3, back: 0.3, phase: R() * 6.3, r0: 0.7 });
-    const n = s > 0 ? 12 : 8;
+    // a punk mane on both sides of the carapace, from behind the lateral eyes back
+    const n = 11;
     for (let k = 0; k < n; k++) {
-      const th = s * ((s > 0 ? 1.13 : 1.98) + k * (s > 0 ? 0.08 : 0.07) + (R() - 0.5) * 0.04);
+      const th = s * (1.22 + k * 0.08 + (R() - 0.5) * 0.04);
       const behind = Math.abs(th) > 1.6;
-      C.push({ th, y0: (s > 0 ? 57.8 : 57.2) - 0.08 * k + (R() - 0.5) * 0.4, yEnd: (behind ? 31.8 : 36.4) + R() * 1.8, puff: 2.5 + R() * 1.0, back: behind ? 2.4 : 1.0, phase: R() * 6.3, r0: 0.74 + R() * 0.1 });
+      C.push({ th, y0: 57.8 - 0.08 * k + (R() - 0.5) * 0.4, yEnd: (behind ? 31.8 : 36.4) + R() * 1.8, puff: 2.5 + R() * 1.0, back: behind ? 2.4 : 1.0, phase: R() * 6.3, r0: 0.74 + R() * 0.1 });
     }
     build(s > 0 ? 'hair_l' : 'hair_r', 49.4, C);
   }
@@ -1594,6 +1592,7 @@ function punkTorso(m: Sc) {
     }
     return d < 5.42 || d > 5.93 || Math.abs(x) > 4.15 ? TOON.linen.base : TOON.red.base;
   });
+  tergites(m, e, T + 0.05);
   // back yoke seam
   m.region([-8, 41.0, -8.5], [8, 41.5, -5], (x, y, z) => rhoOf(e, x, y, z) > outer(y) - 0.4 / havg(e, y) && Math.abs(x) > 4.7, LEA.dark, { mode: 'paint' });
 }
@@ -1771,6 +1770,7 @@ function punkPelvis(m: Sc) {
     }, DEN.shade);
   }
   holster(m, LEA);
+  pectines(m);
   // wallet chain from the front belt loop to the back pocket
   chain(m, [[5.95, 25.0, 2.3], [6.95, 22.7, 1.25], [7.1, 21.6, -0.8], [6.65, 22.3, -3.0], [4.95, 23.6, -4.85]], 1.5);
   shadeRamps(m.m, [DEN, LEA, BN, SKIN], true);
@@ -1821,6 +1821,7 @@ function punkShin(m: Sc, s: number) {
   if (s > 0) m.region([s * 3.6 - 2, 14.0, -1], [s * 3.6 + 2, 15.5, 2.4], (x, y, z) => y < 15.5 && ((x - s * 3.6) / 1.75) ** 2 + ((y - 16.75) / 2.05) ** 2 + ((z - 0.3) / 1.72) ** 2 <= 1, SKIN.base, { mode: 'under' });
   else tibia(m, s, 10.4);
   cowboyBoot(m, s, BOOT, { harness: true, spur: true });
+  greaves(m, s);
   shadeRamps(m.m, [DEN, BOOT, BN, SKIN], true);
 }
 
@@ -2455,6 +2456,178 @@ function bearTrap(head: VoxelModel): VoxelModel {
   return jw.m;
 }
 
+// ================================================================== THE SCORPION HEAD (Serket's curse took his face)
+// A skeletal scorpion head: a broad, flattened carapace of bleached bone and amber chitin (it fills the hat), a
+// jutting anterior plate with a median notch, granular keels, an ocular ridge carrying two glossy median eyes
+// under the round shades (the right one burns Serket green), lateral eye beads at the front corners, and two
+// big chelicerae below, clamped by the iron bear trap that is his mouth. The rocker mane falls from under the hat.
+/** the median eyes' pivots and the keels over them (head family, design units) */
+const J_EYE: V3 = [3.2, 54.0, 5.75];
+const J_BROW: V3 = [3.2, 55.7, 6.0];
+/** bleached bone at the front and sides, amber chitin plates over the crown and the back, darker seams */
+function carapaceCol(x: number, y: number, z: number) {
+  const seam = Math.abs(((z + 20) % 2.7) - 1.35) < 0.18 && z < 1.5;
+  if (seam) return BN.shade;
+  if (z < 1.5 && Math.abs(x) < 4.2 && y > 57) return (Math.floor((z + 20) / 2.7) & 1) ? CHI.base : CHI.shade;
+  return BN.base;
+}
+function scorpionHead(hair: boolean): { head: VoxelModel; brow_l: VoxelModel; brow_r: VoxelModel } {
+  const hs = sc('head');
+  // the prosoma dome, flattened on top
+  hs.ell([0, 55.4, -0.8], [6.35, 7.0, 7.3], carapaceCol, { p: 2.6 });
+  hs.region([-8, 62.3, -9], [8, 64, 8], () => true, 0, { mode: 'carve' });
+  // the anterior plate jutting over the mouth, with the median notch in its front margin
+  hs.ell([0, 52.9, 3.4], [5.0, 2.9, 4.55], carapaceCol, { p: 2.6 });
+  hs.ell([0, 52.3, 7.75], [0.75, 1.1, 1.1], 0, { mode: 'carve' });
+  // the ocular ridge across the front, and the sockets the median eyes sit in
+  hs.ell([0, 54.5, 4.4], [5.1, 1.75, 2.0], BN.hi, { p: 2.4 });
+  for (const s of [1, -1]) hs.ell([s * J_EYE[0], J_EYE[1], J_EYE[2]], [1.4, 1.35, 1.2], 0, { mode: 'carve' });
+  hs.walls([-5, 52, 4], [5, 56, 7.2], (x, y, z) => ((Math.abs(x) - J_EYE[0]) / 1.4) ** 2 + ((y - J_EYE[1]) / 1.35) ** 2 + ((z - J_EYE[2]) / 1.2) ** 2 <= 1, SOCK.deep);
+  // keels: lateral keels sweeping back over the sides, a median keel up the crown; granular
+  for (const s of [1, -1]) {
+    hs.path([[s * 4.7, 54.4, 5.0], [s * 5.7, 56.2, 1.9], [s * 6.0, 57.7, -1.7], [s * 5.5, 58.5, -5.0]], () => 0.5, BN.hi);
+    hs.path([[s * 4.9, 51.6, 5.2], [s * 6.0, 52.6, 1.6], [s * 6.3, 53.6, -2.4]], () => 0.42, BN.hi);
+  }
+  hs.path([[0, 56.2, 5.3], [0, 59.3, 3.1], [0, 61.6, -1.0]], () => 0.45, BN.hi);
+  hs.region([-7, 49, -9], [7, 63, 9], () => true, (x, y, z) => (vhash(Math.floor(x * S), Math.floor(y * S), Math.floor(z * S)) < 0.08 ? BN.hi : null), { mode: 'paint' });
+  // lateral eyes: a cluster of three glossy beads at each front corner
+  for (const s of [1, -1])
+    for (const [dx, dy, dz, r] of [[0, 0, 0, 0.44], [0.55, -0.4, -0.35, 0.34], [-0.15, -0.6, -0.55, 0.3]] as [number, number, number, number][]) {
+      const c: V3 = [s * (4.75 + dx), 53.05 + dy, 5.35 + dz];
+      hs.ell(c, [r, r, r], (x, y) => (y > c[1] + r * 0.3 && x * s < c[0] * s ? 0xc8d8d0 : 0x0e1013), { flags: M });
+    }
+  // the underside and the neck plug where it meets the spine
+  hs.ell([0, 49.4, -1.6], [3.8, 3.0, 3.5], BN.shade);
+  hs.cap([0, 47.9, -2.4], [0, 46.2, -2.3], 1.15, 1.0, BN.shade);
+  if (hair) hairCap(hs);
+  shadeRamps(hs.m, [BN, CHI, HAIR], true);
+  // small chitin keels over each median eye (expressions tilt them)
+  const br = sc('brow');
+  for (const s of [1, -1]) br.path([[s * 4.6, 55.35, 5.4], [s * 3.2, 55.85, 6.15], [s * 1.9, 55.55, 6.0]], () => 0.46, CHI.hi);
+  const brow_l = splitOff(br, 'brow_l', (x) => x > 0);
+  const brow_r = splitOff(br, 'brow_r', (x) => x < 0);
+  return { head: hs.m, brow_l, brow_r };
+}
+/** a median eye: a glossy black dome with a catch-light (left), or Serket's green burning in it (right) */
+function scorpEye(s: number, v: EyeVar) {
+  const m = sc(s > 0 ? 'eye_l' : 'eye_r');
+  const c: V3 = [s * J_EYE[0], J_EYE[1], J_EYE[2]];
+  if (v === 'shut') {
+    m.ell(c, [1.2, 1.15, 1.0], (x, y) => (y > c[1] ? BN.hi : BN.shade)); // a bone lid
+    return m.m;
+  }
+  const r = v === 'wide' ? 1.32 : 1.2;
+  const glow = s < 0 && v !== 'dead';
+  m.ell(c, [r, r, r * 0.95], (x, y, z) => {
+    const glint = (x - c[0]) * s < -0.15 && y > c[1] + 0.3;
+    if (s < 0) return v === 'dead' ? 0x3c4438 : z > c[2] + 0.55 && Math.hypot(x - c[0], y - c[1]) < (v === 'intense' ? 0.8 : 0.6) ? EYE.core : EYE.ring;
+    return glint && v !== 'dead' ? 0xe2eaf2 : v === 'dead' ? 0x5a5f63 : v === 'dim' ? 0x22262a : 0x0f1114;
+  }, { flags: glow ? (v === 'dim' ? VF.EMISSIVE : VF.GLOW) : M });
+  return m.m;
+}
+/** the chelicerae: two big jaws of bone under the anterior plate, their fingers curling down in front of the iron
+ *  trap, bound to it by riveted iron rings */
+function chelicerae(hs: Sc) {
+  for (const s of [1, -1]) {
+    const a: V3 = [s * 2.45, 50.7, 4.4], b: V3 = [s * 2.95, 49.9, 10.4];
+    hs.cap(a, b, 1.95, 1.55, (x, y) => (y > 50.2 ? CHI.base : CHI.shade));
+    hs.path([vadd(a, [0, 1.75, 0.6]), vadd(b, [0, 1.35, 0])], () => 0.4, BN.hi); // a keel along the top
+    // the fixed finger curling down and in, teeth on its inner edge
+    const f: V3[] = [b, [s * 2.85, 48.8, 12.6], [s * 1.6, 46.4, 13.4]];
+    hs.path(spline(f, 6), (t) => lerp(1.35, 0.22, t), (x, y) => (y < 47.6 ? BN.hi : BN.base));
+    for (const t of [0.35, 0.6]) {
+      const p: V3 = [lerp(f[1][0], f[2][0], t), lerp(f[1][1], f[2][1], t), lerp(f[1][2], f[2][2], t) - 0.45];
+      hs.cap(p, vadd(p, [-s * 0.35, 0, -0.55]), 0.24, 0.07, BN.hi);
+    }
+    // the iron ring clamping the trap to the chelicera, riveted
+    const rc = vadd(a, vmul(vsub(b, a), 0.62)), dd = vnorm(vsub(b, a));
+    hs.region(vsub(rc, [2.2, 2.2, 2.2]), vadd(rc, [2.2, 2.2, 2.2]), (x, y, z) => {
+      const q = vsub([x, y, z], rc), t = vdot(q, dd), rr = vlen(vsub(q, vmul(dd, t)));
+      return Math.abs(t) < 0.5 && rr < 2.1 && rr > 1.45;
+    }, (x, y, z) => ironCol(x, y, z, y > rc[1] + 1 ? 0.8 : 0), { flags: M });
+    rivet(hs, vadd(rc, [s * 2.05, 0, 0]), [s, 0, 0], 0.42);
+  }
+}
+
+// ================================================================== THE LOWER ARMS (scorpion pedipalps with big chelae)
+/** the lower arms' rest pose (output units, rig space): shoulder on the ribcage side, elbow, wrist, the claw's
+ *  forward direction */
+function palpPose(s: number) {
+  const S0 = W_BODY.fwd([s * 6.0, 37.5, 0.8]);
+  const E: V3 = vadd(S0, [s * 5.6, -6.0, 6.5]);
+  const Wr: V3 = vadd(E, [s * 0.6, -1.4, 7.5]);
+  return { S0, E, Wr, dir: vnorm([-s * 0.06, -0.06, 1]) };
+}
+/** the chela: a bulbous bone-and-chitin hand with granular keels and the fixed (upper) finger, serrated */
+function chelaHand(s: number, w: V3, dir: V3) {
+  const m = sc(s > 0 ? 'chela_l' : 'chela_r');
+  const d = vnorm(dir), up = vnorm(vsub([0, 1, 0], vmul(d, d[1]))), side = vnorm(vcross(d, up));
+  const mc = vadd(w, vmul(d, 4.2));
+  m.oell(mc, [d, up, side], [4.8, 3.1, 2.8], (x, y, z) => {
+    const q = vsub([x, y, z], mc);
+    return vdot(q, up) > 0.9 ? CHI.base : vhash(Math.floor(x * S), Math.floor(y * S), Math.floor(z * S)) < 0.08 ? BN.hi : BN.base;
+  });
+  for (const k of [-1.4, 1.4]) m.path([vadd(mc, vadd(vmul(d, -3.7), vadd(vmul(up, 2.7), vmul(side, k)))), vadd(mc, vadd(vmul(d, 3.6), vadd(vmul(up, 2.4), vmul(side, k * 0.8))))], () => 0.42, BN.hi);
+  m.ell(w, [1.75, 1.75, 1.75], BN.shade); // the wrist knuckle
+  const f0 = vadd(mc, vadd(vmul(d, 4.2), vmul(up, 1.15)));
+  const pts = spline([f0, vadd(f0, vadd(vmul(d, 4.0), vmul(up, 0.15))), vadd(f0, vadd(vmul(d, 7.2), vmul(up, -1.15)))], 6);
+  m.path(pts, (t) => lerp(1.6, 0.26, t), (x, y, z) => (vdot(vsub([x, y, z], f0), d) > 5.8 ? BN.hi : BN.base));
+  for (let t = 0.2; t < 0.86; t += 0.13) {
+    const p = pts[Math.round(t * (pts.length - 1))];
+    m.cap(vadd(p, vmul(up, -0.85)), vadd(p, vmul(up, -1.6)), 0.32, 0.08, BN.hi);
+  }
+  return { m, hinge: vadd(mc, vadd(vmul(d, 3.9), vmul(up, -1.15))), d, up };
+}
+/** the movable (lower) finger of the chela, hinged under the fixed one, serrated on its upper edge */
+function chelaFinger(s: number, h: V3, d: V3, up: V3) {
+  const m = sc(s > 0 ? 'chelaf_l' : 'chelaf_r');
+  const pts = spline([h, vadd(h, vadd(vmul(d, 3.7), vmul(up, -0.45))), vadd(h, vadd(vmul(d, 6.8), vmul(up, 0.55)))], 6);
+  m.path(pts, (t) => lerp(1.45, 0.26, t), (x, y, z) => (vdot(vsub([x, y, z], h), d) > 5.5 ? BN.hi : BN.base));
+  for (let t = 0.2; t < 0.86; t += 0.13) {
+    const p = pts[Math.round(t * (pts.length - 1))];
+    m.cap(vadd(p, vmul(up, 0.75)), vadd(p, vmul(up, 1.45)), 0.3, 0.08, BN.hi);
+  }
+  m.ell(h, [1.2, 1.2, 1.2], BN.shade);
+  return m;
+}
+
+/** pectines: the comb-like sense organs of a scorpion, a row at each hip below the belt */
+function pectines(m: Sc) {
+  for (const s of [1, -1]) {
+    const a: V3 = [s * 5.0, 24.5, 3.0], b: V3 = [s * 6.9, 23.7, 0.2];
+    m.cap(a, b, 0.38, 0.32, CHI.base);
+    for (let t = 0; t <= 1.001; t += 1 / 7) {
+      const p: V3 = [lerp(a[0], b[0], t), lerp(a[1], b[1], t) - 0.3, lerp(a[2], b[2], t)];
+      m.cap(p, vadd(p, [s * 0.2, -1.15, 0.15]), 0.2, 0.07, BN.hi);
+    }
+  }
+}
+/** tergites: overlapping chitin plates down the spine, over the back of the jacket */
+function tergites(m: Sc, e: Env, off: number) {
+  for (let k = 0; k < 7; k++) {
+    const yc = 43.3 - k * 1.75, w = 2.4 - k * 0.08;
+    m.region([-w - 0.3, yc - 1.15, -10], [w + 0.3, yc + 1.0, -2], (x, y, z) => {
+      const zs = backZ(e, x, y, off) - (yc - y) * 0.14;
+      const ex = Math.abs(x) / w, ey = (y - yc) / (y < yc ? 1.05 : 0.95);
+      return ex * ex + ey * ey < 1 && z < zs && z > zs - 0.6;
+    }, (x, y) => (y < yc - 0.7 ? BN.hi : Math.abs(x) < 0.3 ? CHI.hi : CHI.base));
+  }
+}
+/** greaves: chitin plates down the front of a shin, a bone knuckle at the knee */
+function greaves(m: Sc, s: number) {
+  const cx = s * 3.4;
+  for (let k = 0; k < 3; k++) {
+    const y0 = 10.6 + k * 1.55, y1 = y0 + 1.6;
+    m.region([cx - 2.8, y0, -1], [cx + 2.8, y1, 3], (x, y, z) => {
+      const r = Math.hypot(x - cx, z - 0.1), th = Math.atan2(x - cx, z - 0.1);
+      const R = 2.05 + 0.3 * ((y - y0) / (y1 - y0));
+      return Math.abs(th) < 1.15 && r < R + 0.5 && r > R - 0.05 && y < y1;
+    }, (x, y) => (y > y1 - 0.3 ? BN.hi : CHI.base));
+  }
+  m.ell([s * 3.55, 15.7, 2.15], [1.15, 0.95, 0.75], BN.hi); // the knee knuckle
+  m.cap([s * 3.55, 15.9, 2.7], [s * 3.6, 16.9, 3.3], 0.42, 0.1, BN.hi); // a short spur off it
+}
+
 // ================================================================== SERKET'S CURSE: THE SCORPION IN HIS BONES
 // A carapace of bone and dark amber chitin has grown over the human skeleton: plates down the breastbone and
 // over the collarbones, segmented pauldrons, gauntlets with serrated pincer spurs, median-eye beads on the
@@ -2534,11 +2707,11 @@ const TAIL_R = [2.7, 2.5, 2.3, 2.1, 1.9];
 const TAIL_TIP: V3 = [13.6, 89.6, 4.4];
 /** one metasoma segment: a waisted bleached-bone vertebra under a dorsal chitin plate with a bone keel and
  *  lateral spines, a ball knuckle at its root (output units) */
-function tailSeg(name: string, a: V3, b: V3, r: number) {
+function tailSeg(name: string, a: V3, b: V3, r: number, upDir?: V3) {
   const m = sc(name);
   const d = vnorm(vsub(b, a)), L = vlen(vsub(b, a));
   const mid = vmul(vadd(a, b), 0.5);
-  let up = vsub(mid, [6, 72, -8]); // away from the inside of the curl
+  let up = upDir ?? vsub(mid, [6, 72, -8]); // away from the inside of the curl
   up = vnorm(vsub(up, vmul(d, vdot(up, d))));
   const side = vnorm(vcross(d, up));
   const lo: V3 = [Math.min(a[0], b[0]) - r - 1.5, Math.min(a[1], b[1]) - r - 1.5, Math.min(a[2], b[2]) - r - 1.5];
@@ -2711,7 +2884,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   // no loose hair under a headdress that is itself the hair (nemes, the frog wig)
   const hairy = look.hat !== 'nemes' && look.hat !== 'wig';
   WARP = null;
-  const hd = buildHead(hairy);
+  const hd = scorpionHead(hairy);
   const punk = o === 'punk';
   const coatish = o === 'duster' || o === 'sheriff';
 
@@ -2818,8 +2991,8 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   };
   const head = hd.head;
   // his mouth and lower jaw are the iron bear trap (the old mandible is dropped; the upper jaw is forged into the head)
-  void hd.jaw;
   const jaw = bearTrap(head);
+  chelicerae(Object.assign(sc('head'), { m: head }));
   if (mask) {
     mask.jaw.forEach((x, y, z, c, f) => jaw.set(x, y, z, c, f)); // the chin cloth rides the jaw
     burnHole([mask.head, jaw]); // the cigarette pokes out through the cloth
@@ -2857,7 +3030,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   const eye = (side: 'l' | 'r', v: EyeVar) => {
     const k = side + v;
     let m = eyeCache.get(k);
-    if (!m) eyeCache.set(k, (m = side === 'l' ? humanEye(v, head) : eyeModel('eye_r', -1, v)));
+    if (!m) eyeCache.set(k, (m = scorpEye(side === 'l' ? 1 : -1, v)));
     return m;
   };
   for (const [name, [l, r]] of Object.entries(EYE_EXPR))
@@ -2878,10 +3051,10 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   P('torso', torso.m, J.waist, 'pelvis');
   P('head', head, J.neck, 'torso');
   P('jaw', jaw, J_TRAP, 'head'); // the lower trap jaw swings on the hinge axis
-  P('eye_l', eye('l', 'normal'), J.eye, 'head');
-  P('eye_r', eye('r', 'normal'), mg(J.eye), 'head');
-  P('brow_l', hd.brow_l, J.brow, 'head');
-  P('brow_r', hd.brow_r, mg(J.brow), 'head');
+  P('eye_l', eye('l', 'normal'), J_EYE, 'head');
+  P('eye_r', eye('r', 'normal'), mg(J_EYE), 'head');
+  P('brow_l', hd.brow_l, J_BROW, 'head');
+  P('brow_r', hd.brow_r, mg(J_BROW), 'head');
   P('cig', cig, J.jaw, 'jaw');
   P('hat', hat, J.hat, 'head');
   for (const lk of hair?.locks ?? []) P(lk.name, lk.model, lk.pivot, lk.parent);
@@ -2905,6 +3078,20 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   shadeRamps(sting.m.m, [BN], true);
   parts.push({ name: 'stinger', model: sting.m.m, pivot: vx(TAIL_P[5]), attach: vx(TAIL_P[5]), parent: 'tail5' });
   P('shin_r', shinR.m, mg(J.knee), 'thigh_r');
+  // the lower arms: pedipalps from the ribcage sides with big chelae (sculpted in rig space)
+  const claws: Record<'l' | 'r', string[]> = { l: [], r: [] };
+  for (const s of [1, -1]) {
+    const k = s > 0 ? 'l' : 'r', pp = palpPose(s);
+    const up: V3 = [s * 0.5, 1, 0];
+    const femur = tailSeg('arm2_' + k, pp.S0, pp.E, 2.0, up), patella = tailSeg('fore2_' + k, pp.E, pp.Wr, 1.85, up);
+    const hand = chelaHand(s, pp.Wr, pp.dir), finger = chelaFinger(s, hand.hinge, hand.d, hand.up);
+    for (const mm of [femur.m, patella.m, hand.m.m, finger.m]) shadeRamps(mm, [BN, CHI], true);
+    parts.push({ name: 'arm2_' + k, model: femur.m, pivot: vx(pp.S0), attach: vx(pp.S0), parent: 'torso' });
+    parts.push({ name: 'fore2_' + k, model: patella.m, pivot: vx(pp.E), attach: vx(pp.E), parent: 'arm2_' + k });
+    parts.push({ name: 'chela_' + k, model: hand.m.m, pivot: vx(pp.Wr), attach: vx(pp.Wr), parent: 'fore2_' + k });
+    parts.push({ name: 'chelaf_' + k, model: finger.m, pivot: vx(hand.hinge), attach: vx(hand.hinge), parent: 'chela_' + k });
+    claws[k] = ['arm2_' + k, 'fore2_' + k, 'chela_' + k, 'chelaf_' + k];
+  }
   let skirt: ReturnType<typeof dusterSkirt> | null = null;
   if (coatish) {
     skirt = warped(W_BODY, () => dusterSkirt(LK.coat, LK.trim));
@@ -2926,8 +3113,8 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     shoulder_r: sock('torso', [-8, 45.6, -0.4]),
     hip_r: sock('pelvis', [-7.8, 25, 0.5]),
     chest: sock('torso', [0, 38, 5.4]),
-    eye_l: sock('head', J.eye),
-    eye_r: sock('head', mg(J.eye)),
+    eye_l: sock('head', J_EYE),
+    eye_r: sock('head', mg(J_EYE)),
     mouth: sock('jaw', [0, 46.9, 8.6]),
     // the cigarette's ember, and where he blows the smoke out (the burnt hole in the mask, or the bare teeth)
     cig_tip: sock('cig', vadd(CIG_B, vmul(vnorm(vsub(CIG_B, CIG_A)), 0.55))),
@@ -2936,8 +3123,9 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     // Pinch's perches (empty anchors on the head bone, +Z out of the face): on the hat crown, in either eye socket
     // (perch_eyeR is the bare skull socket on the rotted side)
     perch_hat: sock('head', [0, crownTop(hat, topY) + 0.15, -1.2]),
-    perch_eyeL: sock('head', [J.eye[0], J.eye[1], J.eye[2] - 0.6]),
-    perch_eyeR: sock('head', [-J.eye[0], J.eye[1], J.eye[2] - 0.6]),
+    // on the scorpion head: beside the left median eye on the ocular ridge, and on the right chelicera's base
+    perch_eyeL: sock('head', [J_EYE[0] + 1.7, 54.9, 5.3]),
+    perch_eyeR: sock('head', [-2.45, 51.9, 7.0]),
     // the venom tip of the stinger, and Pinch's perch on top of the fourth tail segment
     tail_tip: { part: 'stinger', at: vx(sting.tip) },
     perch_tail: { part: 'tail4', at: vx(vadd(vmul(vadd(TAIL_P[3], TAIL_P[4]), 0.5), [-0.4, TAIL_R[3] + 0.5, -0.6])) },
@@ -2985,6 +3173,8 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
       trapJaw: true,
       // the scorpion tail chain (root first): PlayerAnim curls, flicks, jabs and whips it
       tail: { parts: [...tailNames, 'stinger'] },
+      // the lower pincer arms per side (shoulder, elbow, wrist, the movable finger): PlayerAnim flexes, flares and strikes
+      claws,
       // third-person camera fitted to his height (CameraRig.fitHero)
       cam: { height: 1.08, shoulder: 0.95, dist: 2.55 },
       // where the free hand takes the hat brim (head-local metres): the front of the brim, a touch to his left
@@ -3002,7 +3192,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
       upperArmLen: (WA_L.Y(J.shoulder[1]) - WA_L.Y(J.elbow[1])) * UH,
       foreArmLen: (WA_L.Y(J.elbow[1]) - WA_L.Y(J.hand[1])) * UH,
       legLen: W_BODY.Y(J.hip[1]) * UH,
-      facePivots: { eye_l: mm(J.eye), eye_r: mm(mg(J.eye)), brow_l: mm(J.brow), brow_r: mm(mg(J.brow)), jaw: mm(J_TRAP) },
+      facePivots: { eye_l: mm(J_EYE), eye_r: mm(mg(J_EYE)), brow_l: mm(J_BROW), brow_r: mm(mg(J_BROW)), jaw: mm(J_TRAP) },
       // modelled eyeballs with glowing Serket-green pupils (no 2D overlay)
       eyeColor: EYE.core,
       eyes: 'voxel',

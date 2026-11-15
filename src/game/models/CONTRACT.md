@@ -157,6 +157,15 @@ Sockets: `hand_r`, `hand_l`, `head_top`, `back`, `shoulder_l`, `shoulder_r`, `hi
     over the sternum and collarbones, segmented pauldrons, bone-and-chitin gauntlets with serrated pincer spurs,
     median-eye beads on the brow, chitin ridges on the bare temple. Pinch can also perch on the tail (`perch_tail`
     on `tail4`; `getPerchAnchors` returns it as `tail`).
+    SCORPION HEAD AND FOUR ARMS (user note, latest): the human face is gone. `head` is a skeletal scorpion head: a
+    flattened bone-and-chitin carapace with granular keels, an ocular ridge with modelled median eyes `eye_l` / `eye_r`
+    (glossy; the right burns Serket green) under the round shades, lateral eye beads, and big chitin chelicerae with
+    iron rings clamping the bear trap, which stays the snapping `jaw`. The hat sits on the carapace and the curly
+    mane falls from under the brim. A lower pair of arms grows from the ribcage: `arm2_l`/`_r` > `fore2_*` >
+    `chela_*` > `chelaf_*` (the movable finger), `meta.claws`; PlayerAnim flexes and clicks them, flares them for
+    balance, snaps them open on jumps and kills and strikes with them on `melee` / `counter`. Pectines at the hips,
+    tergite plates down the back, shin greaves with knee knuckles. Pinch: `perch_eyeL` beside the left median eye,
+    `perch_eyeR` on the right chelicera's base.
     The 1/36 `skeleton.ts` build stays only as the base for `skeletonFigure()` (enemies).
   - parts: humanoid + `jaw`, `hat` (parent head), `coat` (parent pelvis), modelled `eye_l`/`eye_r` (glowing pupils).
   - socket `board_back` (torso, between the shoulder blades); mount a board with

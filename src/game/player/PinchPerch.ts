@@ -3,8 +3,8 @@
 //   hat      on top of the crown, looking around (clinging when the ride gets rough)
 //   (inside) tucked under the back of the brim, out of sight: where he bolts when Sundown is hit
 //            or the board is flying, and where he climbs out of again once it is calm
-//   eyeR     in the bare skull socket, claws and the point of his tail peeking out (idle, after kills)
-//   eyeL     on the living brow, peering down over the shades
+//   eyeR     on the base of the right chelicera, by the iron trap (idle, after kills)
+//   eyeL     on the ocular ridge beside the left median eye, peering over the shades
 //   shoulder on the torn sleeve stump
 //   tail     riding the top of Sundown's scorpion tail (a rig with a `perch_tail` anchor), up from the shoulder
 // Between perches he scuttles along a little graph of waypoints over the head, the brim, the
@@ -555,14 +555,15 @@ export class PinchPerch {
         const s = w === 'templeL' ? 1 : -1;
         return onHead(g.hc.clone().add(_v.set(s, 0.12, 0.3).normalize().multiplyScalar(g.R)));
       }
-      case 'eyeR':
-        // tucked in the bare socket behind the cracked lens, sunk to the waist, front half poking out past its
-        // outer rim (his home in the skull)
-        return { frame: h, p: g.eR.clone().add(_v.set(-0.012, -0.016, -0.014)), n: new THREE.Vector3(-0.6, 0.3, 0.7).normalize() };
+      case 'eyeR': {
+        // on the base of the right chelicera (snapped onto the bone), beside the iron trap
+        const pt = onHead(g.eR.clone().add(_v.set(0, 0.004, -this.eyeDepth)), this.meshesOf(['head']));
+        return { ...pt, n: new THREE.Vector3(-0.5, 0.75, 0.45).normalize() };
+      }
       case 'eyeL': {
-        // on the living brow, peering down over the shades (snapped onto the brow, under the brim)
-        const pt = onHead(g.eL.clone().add(_v.set(0.012, 0.032, 0.002)), this.meshesOf(['head', 'brow_l', 'glasses']));
-        return { ...pt, n: new THREE.Vector3(0.2, 1, 0.4).normalize() };
+        // on the ocular ridge beside the left median eye, peering over the shades
+        const pt = onHead(g.eL.clone().add(_v.set(0, 0.004, -this.eyeDepth)), this.meshesOf(['head', 'brow_l', 'glasses']));
+        return { ...pt, n: new THREE.Vector3(0.4, 1, 0.3).normalize() };
       }
       case 'bridge':
         return onHead(new THREE.Vector3(0, (g.eR.y + g.eL.y) / 2 + 0.05, (g.eL.z + 0.02)));

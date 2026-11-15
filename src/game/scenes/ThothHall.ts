@@ -34,7 +34,7 @@ import { Puppet } from '../ui/codex/Puppet';
 import { entryPuppet, placeProps, plateMound } from '../ui/codex/Plate';
 import * as HM from './thoth/HallModels';
 import { HallUI, HallUIState, PanelData, ErrandSlip } from './thoth/HallUI';
-import { TALK, say, aboutEntry } from './thoth/ThothTalk';
+import { TALK, say, aboutEntry, helloLore } from './thoth/ThothTalk';
 
 export interface ThothHallOpts {
   hero: RigSpec | null;
@@ -488,7 +488,7 @@ export class ThothHall {
       th.th?.kick(3);
       th.th?.flutter(1.5);
       this.gesture(th, 'delight', 1.6);
-      this.talk(say(this.o.from === 'menu' ? TALK.helloMenu : TALK.hello), 6);
+      this.talk((helloLore() ?? say(this.o.from === 'menu' ? TALK.helloMenu : TALK.hello)), 6);
     }
   }
 
@@ -604,6 +604,12 @@ export class ThothHall {
     eng.audio.play('book_open', { volume: 0.6, pitch: 0.85 });
     await eng.fadeOut(0.35, '#000', { loading: "Opening Thoth's Hall" });
     try {
+      // Thoth's own Ledger page, and any page the save has earned since (meta/Lore)
+      Codex.hallVisit();
+    } catch (e) {
+      console.warn('[hall] lore', e);
+    }
+    try {
       this.build();
     } catch (e) {
       console.error('[hall] build failed', e);
@@ -629,7 +635,7 @@ export class ThothHall {
     this.setView('nave', true);
     this.camPos.set(0.2, 2.6, 8.6);
     this.camLook.set(0, 3.2, 0);
-    this.talk(this.waitingThoth ? say(TALK.coming) : say(this.o.from === 'menu' ? TALK.helloMenu : TALK.hello), 7);
+    this.talk(this.waitingThoth ? say(TALK.coming) : (helloLore() ?? say(this.o.from === 'menu' ? TALK.helloMenu : TALK.hello)), 7);
     (window as any).__hall = this;
     this.buildSome(60);
     void eng.fadeIn(0.6);

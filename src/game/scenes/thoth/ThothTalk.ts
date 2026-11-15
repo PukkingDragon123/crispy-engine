@@ -1,6 +1,7 @@
 // What Thoth says in his Hall. He is ten thousand and three years old and talks like a
 // small, delighted child: short sentences, lots of "look, look!", tiny confessions.
-import type { CodexCat, CodexEntry } from '../../meta/Codex';
+import { Codex, F_READ, F_SEEN, type CodexCat, type CodexEntry } from '../../meta/Codex';
+import { LEDGER } from '../../meta/Lore';
 
 const pick = <T>(a: T[]) => a[Math.floor(Math.random() * a.length)];
 
@@ -46,6 +47,36 @@ export const TALK = {
     khepri: 'Khepri rolls the sun every morning. He is never late. I am always late.',
     set: 'Set is grumpy. He is always grumpy. I gave him a hug once. Grumpier.',
     ozymandias: 'Mister Ozymandias sells everything. He sold me a rock. It is a good rock.',
+    // the pages of Sundown's Ledger
+    lastBounty: 'This is the saddest page. I drew a little sun in the corner so it is less sad.',
+    ironJaw: 'Serket taught a bear trap to talk! I tried to teach my stool. It did not work.',
+    blackStinger: 'Aqrab was SO big. He let me ride on his tail once. Now it is YOUR tail! Can I ride it? No? Okay.',
+    lastBrood: 'Baby Pinch! He was the size of a raisin. I almost ate him. I did not! I did NOT.',
+    soulDebt: 'I read the number Anubis wrote. I had to sit down. I am still a little bit sitting down.',
+    starThatRusts: 'The marshal was mean. I put his page next to the vinegar. Hmph.',
+    godsWork: 'I wrote the Treaty! With my best pen. Set read it VERY carefully. Too carefully.',
+    scribe: 'That is my page about you! I know your real name, you know. It starts with... NO. Not telling!',
+    borrowedNights: 'I won five days off Khonsu at senet! He says I cheated. I did not cheat. I am just very good.',
+    moonCat: 'Mark never talks! I told him a joke once. He blinked. I think that is cat for laughing.',
+    sunsDaughter: 'Cleopatra is SO shiny. Do not look under the veil. I looked once. My feathers went crispy.',
+    theBurning: 'Ra wants it to be noon forever. Then when is bedtime? Exactly. Terrible plan.',
+    lastPage: 'It is empty because it is YOURS. Write something nice. Use your best handwriting!',
+  } as Record<string, string>,
+  /** a fresh Ledger page waiting to be read: his hello is about it */
+  loreHello: {
+    lastBounty: 'I started your Ledger! Page one! It is about how you... oh. Maybe read it sitting down.',
+    ironJaw: 'New page! It is about your jaw! Clack clack! Sorry. Clack.',
+    blackStinger: 'I wrote about the Black Stinger! Four arms! Now you can hold two cookies AND two more cookies!',
+    lastBrood: 'New page! Baby pictures of Pinch! Well. Baby words. Go look, go look!',
+    soulDebt: 'I wrote down your debt. Do not read the number before bedtime.',
+    starThatRusts: 'You met the marshal! I wrote it all down. I used my angry pen.',
+    godsWork: 'New page! It is about the Treaty. I wrote the Treaty! Did I say that already? I wrote it!',
+    scribe: 'You came! I wrote a page about you! Just one so far. Well. Lots. But one is about you.',
+    borrowedNights: 'You met the moon! Did Khonsu say anything about me? Did he? He is a sore loser.',
+    moonCat: 'Mark is free! Mark is FREE! I wrote it down in glitter. Glitter is very hard to write with.',
+    sunsDaughter: 'You went to the river! There is a new page and it is very shiny. Squint!',
+    theBurning: 'New page. It is about Ra. It is a little bit hot to hold. Careful!',
+    lastPage: 'The last page is ready! It is blank! That is the whole point! Go look!',
   } as Record<string, string>,
   unknown: [
     'It is under the sheet! I do not know what it is yet. Will you go find it? Pleeease?',
@@ -69,6 +100,14 @@ export const TALK = {
     'Bookworm number four, that is not a book, that is a sandwich!',
     'Can you count to ten thousand? I can! It takes a while.',
     'I invented writing. Then I invented doodling. Doodling is better.',
+    // gossip about the hunter's story (docs/LORE.md)
+    'Your real name has a LOT of consonants. That is all I am saying. That is ALL.',
+    'Pinch hatched in your skull. That is the cosiest place in the whole Reach.',
+    'Four arms! You could hold four books at once. Please hold four books at once.',
+    'Serket keeps the canopic jars. I keep regular jars. Mine have more creatures in them.',
+    'I wrote the Treaty of the Sands. Set says a storm is not a hand. RUDE.',
+    'Khonsu still wants his five days back. Finders keepers!',
+    'Anubis is very good at sums. I am very good at doodles. We are a team.',
   ],
   gifts: ['These are my gifts! Every study you finish, I get closer to giving you one.', 'I wrapped them myself. With papyrus. It is crinkly.'],
   bye: ['Bye! Bye! Come back with more things for my jars!', 'Bye! Do not get eaten! Unless it is for science.'],
@@ -83,4 +122,14 @@ export function aboutEntry(e: CodexEntry, known: boolean) {
   if (!known) return say(TALK.unknown);
   if (e.cat === 'legend' && TALK.legend[e.id]) return TALK.legend[e.id];
   return say(TALK.seen[e.cat] ?? TALK.seen.bounty, e.name);
+}
+
+/** his hello when a Ledger page opened since the last visit and is still unread (null: none) */
+export function helloLore(): string | null {
+  for (let i = LEDGER.length - 1; i >= 0; i--) {
+    const p = LEDGER[i];
+    const f = Codex.flags('legend:' + p.id);
+    if (f & F_SEEN && !(f & F_READ) && TALK.loreHello[p.id]) return TALK.loreHello[p.id];
+  }
+  return null;
 }

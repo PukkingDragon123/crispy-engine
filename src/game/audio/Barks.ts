@@ -2,6 +2,8 @@
 // (a multi-kill, low bones, a perfect reload, a big trick, a new zone, a boss
 // walking in, a boss going down). Each one types itself out as a small Alagard
 // subtitle beside his head and is spoken in his voice (Voice 'sundown').
+// A boss walking in gets a line of its own where the story has one (docs/LORE.md),
+// and Pinch, in the hat, sometimes clicks his two cents after (jade type, his side).
 //
 // Self-driving: hooks ctx.events and engine.onAfterUpdate itself and tears down
 // when the run scene goes away. RunScene needs one line:
@@ -9,6 +11,7 @@
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import { FloatText3D } from '../fx/FloatText3D';
+import { say3D } from '../fx/WorldSpeech';
 import { Voice } from './Voice';
 
 /** what Barks reads off the hunter */
@@ -20,6 +23,45 @@ export interface BarkHero {
 }
 
 type Kind = 'multi' | 'massacre' | 'lowHp' | 'reload' | 'trick' | 'zone' | 'boss' | 'bossDown' | 'dodge';
+
+/** Sundown on a boss walking in, matched on "name title" (first match wins; the rest get the plain boss lines) */
+const BOSS_LINES: [RegExp, string[]][] = [
+  [/marshal/i, ["Evenin', partner.", 'Wade. You owe me a horse.', 'Draw, Wade. Slow this time.']],
+  [/^sethos/i, ['Sethos. You bought the trap.', 'A million on your head. Hold still.']],
+  [/avatar of set/i, ['Red God. Seen redder.', "Storm's over, big fella."]],
+  [/shifting sands/i, ["Sand's got a face. Ugly one.", "Wake up, moon. Rent's due."]],
+  [/khonsu/i, ["Evenin', moon. You're early.", 'Paid for those nights. Ask Thoth.']],
+  [/bertha/i, ["Easy, Pinch. She's no kin.", 'Mother of a thousand. Make it less.']],
+  [/sunroller/i, ['Khepri wants his ball back.']],
+  [/nekh-amun|pharaoh/i, ['Lie down, your majesty.', 'Robbed better tombs than yours.']],
+  [/gulp/i, ['Not the belly again.']],
+  [/ironclad/i, ["Last train. I'll take a ticket."]],
+  [/thornback/i, ['Hold still, cactus.']],
+  [/cleopatra/i, ["Paint it black, ma'am.", 'Nice veil. Keep it on.']],
+  [/^ra\b/i, ['Sun sets. Ask me how I know.', 'They call me Sundown for a reason.']],
+  [/sphinx/i, ["Ask away. I'm dead, not dumb."]],
+  [/sebekhotep/i, ["Big jaws. Mine are iron."]],
+  [/leviathan/i, ['Nice boat. Shame about it.']],
+  [/oasis king/i, ['Your water tastes like frog.']],
+  [/olm/i, ["Can't see me? Lucky you."]],
+];
+
+/** Pinch's two cents after a bark (he talks in clicks; the words are what he does) */
+const PINCH_LINES: Partial<Record<Kind, string[]>> = {
+  boss: ['*click click click*', '*snaps both claws*', '*tail up, ready*', '*clicks nervously*'],
+  bossDown: ['*victory dance on the hat brim*', '*snip snip*', '*clicks, very smug*', '*tiny claw salute*'],
+  lowHp: ['*worried clicking*', '*taps your skull twice*', '*clicks: get up, get up*'],
+  massacre: ['*counts on his claws, gives up*', '*one impressed click*'],
+};
+/** ...and on a boss walking in, where he has an opinion */
+const PINCH_BOSS: [RegExp, string][] = [
+  [/bertha/i, '*hides in the hat*'],
+  [/marshal/i, '*hisses at the tin star*'],
+  [/khonsu/i, '*squints at the moon*'],
+  [/cleopatra|^ra\b/i, '*pulls the hat brim down*'],
+  [/gulp/i, '*clings to the hat for dear life*'],
+];
+const PINCH_CHANCE: Partial<Record<Kind, number>> = { boss: 0.85, bossDown: 0.7, lowHp: 0.45, massacre: 0.5 };
 
 const LINES: Record<Kind, string[]> = {
   multi: ['Next.', 'Too slow.', "Who's next?", "Line 'em up.", 'Thinned the herd.', 'Crowded.'],
@@ -55,7 +97,9 @@ export class Barks {
   private last = new Map<Kind, number>();
   private bags = new Map<Kind, string[]>();
   private recent = new Map<Kind, string>();
-  private queued: { kind: Kind; at: number; until: number } | null = null;
+  private queued: { kind: Kind; at: number; until: number; who?: string } | null = null;
+  /** Pinch's line, waiting for Sundown to finish */
+  private pinchQ: { at: number; text: string } | null = null;
   private sub: FloatText3D | null = null;
   private subLeft = 0;
   private fading: FloatText3D[] = [];
@@ -81,11 +125,12 @@ export class Barks {
         const s = l?.score ?? 0;
         if (s >= 450 || (l?.quality === 'perfect' && s >= 250)) this.want('trick');
       }),
-      ev.on('bossIntro', () => this.want('boss')),
+      ev.on('bossIntro', (b: { name?: string; title?: string }) => this.want('boss', b ? `${b.name ?? ''} ${b.title ?? ''}`.trim() : undefined)),
       ev.on('bossKilled', () => this.want('bossDown')),
       ev.on('perfectDodge', () => this.want('dodge')),
       ev.on('playerDeath', () => {
         this.queued = null;
+        this.pinchQ = null;
         Voice.stop(KEY, 0.15);
       }),
     );
@@ -93,12 +138,12 @@ export class Barks {
   }
 
   /** ask for a bark; it fires after its delay once the air is clear */
-  private want(kind: Kind) {
+  private want(kind: Kind, who?: string) {
     const r = RULES[kind];
     if (this.t - (this.last.get(kind) ?? -1e9) < r.cd) return;
     if (Math.random() > r.chance) return;
     if (this.queued && RULES[this.queued.kind].prio > r.prio) return;
-    this.queued = { kind, at: this.t + r.delay, until: this.t + r.delay + r.wait };
+    this.queued = { kind, at: this.t + r.delay, until: this.t + r.delay + r.wait, who };
   }
 
   private tick = (_dt: number, rdt: number) => {
@@ -118,8 +163,13 @@ export class Barks {
       const clear = this.hero.alive && !Voice.speaking(KEY) && (pr >= 3 || this.t - this.lastAny >= GAP);
       if (clear) {
         this.queued = null;
-        this.fire(q.kind);
+        this.fire(q.kind, q.who);
       } else if (this.t > q.until) this.queued = null;
+    }
+    const pq = this.pinchQ;
+    if (pq && this.t >= pq.at) {
+      this.pinchQ = null;
+      if (this.hero.alive) this.pinch(pq.text);
     }
     this.updateText(rdt);
   };
@@ -137,14 +187,32 @@ export class Barks {
     return line;
   }
 
-  private fire(kind: Kind) {
-    const text = this.pick(kind);
+  private fire(kind: Kind, who?: string) {
+    const own = kind === 'boss' && who ? BOSS_LINES.find(([re]) => re.test(who))?.[1] : undefined;
+    const text = own ? own[Math.floor(Math.random() * own.length)] : this.pick(kind);
     this.last.set(kind, this.t);
     this.lastAny = this.t;
     const sp = Voice.say('sundown', text, { pos: this.hero.pos, follow: true, key: KEY, duck: 0.3 });
     // the subtitle types at the pace of the voice
     const dur = sp ? Math.max(0.25, sp.duration * 0.85) : text.length / 22;
     this.show(text, Math.min(60, Math.max(10, text.length / dur)), (sp?.duration ?? dur) + 1.1 + text.length * 0.03);
+    // Pinch has an opinion once Sundown is done
+    const pl = PINCH_LINES[kind];
+    if (pl && Math.random() < (PINCH_CHANCE[kind] ?? 0)) {
+      const mine = kind === 'boss' && who ? PINCH_BOSS.find(([re]) => re.test(who))?.[1] : undefined;
+      this.pinchQ = { at: this.t + (sp?.duration ?? dur) + 0.5, text: mine ?? pl[Math.floor(Math.random() * pl.length)] };
+    }
+  }
+
+  /** Pinch clicks a line from the hat: small jade type on the other side of the head, his chirpy voice */
+  private pinch(text: string) {
+    let sp: { duration: number } | null = null;
+    try {
+      sp = Voice.say('pinch', text.replace(/\*/g, ''), { pos: this.hero.pos, follow: true, key: 'pinch-bark', duck: 0.15 });
+    } catch {
+      /* no voice: the words still float */
+    }
+    say3D(this.ctx.engine, text, () => this.hero.pos, { key: 'pinch-bark', lift: 2.3, side: -0.75, size: 0.115, px: 52, wrap: 26, color: '#dcffe9', glow: '#2fbf7e', hdr: 1.3, voiceDur: sp?.duration, hold: 1.4 + text.length * 0.03, scene: this.ctx.scene, camera: this.ctx.camera });
   }
 
   // ---------------------------------------------------------------- subtitle

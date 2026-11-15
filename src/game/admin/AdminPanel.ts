@@ -60,7 +60,7 @@ interface Hit {
 export class AdminPanel {
   readonly cv = document.createElement('canvas');
   private c: CanvasRenderingContext2D;
-  readonly W = 380;
+  readonly W = 440;
   readonly H = 282;
   s = 2;
   tab: TabId = 'jump';
@@ -161,12 +161,16 @@ export class AdminPanel {
     const vw = window.innerWidth, vh = window.innerHeight;
     this.s = Math.max(1, Math.min(3, Math.floor(Math.min((vw - 16) / this.W, (vh - 16) / this.H))));
     const w = this.W * this.s, h = this.H * this.s;
+    const key = `${w}:${h}:${vw}:${vh}`;
+    if (key === this.fitKey) return;
+    this.fitKey = key;
     const st = this.cv.style;
     st.width = w + 'px';
     st.height = h + 'px';
     st.left = Math.round(vw - w > 340 ? vw - w - 16 : (vw - w) / 2) + 'px';
     st.top = Math.round((vh - h) / 2) + 'px';
   }
+  private fitKey = '';
 
   show(on: boolean) {
     this.cv.style.display = on ? 'block' : 'none';
@@ -395,15 +399,16 @@ export class AdminPanel {
     this.label(`AREA ${areaFor(sel.wave)}`, x, y, INK);
     this.btn(W - 14 - 64, y - 1, 'GO', () => a.go(), { w: 64, h: 18, tone: 'blood', tip: 'Restart the run at this stage, hero and wave' });
     // every boss wave on both stages
+    const cw = Math.floor((W - 28 - 18) / 10);
     const grid = (stage: 'desert' | 'nile', y0: number) => {
       BOSS_WAVES.forEach((w, i) => {
-        const gx = 14 + (i % 10) * 35, gy = y0 + Math.floor(i / 10) * 18;
+        const gx = 14 + (i % 10) * (cw + 2), gy = y0 + Math.floor(i / 10) * 18;
         const on = sel.stage === stage && sel.wave === w;
         const name = bossLabel(stage, w) ?? '';
         this.btn(gx, gy, String(w), () => {
           sel.stage = stage;
           a.setWave(w);
-        }, { w: 33, on, tone: isMajor(stage, w) ? 'brass' : 'bone', tip: `${stage === 'nile' ? 'NILE' : 'DUNES'} WAVE ${w}: ${name}${isMajor(stage, w) ? '  (gate boss)' : ''}` });
+        }, { w: cw, on, tone: isMajor(stage, w) ? 'brass' : 'bone', tip: `${stage === 'nile' ? 'NILE' : 'DUNES'} WAVE ${w}: ${name}${isMajor(stage, w) ? '  (gate boss)' : ''}` });
       });
     };
     this.label('DUNES BOSS WAVES', 14, 88);
@@ -587,7 +592,7 @@ export class AdminPanel {
     }
     const list = this.giveList();
     const up = r.upgrades;
-    this.list('give', 14, 66, 338, 150, 15, 2, list.length, (i, rx, ry, rw, hov) => {
+    this.list('give', 14, 66, this.W - 42, 150, 15, 2, list.length, (i, rx, ry, rw, hov) => {
       const d = list[i];
       const lv = up.lv(d.id);
       if (hov) this.rowPlate(rx, ry, rw - 3, 14);
@@ -625,7 +630,7 @@ export class AdminPanel {
     }
     if (!this.spawnBosses) {
       const list = this.foes;
-      this.list('spawn', 14, 66, 338, 150, 15, 2, list.length, (i, rx, ry, rw, hov) => {
+      this.list('spawn', 14, 66, this.W - 42, 150, 15, 2, list.length, (i, rx, ry, rw, hov) => {
         const d = list[i];
         if (hov) this.rowPlate(rx, ry, rw - 3, 14);
         const nile = d.id in NILE_ARMY;
@@ -636,7 +641,7 @@ export class AdminPanel {
       this.label('Foes land a dozen metres ahead of the camera', 14, 222, SOFT);
     } else {
       const list = BOSS_LIST;
-      this.list('spawn', 14, 66, 338, 150, 15, 2, list.length, (i, rx, ry, rw, hov) => {
+      this.list('spawn', 14, 66, this.W - 42, 150, 15, 2, list.length, (i, rx, ry, rw, hov) => {
         const e = list[i];
         if (hov) this.rowPlate(rx, ry, rw - 3, 14);
         pixelText(this.c, this.fitText(e.label, rw - 44), rx + 4, ry - 1, { size: 16, color: INK, lip: LIP });
@@ -649,7 +654,7 @@ export class AdminPanel {
   // ------------------------------------------------------------------ SAVE
   private tabSave() {
     const a = this.a;
-    const X = 14, BW = 176;
+    const X = 14, BW = 200;
     let y = 46;
     this.btn(X, y, 'UNLOCK EVERYTHING', () => a.unlockAll(), { w: BW, tone: 'brass', tip: 'The Nile, Mark, the hideout, Thoth\'s Hall, every look, move and plan' });
     y += 20;
@@ -671,7 +676,7 @@ export class AdminPanel {
     // what the save holds now
     const st = a.saveStatus();
     let sy = 46;
-    const SX = 204;
+    const SX = 236;
     for (const [k, v, good] of st) {
       this.label(k, SX, sy, SOFT);
       this.label(v, this.W - 16, sy, good === undefined ? INK : good ? GREEN : RED, 'right');
@@ -708,7 +713,7 @@ export class AdminPanel {
     this.label(this.fitText(b.title, 340), 14, y, SOFT);
     y += 17;
     const c = this.c;
-    const BW = 352;
+    const BW = this.W - 28;
     c.drawImage(barFrame(BW, 14), 14, y);
     drawBarFill(c, 14, y, BW, 14, Math.max(0, b.frac), UI.blood);
     // the phase thresholds as brass pins on the bar
@@ -726,7 +731,8 @@ export class AdminPanel {
     y += 16;
     let x = 14;
     for (let p = 0; p < nPh; p++) x = this.btn(x, y, `PHASE ${p + 1}`, () => a.bossPhase(b, p), { on: b.phase === p }) + 3;
-    x += 8;
+    y += 19;
+    x = this.label('HEALTH', 14, y) + 8;
     x = this.btn(x, y, 'FULL', () => a.bossHp(b, 1)) + 2;
     x = this.btn(x, y, '50%', () => a.bossHp(b, 0.5)) + 2;
     x = this.btn(x, y, '10%', () => a.bossHp(b, 0.1)) + 4;
@@ -741,7 +747,7 @@ export class AdminPanel {
     this.label('ATTACKS', 14, y, INK);
     this.label('queued as its next move', this.W - 16, y, SOFT, 'right');
     y += 14;
-    this.list('moves', 14, y, 344, this.H - 28 - y, 18, 2, moves.length, (i, rx, ry, rw, hov) => {
+    this.list('moves', 14, y, this.W - 40, this.H - 28 - y, 18, 2, moves.length, (i, rx, ry, rw, hov) => {
       const T = TONES.brass;
       this.c.drawImage(nine(ART.nine_key, rw - 4, 16, 5, hov ? T.lit : T.base), rx, ry);
       pixelText(this.c, this.fitText(moveTitle(moves[i]), rw - 14), rx + (rw - 4) / 2, ry - 1, { size: 16, color: INK, align: 'center' });

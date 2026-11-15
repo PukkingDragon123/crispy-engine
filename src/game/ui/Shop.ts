@@ -202,15 +202,22 @@ const TALK: { q: string; a: string[]; go?: 'enter' | 'bye'; haggle?: true }[] = 
   { q: 'Can you do better on the price?', a: [], haggle: true },
   { q: 'Ride on.', a: ['Then pass slowly. Safe roads, little bones.', 'Hrrm. The road will bring you back. It always does.'], go: 'bye' },
 ];
-/** what he tells you unasked: his story, the tree, the road (it used to be porch questions) */
+/** what he tells you unasked: his story, the tree, the road, and what he remembers of yours (docs/LORE.md) */
 const LORE = [
   'Ozymandias, merchant of the walking road. Nine hundred years on this shell.',
+  'I sold a young bounty hunter his first shovel once. Paid in pharaoh gold. Hrrm. I did not ask.',
   'I sell, Gobi walks. We have done it since the pyramids were pointy.',
+  'A marshal bought a bear trap from me the week the storm came. I did not ask what for. I should have asked.',
   'Gobi swallowed an acacia seed in the old kingdom. Now it shades us both.',
+  'You remind me of a customer I had once. Better face. Fewer arms.',
   'When outlaws come, Gobi digs in and I bar the shutters. Sand is a fine door.',
+  'Four arms, and still you pay with one hand. Hrrm.',
   'If Gobi starts digging, you start riding. That is the only rule out here.',
+  'A million on your skull and a million on Sethos. That makes you even, little bones.',
   'Every jar on that shelf has a story. Most of them end badly.',
+  'That shovel boy had a name. It is on the tip of my tongue. Tortoise tongues are slow.',
   'Hrrm. My knees are older than that dune.',
+  'Thoth says I was a king once. Thoth says a lot of things.',
 ];
 /** small noises while he waits */
 const GRUMBLE = ['Hrrm.', 'Hrrm. Where did I put my spectacles.', 'Mmm. Mmm-hm.', 'Gobi, stop swaying.', 'Dust. Always dust.'];

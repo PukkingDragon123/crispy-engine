@@ -294,6 +294,11 @@ export class PlayerAnim {
   private strikeAmp = 0;
   private flickT = 4;
   private tailShot = false;
+  /** lower pincer arms (meta.claws: per side [shoulder, elbow, wrist, movable finger]) and their springs */
+  private claws: { s: number; n: THREE.Object3D[]; spread: SpringF; pitch: SpringF; wrist: SpringF; open: SpringF }[] = [];
+  private clawStrikeT = 9;
+  private clawSnapT = 9;
+  private clickT = 2;
 
   // blend weights
   aimW = 0;
@@ -415,6 +420,13 @@ export class PlayerAnim {
     this.tailNodes = tp.map((n) => rig.nodes[n]).filter((o): o is THREE.Group => !!o);
     this.tailP = this.tailNodes.map((_, i) => new SpringF(0, 3.2 - i * 0.25, 0.32));
     this.tailY = this.tailNodes.map((_, i) => new SpringF(0, 2.6 - i * 0.2, 0.36));
+    const cl = (meta as { claws?: Record<'l' | 'r', string[]> } | undefined)?.claws;
+    this.claws = [];
+    if (cl)
+      for (const [k, s] of [['l', 1], ['r', -1]] as ['l' | 'r', number][]) {
+        const n = (cl[k] ?? []).map((nm) => rig.nodes[nm]);
+        if (n.length === 4 && n.every(Boolean)) this.claws.push({ s, n, spread: new SpringF(0, 3.0, 0.4), pitch: new SpringF(0, 3.4, 0.38), wrist: new SpringF(0, 4.0, 0.35), open: new SpringF(0, 7, 0.4) });
+      }
     this.hatGrip = Array.isArray(meta?.hatGrip) && meta.hatGrip.length === 3 ? new THREE.Vector3().fromArray(meta.hatGrip) : null;
     // a cartoon rider stands wider on the deck
     this.stanceHalf = Math.abs(this.hipL.x) + (0.13 + (meta?.stanceWide ?? 0.055) * this.toon) * this.scale;
@@ -439,10 +451,12 @@ export class PlayerAnim {
   /** the scorpion tail strikes forward over the shoulder (melee, counters); no-op without a tail */
   tailJab() {
     if (this.tailNodes.length && this.strikeT > 0.3) (this.strikeT = 0), (this.strikeAmp = 1);
+    if (this.claws.length && this.clawStrikeT > 0.4) this.clawStrikeT = 0; // the pincers strike with it
   }
-  /** a quick tail snap (kills) */
+  /** a quick tail snap (kills); the pincers snap open */
   tailSnap() {
     if (this.tailNodes.length && this.strikeT > 0.3) (this.strikeT = 0), (this.strikeAmp = 0.5);
+    if (this.claws.length) this.clawSnapT = 0;
   }
 
   /** snap the iron trap jaw shut (kills, the reload close); no-op on other jaws */
@@ -807,6 +821,46 @@ export class PlayerAnim {
     this.solveHead(I, f);
     this.accessories(I, accX, accZ);
     this.tailAnim(I, accX, accZ, takeoff, landed);
+    this.clawAnim(I, takeoff, landed);
+  }
+
+  /** the lower pincer arms: idle flexing and claw clicks, flaring out for balance when carving, in the air and on
+   *  landing, snapping open on the jump and on kills, and a big pincer strike (melee, counters) */
+  private clawAnim(I: PlayerAnimIn, takeoff: boolean, landed: boolean) {
+    if (!this.claws.length) return;
+    const dt = I.dt, t = I.time;
+    this.clawStrikeT += dt;
+    this.clawSnapT += dt;
+    if (takeoff) this.clawSnapT = 0;
+    const st = this.clawStrikeT, sn = this.clawSnapT;
+    // strike: wind back, swing forward and up, clamp, recover
+    let sp = 0, so = 0;
+    if (st < 0.1) (sp = 0.35 * smooth(st / 0.1)), (so = 0.7 * smooth(st / 0.1));
+    else if (st < 0.22) (sp = lerp(0.35, -1.25, easeOutCubic((st - 0.1) / 0.12))), (so = 0.8);
+    else if (st < 0.6) (sp = lerp(-1.25, 0, smooth((st - 0.22) / 0.38))), (so = st < 0.3 ? lerp(0.8, -0.05, (st - 0.22) / 0.08) : 0);
+    const snapOpen = sn < 0.12 ? 0.85 * smooth(sn / 0.12) : sn < 0.3 ? lerp(0.85, -0.05, easeInCubic((sn - 0.12) / 0.18)) : 0;
+    if (this.idleW > 0.5) {
+      this.clickT -= dt;
+      if (this.clickT <= 0) {
+        this.clickT = 1.2 + Math.random() * 2.5;
+        for (const c of this.claws) if (Math.random() < 0.7) c.open.kick(6 + Math.random() * 3);
+      }
+    }
+    if (landed) for (const c of this.claws) (c.spread.kick(2.4), c.pitch.kick(1.2));
+    for (const c of this.claws) {
+      const s = c.s;
+      const carve = Math.max(0, s > 0 ? this.lean.x : -this.lean.x);
+      const flare = 0.08 + Math.abs(this.lean.x) * 0.35 + carve * 0.2 + this.airW * 0.5 + this.driftW * 0.25 + this.stunW * 0.2;
+      const breathe = Math.sin(t * 0.9 + s * 1.3) * 0.06 * (0.4 + this.idleW);
+      c.spread.step(flare + breathe * 0.5, dt);
+      c.pitch.step(-0.1 + sp + breathe - this.airW * 0.25 + this.deadW * 0.6, dt);
+      c.wrist.step(Math.sin(t * 1.3 + s * 1.7) * 0.18 * (0.3 + this.idleW) - sp * 0.3, dt);
+      c.open.step(Math.max(so, snapOpen, 0.05 + this.airW * 0.25), dt);
+      c.n[0].rotation.set(c.pitch.x, -s * c.spread.x * 0.3, s * c.spread.x);
+      c.n[1].rotation.set(c.pitch.x * 0.45 - 0.05, 0, 0);
+      c.n[2].rotation.set(c.wrist.x, 0, 0);
+      c.n[3].rotation.set(clamp(c.open.x, -0.1, 1.0), 0, 0);
+    }
   }
 
   /** the scorpion tail: a slow curl breath and idle flicks, lag behind the ride's accelerations, a whip on the jump

@@ -28,6 +28,7 @@ import { Puppet } from '../ui/codex/Puppet';
 import { HubScene } from './HubScene';
 import { nav } from '../Nav';
 import { loadSave } from '../meta/Save';
+import { DEATH_LORE } from '../meta/Lore';
 import type { PosterData, RunResult } from './ResultsScene';
 
 export interface DeathCineKiller {
@@ -844,9 +845,11 @@ export class DeathCine implements GameScene {
     if (skipped) this.daysLine(`${days} DAYS PASSED...`, true);
     // after the first ride, waking at home is how the hideout is found
     const first = loadSave().runs === 1;
-    if (first) say3D(eng, 'and the way home is found', null, { key: 'death:home', screen: [0, 0.12], depth: 2.6, fit: false, size: 0.075, px: 56, wrap: 40, cps: 22, color: '#ffe2a0', glow: '#ffae5a', hdr: 1.4, hold: 30 });
+    // after that, a line of the story: where the jar went, who paid for the nights (meta/Lore)
+    const lore = !first && !skipped ? DEATH_LORE[Math.floor(Math.random() * DEATH_LORE.length)] : null;
+    if (first || lore) say3D(eng, lore ?? 'and the way home is found', null, { key: 'death:home', screen: [0, 0.12], depth: 2.6, fit: false, size: 0.075, px: 56, wrap: 40, cps: 22, color: '#ffe2a0', glow: '#ffae5a', hdr: 1.4, hold: 30 });
     void (async () => {
-      if (first) await eng.tweens.wait(1.3, true);
+      if (first || lore) await eng.tweens.wait(lore ? 1.8 : 1.3, true);
       await eng.fadeOut(skipped ? 0.5 : 1.5, '#fff3dc');
       this.title.style.opacity = '0';
       await eng.setScene(new HubScene(eng, () => nav.ride(false), () => nav.menu(), { wake: { days, result: this.o.result } }), 0.9, '#fff3dc');

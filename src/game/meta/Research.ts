@@ -18,7 +18,8 @@
 //   Research.errand()           → the errand in hand (accept with Research.takeErrand())
 //   Research.takeSatchel()      → consumables Thoth packed for the next ride (run start)
 import { loadSave, writeSave, PRICES } from './Save';
-import { Codex, CodexEntry, F_CLAIM, F_SEEN } from './Codex';
+import { Codex, CodexEntry, F_CLAIM, F_SEEN, loreStat } from './Codex';
+import { ledgerPage } from './Lore';
 import { Blueprints, blueprint } from './Blueprints';
 import { ITEMS, ItemId } from '../player/Items';
 import { GEAR, GearId } from '../player/Equipment';
@@ -151,6 +152,13 @@ function legendGoal(id: string): Goal {
     case 'khepri': return { text: 'Knock the Sunroller off his ball', cur: claimed('boss:sunroller') ? 1 : 0, need: 1 };
     case 'set': return { text: 'Defeat Sethos, Hand of Set', cur: claimed('boss:sethos') ? 1 : 0, need: 1 };
     case 'ozymandias': return { text: 'Find the walking trading post three times', cur: Codex.rides('legend:ozymandias'), need: 3 };
+  }
+  // a page of Sundown's Ledger (meta/Lore): a tally, a codex key claimed, or one known
+  const page = ledgerPage(id);
+  if (page) {
+    const st = page.study.stat;
+    const cur = st.startsWith('claim:') ? (claimed(st.slice(6)) ? 1 : 0) : st.startsWith('known:') ? (Codex.known(st.slice(6)) ? 1 : 0) : loreStat(st as Parameters<typeof loreStat>[0]);
+    return { text: page.study.text, cur: Math.min(cur, page.study.n), need: page.study.n };
   }
   return { text: 'Meet them again', cur: Codex.rides('legend:' + id), need: 2 };
 }

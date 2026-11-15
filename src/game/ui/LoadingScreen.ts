@@ -8,8 +8,9 @@
 import type { LoadingCover } from '../../engine/Engine';
 import type { HourglassView, ProgressMode } from './loading/HourglassView';
 import { px, text, measure, UI } from './PixelUI';
+import { LOADING_LORE } from '../meta/Lore';
 
-const TIPS = [
+const PLAY_TIPS = [
   'Six chambers, no more. Count your bullets.',
   'Read the tarot before you take your card.',
   'Style pays: flashy kills fatten the bounty.',
@@ -20,6 +21,8 @@ const TIPS = [
   'Sand crests roll across the dunes. Ride them.',
   'Pinch fights at your side. Mind his tail.',
 ];
+/** a gameplay tip, then a line of lore (meta/Lore, docs/LORE.md), in turn */
+const TIPS = Array.from({ length: Math.max(PLAY_TIPS.length, LOADING_LORE.length) * 2 }, (_, i) => (i % 2 ? LOADING_LORE : PLAY_TIPS)[(i >> 1) % (i % 2 ? LOADING_LORE.length : PLAY_TIPS.length)]);
 
 // ------------------------------------------------------------------ the scarab track (pixel art)
 // The bar is a carved obsidian cartouche: a gold-rimmed oval tablet with an ankh in its left end and an

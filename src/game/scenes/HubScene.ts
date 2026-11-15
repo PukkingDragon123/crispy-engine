@@ -152,6 +152,9 @@ const MAMA_LINES = [
   "When the sand's done screaming, the stars come out lovely.",
   "Wear the poncho. It brings out your cheekbones.",
   "Ride careful. Come back hungry.",
+  "Your jar came home before you did again. It's on the mantel, sugar.",
+  "I'm knitting you a sweater with four sleeves. Took me all winter.",
+  "Keep that tail off my good rug, dear.",
 ];
 
 const ease = (u: number) => (u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2);
