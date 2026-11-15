@@ -304,7 +304,7 @@ export class Wardrobe3D implements Mode {
         tip: () => {
           const name = it.id.replace('_', ' ');
           if (it.lock && !it.lock.open) return it.lock.tip(cap(name));
-          if (it.kind === 'mask') return (d.look as any).mask !== true ? 'Pull the outlaw mask up' : 'Take the mask off';
+          if (it.kind === 'mask') return (d.look as any).mask === false ? 'Pull the outlaw mask up' : 'Take the mask off';
           if (it.kind === 'shades') return (d.look as any).shades === false ? 'Put the shades on' : 'Take the shades off';
           return `Try on the ${name}`;
         },
@@ -387,7 +387,7 @@ export class Wardrobe3D implements Mode {
       const from = this.h.hero?.nodes['head']?.getWorldPosition(new THREE.Vector3()) ?? new THREE.Vector3(this.h.pos.x, 1.7, this.h.pos.y);
       if (it.kind === 'hat') d.look.hat = it.id;
       else if (it.kind === 'outfit') d.look.outfit = it.id;
-      else if (it.kind === 'mask') (d.look as any).mask = (d.look as any).mask !== true;
+      else if (it.kind === 'mask') (d.look as any).mask = (d.look as any).mask === false;
       else (d.look as any).shades = (d.look as any).shades === false;
       writeSave(d);
       // what he wore goes back on its hook
