@@ -40,23 +40,28 @@ export function raWrathDone(ctx: Ctx): Promise<void> {
 /** listen for Cleopatra's fall on the Nile stage; returns the unsubscribe */
 export function installRaWrath(d: WrathDeps): () => void {
   let fired = false;
-  const go = () => {
+  /** travel waits from the moment he is enraged; the beat itself starts after `delay` s */
+  const go = (delay = 0) => {
     if (fired) return;
     fired = true;
-    const p = playRaWrath(d).catch((e) => console.warn('[ra wrath]', e));
+    const p = new Promise<void>((resolve) => {
+      d.ctx.engine.tweens.after(delay, () => void playRaWrath(d).catch((e) => console.warn('[ra wrath]', e)).then(() => resolve()));
+    });
     PENDING.set(d.ctx, p);
     void p.then(() => PENDING.delete(d.ctx));
   };
   const offs = [
-    d.ctx.events.on('raEnraged', () => go()),
+    // Cleopatra's own beat (her fall, "who has put out the light of my daughter?") runs ~3.4 s after the event
+    d.ctx.events.on('raEnraged', () => go(3.7)),
     d.ctx.events.on('bossDefeated', (b: { name?: string }, escaped: boolean) => {
-      if (!escaped && /cleopatra/i.test(b?.name ?? '')) d.ctx.engine.tweens.after(0.6, go, true);
+      if (!escaped && /cleopatra/i.test(b?.name ?? '')) go(0.6);
     }),
   ];
-  (window as any).__raWrath = go; // dev handle: __raWrath()
+  const dev = () => go(0);
+  (window as any).__raWrath = dev; // dev handle: __raWrath()
   return () => {
     for (const o of offs) o();
-    if ((window as any).__raWrath === go) (window as any).__raWrath = null;
+    if ((window as any).__raWrath === dev) (window as any).__raWrath = null;
   };
 }
 
@@ -183,7 +188,7 @@ async function playRaWrath(d: WrathDeps) {
     ctx.sfx('boss_roar', pp, 1, 0.4);
     ctx.sfx('anubis_roar', pp, 1, 0.5);
     ctx.shake(0.9);
-    speak3D(eng, 'setAvatar', 'You broke my vessel. Then I come myself, and the river burns.', n['head'], { key: 'ra:wrath', lift: 4 * SC, side: 6 * SC, size: 0.3, px: 64, wrap: 26, color: '#fff1dc', glow: '#ffb050', hdr: 1.8, hold: 3.4 });
+    speak3D(eng, 'setAvatar', 'You put out my daughter\'s light. Now I come myself, and the river burns.', n['head'], { key: 'ra:wrath', lift: 4 * SC, side: 6 * SC, size: 0.3, px: 64, wrap: 26, color: '#fff1dc', glow: '#ffb050', hdr: 1.8, hold: 3.4 });
     ctx.toast('« Sympathy for the Devil »', '#ffc860', 'Ra');
     for (let r0 = eng.realTime, k = 0; k < 2.6; k = eng.realTime - r0) {
       cam.setCine({ pos: camB, look: h, fov: 13 });

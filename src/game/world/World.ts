@@ -239,7 +239,7 @@ export class World {
     b.maxR = Math.max(Math.hypot(b.ox, b.oz), Math.hypot(S - b.ox, b.oz), Math.hypot(b.ox, S - b.oz), Math.hypot(S - b.ox, S - b.oz)) + 60;
     const was = b.k;
     b.k = k;
-    BURN.value.set(b.ox, b.oz, k >= 1 ? 1e5 : 10 + k * b.maxR, Math.min(1, k * 6));
+    BURN.value.set(b.ox, b.oz, k >= 1 ? 1e5 : 10 + k * b.maxR, Math.min(1, k * 40));
     // the sky catches fire with the land
     const base = this.basePreset ?? PRESETS[this.sa.env];
     if (this.sa.env !== 'nileBurn') this.env.lerpPreset(base, PRESETS.nileBurn, smoothstep(0.0, 0.55, k));

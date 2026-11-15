@@ -155,7 +155,8 @@ void main(){
   col = mix(col, sky, frB);
   float spk = pow(max(dot(R, uSunDirW), 0.0), 70.0);
   float tw = h21(floor(vW.xz * 8.0) + floor(uTime * 7.0) * 13.1);
-  vec3 glint = uSunCol * 0.2 * step(0.3, spk) * step(0.7, tw);
+  // a scatter of glints that thins out toward the edge of the sun's path
+  vec3 glint = uSunCol * 0.2 * step(1.0 - 0.32 * smoothstep(0.08, 0.9, spk), tw);
   // flow-advected foam (two phases, pixel snapped)
   vec2 fl = vFlow.xy;
   float spd = length(fl);
@@ -163,10 +164,14 @@ void main(){
   float f0 = fract(ph), f1 = fract(ph + 0.5);
   float w0 = 1.0 - abs(2.0 * f0 - 1.0);
   vec2 q0 = px - fl * f0 * 3.33, q1 = px - fl * f1 * 3.33;
-  float n0 = vn(q0 * 0.32) * 0.62 + vn(q0 * 1.05 + 3.1) * 0.38;
-  float n1 = vn(q1 * 0.32 + 17.0) * 0.62 + vn(q1 * 1.05 + 9.7) * 0.38;
+  // foam streaks drawn out along the current (flow frame: long along, narrow across)
+  vec2 FT = spd > 0.05 ? fl / spd : vec2(1.0, 0.0);
+  vec2 FN = vec2(-FT.y, FT.x);
+  vec2 a0 = vec2(dot(q0, FT) * 0.16, dot(q0, FN) * 0.62), a1 = vec2(dot(q1, FT) * 0.16, dot(q1, FN) * 0.62);
+  float n0 = vn(a0) * 0.62 + vn(a0 * 2.6 + 3.1) * 0.38;
+  float n1 = vn(a1 + 17.0) * 0.62 + vn(a1 * 2.6 + 9.7) * 0.38;
   float n = mix(n1, n0, w0);
-  float thr = 0.76 - clamp(spd * 0.035, 0.0, 0.12) - max(vCrest, 0.0) * 0.08 + smoothstep(1.2, 0.0, spd) * 0.06;
+  float thr = 0.83 - clamp(spd * 0.03, 0.0, 0.1) - max(vCrest, 0.0) * 0.08 + smoothstep(1.2, 0.0, spd) * 0.08;
   float foam = 0.0, ink = 0.0;
   if (n > thr) foam = 1.0; else if (n > thr - 0.028) ink = 1.0;
   // shore wash: a foam line breathing on the bank, an ink rim on its water side
@@ -220,15 +225,17 @@ void main(){
     float chance = mix(1.0, 0.4, smoothstep(0.5, 1.7, depth));
     bool crust = burnH(id + 7.3) < chance || vRiv.z < 0.001 && depth < 0.9;
     float edge = F2 - F1;
-    float m0 = vn(q0 * 0.45) * 0.6 + vn(q0 * 1.4 + 5.0) * 0.4;
-    float m1 = vn(q1 * 0.45 + 11.0) * 0.6 + vn(q1 * 1.4 + 2.0) * 0.4;
+    // molten bands streaming with the current
+    float m0 = vn(a0 * 1.6) * 0.6 + vn(a0 * 4.2 + 5.0) * 0.4;
+    float m1 = vn(a1 * 1.6 + 11.0) * 0.6 + vn(a1 * 4.2 + 2.0) * 0.4;
     float mf = mix(m1, m0, w0);
-    vec3 hot = mf > 0.62 ? vec3(1.0, 0.86, 0.38) : mf > 0.42 ? vec3(1.0, 0.45, 0.07) : vec3(0.82, 0.17, 0.03);
-    hot *= 2.4 + 0.5 * sin(uTime * 2.0 + vRiv.x * 0.3);
+    // saturated, not white-hot: the filmic tone curve washes over-bright orange out to cream
+    vec3 hot = mf > 0.64 ? vec3(1.0, 0.62, 0.16) : mf > 0.42 ? vec3(0.98, 0.3, 0.035) : vec3(0.62, 0.075, 0.015);
+    hot *= 1.45 + 0.25 * sin(uTime * 2.0 + vRiv.x * 0.3);
     vec3 crustC = hp > 0.82 ? vec3(0.16, 0.1, 0.075) : hp < 0.15 ? vec3(0.035, 0.024, 0.02) : vec3(0.075, 0.05, 0.04);
     crustC *= rel > 0.05 ? 1.35 : rel > -0.045 ? 1.0 : 0.75;
     vec3 lc = hot;
-    if (crust) lc = edge < 0.06 ? hot * 0.8 : edge < 0.1 ? mix(crustC, vec3(0.9, 0.2, 0.03), 0.55) : crustC;
+    if (crust) lc = edge < 0.06 ? hot * 0.85 : edge < 0.1 ? mix(crustC, vec3(0.75, 0.13, 0.02), 0.6) : crustC;
     if (wk > 0.5 || churn > 0.45) lc = hot * 1.25;
     // the fire front races across the water
     lc += vec3(1.6, 0.5, 0.08) * burnFront(px) * (0.6 + 0.4 * wn);
