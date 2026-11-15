@@ -101,7 +101,10 @@ async function playRaWrath(d: WrathDeps) {
   const flat = new THREE.Vector3(sun.x, 0, sun.z);
   if (flat.lengthSq() < 1e-4) flat.set(Math.sin(cam.yaw), 0, Math.cos(cam.yaw));
   flat.normalize();
-  const D = 240, SC = 2.6;
+  // as far out as the arena allows (beyond the storm wall he would be lost in the dust), scaled to stay colossal
+  let D = 160;
+  while (D > 70 && ctx.world.storm.sdf(pp.x + flat.x * D, pp.z + flat.z * D) < 18) D -= 10;
+  const SC = D / 92;
   const at = pp.clone().addScaledVector(flat, D);
   at.y = pp.y - 18;
   rig.root.position.copy(at);
@@ -175,8 +178,9 @@ async function playRaWrath(d: WrathDeps) {
     eng.flash(0xffc080, 0.4, 0.6);
     // 2) the eyes open; the roar
     const h = head();
-    const camB = pp.clone().addScaledVector(flat, -3).add(new THREE.Vector3(0, 1.4, 0));
-    camB.y = Math.max(camB.y, ctx.world.groundAt(camB.x, camB.z) + 1.4);
+    // over the heads of the fight, a long lens on his face
+    const camB = pp.clone().addScaledVector(flat, -4).add(new THREE.Vector3(0, 7, 0));
+    camB.y = Math.max(camB.y, ctx.world.groundAt(camB.x, camB.z) + 7);
     ctx.sfx('divine_power', pp, 1, 0.45);
     for (let r0 = eng.realTime, k = 0; k < 1; k = eng.realTime - r0) {
       eye = k;

@@ -869,7 +869,7 @@ export class RaSunKing extends Boss {
       // the ground melts: a burning trench behind the point
       s.melt -= dt;
       if (s.melt <= 0) {
-        s.melt = 0.14;
+        s.melt = 0.25;
         ctx.world.deform(s.p.x, s.p.z, 1.7, 0.32);
         ctx.events.emit('groundMark', s.p.x, s.p.z, 2.0, 1);
         if (s.p.distanceTo(s.last) > 1.4) {
