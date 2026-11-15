@@ -269,6 +269,8 @@ export class Player {
       if (hit?.source === 'gun' && res?.crit) this.shotCrit = true;
     });
     // a landed counter: safe for a beat, the view punches in on the impact
+    // a kill: the iron trap jaw snaps shut with a clack (no-op on other jaws)
+    ctx.events.on('enemyKilled', () => this.pa.snapJaw());
     ctx.events.on('counter', () => {
       this.invuln = Math.max(this.invuln, 0.55);
       this.cam.punch(-0.03, 0, -3.4, 0);

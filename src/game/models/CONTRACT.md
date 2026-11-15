@@ -138,7 +138,13 @@ Sockets: `hand_r`, `hand_l`, `head_top`, `back`, `shoulder_l`, `shoulder_r`, `hi
     Rocker additions (user note, latest; the old design otherwise stays): long, voluminous curly late-80s hard-rock
     hair from under the hat past the shoulders (four sway chains `hair_l`, `hair_r`, `hair_bl`, `hair_br`, each + `2`;
     on the rotted side only from behind the bare temple), and a cigarette (`cig` part on the jaw, clamped in the bare
-    teeth, out through a burnt hole in the mask; `cig_tip` / `mouth_corner` sockets, `meta.smoke`, `CigSmoke` pixel smoke).
+    teeth; `cig_tip` / `mouth_corner` sockets, `meta.smoke`, `CigSmoke` pixel smoke). His mouth and lower jaw are an iron
+    BEAR-TRAP JAW (user note): rusted forged arcs with interlocking serrated teeth, hinges with leaf springs and rivets
+    bolted into the skull and cheekbones, the living left cheek stitched to the iron, a chain under the chin. The upper
+    arc is forged into `head`; the lower arc is the `jaw` part, pivot on the hinge axis (positive x opens it).
+    `meta.trapJaw` makes PlayerAnim snap it shut with an overshoot clack on kills and the reload close, and chew when
+    idle. The face mask is gone: the bandana is worn round the neck (`look.mask === true` raises it to a neck gaiter
+    under the iron jaw).
     `meta.toon = 1` switches on PlayerAnim's cartoon layer (`meta.stanceWide` its extra stance), `meta.cam` fits the
     follow camera, `meta.hatGrip` is the brim grip. Pinch's perches: empty sockets `perch_hat` (hat crown),
     `perch_eyeL` / `perch_eyeR` (eye sockets; the right one is the bare skull socket) on `head`, +Z out of the face;

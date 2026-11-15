@@ -280,6 +280,12 @@ export class PlayerAnim {
   /** secondary bounce of the hips over the dunes (metres) and the head's lagging bobble (radians) */
   bounce = new SpringF(0, 2.8, 0.24);
   headBob = new SpringF(0, 3.3, 0.26);
+  /** an iron bear-trap jaw (meta.trapJaw): snaps shut with a clack on kills and the reload close, chews when idle */
+  trap = false;
+  /** seconds since the last snap (large: none running) */
+  private snapT = 9;
+  /** the trap jaw's expression pose, damped (the snap plays over it) */
+  private jawBase = 0;
 
   // blend weights
   aimW = 0;
@@ -394,8 +400,9 @@ export class PlayerAnim {
     if (hd) this.neck.copy(hd);
     this.shoulderH = this.pelvisRest.y + (to?.y ?? 0.08) + this.shL.y;
     this.scale = (this.l1Leg + this.l2Leg) / 0.667;
-    const meta = rig.geo.spec.meta as { toon?: number; hatGrip?: number[]; stanceWide?: number } | undefined;
+    const meta = rig.geo.spec.meta as { toon?: number; hatGrip?: number[]; stanceWide?: number; trapJaw?: boolean } | undefined;
     this.toon = typeof meta?.toon === 'number' ? clamp01(meta.toon) : 0;
+    this.trap = !!meta?.trapJaw;
     this.hatGrip = Array.isArray(meta?.hatGrip) && meta.hatGrip.length === 3 ? new THREE.Vector3().fromArray(meta.hatGrip) : null;
     // a cartoon rider stands wider on the deck
     this.stanceHalf = Math.abs(this.hipL.x) + (0.13 + (meta?.stanceWide ?? 0.055) * this.toon) * this.scale;
@@ -415,6 +422,11 @@ export class PlayerAnim {
       this.gunSway.x.zeta = this.gunSway.y.zeta = this.gunSway.z.zeta = lerp(0.5, 0.38, tn);
     }
     this.ready = true;
+  }
+
+  /** snap the iron trap jaw shut (kills, the reload close); no-op on other jaws */
+  snapJaw() {
+    if (this.trap && this.snapT > 0.25) this.snapT = 0;
   }
 
   /** ask for a nearby threat to glance at (answered via setGlance) */
@@ -819,6 +831,7 @@ export class PlayerAnim {
           this.squash.kick(-0.5 * tn);
         }
         if (ph === 'close') {
+          this.snapJaw();
           this.wristR.kick(14 + 6 * tn);
           // toon: the snap shut lands with a cocky little bounce and a hat jump
           this.nod.kick(-2.4 * tn);
@@ -1088,7 +1101,24 @@ export class PlayerAnim {
   private accessories(I: PlayerAnimIn, accX: number, accZ: number) {
     const n = I.rig.nodes, t = I.time, dt = I.dt, b = I.board;
     const jaw = n['jaw'];
-    if (jaw) jaw.rotation.x = damp(jaw.rotation.x, I.exprJaw + (I.expression === 'laugh' ? Math.abs(Math.sin(t * 22)) * 0.25 : 0) + this.wrapW * Math.abs(Math.sin(t * 9)) * 0.2 + this.ab.jaw, 18, dt);
+    const jawT = I.exprJaw + (I.expression === 'laugh' ? Math.abs(Math.sin(t * 22)) * 0.25 : 0) + this.wrapW * Math.abs(Math.sin(t * 9)) * 0.2 + this.ab.jaw;
+    if (jaw && this.trap) {
+      // the iron trap: the pose is damped, a snap plays over it (springs open, slams shut past closed with a
+      // clack, rings out, then hands back), and when idle it chews and clenches now and then
+      this.jawBase = damp(this.jawBase, jawT, 14, dt);
+      this.snapT += dt;
+      const st = this.snapT;
+      const chew = this.idleW * Math.pow(Math.max(0, Math.sin(t * 0.75 + 1.1)), 8) * (0.5 + 0.5 * Math.sin(t * 11)) * 0.08;
+      const rest = Math.max(0, this.jawBase + chew);
+      let rx = rest;
+      if (st < 0.07) rx = lerp(rest, 0.46, smooth(st / 0.07));
+      else if (st < 0.105) rx = lerp(0.46, -0.06, easeInCubic((st - 0.07) / 0.035));
+      else if (st < 0.6) {
+        const ring = -0.06 * Math.exp(-(st - 0.105) * 13) * Math.cos((st - 0.105) * 52);
+        rx = lerp(ring, rest, smooth((st - 0.22) / 0.38));
+      }
+      jaw.rotation.x = rx;
+    } else if (jaw) jaw.rotation.x = damp(jaw.rotation.x, jawT, 18, dt);
     if (n['brow_l']) n['brow_l'].rotation.z = damp(n['brow_l'].rotation.z, I.exprBrow[0], 14, dt);
     if (n['brow_r']) n['brow_r'].rotation.z = damp(n['brow_r'].rotation.z, I.exprBrow[1], 14, dt);
     // hat: wind from the nose pushes the brim toward the tail, inertia rocks it

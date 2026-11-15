@@ -1315,7 +1315,12 @@ function flameCol(tongues: Tongue[], arc: number, h: number): number | null {
 }
 
 /** a red bandana knotted round the neck, folded triangle over the sternum */
-function bandana(m: Sc, R: Ramp) {
+function bandana(m: Sc, R: Ramp, up = false) {
+  if (up)
+    m.region([-4.2, 43.3, -5.6], [4.2, 46.2, 2.6], (x, y, z) => {
+      const r = Math.hypot(x / 3.3, (z + 1.65) / 3.05);
+      return r <= 1 && r > 0.72 && y < 46.0 + 0.25 * Math.sin(x * 2.1);
+    }, (x, y) => (Math.abs(y - 44.6 - 0.2 * Math.sin(x * 1.3)) < 0.22 ? R.shade : R.base));
   const ring: V3[] = [];
   for (let a = 0; a <= Math.PI * 2 + 0.01; a += 0.15) ring.push([3.15 * Math.sin(a), 45.15 + 0.3 * Math.cos(a), -1.9 - 2.9 * Math.cos(a)]);
   m.path(ring, () => 0.86, R.base);
@@ -2299,6 +2304,132 @@ function burnHole(models: VoxelModel[]) {
   }
 }
 
+// ================================================================== THE BEAR-TRAP JAW (forged iron where his mouth and lower jaw were)
+// Two rusted iron jaw arcs with big interlocking teeth, hinged at the corners of the mouth: the upper arc is
+// bolted into the skull and the cheekbones (the living skin of the left cheek stitched down to it), the lower
+// arc is the rig's `jaw` part and swings on the hinge axis. Leaf springs under the hinges, rivets, a ring and
+// a short chain under the chin. Pixel-art iron: pitting, rust patches and rust runs, bright worn tooth tips.
+const IRON = ramp(0x79736b, 0x58524c, 0xb0a89c, 0x352f2a);
+const IRON_EDGE = 0xd2cabc;
+const RUST = { base: 0x8a4a2a, dark: 0x5e3220, hi: 0xa8653a, run: 0x96512e };
+/** the hinge axis of the trap (design units, head family): the lower jaw swings round it */
+const J_TRAP: V3 = [0, 47.25, 1.0];
+/** the jaw arcs: half-ellipses round the mouth (A wide, B deep from the hinge line zc), band T thick; the upper
+ *  band's height, the lower band's, the tooth height H and pitch P along the arc */
+const TR = { A: 4.75, B: 5.7, zc: 1.0, T: 0.95, upTop: 49.15, upBot: 48.1, loTop: 45.9, loBot: 44.85, H: 1.75, P: 1.95 };
+const trapE = (x: number, z: number) => Math.hypot(x / TR.A, (z - TR.zc) / TR.B);
+const trapPhi = (x: number, z: number) => Math.atan2(x / TR.A, (z - TR.zc) / TR.B);
+const trapU = (x: number, z: number) => (trapPhi(x, z) * (TR.A + TR.B)) / 2;
+const TRAP_IN = 1 - TR.T / ((TR.A + TR.B) / 2);
+/** a tooth at arc position u, h below (upper) / above (lower) the band edge; `ph` offsets the rows so they interlock */
+function trapTooth(x: number, z: number, h: number, ph: number) {
+  if (h < 0 || h > TR.H || Math.abs(trapPhi(x, z)) > 1.32) return false;
+  const u = trapU(x, z) / TR.P - ph;
+  const w = 0.44 * (1 - h / TR.H) + 0.05;
+  const d = Math.abs(u - Math.round(u));
+  // a small barb on one flank of each tooth: the serration
+  const barb = Math.abs(h - TR.H * 0.45) < 0.16 && u - Math.round(u) > 0 && d < w + 0.09;
+  return d < w || barb;
+}
+/** forged iron, pixel-art: pitting, worn bright edges (k: 0..1 wear) */
+function ironCol(x: number, y: number, z: number, k: number) {
+  const h = vhash(Math.floor(x * S), Math.floor(y * S), Math.floor(z * S));
+  if (k > 0.7) return IRON_EDGE;
+  if (k > 0.35) return IRON.hi;
+  if (h < 0.07) return IRON.dark;
+  return h > 0.86 ? IRON.shade : IRON.base;
+}
+/** rust over the iron (matte): blotches, and runs streaking down the band from the rivets */
+function rustCol(x: number, y: number, z: number): number | null {
+  const b = blotch(x * 1.35 + 3.1, y * 1.35, z * 1.35);
+  if (b > 0.7) return RUST.hi;
+  if (b > 0.46) return RUST.base;
+  const u = trapU(x, z);
+  const run = Math.abs((((u * 0.85) % 2.6) + 2.6) % 2.6 - 1.3);
+  if (run < 0.16 && vhash(Math.floor(x * S), 0, Math.floor(z * S)) < 0.6) return RUST.run;
+  return b < -0.75 ? RUST.dark : null;
+}
+/** a domed iron rivet at p (n outward) */
+function rivet(m: Sc, p: V3, n: V3, r = 0.42) {
+  const c = vadd(p, vmul(n, r * 0.2));
+  m.ell(c, [r, r, r], (x, y) => (y > c[1] + r * 0.25 ? IRON.hi : y < c[1] - r * 0.3 ? IRON.dark : IRON.shade), { flags: M });
+}
+/** a point on the arcs' outer face at arc angle phi, height y (and its outward normal) */
+function trapPt(phi: number, y: number, out = 0): { p: V3; n: V3 } {
+  const n = vnorm([Math.sin(phi) / TR.A, 0, Math.cos(phi) / TR.B]);
+  return { p: [TR.A * Math.sin(phi) + n[0] * out, y, TR.zc + TR.B * Math.cos(phi) + n[2] * out], n };
+}
+/**
+ * Rebuild the mouth as the bear trap: carves the lips, teeth and lower cheeks out of the head, forges the upper
+ * jaw into it (band, teeth, hinges, springs, cheek plates, rivets, stitches) and returns the lower jaw (the `jaw` part).
+ */
+function bearTrap(head: VoxelModel): VoxelModel {
+  const hs = sc('head');
+  hs.m = head;
+  const { A, B, zc } = TR;
+  // ---- clear the old mouth: lips, teeth and the lower cheeks round the trap (the hinges sit in the cheeks)
+  hs.region([-7.2, 41, zc - 0.7], [7.2, TR.upTop + 0.1, 9.5], (x, y, z) => trapE(x, z) < 1.1 || (y < TR.upBot - 0.05 && Math.abs(x) < 6.7), 0, { mode: 'carve' });
+  // ---- the mouth's dark inside, between the teeth and when the trap springs open
+  hs.region([-A, 45.9, zc - 0.3], [A, TR.upTop, zc + B], (x, y, z) => trapE(x, z) < TRAP_IN - 0.03 && y > 46.25, SOCK.void);
+  // ---- the upper jaw: the forged band and its teeth hanging down
+  const lo: V3 = [-A - 0.3, TR.upBot - TR.H - 0.1, zc - 0.5], hi: V3 = [A + 0.3, TR.upTop + 0.05, zc + B + 0.3];
+  const upper = (x: number, y: number, z: number) => {
+    const e = trapE(x, z);
+    if (z < zc - 0.3 || e > 1 || e < TRAP_IN) return false;
+    return y >= TR.upBot ? y <= TR.upTop : trapTooth(x, z, TR.upBot - y, 0.5);
+  };
+  hs.region(lo, hi, upper, (x, y, z) => ironCol(x, y, z, y < TR.upBot ? 0.45 + (0.55 * (TR.upBot - y)) / TR.H : y > TR.upTop - 0.3 ? 0.8 : 0), { flags: M });
+  hs.region(lo, hi, (x, y, z) => upper(x, y, z) && y > TR.upBot - 0.4, rustCol, { mode: 'paint', flags: VF.SOLID });
+  // rivets along the band, bolting it into the skull
+  for (const phi of [-1.05, -0.5, 0, 0.5, 1.05]) {
+    const { p, n } = trapPt(phi, 48.55, 0.05);
+    rivet(hs, p, n, 0.4);
+  }
+  for (const s of [1, -1]) {
+    // hinge barrel on the corner of the mouth, its pin head on the outside
+    hs.cap([s * (A - 0.5), J_TRAP[1], zc], [s * (A + 0.55), J_TRAP[1], zc], 0.7, 0.7, (x, y, z) => ironCol(x, y, z, y > J_TRAP[1] + 0.45 ? 0.8 : 0), { flags: M });
+    rivet(hs, [s * (A + 0.6), J_TRAP[1], zc], [s, 0, 0], 0.48);
+    // the cheek plate the upper jaw hangs from, bolted into the cheekbone (bare bone on the right)
+    hs.rbox([s * (A + 0.12), 49.3, zc + 1.0], [0.3, 1.25, 1.05], 0.2, (x, y, z) => ironCol(x, y, z, y > 50.3 ? 0.8 : 0), { flags: M });
+    hs.region([s * (A - 0.4), 47.9, zc - 0.4], [s * (A + 0.6), 50.7, zc + 2.3], (x, y, z) => Math.abs(x - s * (A + 0.12)) < 0.42 && Math.abs(y - 49.3) < 1.3 && Math.abs(z - zc - 1.0) < 1.1, rustCol, { mode: 'paint', flags: VF.SOLID });
+    for (const [y, z] of [[50.05, zc + 0.45], [48.75, zc + 1.6]]) rivet(hs, [s * (A + 0.42), y, z], [s, 0, 0], 0.4);
+    // the leaf spring: a flat steel band from under the hinge sweeping back along the jaw line toward the ear
+    hs.sweep([[s * (A + 0.35), 46.75, zc + 0.35], [s * (A + 0.8), 46.1, zc - 1.1], [s * (A + 0.95), 46.45, zc - 2.6], [s * (A + 0.6), 47.55, zc - 3.7]], (t) => [0.26, 0.48 - 0.1 * t, 0.42], (x, y, z) => (y > 46.6 + (z < zc - 2 ? 0.6 : 0) ? IRON.hi : IRON.shade), 0.2, { flags: M });
+    rivet(hs, [s * (A + 0.75), 47.6, zc - 3.75], [s, 0, -0.3], 0.36);
+  }
+  // the living left cheek stitched down to the iron with black thread
+  for (const phi of [0.3, 0.55, 0.8, 1.05, 1.3]) {
+    const a = trapPt(phi, TR.upTop + 0.85, 0.15), b = trapPt(phi, TR.upTop - 0.35, 0.2);
+    stitch(hs, a.p, b.p, 0.2);
+  }
+  // ---- the lower jaw: band, teeth up (offset half a tooth: they interlock), hinge knuckles, the chin plate
+  const jw = sc('jaw');
+  const jlo: V3 = [-A - 0.3, 43.6, zc - 0.5], jhi: V3 = [A + 0.3, TR.loTop + TR.H + 0.1, zc + B + 0.3];
+  const lower = (x: number, y: number, z: number) => {
+    const e = trapE(x, z);
+    if (z < zc - 0.3 || e > 1) return false;
+    if (e >= TRAP_IN) return y >= TR.loBot ? y <= TR.loTop || trapTooth(x, z, y - TR.loTop, 0) : y >= 44.3 && z > zc + 1.2;
+    // the mouth's floor (dark) over the chin plate (iron)
+    return y >= 44.3 && y <= TR.loBot + 0.45 && z > zc + 0.2;
+  };
+  jw.region(jlo, jhi, lower, (x, y, z) => {
+    const e = trapE(x, z);
+    if (e < TRAP_IN && y > TR.loBot) return SOCK.void;
+    return ironCol(x, y, z, y > TR.loTop ? 0.45 + (0.55 * (y - TR.loTop)) / TR.H : y < 44.55 ? 0.8 : 0);
+  }, { flags: M });
+  jw.region(jlo, jhi, (x, y, z) => lower(x, y, z) && trapE(x, z) >= TRAP_IN && y < TR.loTop + 0.4, rustCol, { mode: 'paint', flags: VF.SOLID });
+  for (const phi of [-0.75, 0, 0.75]) {
+    const { p, n } = trapPt(phi, 45.45, 0.05);
+    rivet(jw, p, n, 0.38);
+  }
+  for (const s of [1, -1]) jw.cap([s * (A - 1.15), J_TRAP[1], zc], [s * (A - 0.55), J_TRAP[1], zc], 0.62, 0.62, IRON.shade, { flags: M }); // hinge knuckles
+  // a ring under the chin and a short length of chain hanging from it
+  const rc: V3 = [0, 43.85, zc + B - 0.55];
+  jw.region(vsub(rc, [0.5, 1, 1]), vadd(rc, [0.5, 1, 1]), (x, y, z) => Math.abs(x) < 0.3 && Math.abs(Math.hypot(y - rc[1], z - rc[2]) - 0.62) < 0.24, (x, y) => (y > rc[1] ? IRON.hi : IRON.shade), { flags: M });
+  chain(jw, [[0, 43.25, rc[2]], [0.15, 42.0, rc[2] + 0.1], [0.05, 40.8, rc[2] - 0.05]], 1.3, IRON);
+  return jw.m;
+}
+
 // ================================================================== SUNGLASSES (round punk shades over the sockets)
 const FRAME = ramp(0x34363d, 0x1c1d22, 0x8c919c, 0x0c0c0e); // gunmetal
 const LENS = { top: 0x0f1015, mid: 0x171a22, low: 0x252c3a, streak: 0xaebdd6, crack: 0xd6dde8 };
@@ -2433,8 +2564,11 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   }
   // the outlaw mask (default on every outfit) is the bandana pulled up over the face; without it he wears it round the neck
   const masked = look.mask !== false;
-  const mask = masked ? warped(null, () => outlawMask(o)) : null;
-  if (!masked && o !== 'sheriff' && o !== 'pharaoh') bandana(torso, LK.band);
+  // the bear-trap jaw leaves no room for the face mask: the bandana is worn round the neck (raised, it is a gaiter
+  // pulled up to just under the iron jaw)
+  const maskUp = look.mask === true;
+  const mask = (false as boolean) ? warped(null, () => outlawMask(o)) : null;
+  if (o !== 'sheriff' && o !== 'pharaoh') bandana(torso, LK.band, maskUp);
   const [senv, soff] = STRAP_OFF[o] ?? STRAP_OFF.punk;
   sling(torso, senv, soff);
   shadeRamps(torso.m, [BN, SKIN, LK.coat, LK.trim, LK.band, STRAP], true);
@@ -2514,7 +2648,10 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     if (!m) glassCache.set(l + r, (m = sunglasses(l, r)));
     return m;
   };
-  const head = hd.head, jaw = hd.jaw;
+  const head = hd.head;
+  // his mouth and lower jaw are the iron bear trap (the old mandible is dropped; the upper jaw is forged into the head)
+  void hd.jaw;
+  const jaw = bearTrap(head);
   if (mask) {
     mask.jaw.forEach((x, y, z, c, f) => jaw.set(x, y, z, c, f)); // the chin cloth rides the jaw
     burnHole([mask.head, jaw]); // the cigarette pokes out through the cloth
@@ -2545,6 +2682,9 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
 
   // ---- expressions: jaw / brow angles + modelled eye variants (the living eye's lids close over it)
   const expressions = defaultExpressions([...SUNDOWN_EXPRESSIONS]) as Record<string, { jaw?: number; brow?: [number, number]; parts?: Record<string, VoxelModel> }>;
+  // the trap's bite per expression: clenched shut, a grin or snarl cracks it to show the iron teeth, wide when shocked
+  const TRAP_JAW: Record<string, number> = { neutral: 0, focus: 0, smug: 0.1, surprised: 0.5, hurt: 0.24, angry: 0.17, laugh: 0.36, wink: 0.06, dead: 0.48, determined: 0.02 };
+  for (const [n, v] of Object.entries(TRAP_JAW)) if (expressions[n]) expressions[n].jaw = v;
   const eyeCache = new Map<string, VoxelModel>();
   const eye = (side: 'l' | 'r', v: EyeVar) => {
     const k = side + v;
@@ -2569,7 +2709,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
   P('pelvis', pelvis.m, J.pelvis);
   P('torso', torso.m, J.waist, 'pelvis');
   P('head', head, J.neck, 'torso');
-  P('jaw', jaw, J.jaw, 'head');
+  P('jaw', jaw, J_TRAP, 'head'); // the lower trap jaw swings on the hinge axis
   P('eye_l', eye('l', 'normal'), J.eye, 'head');
   P('eye_r', eye('r', 'normal'), mg(J.eye), 'head');
   P('brow_l', hd.brow_l, J.brow, 'head');
@@ -2610,10 +2750,10 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
     chest: sock('torso', [0, 38, 5.4]),
     eye_l: sock('head', J.eye),
     eye_r: sock('head', mg(J.eye)),
-    mouth: sock('jaw', [0, 47.5, 6]),
+    mouth: sock('jaw', [0, 46.6, 6.5]),
     // the cigarette's ember, and where he blows the smoke out (the burnt hole in the mask, or the bare teeth)
     cig_tip: sock('cig', vadd(CIG_B, vmul(vnorm(vsub(CIG_B, CIG_A)), 0.55))),
-    mouth_corner: sock('jaw', mask ? [-2.55, 46.9, 7.1] : [-1.9, 47.2, 6.0]),
+    mouth_corner: sock('jaw', [-2.45, 46.9, 6.4]),
     hat_top: sock('hat', [0, topY, -1]),
     // Pinch's perches (empty anchors on the head bone, +Z out of the face): on the hat crown, in either eye socket
     // (perch_eyeR is the bare skull socket on the rotted side)
@@ -2660,6 +2800,8 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
       // extra half-stance, times the leg scale)
       toon: 1,
       stanceWide: 0.02,
+      // the iron bear-trap jaw: PlayerAnim snaps it shut on kills and the reload close, and chews when idle
+      trapJaw: true,
       // third-person camera fitted to his height (CameraRig.fitHero)
       cam: { height: 1.2, shoulder: 0.94, dist: 2.65 },
       // where the free hand takes the hat brim (head-local metres): the front of the brim, a touch to his left
@@ -2677,7 +2819,7 @@ export function skeletonCowboyRig(look: CowboyLook = { hat: 'stetson', outfit: '
       upperArmLen: (WA_L.Y(J.shoulder[1]) - WA_L.Y(J.elbow[1])) * UH,
       foreArmLen: (WA_L.Y(J.elbow[1]) - WA_L.Y(J.hand[1])) * UH,
       legLen: W_BODY.Y(J.hip[1]) * UH,
-      facePivots: { eye_l: mm(J.eye), eye_r: mm(mg(J.eye)), brow_l: mm(J.brow), brow_r: mm(mg(J.brow)), jaw: mm(J.jaw) },
+      facePivots: { eye_l: mm(J.eye), eye_r: mm(mg(J.eye)), brow_l: mm(J.brow), brow_r: mm(mg(J.brow)), jaw: mm(J_TRAP) },
       // modelled eyeballs with glowing Serket-green pupils (no 2D overlay)
       eyeColor: EYE.core,
       eyes: 'voxel',
