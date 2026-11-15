@@ -28,9 +28,11 @@
 ## Current art direction (latest user notes win)
 - Realistic lighting with an anime-painted look: cel light ramp, black ink outlines, and lots of 2D pixel-art particles
   for dust, sand and trails. "Lighting 100× better, super realistic and anime-painted".
-- World not cartoony. Sundown (latest note): a skeletal scorpion-man revenant cowboy remade by Serket: half-skull face
-  with an iron bear-trap jaw, long curly hard-rock hair, cigarette with pixel smoke, hat and shades; segmented bone
-  scorpion tail with a green venom stinger; bone-chitin carapace over an exposed ribcage. About 1.6 m, a little
+- World not cartoony. Sundown (latest note): a skeletal scorpion-man revenant cowboy remade by Serket: a fully
+  animal skeletal scorpion head (carapace, modelled median eyes, chelicerae clamped with the iron bear-trap teeth),
+  hat, shades, long curly hard-rock hair, cigarette with pixel smoke; four arms (bony humanoid gun and grip arms plus
+  a lower pair of big scorpion pincer arms); segmented bone scorpion tail with a green venom stinger; bone-chitin
+  carapace over an exposed ribcage. About 1.6 m, a little
   cartoony (about 5 to 5.5 heads), lean and wiry, never fat or squat. Lore bible: docs/LORE.md.
 - Codex is now Thoth's Hall: Thoth is a tiny, very cute ibis-headed god, 10,000 years old but talks like a child,
   collects creatures. Latest note: Thoth is lower resolution but more stylized, like a real animated character, with
