@@ -28,9 +28,10 @@
 ## Current art direction (latest user notes win)
 - Realistic lighting with an anime-painted look: cel light ramp, black ink outlines, and lots of 2D pixel-art particles
   for dust, sand and trails. "Lighting 100× better, super realistic and anime-painted".
-- Not cartoony. Sundown (latest note): the OLD design stays: half zombie, half human, rotted and exposed skull and
-  teeth on part of the face, living skin on the rest; punk cowboy outfit, mask and shades. Only additions: long curly
-  late-80s hard-rock hair flowing from under the hat, and a cigarette with pixel smoke. Lean build, never fat or squat.
+- World not cartoony. Sundown (latest note): a skeletal scorpion-man revenant cowboy remade by Serket: half-skull face
+  with an iron bear-trap jaw, long curly hard-rock hair, cigarette with pixel smoke, hat and shades; segmented bone
+  scorpion tail with a green venom stinger; bone-chitin carapace over an exposed ribcage. About 1.6 m, a little
+  cartoony (about 5 to 5.5 heads), lean and wiry, never fat or squat. Lore bible: docs/LORE.md.
 - Codex is now Thoth's Hall: Thoth is a tiny, very cute ibis-headed god, 10,000 years old but talks like a child,
   collects creatures. Latest note: Thoth is lower resolution but more stylized, like a real animated character, with
   simple 1-pixel 2D dot eyes; cool, funny and alive. His hall is a beautiful library run by worm librarians (bookworms): real eyeless earthworms with physics bodies.
