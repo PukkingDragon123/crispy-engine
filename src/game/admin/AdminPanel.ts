@@ -83,9 +83,12 @@ export class AdminPanel {
   private mapNear = false;
   private bossIdx = 0;
   private resetArm = 0;
+  /** input arrived since the last draw: redraw now rather than on the 30 Hz beat */
+  dirty = true;
 
   constructor(private a: AdminMode) {
-    this.c = this.cv.getContext('2d')!;
+    // a small board redrawn often: rasterised on the CPU, uploaded once per redraw
+    this.c = this.cv.getContext('2d', { willReadFrequently: true })!;
     this.cv.width = this.W;
     this.cv.height = this.H;
     this.cv.style.cssText = 'position:absolute;pointer-events:auto;image-rendering:pixelated;display:none;touch-action:none;cursor:default';
@@ -94,6 +97,7 @@ export class AdminPanel {
       return { x: ((e.clientX - r.left) / r.width) * this.W, y: ((e.clientY - r.top) / r.height) * this.H };
     };
     this.cv.addEventListener('pointerdown', (e) => {
+      this.dirty = true;
       const p = pos(e);
       this.mx = p.x;
       this.my = p.y;
@@ -107,6 +111,7 @@ export class AdminPanel {
       e.preventDefault();
     });
     this.cv.addEventListener('pointermove', (e) => {
+      this.dirty = true;
       const p = pos(e);
       this.mx = p.x;
       this.my = p.y;
@@ -115,6 +120,7 @@ export class AdminPanel {
       if (pr?.drag && pr.region) this.scroll[pr.region.scroll!] = clamp(pr.s0 - (p.y - pr.y), 0, pr.region.max ?? 0);
     });
     this.cv.addEventListener('pointerup', (e) => {
+      this.dirty = true;
       const p = pos(e);
       const pr = this.press;
       this.press = null;
@@ -131,6 +137,7 @@ export class AdminPanel {
       if (!this.press) this.mx = this.my = -99;
     });
     this.cv.addEventListener('wheel', (e) => {
+      this.dirty = true;
       const p = pos(e);
       const r = this.regionAt(p.x, p.y);
       if (r) this.scroll[r.scroll!] = clamp((this.scroll[r.scroll!] ?? 0) + e.deltaY * 0.35, 0, r.max ?? 0);
@@ -183,6 +190,7 @@ export class AdminPanel {
   // ------------------------------------------------------------------ keyboard (the wave box)
   /** a key while the panel is open; true when the panel used it */
   key(e: KeyboardEvent): boolean {
+    this.dirty = true;
     if (this.tab !== 'jump') return false;
     const sel = this.a.sel;
     if (e.code === 'Enter' || e.code === 'NumpadEnter') {
@@ -298,6 +306,7 @@ export class AdminPanel {
 
   // ------------------------------------------------------------------ the board
   draw(dt: number) {
+    this.dirty = false;
     this.t += dt;
     this.fit();
     const c = this.c, W = this.W, H = this.H;

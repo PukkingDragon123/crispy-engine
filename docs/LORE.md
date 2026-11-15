@@ -76,12 +76,12 @@ it by halves. Nothing of the man's face survived the trap, so nothing of it came
 - The cigarette, the hat and the shades were his idea. Serket says a scorpion in shades is ridiculous. He says so is
   a goddess in a sandstorm.
 
-Nobody would know him now. That is half the point: the face on his old wanted posters belonged to a man who died. The
-new posters have a scorpion skull on them and no name at all.
+Nobody would know him now. That is half the point: the face on his old wanted posters belonged to a man who died.
 
-He woke up on Sundown Flats with his own wanted poster flapping on the signpost: DEAD OR ALIVE, SUNDOWN, NAME
-UNKNOWN, $1,000,000. Set put that price on his skull, because a dead man Set cannot keep is a problem. There is also
-a million on Sethos. Ozymandias says that makes them even. Sundown says it makes them a matched pair.
+He woke up on Sundown Flats with a new wanted poster flapping on the signpost, a scorpion skull under a hat where the
+portrait should be: DEAD OR ALIVE, SUNDOWN, NAME UNKNOWN, $1,000,000. Set put that price on his skull, because a
+dead man Set cannot keep is a problem. There is also a million on Sethos. Ozymandias says that makes them even.
+Sundown says it makes them a matched pair.
 
 ### The Debt at the Scales (the soul jar)
 
@@ -130,14 +130,15 @@ Pinch is **the last of Serket's brood**. Set stole the rest of her scorpions in 
 giant scorpions that hunt the dunes now. Pinch refuses to look at them.
 
 When Aqrab fell, he was carrying one last egg in the joint of his shell. Serket did not notice it until the remaking
-was done and the egg cracked open in an empty socket of the hunter's new skull. Pinch hatched first and saw Sundown second. Scorpions
-imprint. Pinch has been trying to raise him ever since. ("Pinch, you have raised him well," Serket told him. Pinch
-took it as a compliment. Sundown did not.)
+was done and the egg cracked open in an empty socket of the hunter's new skull. Pinch hatched first and saw Sundown
+second. Scorpions imprint. Pinch has been trying to raise him ever since. ("Pinch, you have raised him well," Serket
+told him. Pinch took it as a compliment. Sundown did not.)
 
 Because they came out of the same shell, they are bound: Pinch can never wander far, and Sundown can never quite get
-rid of him. Pinch lives in the hat by day and curls up in that warm empty socket at night, right beside the Serket eye,
-which is why it glows brighter when he sleeps. He talks in clicks. Serket translates when she feels like it, and he is mostly saying
-that Sundown is rusty, reckless and snores. He adores him. He milks his own venom for the bullets. Do not ask how.
+rid of him. Pinch lives in the hat by day and curls up in that warm empty socket at night, right beside the Serket
+eye, which is why it glows brighter when he sleeps. He talks in clicks. Serket translates when she feels like it, and
+he is mostly saying that Sundown is rusty, reckless and snores. He adores him. He milks his own venom for the
+bullets. Do not ask how.
 
 He insists the phantom scorpions that sometimes hatch from Sundown's kills are his cousins. He insists Big Bertha is
 no relation at all.
@@ -302,8 +303,28 @@ Ozymandias keeps saying "it is always noon here." He means it as a joke. It is l
 ## Where the lore lives in the game
 
 - `src/game/meta/Lore.ts`: Sundown's Ledger pages (unlocked through play, shown in the Legends wing of Thoth's Hall),
-  loading-screen lore lines, death-screen lines.
-- `src/game/meta/Codex.ts`: codex entries (Legends hold the Ledger pages); `src/game/meta/Research.ts`: their studies.
+  loading-screen lore lines (`ui/LoadingScreen.ts` alternates them with the tips), death-screen lines
+  (`scenes/DeathCine.ts`, under "N DAYS PASSED").
+- `src/game/meta/Codex.ts`: codex entries (Legends hold the Ledger pages) and the page triggers (`loreCheck`,
+  `loreBoss`, `hallVisit`); `src/game/meta/Research.ts`: their studies.
+
+### How the Ledger pages open
+
+| Page | Opens when | Thoth's study |
+| --- | --- | --- |
+| I. The Last Bounty | Serket is met (the first ride) | Ride out three times |
+| II. The Iron Jaw | the first death that reaches Anubis | Snap the jaw on 150 outlaws |
+| III. The Black Stinger | wave 10 is won | Reach wave 30 |
+| IV. The Last of the Brood | a giant scorpion is sighted | Fill 40 jars in the Hall |
+| V. The Debt at the Scales | Anubis' tally reaches 2 | Stand before Anubis five times |
+| VI. The Star That Rusts | the Dust Marshal rides in | Bring in the Dust Marshal |
+| VII. Gold From the Gods | the first boss falls | Fell five different bosses |
+| VIII. The Scribe Keeps Count | the first visit to Thoth's Hall | Finish five studies |
+| IX. The Borrowed Nights | the Avatar of Khonsu walks | Reach wave 50 |
+| X. The Cat Who Kept Silent | Khonsu of the Sands falls (Mark is free) | Fell ten different bosses |
+| XI. The Sun's Daughter | any of the Queen's court is met on the river | Reach wave 75 |
+| XII. The Burning | Cleopatra falls, or Ra appears | Reach wave 100 |
+| XIII. The Last Page | the Avatar of Set falls | Finish 40 studies |
 - `src/game/scenes/thoth/ThothTalk.ts`: Thoth's lines about every page, his lore greetings and idle gossip.
 - `src/game/audio/Barks.ts`: Sundown's boss-entrance quips and Pinch's reactions (floating 3D text).
 - `src/game/ui/Shop.ts`: Ozymandias' memories. `src/game/scenes/HubScene.ts`: Mama Toad.

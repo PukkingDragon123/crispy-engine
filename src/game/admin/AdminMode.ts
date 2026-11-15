@@ -75,6 +75,8 @@ export class AdminMode {
   private t = 0;
   private hs = 2;
   private hudT = 0;
+  /** time since the panel was last drawn (it redraws at 30 Hz, or at once after input) */
+  private panelT0 = 1;
   private tagHover = false;
   private tagKey = '';
   private hudWasHidden = false;
@@ -245,7 +247,11 @@ export class AdminMode {
     this.scrim.style.pointerEvents = this.open || this.fly.on ? 'auto' : 'none';
     this.scrim.style.cursor = this.fly.on ? (this.fly.drag ? 'grabbing' : 'grab') : 'default';
     if (this.fly.on) this.tickFly(rdt);
-    if (this.open) this.panel.draw(rdt);
+    this.panelT0 += rdt;
+    if (this.open && (this.panelT0 >= 1 / 30 || this.panel.dirty)) {
+      this.panel.draw(this.panelT0);
+      this.panelT0 = 0;
+    }
     this.drawTag();
     // perf counters: last frame's totals (every pass: the scene, the post stack, the 3D HUD), then reset
     const info = eng.renderer.info;
@@ -328,6 +334,8 @@ export class AdminMode {
       cv.width = w;
       cv.height = h;
     }
+    cv.style.display = this.perfOn || this.fly.on ? 'block' : 'none';
+    if (!this.perfOn && !this.fly.on) return;
     const c = cv.getContext('2d')!;
     c.imageSmoothingEnabled = false;
     c.clearRect(0, 0, w, h);
