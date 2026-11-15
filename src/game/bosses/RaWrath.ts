@@ -72,7 +72,7 @@ async function playRaWrath(d: WrathDeps) {
   const { ctx, cam, player } = d;
   const eng = ctx.engine;
   const tw = eng.tweens;
-  const world = ctx.world as unknown as { burnToLava?: (k: number) => void };
+  const world = ctx.world as unknown as { burnToLava?: (k: number, o?: { x: number; z: number }) => void; igniteNile?: (o: { origin?: { x: number; z: number }; dur?: number }) => Promise<void>; burnK?: number };
   const wait = (s: number) => tw.wait(s, true);
   eng.input.enabled = false;
   eng.letterbox(true, 0.6);
@@ -201,9 +201,11 @@ async function playRaWrath(d: WrathDeps) {
       strikes.push(p);
     }
     let si = 0, ts = 0;
+    // the world's own burn spreads out from where the first beam lands (NILE WORLD's igniteNile)
+    const ignited = world.igniteNile ? (void world.igniteNile({ origin: { x: strikes[0].x, z: strikes[0].z }, dur: 5.5 }), true) : false;
     for (let k = 0; k < 5.2; k += 1 / 30) {
       const kk = k / 5.2;
-      world.burnToLava?.(Math.min(1, kk * 1.25));
+      if (!ignited) world.burnToLava?.(Math.min(1, kk * 1.25), { x: strikes[0].x, z: strikes[0].z });
       cam.setCine({ pos: camC.clone().add(new THREE.Vector3(0, kk * 6, 0)), look: pp.clone().addScaledVector(flat, 20).add(new THREE.Vector3(0, 6 + kk * 10, 0)), fov: 60 + kk * 8 });
       // the beams walk across the land
       ts += 1 / 30;
@@ -232,7 +234,7 @@ async function playRaWrath(d: WrathDeps) {
       }
       await wait(1 / 30);
     }
-    world.burnToLava?.(1);
+    if (!ignited) world.burnToLava?.(1);
     // 4) he sinks back into the sun; the land is burning
     jaw = 0;
     for (let k = 0; k < 1; k += 1 / 45) {

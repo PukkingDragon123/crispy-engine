@@ -134,10 +134,18 @@ export class LunarSky {
   private size: number;
   private t = 0;
   private gone = false;
+  /**
+   * the image-based fill: the run bakes it once from the day sky, so the night would still be lit
+   * by daylight. It dims as the sun sets and is re-baked from the moonlit sky once night has fallen
+   * (the run's own map comes back when the day does).
+   */
+  private ibl: { env: THREE.Texture | null; k: number; rt: THREE.WebGLRenderTarget | null; bakedK: number } = { env: null, k: 1, rt: null, bakedK: 0 };
 
   constructor(private ctx: Ctx, o: LunarSkyOpts = {}) {
     const env = ctx.world.env;
     this.base = { ...env.preset };
+    this.ibl.env = ctx.scene.environment;
+    this.ibl.k = ctx.scene.environmentIntensity ?? 1;
     this.elev = o.elev ?? 17;
     this.size = o.size ?? 9;
     // the moon comes up a little off the bearing where the sun went down
@@ -146,7 +154,7 @@ export class LunarSky {
     this.moonlit = moonlitOf(this.base, this.elev, this.azim);
     const g = moonGeo();
     this.u = {
-      uGlow: { value: 1.55 },
+      uGlow: { value: 1.3 },
       uEclipse: { value: 0 },
       uR: { value: MOON_R },
       uNear: { value: 0 },
@@ -242,6 +250,7 @@ export class LunarSky {
     const el = this.elevAt(k) * DEG - this.near * 2.5 * DEG;
     const az = this.azim * DEG;
     this.dir.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)).normalize();
+    this.updateIbl(k);
     const vis = k > 0.45;
     this.group.visible = vis;
     if (!vis) return;
@@ -256,7 +265,7 @@ export class LunarSky {
     this.u.uNear.value = this.near;
     // the shadow slides in from the left as the eclipse deepens
     (this.u.uShadow.value as THREE.Vector2).set(-MOON_R * 2.3 * (1 - this.eclipse), MOON_R * 0.45 * (1 - this.eclipse));
-    this.u.uGlow.value = 1.55 + this.near * 0.35 + this.crackFlare * 0.4;
+    this.u.uGlow.value = 1.3 + this.near * 0.35 + this.crackFlare * 0.4;
     // cracks pulse; the corona burns while eclipsed
     const pulse = 0.75 + 0.25 * Math.sin(this.t * 3.2);
     this.crackMat.color.setScalar((1.6 + this.crackFlare * 2.5) * pulse * (1 - this.eclipse * 0.5));
@@ -280,10 +289,31 @@ export class LunarSky {
     this.dispose();
   }
 
+  private updateIbl(k: number) {
+    const sc = this.ctx.scene;
+    const ren = (this.ctx.engine as unknown as { renderer?: THREE.WebGLRenderer }).renderer;
+    if (!this.ibl.rt && this.ibl.bakedK === 0 && k >= 0.97 && ren) {
+      // night has fallen: bake the fill from the moonlit sky
+      try {
+        this.ibl.rt = this.ctx.world.env.applyEnvMap(ren);
+        this.ibl.bakedK = sc.environmentIntensity;
+      } catch (e) {
+        console.warn('[khonsu] night fill', e);
+        this.ibl.bakedK = -1;
+      }
+    }
+    if (this.ibl.rt) sc.environmentIntensity = this.ibl.bakedK * (1 - 0.45 * this.eclipse);
+    else sc.environmentIntensity = this.ibl.k * (1 - 0.72 * Math.min(1, k));
+  }
+
   dispose() {
     if (this.gone) return;
     this.gone = true;
     this.ctx.world.env.apply(this.base);
+    this.ctx.scene.environment = this.ibl.env;
+    this.ctx.scene.environmentIntensity = this.ibl.k;
+    this.ibl.rt?.dispose();
+    this.ibl.rt = null;
     this.group.removeFromParent();
     (this.body.material as THREE.Material).dispose();
     this.crackMat.dispose();

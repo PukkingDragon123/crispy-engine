@@ -343,11 +343,11 @@ export function segDist(p: THREE.Vector3, a: THREE.Vector3, b: THREE.Vector3) {
   return Math.hypot(p.x - a.x - abx * t, p.y - a.y - aby * t, p.z - a.z - abz * t);
 }
 
-/** the river's flow at a point, if the world knows its river (NILE WORLD); null otherwise */
+/** the river's flow direction at a point (World.water on the Nile); null off the river or where it is still */
 export function riverFlow(world: unknown, x: number, z: number): { x: number; z: number } | null {
-  const w = world as { riverFlow?: (x: number, z: number) => { x: number; z: number } | null; nile?: { flowAt?: (x: number, z: number) => { x: number; z: number } | null } };
-  const f = w.riverFlow?.(x, z) ?? w.nile?.flowAt?.(x, z) ?? null;
-  if (!f) return null;
+  const w = (world as { water?: { isWater?(x: number, z: number): boolean; flowAt?(x: number, z: number): { x: number; z: number } } | null }).water;
+  if (!w?.flowAt || (w.isWater && !w.isWater(x, z))) return null;
+  const f = w.flowAt(x, z);
   const l = Math.hypot(f.x, f.z);
   return l > 1e-4 ? { x: f.x / l, z: f.z / l } : null;
 }

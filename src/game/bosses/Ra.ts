@@ -35,6 +35,7 @@ import type { VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { raHeadHD, raJawHD, raEyeHD, sunMeteorModel, obsidianSpireModel, eclipseMoonModel, fireFalconRig } from '../models/enemies/ra';
 import { raMaterial, SolarShots, Ribbon, segDist, riverFlow, SUN, EMBERS, FIRE_COLS } from './RaFx';
 import { Cinema } from '../cine/Cinema';
+import { BURN as NILE_BURN } from '../world/NileBurn';
 import { speak3D } from '../fx/WorldSpeech';
 import type { VoiceId } from '../audio/Voice';
 import { rnd, damp, clamp, dampAngle } from '../../engine/math/rand';
@@ -1808,21 +1809,25 @@ export class RaSunKing extends Boss {
     this.onDefeated?.(this, false);
     this.dispose();
   }
-  /** lava back to water and a cool dawn (the world worker owns burnToLava; without it only the sky changes) */
+  /**
+   * The fire drains out of the world: the shared burn amount (NileBurn, read by the terrain, the river
+   * shader and the lava physics) falls to nothing, so the lava river runs back to water, and a cool
+   * dawn comes up. World.stopBurn then clears the burn for good.
+   */
   private async restoreWorld() {
     const ctx = this.ctx;
     const tw = ctx.engine.tweens;
-    const world = ctx.world as unknown as { burnToLava?: (k: number) => void };
+    const world = ctx.world as unknown as { stopBurn?: () => void };
     this.envHeld = true;
     const p0 = { ...ctx.world.env.preset };
+    const w0 = NILE_BURN.value.w;
     for (let t = 0; t < 6; t += 0.05) {
       await tw.wait(0.05, true);
       const k = t / 6, e = k * k * (3 - 2 * k);
-      world.burnToLava?.(1 - e);
-      const p = mixPreset(p0, DAWN, e);
-      ctx.world.env.apply(p);
+      NILE_BURN.value.w = w0 * (1 - e);
+      ctx.world.env.apply(mixPreset(p0, DAWN, e));
     }
-    world.burnToLava?.(0);
+    world.stopBurn?.();
     ctx.world.env.apply(mixPreset(this.baseEnv, DAWN, 1));
   }
 

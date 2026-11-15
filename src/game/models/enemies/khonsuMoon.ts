@@ -33,7 +33,7 @@ const SILVER = { base: 0xc9d2e2, shade: 0x96a1b8, hi: 0xf0f4fb, dark: 0x5f6a82 }
 const GOLD = { base: 0xd2a63c, shade: 0xa47b25, hi: 0xf0d273, dark: 0x6a4a12 };
 const LAPIS = 0x2f4f9c;
 const SANDG = [0xf3d29a, 0xe8c27e, 0xfae3b4];
-const CRACK = [0xe8f6ff, 0xbfe4ff, 0x9fd0ff];
+const CRACK = [0x6fcaff, 0x3aa8ff, 0xb8eaff]; // cold cyan fire: reads on the pale face
 
 function h3(x: number, y: number, z: number, s = 0) {
   let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(z | 0, 1274126177) ^ Math.imul(s | 0, 2246822519);

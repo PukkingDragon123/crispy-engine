@@ -257,7 +257,7 @@ export class CrocodileChampion extends Boss {
       this.pitchO = (1 - k) * 0.9;
       this.rollO = k * Math.PI * 2;
       this.jawT = 1;
-      if (k > 0.25 && k < 0.65) cam.setCine({ pos: camAt, look: new THREE.Vector3(this.pos.x, this.pos.y + this.liftO + 2, this.pos.z), fov: 46 });
+      if (k > 0.2 && k < 0.7) cam.setCine({ pos: camAt, look: new THREE.Vector3(this.pos.x, this.pos.y + this.height * 0.45, this.pos.z), fov: 46 });
       if (rnd.chance(0.6)) ctx.particles.emit({ pos: { x: this.pos.x, y: this.pos.y + this.liftO + 1, z: this.pos.z }, count: 3, vel: { x: 0, y: -1, z: 0 }, spread: 2.2, gravity: 14, life: [0.4, 0.8], size: [0.12, 0.05], sprite: ['dot3', 'dot4'], color: RIVER, ground: true });
       await this.wait(0.035);
     }
@@ -671,13 +671,15 @@ export class CrocodileChampion extends Boss {
     if (!this.root.visible && !this.alive) return;
     this.exposedT = Math.max(0, this.exposedT - dt);
     this.under = damp(this.under, this.underT, 3.2, dt);
-    this.swim = damp(this.swim, this.swimT || (this.deep(this.pos.x, this.pos.z, 1.9) ? 0.6 : 0), 3, dt);
+    // in deep water he treads upright, chest out of the river; only a fast swim lays him flat
+    const fast = Math.hypot(this.vel.x, this.vel.z) > 4.5 && this.deep(this.pos.x, this.pos.z, 1.9);
+    this.swim = damp(this.swim, this.swimT || (fast ? 0.45 : 0), 3, dt);
     this.tailSwing += dt * (2 + this.swim * 4 + Math.hypot(this.vel.x, this.vel.z) * 0.4);
     // stand on the bed, wade in the shallows, float chest-deep where it is deep, sink when he dives
     const bed = this.ctx.world.groundAt(this.pos.x, this.pos.z);
     const ry = this.riverY(this.pos.x, this.pos.z);
     let y = bed;
-    if (ry !== null) y = Math.max(bed, ry - Math.min(1.5, ry - this.bed(this.pos.x, this.pos.z)));
+    if (ry !== null) y = Math.max(bed, ry - Math.min(1.25, ry - this.bed(this.pos.x, this.pos.z)));
     y -= this.under * (this.height * 0.9 + (ry !== null ? 0.6 : 1.2));
     this.bodyY = damp(this.bodyY || y, y, 8, dt);
     this.pos.y = this.bodyY + this.liftO;

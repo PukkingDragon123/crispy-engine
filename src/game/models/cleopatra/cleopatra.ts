@@ -69,8 +69,8 @@ function silk(x: number, y: number, z: number, ny: number, fold: number, o: { tr
   if (fold < -0.85) c = mixc(c, SILK.dark, 0.5);
   if (ny < -0.6) c = mixc(c, SILK.shade, 0.5);
   if (o.tint !== undefined) c = mixc(c, o.tint, 0.35);
-  if (L > 0.78) return pk(mixc(GLOWC, CORE, (L - 0.78) / 0.22), VF.GLOW);
-  if (L > 0.3) return pk(mixc(c, GLOWC, 0.35 + (L - 0.3) * 1.3), VF.EMISSIVE);
+  if (L > 0.86) return pk(mixc(GLOWC, CORE, (L - 0.86) / 0.14), VF.GLOW);
+  if (L > 0.42) return pk(mixc(c, GLOWC, 0.3 + (L - 0.42) * 1.2), VF.EMISSIVE);
   return pk(c);
 }
 const goldP = (ny: number, f = VF.METAL) => pk(ny > 0.5 ? GOLDC.hi : ny < -0.45 ? GOLDC.shade : GOLDC.base, f);

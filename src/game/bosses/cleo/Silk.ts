@@ -159,7 +159,7 @@ export class SilkRenderer {
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSilk = iSilk;');
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', '#include <common>\nvarying vec2 vSilk;\nuniform float uSilkGlow;')
-        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vSilk.x * uSilkGlow * 1.6 + vec3(1.0, 0.42, 0.08) * vSilk.y * 3.0;');
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * vSilk.x * uSilkGlow + vec3(1.0, 0.42, 0.08) * vSilk.y * 3.0;');
     };
     mat.customProgramCacheKey = () => 'cleo-silk-v1';
     this.mesh = new THREE.InstancedMesh(geo, mat, max);

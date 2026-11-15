@@ -1014,6 +1014,9 @@ export class NileFleet {
     if (!def) return null;
     this.hook();
     const kind: Kind = id === 'warBarge' ? 'barge' : id === 'bankCannon' ? 'battery' : 'reed';
+    // a river can only hold so many: three skiffs, two barges, three shore guns at once
+    const cap = kind === 'reed' ? 3 : kind === 'barge' ? 2 : 3;
+    if (this.hulls.filter((h) => h.alive && h.kind === kind && !h.sinking && !h.leaving).length >= cap) return null;
     const entry = modelEntry(def.rig);
     const spec = entry?.() as RigSpec | undefined;
     if (!spec?.parts) return null;

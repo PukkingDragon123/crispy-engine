@@ -33,7 +33,7 @@ export interface RevealDeps {
   moon: THREE.Vector3;
 }
 
-const silVert = /* glsl */ `
+export const silVert = /* glsl */ `
 varying vec3 vN;
 varying vec3 vV;
 void main(){
@@ -42,14 +42,15 @@ void main(){
   vN = normalize(normalMatrix * normal);
   gl_Position = projectionMatrix * mv;
 }`;
-const silFrag = /* glsl */ `
+export const silFrag = /* glsl */ `
 uniform vec3 uRim;
 uniform float uK, uGlow;
 varying vec3 vN;
 varying vec3 vV;
 void main(){
+  // dark body, a thin cold rim only where the surface turns away (and the flare while he forms)
   float f = 1.0 - max(dot(normalize(vN), normalize(vV)), 0.0);
-  vec3 c = mix(vec3(0.025, 0.03, 0.055), uRim, clamp(pow(f, 1.8) * uK + uGlow, 0.0, 1.0));
+  vec3 c = mix(vec3(0.008, 0.01, 0.022), uRim, clamp(pow(f, 6.0) * uK + uGlow, 0.0, 1.0));
   gl_FragColor = vec4(c * (1.0 + uGlow * 2.0), 1.0);
   #include <colorspace_fragment>
 }`;
@@ -57,7 +58,7 @@ void main(){
 const PALE = [0xcfe8ff, 0xffffff, 0x9fd0ff];
 
 /** Mark posed in a sideways surf crouch on his board (or the stand-in), as a moonlit silhouette */
-function buildRider(mat: THREE.ShaderMaterial): { root: THREE.Group; rig: RigInstance | null; placeholder: boolean; dispose: () => void } {
+export function buildRider(mat: THREE.ShaderMaterial): { root: THREE.Group; rig: RigInstance | null; placeholder: boolean; dispose: () => void } {
   const root = new THREE.Group();
   const geos: THREE.BufferGeometry[] = [];
   let rig: RigInstance | null = null;
@@ -90,6 +91,11 @@ function buildRider(mat: THREE.ShaderMaterial): { root: THREE.Group; rig: RigIns
     set('fore_r', -0.4, 0, -0.2);
     rig.root.scale.setScalar(0.98);
     root.add(rig.root);
+    // the crouch lifts his feet: drop him until the lowest paw stands on the deck
+    bg.computeBoundingBox();
+    root.updateMatrixWorld(true);
+    const low = new THREE.Box3().setFromObject(rig.root, true).min.y;
+    rig.root.position.y += bg.boundingBox!.max.y - low - 0.01;
   } catch {
     // the stand-in: the moon-cat silhouette rig (its board is the root part)
     placeholder = true;
@@ -136,7 +142,7 @@ export async function playMoonReveal(d: RevealDeps): Promise<void> {
   const light = new THREE.PointLight(0xcfe8ff, 0, 16, 1.6);
   light.position.set(m.x, g + 1.2, m.z);
   ctx.scene.add(light);
-  const mat = new THREE.ShaderMaterial({ vertexShader: silVert, fragmentShader: silFrag, uniforms: { uRim: { value: new THREE.Color(0xd8ecff) }, uK: { value: 1.4 }, uGlow: { value: 1 } } });
+  const mat = new THREE.ShaderMaterial({ vertexShader: silVert, fragmentShader: silFrag, uniforms: { uRim: { value: new THREE.Color(0xd8ecff) }, uK: { value: 0.8 }, uGlow: { value: 1 } } });
   let rider: ReturnType<typeof buildRider> | null = null;
   const lines: { end(): void }[] = [];
   const shot = { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 44 };
@@ -186,7 +192,7 @@ export async function playMoonReveal(d: RevealDeps): Promise<void> {
     lines.push(say3D(eng, 'MARK IS FREE', () => new THREE.Vector3(rr.position.x, rr.position.y + 2.6, rr.position.z), { key: 'reveal:mark', size: 0.3, px: 72, color: '#eef6ff', glow: '#7fc4ff', hdr: 1.8, cps: 16, hold: 3.2 }));
     for (let t = 0; t < 1.6; t += 0.05) {
       const k = Math.min(1, t / 0.6);
-      mat.uniforms.uGlow.value = 1 - k * 0.92;
+      mat.uniforms.uGlow.value = 1 - k;
       rr.scale.setScalar(0.4 + 0.6 * (1 - (1 - k) ** 3));
       rr.position.y = g + 1.0 + Math.sin(t * 3) * 0.06;
       light.intensity = damp(light.intensity, 3, 3, 0.05);
@@ -230,7 +236,7 @@ export async function playMoonReveal(d: RevealDeps): Promise<void> {
       // the camera lets him go, drifting up to keep the moon in frame
       shot.pos.y = camFrom.y + t * 0.35;
       shot.look.lerp(rr.position.clone().addScaledVector(R, 24).add(new THREE.Vector3(0, 6, 0)), 0.04);
-      mat.uniforms.uGlow.value = Math.max(0.06, 0.08 + Math.max(0, t - 3.4) * 0.5);
+      mat.uniforms.uGlow.value = Math.max(0, t - 3.4) * 0.5;
       if (t > 3.4) rr.scale.setScalar(Math.max(0.02, 1 - (t - 3.4) / 1.2));
       await wait(dt);
     }

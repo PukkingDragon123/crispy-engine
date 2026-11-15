@@ -69,7 +69,7 @@ const mirror = (l: Pose): Pose => {
   for (const [k, v] of Object.entries(l)) if (k.endsWith('_l')) o[k.slice(0, -2) + '_r'] ??= [v[0], -v[1], -v[2]];
   return o;
 };
-const POSES: Record<string, Pose> = {
+export const POSES: Record<string, Pose> = {
   idle: mirror({ torso: [0.03, 0, 0], head: [0.06, 0, 0], arm_l: [-0.12, 0, 0.2], fore_l: [-0.45, 0, 0.05], hand_l: [-0.25, 0.3, 0], fing_l: [0.25, 0, 0], foot_l: [0.15, 0, 0], foot_r: [0.4, 0, 0] }),
   open: mirror({ torso: [-0.1, 0, 0], head: [-0.15, 0, 0], arm_l: [-0.25, 0, 1.3], fore_l: [-0.15, 0, 0.35], hand_l: [0, 0.9, 0.35], fing_l: [-0.1, 0, 0] }),
   raise: mirror({ torso: [-0.12, 0, 0], head: [-0.3, 0, 0], arm_l: [-0.15, 0, 2.75], fore_l: [0, 0, 0.55], hand_l: [0, 0, 0.5], fing_l: [0.1, 0, 0] }),
@@ -255,7 +255,7 @@ export class Cleopatra extends Boss {
     this.root.remove(old.root);
     old.material.dispose();
     this.rig = new RigInstance(geo, { ownMaterial: true });
-    this.rig.material.userData.emissiveStrength.value = 1.5;
+    this.rig.material.userData.emissiveStrength.value = 1.15;
     this.root.add(this.rig.root);
     this.eyes = new RigEyes(this.rig, 'glow', 0xffd070);
     this.height = 3.2;
@@ -271,7 +271,7 @@ export class Cleopatra extends Boss {
       { node: 'hand_r', r: 0.13, part: 'hand', weak: 1.2, offset: [-0.014, -0.086, 0.012] },
     ];
     this.rig.nodes['torso'].add(this.heartLight);
-    this.heartLight.position.set(0, 0.26, 0.3);
+    this.heartLight.position.set(0, 0.26, 0.55);
     // silk: the veil, crimson sleeve streamers, sash ribbons and four sheer skirt panels
     const S = (k: string, w: number, h: number, width: number, length: number, look: ConstructorParameters<typeof Silk>[1], o: { stiffness?: number; drag?: number; gravity?: number } = {}) => {
       const s = new Silk({ w, h, width, length, stiffness: o.stiffness ?? 0.85, drag: o.drag ?? 2.4, gravity: o.gravity ?? 7, thickness: 0.016 }, look);
@@ -281,12 +281,12 @@ export class Cleopatra extends Boss {
       this.silkR.add(s);
     };
     const ivory = { main: 0xf6ecdc, alt: 0xf0dcb8, trim: 0xe8b84a };
-    S('veil', 9, 15, 0.5, 2.5, { ...ivory, glow: 0.35, glowFall: 0.7, pattern: 'veil' }, { gravity: 6 });
+    S('veil', 9, 15, 0.5, 2.5, { ...ivory, glow: 0.22, glowFall: 0.7, pattern: 'veil' }, { gravity: 6 });
     for (const sd of ['l', 'r']) {
       S('sleeve_' + sd, 4, 16, 0.3, 2.5, { main: 0xc02a3a, alt: 0x8e1a2c, trim: 0xe8b84a, glow: 0.3, glowFall: 0.4, pattern: 'ribbon' }, { stiffness: 0.8, drag: 2.8, gravity: 5.5 });
       S('sash_' + sd, 3, 14, 0.15, 2.0, { main: 0xf2d48a, alt: 0xe0b04a, trim: 0xc02a3a, glow: 0.25, pattern: 'ribbon' }, { gravity: 6.5 });
     }
-    for (const sd of ['f', 'b', 'l', 'r']) S('skirt_' + sd, 5, 10, 0.36, 1.45, { main: 0xfaf2e4, alt: 0xf2e2c6, trim: 0xe8b84a, glow: 0.28, glowFall: 0.6, pattern: 'panel' }, { stiffness: 0.9, gravity: 7.5 });
+    for (const sd of ['f', 'b', 'l', 'r']) S('skirt_' + sd, 5, 10, 0.36, 1.45, { main: 0xfaf2e4, alt: 0xf2e2c6, trim: 0xe8b84a, glow: 0.18, glowFall: 0.6, pattern: 'panel' }, { stiffness: 0.9, gravity: 7.5 });
     for (let i = 0; i < 5; i++) this.colliders.push({ c: new THREE.Vector3(), r: 0.3 });
   }
 
@@ -1489,7 +1489,7 @@ export class Cleopatra extends Boss {
     this.glowNow = damp(this.glowNow, this.glowT + Math.sin(t * 2.2) * 0.08, 2.5, dt);
     const fx = this.rig.material.userData.fx.value;
     fx.z = (this.glowNow - 1) * 0.8 + (this.exposed ? 0.8 + Math.sin(t * 10) * 0.3 : 0);
-    this.heartLight.intensity = this.root.visible ? 3 + this.glowNow * 5 + this.raySpin * 0.4 + (this.exposed ? 8 : 0) : 0;
+    this.heartLight.intensity = this.root.visible ? 1.5 + this.glowNow * 2.2 + this.raySpin * 0.25 + (this.exposed ? 7 : 0) : 0;
   }
 
   private burstPetals(at: THREE.Vector3, n: number) {

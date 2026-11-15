@@ -524,7 +524,7 @@ export class SunShots {
       const fx = p.rest ? 1 : Math.abs(Math.cos(p.flip));
       const a = Math.min(1, p.life / 0.6);
       if (a < 0.98 && ((i * 7 + Math.floor(time * 30)) & 3) === 0 && a < 0.5) continue;
-      this.cut.push(p.x, p.y, p.z, fx < 0.3 ? 'petalE' : p.sprite, p.size * Math.max(0.35, fx), p.size, p.rot, 0xffffff, 1);
+      this.cut.push(p.x, p.y, p.z, fx < 0.15 ? 'petalE' : p.sprite, p.size * Math.max(0.35, fx), fx < 0.15 ? p.size * 0.6 : p.size, p.rot, 0xffffff, 1);
     }
     // ---- light motes and embers
     for (let i = this.motes.length - 1; i >= 0; i--) {
