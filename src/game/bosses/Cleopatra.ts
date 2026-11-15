@@ -1579,8 +1579,8 @@ export class Cleopatra extends Boss {
     speak3D(ctx.engine, 'anubis', 'WHO HAS PUT OUT THE LIGHT OF MY DAUGHTER?', sky, { key: `ra:${this.id}`, size: 0.9, px: 96, wrap: 30, color: '#ffe0c0', glow: '#ff3a10', hdr: 2.2 });
     ctx.toast('« Ruby Tuesday »', '#ff6a3a', 'Ra is enraged', true);
     ctx.events.emit('raEnraged', { x: this.pos.x, z: this.pos.z, from: 'cleopatra' });
-    const world = ctx.world as unknown as { burnToLava?: (o?: unknown) => void };
-    world.burnToLava?.({ x: this.pos.x, z: this.pos.z });
+    const world = ctx.world as unknown as { burnToLava?: (k: number, o?: { x: number; z: number }) => void };
+    world.burnToLava?.(0.001, { x: this.pos.x, z: this.pos.z });
     for (let t = 0; t < 3.4; t += 0.05) {
       await tw.wait(0.05);
       if (this.barge) this.barge.sink = Math.min(2.6, this.barge.sink + 0.05 * 0.5);

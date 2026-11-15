@@ -883,7 +883,8 @@ export class RunScene implements GameScene {
       return;
     }
     if (s.n >= 100) {
-      this.hud.toast('THE STORM BREAKS', '#ffd36b', 'Serket\'s Reach is free.', true);
+      if (this.opts.stage === 'nile') this.hud.toast('DAWN OVER THE NILE', '#ffd36b', 'The river runs free again.', true);
+      else this.hud.toast('THE STORM BREAKS', '#ffd36b', 'Serket\'s Reach is free.', true);
       this.engine.tweens.after(3, () => this.endRun(true));
       return;
     }
