@@ -25,8 +25,8 @@ export type PerchId = 'hat' | 'eyeL' | 'eyeR' | 'shoulder';
 type Spot = PerchId | 'hatIn';
 type WP = Spot | 'crownL' | 'crownR' | 'crownB' | 'brimL' | 'brimR' | 'brimB' | 'lipL' | 'lipR' | 'templeL' | 'templeR' | 'bridge' | 'jawL' | 'neckL' | 'here';
 
-/** Pinch's scale while he lives on Sundown (rig scale 1 is ~0.55 m long; this makes him ~11 cm) */
-export const PINCH_PERCH_SCALE = 0.2;
+/** Pinch's scale while he lives on Sundown (rig scale 1 is ~0.55 m long; this makes him ~15 cm, tail and claws included) */
+export const PINCH_PERCH_SCALE = 0.27;
 
 export interface PerchHost {
   root: THREE.Object3D;
@@ -469,7 +469,8 @@ export class PinchPerch {
         return out(g.hc.clone().add(_v.set(s, 0.3, 0.35).normalize().multiplyScalar(g.R * 1.03)));
       }
       case 'eyeR':
-        return { frame: h, p: g.eR.clone().add(_v.set(0.0, -0.03, 0.004)), n: new THREE.Vector3(0, 0.3, 1).normalize() };
+        // tucked in the bare socket behind the cracked lens, front half poking out past its outer rim
+        return { frame: h, p: g.eR.clone().add(_v.set(-0.006, -0.016, -0.004)), n: new THREE.Vector3(-0.6, 0.3, 0.7).normalize() };
       case 'eyeL':
         return { frame: h, p: g.eL.clone().add(_v.set(0.012, 0.032, 0.002)), n: new THREE.Vector3(0.2, 1, 0.4).normalize() };
       case 'bridge':
@@ -486,7 +487,7 @@ export class PinchPerch {
     f.getWorldQuaternion(out);
     // yaw, pitch (positive: nose down), roll in the bone's frame
     const [yaw, pitch, roll] =
-      s === 'eyeR' ? [0.08, 0.32, 0] : s === 'eyeL' ? [-0.3, 0.55, -0.12] : s === 'shoulder' ? [0.3, 0, 0] : s === 'hatIn' ? [Math.PI, 0.4, 0] : [0, 0, 0];
+      s === 'eyeR' ? [-1.2, 0.1, 0.1] : s === 'eyeL' ? [-0.3, 0.55, -0.12] : s === 'shoulder' ? [0.3, 0, 0] : s === 'hatIn' ? [Math.PI, 0.4, 0] : [0, 0, 0];
     _e.set(pitch, yaw, roll, 'YXZ');
     return out.multiply(_q2.setFromEuler(_e));
   }
