@@ -188,7 +188,23 @@ export class Engine {
     this.resize();
   }
 
-  async setScene(s: GameScene, fade = 0.5, color = '#000', o: SceneSwitch = {}) {
+  /** the scene switch in flight (switches queue behind it, see setScene) */
+  private switchQ: Promise<void> = Promise.resolve();
+
+  /**
+   * Switch scenes. Switches run one at a time: a second request made while one is still fading or
+   * building (a menu click during a results fade, a death during travel) waits for it, then leaves
+   * that scene properly. Run side by side, both left the same scene (its exit ran twice) and the
+   * first one's scene went on building with nobody ever calling its exit: its DOM, listeners, loops
+   * and meshes stayed alive under the new scene.
+   */
+  setScene(s: GameScene, fade = 0.5, color = '#000', o: SceneSwitch = {}): Promise<void> {
+    const run = this.switchQ.then(() => this.switchTo(s, fade, color, o));
+    this.switchQ = run.catch((e) => reportError('setScene', e));
+    return run;
+  }
+
+  private async switchTo(s: GameScene, fade: number, color: string, o: SceneSwitch) {
     const flag = (s as { ready?: boolean }).ready;
     const load = !!this.loader && (o.loading ?? flag === false) !== false;
     if (fade > 0 && this.current) await this.fadeOut(fade, color);
@@ -371,6 +387,33 @@ export class Engine {
     }
   }
 
+  private camOk = { cam: null as THREE.Camera | null, p: new THREE.Vector3(), q: new THREE.Quaternion() };
+  /**
+   * A NaN that reaches the camera (a zero-length direction normalised somewhere in a rig) blanks the
+   * whole view for good: every later frame inherits it. Put the camera back where it last was valid,
+   * and say so once a second so the cause can be found.
+   */
+  private guardCamera(cam: THREE.PerspectiveCamera) {
+    const c = this.camOk, p = cam.position, q = cam.quaternion;
+    if (Number.isFinite(p.x + p.y + p.z) && Number.isFinite(q.x + q.y + q.z + q.w) && Number.isFinite(cam.fov)) {
+      c.cam = cam;
+      c.p.copy(p);
+      c.q.copy(q);
+      return;
+    }
+    reportError('camera', new Error('non-finite camera transform; restored the last valid one'));
+    if (c.cam === cam) {
+      p.copy(c.p);
+      q.copy(c.q);
+    } else {
+      p.set(0, 10, 10);
+      q.identity();
+    }
+    if (!Number.isFinite(cam.fov)) cam.fov = 60;
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld();
+  }
+
   start() {
     const loop = () => {
       requestAnimationFrame(loop);
@@ -411,6 +454,7 @@ export class Engine {
       if (cur) {
         guard('update', () => cur.update(dt, rdt));
         for (const f of this.onAfterUpdate.slice()) guard('afterUpdate', () => f(dt, rdt));
+        this.guardCamera(cur.camera);
         guard('audio', () => this.audio.setListener(cur.camera));
         if (!this.covered && !this.contextLost) {
           guard('render', () => this.post.render(rdt));

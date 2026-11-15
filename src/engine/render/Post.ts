@@ -155,7 +155,8 @@ export class OutlinePass extends Pass {
           // contact shadows: concavities where something stands on / leans against something else.
           // Pairs of opposite samples must both be nearer than the centre (a plane never is), and
           // sand against sand never darkens (dune steps are not contacts).
-          if (uAO > 0.001 && d0 < 70.0) {
+          // (ground pixels only: everything else would take 32 fetches to add nothing)
+          if (uAO > 0.001 && d0 < 70.0 && c.a < 0.5) {
             float tc = 1.0 - step(0.5, c.a);
             float rpx = clamp(0.55 * uProjY / d0, 3.0, 46.0);
             float rot = ign(gl_FragCoord.xy) * 6.2831853;

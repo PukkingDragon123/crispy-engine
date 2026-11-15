@@ -55,6 +55,7 @@ import { HubUI, STATION_CAN, UIHit } from './hub/HubUI';
 import { say3D } from '../fx/WorldSpeech';
 import { touchText } from '../ui/TouchControls';
 import type { HubHost } from './hub/HubKit';
+import { PinchPerch, PINCH_PERCH_SCALE } from '../player/PinchPerch';
 
 /** how he gets home: normally he walks in from the street; after a death he wakes up on the couch */
 export interface HubArrival {
@@ -423,6 +424,8 @@ export class HubScene implements GameScene {
   private hero: RigInstance | null = null;
   private heroSpec: RigSpec | null = null;
   private pinch: RigInstance | null = null;
+  /** Pinch living on the hero: hat, eye sockets, shoulder */
+  private pinchPerch: PinchPerch | null = null;
   private heroHolder = new THREE.Group();
   private boardRackGroup = new THREE.Group();
   private boardBench = new THREE.Group();
@@ -1157,7 +1160,7 @@ export class HubScene implements GameScene {
           const ps = modelEntry('pinch')?.() as RigSpec | undefined;
           if (ps?.parts) {
             const pr = new RigInstance(buildRigGeo(ps, ps.name + ':photo'), { material: sharedVoxelMaterial });
-            pr.root.scale.setScalar(0.8);
+            pr.root.scale.setScalar(PINCH_PERCH_SCALE);
             if (!ri.attach('shoulder_l', pr.root)) ri.nodes['torso']?.add(pr.root);
           }
           subject.add(ri.root);
@@ -1223,13 +1226,17 @@ export class HubScene implements GameScene {
     this.armL1 = this.hero.nodes['fore_r']?.position.length() || 0.264;
     this.armL2 = this.hero.geo.sockets['hand_r']?.offset.length() || 0.321;
     CH.attachBoardOnBack(this.hero, CH.sandboardModel(d.look.board as CH.BoardId), { material: this.hero.material });
-    // Pinch asleep on his shoulder
+    // Pinch lives on him: dozing on the shoulder, peeking out of the eye socket, riding the hat
     const ps = modelEntry('pinch')?.() as RigSpec | undefined;
+    this.pinchPerch?.dispose();
+    this.pinch?.material.dispose();
+    this.pinch = null;
+    this.pinchPerch = null;
     if (ps?.parts) {
       this.pinch = new RigInstance(buildRigGeo(ps, ps.name + ':hub'), { material: makeVoxelMaterial(), castShadow: true });
-      this.pinch.root.scale.setScalar(0.8);
-      if (!this.hero.attach('shoulder_l', this.pinch.root)) this.hero.nodes['torso']?.add(this.pinch.root);
+      this.hero.root.add(this.pinch.root);
       this.pinch.setExpression('sleepy');
+      this.pinchPerch = new PinchPerch(this.pinch, this.hero, this.pinch.root, { start: 'shoulder' });
     }
   }
 
@@ -1578,6 +1585,9 @@ export class HubScene implements GameScene {
   exit() {
     this.heroSwap?.dispose();
     this.heroSwap = null;
+    this.pinchPerch?.dispose();
+    this.pinchPerch = null;
+    this.pinch?.material.dispose();
     this.panel?.remove();
     for (const el of [this.tip, this.bank, this.title, this.prompt, this.hint, this.bubble, ...this.arrows.map((a) => a.label)]) el.remove();
     this.hui?.dispose();
@@ -2270,11 +2280,8 @@ export class HubScene implements GameScene {
       const k = Math.sin(this.duckSquash * 12) * this.duckSquash;
       this.duck.scale.set(0.85 * (1 + k * 0.25), 0.85 * (1 - k * 0.3), 0.85 * (1 + k * 0.25));
     }
-    // Pinch dozes on the shoulder (breathing, the odd twitch)
-    if (this.pinch) {
-      const pn = this.pinch.root;
-      pn.scale.setScalar(0.8 * (1 + Math.sin(t * 2.1) * 0.012));
-    }
+    // Pinch potters about on him (dozes on the shoulder, peeks out of the socket, rides the hat)
+    this.pinchPerch?.update(rdt, { idle: true });
     this.animateToads(t, rdt);
   }
 

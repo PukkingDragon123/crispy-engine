@@ -17,6 +17,7 @@ import * as CH from '../models/characters';
 import { CineKit, GRAIN, SAND, type KitWorld } from './CineKit';
 import { DrunkGait } from '../anim/drunkWalk';
 import { LensShot } from './LensShot';
+import { PinchPerch } from '../player/PinchPerch';
 
 export interface ColdOpenDeps {
   engine: Engine;
@@ -99,10 +100,12 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
     if (!actor.attach('back', sling)) actor.nodes['torso']?.add(sling);
   }
   let pinch: RigInstance | null = null;
+  let pinchPerch: PinchPerch | null = null;
   const ps = modelEntry('pinch')?.() as RigSpec | undefined;
   if (ps?.parts) {
     pinch = new RigInstance(buildRigGeo(ps, 'pinch:coldopen'), { material: player.material });
-    if (!actor.attach('shoulder_l', pinch.root)) actor.nodes['torso']?.add(pinch.root);
+    actor.root.add(pinch.root);
+    pinchPerch = new PinchPerch(pinch, actor, pinch.root, { start: 'shoulder' });
   }
   actor.root.position.copy(S);
   actor.root.rotation.y = yawD + Math.PI;
@@ -242,11 +245,7 @@ export async function playColdOpen(d: ColdOpenDeps): Promise<void> {
         }
         lens.sync();
       }
-      if (pinch) {
-        const pn = pinch.nodes;
-        for (let k = 1; k <= 5; k++) pn['tail' + k]?.rotation.set(-0.3 - Math.sin(T * 2 + k) * 0.08, 0, 0);
-        pinch.root.rotation.y = Math.sin(T * 1.3) * 0.3;
-      }
+      pinchPerch?.update(cdt, { idle: walkAmt < 0.3 });
       actor.root.updateMatrixWorld(true);
       // ---- the camera: low behind him as he walks off; he turns round into it, it creeps in; on the shot it lunges at the muzzle
       const k = ease(sat(dd / FIRE));

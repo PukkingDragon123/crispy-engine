@@ -204,6 +204,8 @@ export class Env {
   private skyU: Record<string, THREE.IUniform>;
   private cloudSpeed = 2.2;
   shadowExtent = 46;
+  /** the prefiltered sky probe (applyEnvMap) */
+  private envRT: THREE.WebGLRenderTarget | null = null;
   /** smoothed reference height of the regional ground: the haze / dust layers sit on it */
   hazeBase = 8;
   private hazeTarget = NaN;
@@ -396,6 +398,8 @@ export class Env {
     envScene.add(ground);
     const pm = new THREE.PMREMGenerator(renderer);
     const rt = pm.fromScene(envScene, 0.04, 0.1, 200);
+    this.envRT?.dispose();
+    this.envRT = rt;
     this.scene.environment = rt.texture;
     this.scene.environmentIntensity = day ? 0.52 : 0.6;
     if (!day) this.hemi.intensity = this.preset.hemiIntensity * 0.7;
@@ -459,5 +463,9 @@ export class Env {
     this.hemi.removeFromParent();
     this.clouds.removeFromParent();
     this.air?.dispose();
+    // the baked sky probe is GPU memory of its own (a lost GC race kept one per run alive)
+    if (this.envRT && this.scene.environment === this.envRT.texture) this.scene.environment = null;
+    this.envRT?.dispose();
+    this.envRT = null;
   }
 }

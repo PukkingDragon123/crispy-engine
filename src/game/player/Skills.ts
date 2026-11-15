@@ -35,6 +35,8 @@ import { clamp, damp, dampAngle, rnd } from '../../engine/math/rand';
 import { Input, type Action } from '../../engine/Input';
 import { Qte } from '../ui/Qte';
 import type { HeroSpells } from './heroes/HeroKit';
+import { PinchPerch } from './PinchPerch';
+import { pinchBroodRig } from '../models/characters/pinch';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -206,6 +208,8 @@ export class Skills {
   pinchTarget: EnemyLike | null = null;
   private pinchFrom = new THREE.Vector3();
   private pinchPos = new THREE.Vector3();
+  /** where Pinch lives on Sundown between errands (hat, eye sockets, shoulder) */
+  perch: PinchPerch | null = null;
   constants = { scorpCd: 7, swarmCd: 15, bombRecharge: 7 };
 
   constructor(private ctx: Ctx, private player: Player, private input: Input) {
@@ -214,7 +218,8 @@ export class Skills {
     const pe = modelEntry('pinch');
     const spec = pe?.() as RigSpec | undefined;
     this.broodMat = makeVoxelMaterial();
-    if (spec?.parts) this.broodGeo = buildRigGeo(spec, 'pinch:player');
+    // (a coarser build of his rig: up to a dozen of them swarm at once)
+    if (spec?.parts) this.broodGeo = buildRigGeo(pinchBroodRig(), 'pinch_brood:player');
     // dung bomb visual
     const db = modelEntry('dung_bomb') ?? modelEntry('dungBomb');
     const r = db?.() as any;
@@ -235,6 +240,7 @@ export class Skills {
     if (spec?.parts) {
       this.pinch = new RigInstance(buildRigGeo(spec, 'pinch:player'));
       this.pinchRoot.add(this.pinch.root);
+      this.perch = new PinchPerch(this.pinch, player.rig, this.pinchRoot, { start: 'hat', events: ctx.events });
     }
     ctx.scene.add(this.pinchRoot);
   }
@@ -1574,10 +1580,13 @@ export class Skills {
   private updatePinch(dt: number) {
     const ctx = this.ctx;
     const pl = this.player;
+    const perch = this.perch;
     const shoulder = pl.rig.sockets['shoulder_l'];
     const hand = pl.rig.sockets['hand_r'];
+    // home: the perch he lives on (hat, eye socket, shoulder), else the shoulder socket
     const home = new THREE.Vector3();
-    if (shoulder) shoulder.getWorldPosition(home);
+    if (perch) perch.homeWorld(home);
+    else if (shoulder) shoulder.getWorldPosition(home);
     else pl.center(home).add(new THREE.Vector3(0, 0.5, 0));
     this.pinchT += dt;
     this.pinchCd -= dt;
@@ -1585,20 +1594,30 @@ export class Skills {
     if (reload && (this.pinchState === 'shoulder' || this.pinchState === 'return')) {
       this.pinchState = 'reload';
       this.pinchT = 0;
+      this.pinchFrom.copy(this.pinchRoot.position);
       this.pinch?.setExpression('determined');
     }
+    // his size: a real little scorpion on the hunter, swelling with Serket's venom when he strikes
+    const small = perch ? perch.homeScale() : 1;
+    const big = perch ? 0.62 : 1;
+    let scale = small;
     switch (this.pinchState) {
       case 'shoulder': {
-        this.pinchPos.copy(home);
-        this.pinchRoot.quaternion.copy(pl.root.quaternion);
-        this.pinchRoot.rotateY(Math.sin(this.pinchT * 1.3) * 0.3);
+        if (perch) {
+          perch.update(dt, { idle: pl.speed < 1.5, speed01: pl.speed / Math.max(1, pl.board.t.boostCap) });
+          this.pinchPos.copy(this.pinchRoot.position);
+        } else {
+          this.pinchPos.copy(home);
+          this.pinchRoot.quaternion.copy(pl.root.quaternion);
+          this.pinchRoot.rotateY(Math.sin(this.pinchT * 1.3) * 0.3);
+        }
         if (this.pinchCd <= 0 && pl.alive) {
           const t = ctx.enemies.nearest(pl.pos, 9, (e) => !e.flying);
           if (t) {
             this.pinchTarget = t;
             this.pinchState = 'leap';
             this.pinchT = 0;
-            this.pinchFrom.copy(home);
+            this.pinchFrom.copy(this.pinchPos);
             ctx.sfx('scorpion_chitter', home, 0.5, 1.3);
             this.pinch?.setExpression('angry');
           }
@@ -1610,6 +1629,7 @@ export class Skills {
         if (!t || !t.alive) {
           this.pinchState = 'return';
           this.pinchT = 0;
+          this.pinchFrom.copy(this.pinchPos);
           break;
         }
         const k = clamp(this.pinchT / 0.45, 0, 1);
@@ -1617,6 +1637,7 @@ export class Skills {
         this.pinchPos.lerpVectors(this.pinchFrom, to, k);
         this.pinchPos.y += Math.sin(k * Math.PI) * 2;
         this.pinchRoot.lookAt(to.x, this.pinchPos.y, to.z);
+        scale = small + (big - small) * Math.min(1, k * 1.6);
         if (k >= 1) {
           this.pinchState = 'sting';
           this.pinchT = 0;
@@ -1625,6 +1646,7 @@ export class Skills {
       }
       case 'sting': {
         const t = this.pinchTarget;
+        scale = big;
         if (!t || !t.alive || this.pinchT > 1.6) {
           this.pinchState = 'return';
           this.pinchT = 0;
@@ -1636,6 +1658,7 @@ export class Skills {
         if (Math.floor((this.pinchT - dt) / 0.5) !== st || this.pinchT === dt) {
           ctx.enemies.damage(t, { base: 8, kind: 'magic', source: 'scorpion', status: [{ id: 'poison', stacks: 3, dur: 4, power: 2.4 }], canCrit: true }, this.pinchPos.clone());
           ctx.sfx('scorpion_sting', this.pinchPos, 0.5);
+          perch?.motion.sting();
         }
         break;
       }
@@ -1643,19 +1666,25 @@ export class Skills {
         const k = clamp(this.pinchT / 0.4, 0, 1);
         this.pinchPos.lerpVectors(this.pinchFrom, home, k);
         this.pinchPos.y += Math.sin(k * Math.PI) * 1.5;
+        if (perch) this.pinchRoot.lookAt(home.x, this.pinchPos.y, home.z);
+        scale = big + (small - big) * Math.min(1, k * 1.4);
         if (k >= 1) {
           this.pinchState = 'shoulder';
           this.pinchCd = 3.2 / (1 + this.stats.get('magic') * 0.03);
           this.pinch?.setExpression('happy');
+          perch?.land();
           ctx.engine.tweens.after(1, () => this.pinch?.setExpression('neutral'));
         }
         break;
       }
       case 'reload': {
+        // he hops onto the gun hand and spins the cylinder, then goes home
         const gun = new THREE.Vector3();
         if (hand) hand.getWorldPosition(gun);
         else gun.copy(home);
         this.pinchPos.lerp(gun.add(new THREE.Vector3(0, 0.12 + Math.abs(Math.sin(this.pinchT * 18)) * 0.05, 0)), Math.min(1, dt * 14));
+        if (perch) this.pinchRoot.quaternion.slerp(pl.root.quaternion, Math.min(1, dt * 12));
+        scale = small + (0.36 - small) * Math.min(1, this.pinchT * 5);
         if (!reload) {
           this.pinchState = 'return';
           this.pinchT = 0;
@@ -1665,8 +1694,15 @@ export class Skills {
       }
     }
     this.pinchRoot.position.copy(this.pinchPos);
-    // pinch idle animation
-    if (this.pinch) {
+    if (perch) {
+      // the perch places him itself; on errands he keeps the scale of the moment and animates
+      if (this.pinchState !== 'shoulder') {
+        this.pinchRoot.scale.setScalar(scale);
+        const mode = this.pinchState === 'reload' ? 'reload' : this.pinchState === 'sting' ? 'sting' : 'leap';
+        perch.update(dt, { away: true, mode, alert: this.pinchState === 'return' ? 0.2 : 0.8 });
+      }
+    } else if (this.pinch) {
+      // fallback idle animation (no perch: no rig to live on)
       const n = this.pinch.nodes;
       const t = this.pinchT;
       const busy = this.pinchState === 'sting' || this.pinchState === 'reload';

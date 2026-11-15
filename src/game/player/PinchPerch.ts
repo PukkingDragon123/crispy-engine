@@ -116,6 +116,8 @@ export class PinchPerch {
   private quatW = new THREE.Quaternion();
   private scaleW = 1;
   private here: Pt | null = null;
+  private eyeDepth = 0;
+  private g: ReturnType<PinchPerch['geoNow']> | null = null;
 
   constructor(
     public rig: RigInstance,
@@ -143,11 +145,14 @@ export class PinchPerch {
     this.host = host;
     this.head = host.nodes['head'] ?? null;
     this.torso = host.nodes['torso'] ?? host.nodes['pelvis'] ?? null;
-    const by = (n: string) => host.root.getObjectByName(n) ?? null;
+    // the named perch anchors (as Object3Ds, or still as the rig sockets of that name), else the plain sockets
+    const by = (n: string) => host.root.getObjectByName(n) ?? host.sockets[n] ?? null;
+    const eR = by('perch_eyeR'), eL = by('perch_eyeL');
+    this.eyeDepth = eR || eL ? 0.008 : 0; // the perch anchors sit 0.6 design units deeper in the socket than eye_l / eye_r
     this.anchors = {
       hat: by('perch_hat') ?? host.sockets['hat_top'] ?? host.sockets['head_top'] ?? undefined,
-      eyeR: by('perch_eyeR') ?? host.sockets['eye_r'] ?? undefined,
-      eyeL: by('perch_eyeL') ?? host.sockets['eye_l'] ?? undefined,
+      eyeR: eR ?? host.sockets['eye_r'] ?? undefined,
+      eyeL: eL ?? host.sockets['eye_l'] ?? undefined,
       shoulder: host.sockets['shoulder_l'] ?? undefined,
     };
     // the hat's extent in head space: the brim edge and the back of the crown for the routes
@@ -162,6 +167,7 @@ export class PinchPerch {
       this.hatBox = g.boundingBox!.clone().applyMatrix4(_m);
     }
     this.route = null;
+    this.g = null;
   }
 
   /** Sundown got hit: into the hat */
@@ -223,6 +229,7 @@ export class PinchPerch {
     }
     this.head?.updateWorldMatrix(true, false);
     this.torso?.updateWorldMatrix(true, false);
+    this.g = null;
     // ---- decide
     if (!this.route) {
       this.dwell -= dt;
@@ -406,9 +413,12 @@ export class PinchPerch {
 
   /** head-space landmarks, recomputed from the anchors (so a re-proportioned Sundown still fits) */
   private geo() {
+    return (this.g ??= this.geoNow());
+  }
+  private geoNow() {
     const h = this.head!;
-    const eR = this.local(h, this.anchors.eyeR, new THREE.Vector3(-0.044, 0.105, 0.09));
-    const eL = this.local(h, this.anchors.eyeL, new THREE.Vector3(0.044, 0.105, 0.09));
+    const eR = this.local(h, this.anchors.eyeR, new THREE.Vector3(-0.044, 0.105, 0.09)).add(_v.set(0, 0, this.eyeDepth));
+    const eL = this.local(h, this.anchors.eyeL, new THREE.Vector3(0.044, 0.105, 0.09)).add(_v.set(0, 0, this.eyeDepth));
     const hat = this.local(h, this.anchors.hat, new THREE.Vector3(0, 0.29, -0.01));
     const hc = new THREE.Vector3(0, (eR.y + eL.y) / 2 + 0.012, (eR.z + eL.z) / 2 - 0.088);
     const R = Math.max(0.07, Math.hypot(eR.x, eR.z - hc.z) * 1.02);

@@ -45,6 +45,7 @@ import * as CH from '../models/characters';
 import { playColdOpen } from '../cine/ColdOpen';
 import { LensShot } from '../cine/LensShot';
 import { DrunkGait } from '../anim/drunkWalk';
+import { PinchPerch } from '../player/PinchPerch';
 
 export interface IntroDeps {
   engine: Engine;
@@ -496,11 +497,14 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     if (!actor.attach('back', sling)) actor.nodes['torso']?.add(sling);
   }
   let pinch: RigInstance | null = null;
+  let pinchPerch: PinchPerch | null = null;
   {
     const ps = modelEntry('pinch')?.() as RigSpec | undefined;
     if (ps?.parts) {
       pinch = new RigInstance(buildRigGeo(ps, 'pinch:intro'), { material: player.material });
-      if (!actor.attach('shoulder_l', pinch.root)) actor.nodes['torso']?.add(pinch.root);
+      actor.root.add(pinch.root);
+      // he lives on the hunter: shoulder, hat, the bare eye socket
+      pinchPerch = new PinchPerch(pinch, actor, pinch.root, { start: 'shoulder' });
     }
   }
   const skills = Skills.current;
@@ -589,17 +593,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     if (n['jaw']) n['jaw'].rotation.x = actor.exprJaw;
     n['brow_l']?.rotation.set(0, 0, actor.exprBrow[0]);
     n['brow_r']?.rotation.set(0, 0, actor.exprBrow[1]);
-    if (pinch) {
-      const pn = pinch.nodes;
-      for (let k = 1; k <= 5; k++) pn['tail' + k]?.rotation.set(-0.3 - Math.sin(T * 2 + k) * 0.06, 0, 0);
-      pn['pincer_l']?.rotation.set(0, -Math.max(0, Math.sin(T * 3)) * 0.5, 0);
-      pn['pincer_r']?.rotation.set(0, Math.max(0, Math.sin(T * 3 + 1)) * 0.5, 0);
-      for (let k = 1; k <= 4; k++) {
-        pn['leg_l' + k]?.rotation.set(0, 0, Math.sin(T * 9 + k) * 0.06 * (0.3 + walkAmt));
-        pn['leg_r' + k]?.rotation.set(0, 0, -Math.sin(T * 9 + k) * 0.06 * (0.3 + walkAmt));
-      }
-      pinch.root.rotation.y = Math.sin(T * 1.3) * 0.3;
-    }
+    pinchPerch?.update(dt, { idle: walkAmt < 0.3, speed01: 0 });
     actor.root.updateMatrixWorld(true);
     if (lensLive) {
       lens.track(camera, ATMO.sunDir);
