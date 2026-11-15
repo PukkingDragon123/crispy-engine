@@ -141,6 +141,10 @@ export class Engine {
     });
     const rbd = r.renderBufferDirect.bind(r);
     r.renderBufferDirect = (camera, scene, geometry, material, object, group) => {
+      // nothing to draw (an empty instance batch or particle pool): three would still bind the
+      // program, upload uniforms and issue an empty draw, in the shadow pass too
+      if ((object as THREE.InstancedMesh).isInstancedMesh && (object as THREE.InstancedMesh).count === 0) return;
+      if (geometry.drawRange.count === 0) return;
       this.drawn.add(geometry);
       rbd(camera, scene, geometry, material, object, group);
     };
@@ -247,7 +251,6 @@ export class Engine {
    * time it is drawn, so a cache reused by the next scene only costs a re-upload.
    */
   private releaseDrawn(keep: THREE.Object3D) {
-    if (location.search.includes('keepgeo=1')) return this.drawn.clear(); // TEMP perf A/B
     const kept = new Set<THREE.BufferGeometry>();
     keep.traverse((o) => {
       const g = (o as THREE.Mesh).geometry;

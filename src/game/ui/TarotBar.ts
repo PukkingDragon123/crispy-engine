@@ -282,6 +282,9 @@ const WIN = CARD.win;
 /** art window in frame-local voxel units (pivot at the card centre) */
 const ART_RECT = { x: (WIN.x0 + WIN.x1 + 1) / 2 - FW / 2, y: (WIN.y0 + WIN.y1 + 1) / 2 - FH / 2, w: WIN.x1 - WIN.x0 + 1, h: WIN.y1 - WIN.y0 + 1 };
 
+/** finished card photographs by hero, gun and card (canvases: the GPU textures are per run) */
+const PRINTS = new Map<string, HTMLCanvasElement>();
+
 export class TarotBar {
   /** the live bar (the unlock cinematic flies cards into it) */
   static current: TarotBar | null = null;
@@ -369,19 +372,28 @@ export class TarotBar {
     this.env = giltEnv(renderer);
     TAROT_BAR.forEach((d, i) => this.cards.push(this.makeCard(d, i)));
     yield;
-    const studio = new CardStudio(renderer);
+    let studio: CardStudio | null = null;
     const kit = new Kit(hero, heroKey, gun);
     try {
       for (const c of this.cards) {
         try {
-          const it = c.def.scene(kit);
-          let r = it.next();
-          while (!r.done) {
+          // the same hero and gun photograph the same cards: a later run (or a hideout trip and back)
+          // reuses the prints instead of sculpting every set again and stalling on each read-back
+          const key = `${heroKey}|${gun?.name ?? ''}|${c.def.title}|${TAROT_ART[0]}x${TAROT_ART[1]}`;
+          let cv = PRINTS.get(key);
+          if (!cv) {
+            const it = c.def.scene(kit);
+            let r = it.next();
+            while (!r.done) {
+              yield;
+              r = it.next();
+            }
             yield;
-            r = it.next();
+            studio ??= new CardStudio(renderer);
+            cv = studio.shoot(r.value, TAROT_ART[0], TAROT_ART[1], 2);
+            if (PRINTS.size > 48) PRINTS.clear();
+            PRINTS.set(key, cv);
           }
-          yield;
-          const cv = studio.shoot(r.value, TAROT_ART[0], TAROT_ART[1], 2);
           const tex = new THREE.CanvasTexture(cv);
           tex.colorSpace = THREE.NoColorSpace; // display values, written straight out
           tex.anisotropy = 4;
@@ -397,7 +409,7 @@ export class TarotBar {
       }
     } finally {
       kit.dispose();
-      studio.dispose();
+      studio?.dispose();
     }
   }
 

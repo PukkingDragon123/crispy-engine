@@ -61,6 +61,7 @@ export class RigBatch {
         const m = new THREE.InstancedMesh(g, material, cap);
         m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         m.count = 0;
+        m.visible = false;
         m.castShadow = lod === 0;
         m.receiveShadow = true;
         m.frustumCulled = false;
@@ -133,6 +134,9 @@ export class RigBatch {
         const m = this.meshes[l][i];
         const c = this.counts[l][i];
         m.count = c;
+        // an empty batch still cost a program bind and a zero-instance draw (twice with the shadow
+        // pass); most (rig, part, LOD) batches are empty on any given frame
+        m.visible = c > 0;
         if (c > 0) {
           m.instanceMatrix.needsUpdate = true;
           m.instanceMatrix.clearUpdateRanges();

@@ -305,6 +305,20 @@ export class PostStack {
   constructor(private renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, w: number, h: number) {
     const rt = new THREE.WebGLRenderTarget(w, h, { type: THREE.HalfFloatType, samples: 4, depthTexture: new THREE.DepthTexture(w, h) });
     this.composer = new EffectComposer(renderer, rt);
+    // Only the scene pass needs multisampling and depth (it always lands in renderTarget1, see
+    // render()); the composer's second target is a clone, another 4x HDR colour buffer and depth
+    // texture that every full-screen pass after it wrote through and resolved. A plain target gives
+    // the same pixels for those passes at a fraction of the memory and bandwidth.
+    {
+      const c = this.composer;
+      const plain = new THREE.WebGLRenderTarget(rt.width, rt.height, { type: THREE.HalfFloatType, depthBuffer: false });
+      plain.texture.name = 'EffectComposer.rt2';
+      const wasRead = c.readBuffer === c.renderTarget2;
+      c.renderTarget2.dispose();
+      c.renderTarget2 = plain;
+      if (wasRead) c.readBuffer = plain;
+      else c.writeBuffer = plain;
+    }
     this.renderPass = new RenderPass(scene, camera);
     this.composer.addPass(this.renderPass);
     this.outline = new OutlinePass();

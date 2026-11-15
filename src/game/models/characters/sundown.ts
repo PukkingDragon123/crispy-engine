@@ -44,7 +44,7 @@ import { SKIN, STUB, STUB_DOT, SCAR, LIP, NAIL, BROWHAIR, HEYE, ROT, BRUISE, MEA
 import { installHairSway, type HairChain } from './hairSway';
 
 /** metres per voxel of the HD player build */
-export const SUNDOWN_HD_VS = 1 / 84;
+export const SUNDOWN_HD_VS = 1 / 96;
 const S = 1.5; // voxels per design unit
 /** metres per output unit (one design unit of the unwarped head family) */
 const UH = S * SUNDOWN_HD_VS;
@@ -92,34 +92,35 @@ const SKULL_TOP = 63;
 const mg = (p: V3): V3 => [-p[0], p[1], p[2]];
 const vx = (p: V3): V3 => [p[0] * S, p[1] * S, p[2] * S];
 
-// ================================================================== PROPORTION WARPS (design layout -> stylized figure, output units)
-// STYLIZED CARTOON PROPORTIONS (user note, latest: "more cartoony, not that tall"): a big head on a short,
-// chunky body, about 4.5 heads to the crown (1.53 m), short legs under a longer trunk, a short neck, big
-// blocky hands, chunky boots and a chunky hat. The head family keeps its exact sculpt; the grid (1/84 m)
-// sets its size (34 cm), and the warps below fit the body to it.
-/** the head family sits HEAD_DY output units above its design height (an integer number of voxels: 33) */
-const HEAD_DY = 22;
-/** horizontal scale of the trunk (output units per design unit): width, and a slimmer depth */
-const BODY_K = 1.62;
-const BODY_KZ = 1.46;
-/** design z = 0 (the limb axes) in output space; keeps the neck (design z -1.5) right under the head */
-const Z0 = -1.5 + 1.5 * BODY_KZ;
-/** height map of the trunk and legs: ankle 9 cm (tall chunky boot heel), knee 30 cm, hip 56 cm, waist 70 cm,
- *  shoulder joint 1.12 m, a short cartoon neck, chin 1.19 m, crown 1.53 m */
-const Y_BODY: [number, number][] = [[0, 0], [3, 5], [15.5, 16.8], [24, 31.4], [29.5, 39.2], [42.5, 62.6], [44, 65.4], [46, 68], [52, 75]];
-/** height map of the hanging arm: elbow 86 cm, wrist 66 cm, grip 58 cm, short cartoon arms with the fists at the hip */
-const Y_ARM: [number, number][] = [[15, 25.4], [21.5, 32.2], [25.6, 37], [33, 48.2], [42.5, 62.6], [52, 75]];
-/** the trunk; a short thick neck above the shoulders (the popped collar closes round it) */
-const W_BODY = new Warp(Y_BODY, [[43, BODY_K], [45.6, 1.12]], [[43, BODY_KZ], [45.6, 1.1]], 0, 0, -1.5, -1.5);
-/** arms: stocky round the shoulder axis; big blocky cartoon hands (as broad as the forearm), the shoulder cap
- *  (stump, pauldron) a little tighter */
-const W_ARM = (s: number) => new Warp(Y_ARM, [[23.6, 1.95], [25.6, 1.6], [41, 1.6], [43.5, 1.42]], [[23.6, 2.0], [25.6, 1.6], [41, 1.6], [43.5, 1.42]], s * 8, s * 8 * BODY_K, 0, Z0);
-/** legs: stubby thick thighs, chunky boots that flare at the sole */
-const W_LEG = (s: number) => new Warp(Y_BODY, [[1, 1.82], [6, 1.7], [12, 1.62]], [[1, 1.6], [6, 1.55], [12, 1.62]], s * 4, s * 4 * BODY_K, 0, Z0);
+// ================================================================== PROPORTION WARPS (design layout -> heroic cartoon figure, output units)
+// HEROIC CARTOON PROPORTIONS (user note, latest: "more cartoon but handsome, not weird"): an animated-film
+// lead, about 5.7 heads to the crown (1.71 m), broad shoulders over a V-shaped trunk, a slim waist and narrow
+// hips, long lean legs, a lean neck, hands and boots a touch stylized. The head family keeps its exact sculpt;
+// the grid (1/96 m) sets its size (30 cm), and the warps below fit the body to it.
+/** the head family sits HEAD_DY output units above its design height (an integer number of voxels: 69) */
+const HEAD_DY = 46;
+/** trunk width and depth by design height (output units per design unit): narrow hips, a slim waist, a broad
+ *  chest and shoulders (the V), a lean neck */
+const BODY_KX: [number, number][] = [[24, 1.24], [27.5, 1.16], [31, 1.1], [35, 1.24], [38.5, 1.44], [41.5, 1.6], [43.4, 1.6], [45.6, 1.3]];
+const BODY_KZ: [number, number][] = [[24, 1.12], [29, 1.02], [32, 1.02], [36, 1.22], [40.5, 1.3], [43.4, 1.28], [45.6, 1.2]];
+/** height map of the trunk and legs: ankle 8 cm, knee 47 cm, hip 86 cm, waist 1.0 m, shoulder joint 1.34 m, a lean
+ *  neck, chin 1.41 m, crown 1.71 m */
+const Y_BODY: [number, number][] = [[0, 0], [3, 5.2], [15.5, 30], [24, 55], [29.5, 64.5], [36, 75], [42.5, 85.6], [44, 88.6], [46, 92], [52, 99]];
+/** height map of the hanging arm: elbow 1.04 m, wrist 0.79 m, grip 0.72 m, fingertips at mid-thigh */
+const Y_ARM: [number, number][] = [[15, 38.6], [21.5, 45.9], [25.6, 50.5], [33, 66.4], [42.5, 85.6], [52, 99]];
+/** the trunk (x and z scale with height; the neck column stays centred under the head) */
+const W_BODY = new Warp(Y_BODY, BODY_KX, BODY_KZ, 0, 0, -1.5, -1.5);
+/** output x of a design-x limb axis on the trunk at height y, and the output z of design z = 0 there */
+const KX_AT = (y: number) => W_BODY.kx(y);
+const Z0_AT = (y: number) => -1.5 + 1.5 * W_BODY.kz(y);
+const Z0 = Z0_AT(42.5);
+/** arms: lean, long; hands a touch broad (stylized, not clubby); the shoulder cap a little tighter */
+const W_ARM = (s: number) => new Warp(Y_ARM, [[23.6, 1.46], [25.6, 1.42], [33, 1.46], [40.5, 1.58], [43.5, 1.5]], [[23.6, 1.52], [25.6, 1.42], [33, 1.44], [40.5, 1.52], [43.5, 1.46]], s * 8, s * 8 * KX_AT(42.5), 0, Z0);
+/** legs: long and lean, slim knees, worn boots with a little heft at the foot */
+const W_LEG = (s: number) => new Warp(Y_BODY, [[1, 1.7], [5, 1.58], [12, 1.5], [20, 1.62]], [[1, 1.68], [5, 1.52], [12, 1.5], [20, 1.58]], s * 4, s * 4 * KX_AT(24), 0, Z0_AT(24));
 const WA_L = W_ARM(1), WA_R = W_ARM(-1), WL_L = W_LEG(1), WL_R = W_LEG(-1);
-/** the cowboy hats (stetson family) are sculpted a size up round the hat pivot: a broader brim and a taller, chunkier
- *  crown, so the hat reads big over the big head (the band seat at the brim stays put) */
-const W_HAT = new Warp([[50, 50], [59, 59], [75, 59 + 16 * 1.16]], [[56, 1.12], [60, 1.1], [66, 1.08]], [[56, 1.1], [60, 1.08], [66, 1.06]], 0, 0, -0.9, -0.9);
+/** the cowboy hats are sculpted on their own design (the rocker crown); a hair over life size round the hat pivot */
+const W_HAT = new Warp([[50, 50], [59, 59], [75, 75]], [[56, 1.04], [66, 1.03]], [[56, 1.04], [66, 1.03]], 0, 0, -0.9, -0.9);
 const STETSONS: HatId[] = ['stetson', 'bandit'];
 /** the warp new sculpts are made with (null: the unwarped head family) */
 let WARP: Warp | null = null;
@@ -441,15 +442,22 @@ const keyAt = (k: [number, number][], v: number) => {
   for (let i = 1; i < k.length; i++) if (v <= k[i][0]) return lerp(k[i - 1][1], k[i][1], sstep((v - k[i - 1][0]) / (k[i][0] - k[i - 1][0])));
   return k[k.length - 1][1];
 };
-/** x of the torn edge across the face at height y (front view): the right half has rotted away */
-const HEAD_EDGE: [number, number][] = [[42, -1.5], [45.5, -1.6], [47.4, -2.15], [49.4, -1.95], [50.6, -1.6], [52.4, -1.4], [54.2, -1.05], [56.2, -0.75], [57.6, 0.0], [59.0, -0.1], [60.5, -1.5], [64, -2.2]];
-/** signed distance (u, approx.) to the rot on the head: < 0 eaten to the bone, > 0 living skin.
- *  The edge runs down beside the nose, bites into the right cheek, climbs over the forehead and
- *  wraps back round the right temple (the back of the head keeps its skin and hair). */
+/** signed distance (u, approx.) to the rot on the head: < 0 eaten to the bone, > 0 living skin. The zombie
+ *  accent is one clean, rounded gap torn through his right cheek over the jaw: the molars, the cheekbone and the
+ *  jaw bone show through it; everything else is living skin. */
 function headRotSdf(x: number, y: number, z: number) {
-  const jag = 0.22 * Math.sin(y * 2.7 + z * 0.8) + 0.14 * Math.sin(y * 6.3 + x * 0.9 + 1.3) + 0.08 * Math.sin(z * 4.1 + y);
-  return x - (keyAt(HEAD_EDGE, y) + jag - 0.95 * Math.max(0, 1.6 - z));
+  const jag = 0.1 * Math.sin(y * 3.1 + z * 1.3) + 0.07 * Math.sin(z * 4.3 - y * 1.7 + 0.4);
+  const d = (Math.hypot((x + 4.6) / 2.05, (y - 48.15) / 2.2, (z - 3.3) / 2.5) - 1) * 2.05;
+  return Math.max(d, 0.6 - z) + jag;
 }
+/** skin colour just outside the gap: a crisp raw rim, then a thin bruised line, then healthy skin */
+function gapEdgeCol(d: number, healthy: number) {
+  if (d < 0.3) return MEAT.base;
+  if (d < 0.62) return BRUISE;
+  return healthy;
+}
+/** bone colour just inside the gap: a dark wet rim, then clean bone */
+const gapBoneCol = (c: number, d: number) => (d > -0.28 ? boneEdgeCol(c, 0) : c);
 const cen = (i: number) => (i + 0.5) / S;
 const vi = (x: number) => Math.round(x * S - 0.5);
 
@@ -459,7 +467,17 @@ const ALMOND: [number, number, number][] = [[81, 3, 6], [80, 2, 7], [79, 3, 6]];
  * His living left eye: a wet orb (white, steel-blue iris, pupil, catch-light) with real lids
  * that close over it for the expressions. Cells the head already fills are skipped.
  */
-function humanEye(v: EyeVar, head: VoxelModel | null) {
+interface IrisPal { iris: number; irisLo: number; irisSh: number; glow: boolean }
+const IRIS_L: IrisPal = { iris: HEYE.iris, irisLo: HEYE.irisLo, irisSh: HEYE.irisSh, glow: false };
+/** the zombie eye: a living eye with a Serket-green iris that glows faintly behind the shades */
+const IRIS_R: IrisPal = { iris: 0x4fd02c, irisLo: 0x9cf060, irisSh: 0x2a6a1a, glow: true };
+/** mirror a model across x = 0 (cell i -> -1 - i) */
+function mirrorModel(src: VoxelModel, name: string) {
+  const out = new VoxelModel(name);
+  src.forEach((x, y, z, c, f) => out.set(-1 - x, y, z, c, f));
+  return out;
+}
+function humanEye(v: EyeVar, head: VoxelModel | null, pal: IrisPal = IRIS_L) {
   const m = new VoxelModel('eye_l');
   const free = (i: number, j: number, l: number) => !head || !head.has(i, j, l);
   for (let j = 77; j <= 83; j++)
@@ -474,7 +492,8 @@ function humanEye(v: EyeVar, head: VoxelModel | null) {
     return -1;
   };
   const dead = v === 'dead';
-  const iris = dead ? HEYE.cloud : HEYE.iris, irisLo = dead ? HEYE.cloud : HEYE.irisLo, irisSh = dead ? 0x6e777a : HEYE.irisSh;
+  const iris = dead ? HEYE.cloud : pal.iris, irisLo = dead ? HEYE.cloud : pal.irisLo, irisSh = dead ? 0x6e777a : pal.irisSh;
+  const irisCells = new Set([iris, irisLo, irisSh]);
   const face: Record<string, number> = {
     '2,80': HEYE.corner, '3,80': HEYE.white, '4,80': dead || v === 'dim' ? iris : HEYE.glint, '5,80': dead ? 0x5c6467 : HEYE.pupil, '6,80': iris, '7,80': HEYE.whiteSh,
     '3,81': HEYE.whiteSh, '4,81': v === 'wide' ? iris : irisSh, '5,81': v === 'wide' ? iris : irisSh, '6,81': v === 'wide' ? iris : irisSh,
@@ -484,7 +503,7 @@ function humanEye(v: EyeVar, head: VoxelModel | null) {
     for (let i = i0; i <= i1; i++) {
       const l = front(i, j);
       const c = face[i + ',' + j];
-      if (l >= 0 && c !== undefined) m.set(i, j, l, c, c === HEYE.glint ? VF.EMISSIVE : M);
+      if (l >= 0 && c !== undefined) m.set(i, j, l, c, c === HEYE.glint || (pal.glow && !dead && irisCells.has(c)) ? VF.EMISSIVE : M);
     }
   // lids (skin, one voxel proud of the ball) close over the opening per expression
   const lid = (j: number, i0: number, i1: number, c: number) => {
@@ -509,28 +528,28 @@ function humanEye(v: EyeVar, head: VoxelModel | null) {
 }
 
 /** heavy living brow with a thick black eyebrow, split by an old scar (part brow_l) */
-function humanBrow() {
+function humanBrow(scar = true) {
   const b = sc('brow_l');
   const pts: V3[] = [[5.9, 56.35, 4.4], [4.75, 57.0, 5.95], [3.2, 57.35, 6.7], [1.45, 57.15, 6.85]];
   const browY = (x: number) => keyAt([[1.45, 57.15], [3.2, 57.35], [4.75, 57.0], [5.9, 56.35]], x);
   b.path(pts, (t) => 0.98 - 0.12 * t, (x, y, z) => {
     if (y < browY(x) - 0.1) return SKIN.base;
-    if (Math.abs(x - 4.05) < 0.3) return SCAR;
+    if (scar && Math.abs(x - 4.05) < 0.3) return SCAR;
     return BROWHAIR;
   });
   return b.m;
 }
 
 /** the living ear on the left of the head */
-function humanEar(f: Sc) {
+function humanEar(f: Sc, s = 1) {
   const K = SKIN.base;
-  f.ell([6.4, 52.45, -2.4], [0.42, 1.75, 1.05], K); // the flat of the ear
+  f.ell([s * 6.4, 52.45, -2.4], [0.42, 1.75, 1.05], K); // the flat of the ear
   const rim: V3[] = [];
-  for (let a = -0.35; a <= 3.45; a += 0.22) rim.push([6.62 + 0.22 * Math.sin(a), 52.55 + 1.85 * Math.cos(a - 0.15), -2.45 - 1.15 * Math.sin(a)]);
+  for (let a = -0.35; a <= 3.45; a += 0.22) rim.push([s * (6.62 + 0.22 * Math.sin(a)), 52.55 + 1.85 * Math.cos(a - 0.15), -2.45 - 1.15 * Math.sin(a)]);
   f.path(rim, () => 0.42, K); // helix
-  f.ell([6.55, 50.85, -2.15], [0.42, 0.58, 0.5], K); // lobe
-  f.ell([6.62, 52.05, -1.35], [0.3, 0.42, 0.3], K); // tragus
-  f.ell([6.85, 52.3, -2.3], [0.4, 0.8, 0.52], SKIN.dark, { mode: 'paint' }); // concha in shadow
+  f.ell([s * 6.55, 50.85, -2.15], [0.42, 0.58, 0.5], K); // lobe
+  f.ell([s * 6.62, 52.05, -1.35], [0.3, 0.42, 0.3], K); // tragus
+  f.ell([s * 6.85, 52.3, -2.3], [0.4, 0.8, 0.52], SKIN.dark, { mode: 'paint' }); // concha in shadow
 }
 
 /** skin colour of the living face (lips, scar, stubble, eye bags, crow's feet); `jaw` = the lower-face part */
@@ -564,7 +583,7 @@ function composeFace(bone: VoxelModel, skin: VoxelModel, name: string, jaw: bool
   const out = new VoxelModel(name);
   bone.forEach((i, j, l, c, f) => {
     const d = headRotSdf(cen(i), cen(j), cen(l));
-    if (d < 0 || !skin.has(i, j, l)) out.set(i, j, l, d < 0 ? boneEdgeCol(c, d) : c, f);
+    if (d < 0 || !skin.has(i, j, l)) out.set(i, j, l, d < 0 ? gapBoneCol(c, d) : c, f);
   });
   skin.forEach((i, j, l) => {
     const x = cen(i), y = cen(j), z = cen(l);
@@ -572,7 +591,7 @@ function composeFace(bone: VoxelModel, skin: VoxelModel, name: string, jaw: bool
     if (d < 0) return;
     const c = skin.get(i, j, l)! & 0xffffff;
     const base = c === (SKIN.base & 0xffffff) ? faceSkinCol(x, y, z, i, j, l, jaw) : c;
-    out.set(i, j, l, rotEdgeCol(d, x, y, z, base));
+    out.set(i, j, l, gapEdgeCol(d, base));
   });
   // the torn lip stands a little proud of the bone and curls back
   const lip: V3[] = [];
@@ -603,7 +622,7 @@ function buildHead(hair: boolean): HeadBuild {
   // ---- skin over the head: one voxel over the bone, the left orbit filled (the living eye sits in it)
   const base = sk.head.m.clone();
   const orbit = sc('orbit');
-  orbit.region([0.4, 50, 2], [6, 57.6, 6.0], (x, y, z) => inSocket(x, y, z) && z < 6.0, K);
+  for (const s of [1, -1]) orbit.region(s > 0 ? [0.4, 50, 2] : [-6, 50, 2], s > 0 ? [6, 57.6, 6.0] : [-0.4, 57.6, 6.0], (x, y, z) => inSocket(x, y, z) && z < 6.0, K);
   base.merge(orbit.m);
   const f = sc('skin');
   skinOver(base, f.m, K);
@@ -623,9 +642,10 @@ function buildHead(hair: boolean): HeadBuild {
   for (const s of [1, -1]) f.ell([s * 0.95 + 0.1, 50.2, 7.05], [0.64, 0.6, 0.72], K, { mode: 'under' });
   f.ell([0.22, 53.5, 7.2], [0.5, 0.5, 0.42], K, { mode: 'under' });
   for (const s of [1, -1]) f.ell([s * 0.55 + 0.15, 49.85, 7.45], [0.34, 0.26, 0.5], SKIN.dark, { mode: 'paint' }); // nostrils
-  humanEar(f);
-  // the eye opening, and the parting of the lips (the jaw part carries everything below it)
-  for (const [j, i0, i1] of ALMOND) for (let i = i0; i <= i1; i++) for (let l = 6; l <= 13; l++) f.m.del(i, j, l);
+  humanEar(f, 1);
+  humanEar(f, -1);
+  // the eye openings, and the parting of the lips (the jaw part carries everything below it)
+  for (const [j, i0, i1] of ALMOND) for (let i = i0; i <= i1; i++) for (let l = 6; l <= 13; l++) (f.m.del(i, j, l), f.m.del(-1 - i, j, l));
   f.region([-8, 40, 1.0], [8, 47.34, 10], (x, y) => y < 47.34, 0, { mode: 'carve' });
   const head = composeFace(sk.head.m, f.m, 'head', false);
   // ---- jaw: skin over the mandible, a square chin, the lower lip
@@ -641,36 +661,24 @@ function buildHead(hair: boolean): HeadBuild {
   const jaw = composeFace(sk.jaw.m, g.m, 'jaw', true);
   const hs = sc('head');
   hs.m = head;
-  // ---- the rotted side: the ear torn off (a ragged stub round the canal), a flap of cheek hanging
-  // off the torn edge, sinew strung across the open cheek, the edge sewn to the skull with black thread
-  hs.region([-7.2, 50.8, -3.4], [-5.2, 52.6, -1.2], (x, y, z) => ((x + 6.15) / 0.75) ** 2 + ((y - 51.7) / 0.62) ** 2 + ((z + 2.3) / 0.6) ** 2 <= 1, SOCK.void, { mode: 'paint' });
-  strand(hs, [[-6.25, 53.1, -2.55], [-6.55, 52.5, -3.05], [-6.6, 51.7, -3.35]], 0.4, 0.26, ROT.dark, MEAT.shade, 0.35);
-  strand(hs, [[-1.9, 51.5, 6.3], [-2.15, 50.75, 6.65], [-2.2, 49.95, 6.55]], 0.46, 0.26, ROT.base, ROT.dark, 0.4);
-  for (const [a, b] of [[[-3.0, 50.9, 5.65], [-3.2, 47.65, 5.55]], [[-4.0, 51.0, 4.95], [-4.25, 47.6, 4.75]], [[-4.9, 50.8, 3.85], [-5.05, 47.7, 3.35]]] as [V3, V3][]) {
-    const mid: V3 = [(a[0] + b[0]) / 2 - 0.1, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2 + 0.35];
-    strand(hs, [a, mid, b], 0.42, 0.38, SINEW.base, SINEW.shade, 0.3);
+  // ---- the cheek gap: three cords of sinew still strung across it, and a few neat black stitches where
+  // someone sewed its upper rim back to the cheekbone
+  for (const [a, b] of [[[-3.3, 50.15, 5.25], [-3.45, 46.55, 5.15]], [[-4.45, 50.35, 4.7], [-4.6, 46.4, 4.45]], [[-5.45, 49.95, 3.6], [-5.55, 46.7, 3.2]]] as [V3, V3][]) {
+    const mid: V3 = [(a[0] + b[0]) / 2 - 0.12, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2 + 0.3];
+    strand(hs, [a, mid, b], 0.36, 0.3, SINEW.base, SINEW.shade, 0.3);
   }
-  // stitches across the edge where it climbs the forehead (thread from the skin into holes in the bone)
-  for (const y of [55.35, 56.3, 57.25, 58.15]) {
-    let ex = -3;
-    for (let x = -3; x < 3; x += 0.05)
-      if (headRotSdf(x, y, 6) >= 0) {
-        ex = x;
-        break;
-      }
-    const zs = (x: number) => {
-      const i = vi(x), j = vi(y);
+  for (const x of [-3.0, -4.1, -5.2]) {
+    const y = 50.55 - 0.15 * (x + 3), zs = (xx: number, yy: number) => {
+      const i = vi(xx), j = vi(yy);
       for (let l = 20; l > -5; l--) if (head.has(i, j, l)) return cen(l);
       return 5;
     };
-    const a: V3 = [ex + 0.85, y + 0.3, zs(ex + 0.85) + 0.3], b: V3 = [ex - 0.75, y - 0.2, zs(ex - 0.75) + 0.3];
-    stitch(hs, a, b);
-    hs.ell(b, [0.3, 0.3, 0.3], SOCK.deep, { mode: 'paint' });
+    stitch(hs, [x + 0.2, y + 0.75, zs(x + 0.2, y + 0.75) + 0.25], [x - 0.2, y - 0.45, zs(x - 0.2, y - 0.45) + 0.25], 0.2);
   }
   if (hair) hairCap(hs);
   shadeRamps(head, [BN, SKIN, ROT, HAIR], true);
   shadeRamps(jaw, [BN, SKIN, ROT], false);
-  return { head, jaw, brow_l: humanBrow(), brow_r: sk.brow_r };
+  return { head, jaw, brow_l: humanBrow(true), brow_r: mirrorModel(humanBrow(false), 'brow_r') };
 }
 
 // ---- hair
