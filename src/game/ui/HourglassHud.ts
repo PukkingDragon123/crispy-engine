@@ -107,7 +107,7 @@ export class HourglassHud {
 
   constructor(private scene: THREE.Scene, private hud: Hud) {
     this.mat = makeVoxelMaterial({ fog: false });
-    this.glassMat = makeVoxelMaterial({ fog: false, transparent: true, opacity: 0.3 });
+    this.glassMat = makeVoxelMaterial({ fog: false, transparent: true, opacity: 0.2 });
     this.glassMat.depthWrite = false;
     const frame = new THREE.Mesh(buildVoxelGeometry(hourglassFrame(), { voxelSize: 1, pivot: [0, 0, 0] }), this.mat);
     const glass = new THREE.Mesh(buildVoxelGeometry(hourglassGlass(), { voxelSize: 1, pivot: [0, 0, 0], ao: 0.3 }), this.glassMat);
@@ -408,7 +408,7 @@ export class HourglassHud {
     h.root.visible = on && this.group.visible;
     if (!on) return;
     // the hand scales with the glass: about one glass-width of finger per bulb
-    const cm = vs * 2.75;
+    const cm = vs * 2.4;
     // where the palm sits: the waist of the glass, in front of it, a touch above the neck
     const g = this.v3.set(2.5, 2.2, 16.5).applyMatrix4(this.body.matrixWorld);
     // grip state: open while reaching, closing on the glass, opening to let go
