@@ -1012,7 +1012,8 @@ export class Hud {
         // big title: drops in high over the action, clear of the rider, as bold 3D type
         const k = Math.min(1, tt.t / 0.4);
         const out = tt.t > life - 0.35 ? (life - tt.t) / 0.35 : 1;
-        const yy = Math.round(H * 0.16 + (1 - easeOutBack(k)) * -16);
+        // below the day plaque and hourglass, above the rider
+        const yy = Math.round(H * 0.27 + (1 - easeOutBack(k)) * -16);
         c.globalAlpha = out * Math.min(1, k * 2.5) * heatA;
         // the letters pop in one by one; a brass lotus blooms up off the title's left shoulder, a scarab gem
         // hangs off its right foot (an asymmetric pair), both breathing gently while it stays

@@ -47,6 +47,7 @@ import { blueprintScroll } from '../models/props/treasure';
 import { signpost } from '../models/props/western';
 import { sculpt, Surf, fbm3, h3, mixc, mulc, clamp, clamp01, len2, sdRoundBox2, TAU, METAL, KNZ } from './HudKit';
 import { SpriteBank, Shot, Sprite, blitC, blitObj, variant, wrap, pixelText, pixelTextWidth } from './HudSprites';
+import { text3d, text3dReveal, uiMark, T3D } from './Text3D';
 import { sprite, nine, SWAP_DIM, HUD_PAL } from './PixelUI';
 import { HUD_ART as ART } from './HudArt';
 import { Blueprints } from '../meta/Blueprints';
@@ -574,7 +575,7 @@ export class ProgressLadder {
     const T = this.tip;
     if (!T) return;
     T.t += dt;
-    const DUR = 8.5;
+    const DUR = 5.5;
     if (T.t > DUR) {
       this.tip = null;
       return;
@@ -586,8 +587,6 @@ export class ProgressLadder {
     }
     const tw = Math.max(...lines.map((l) => pixelTextWidth(l, 16)));
     const W = Math.min(272, Math.max(160, Math.ceil((tw + 24) / 16) * 16)), H = 52;
-    const pp = this.paper(W, H, 'top');
-    if (!pp) return;
     const inK = clamp01(T.t / 0.45), outK = clamp01((T.t - (DUR - 0.5)) / 0.5);
     const e = 1 - Math.pow(1 - inK, 3) - outK * outK;
     const x = Math.round(x0 - (W + 30) * (1 - e));
@@ -598,11 +597,13 @@ export class ProgressLadder {
     c.beginPath();
     c.rect(x0 - 6, yy - 12, this.w, H + 30);
     c.clip();
-    blitObj(c, pp, x + pp.w / 2, yy + H / 2 + Math.round(sway), 3, this.show);
+    // floating 3D type, no paper (user note): a brass title with a lotus off its shoulder, the lines spelled in
     c.globalAlpha = this.show * clamp01(e * 1.5);
-    pixelText(c, lines[0], x + 10, yy + 7, { size: 16, color: '#8a2016', lip: '#f6e8c4' });
-    pixelText(c, lines[1], x + 10, yy + 22, { size: 16, color: '#3a1c0a' });
-    pixelText(c, lines[2], x + 10, yy + 35, { size: 16, color: '#3a1c0a' });
+    const sw = Math.round(sway);
+    blitObj(c, uiMark('lotus'), x + 8, yy + 11 + sw + Math.sin(T.t * 2) * 1.1, 1, this.show * clamp01(e * 1.5));
+    text3dReveal(c, lines[0], x + 18, yy + 5 + sw, { face: T3D.brass }, T.t / 0.4);
+    text3d(c, lines[1], x + 18, yy + 21, { face: T3D.cream, depth: 1 });
+    text3d(c, lines[2], x + 18, yy + 35, { face: T3D.cream, depth: 1 });
     c.globalAlpha = 1;
     c.restore();
   }

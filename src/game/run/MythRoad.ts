@@ -1093,21 +1093,30 @@ export class MythRoad {
     const met = new Set(mythSave().met);
     const sh = <T,>(a: T[]) => a.map((x) => [rnd.next(), x] as const).sort((p, q) => p[0] - q[0]).map((p) => p[1]);
     this.order = [...sh(LEGENDS.filter((l) => !met.has(l.id))), ...sh(LEGENDS.filter((l) => met.has(l.id)))];
-    const want = new URLSearchParams(location.search).get('myth');
-    if (want) {
-      (window as any).__myth = this;
-      const p = d.player.pos, yaw = (d.player as any).yaw ?? 0;
-      const at = new THREE.Vector3(p.x + Math.sin(yaw) * 14, 0, p.z + Math.cos(yaw) * 14);
-      if (want === 'dog') this.dog = new Mojo(d, at);
-      else {
-        const def = LEGENDS.find((l) => l.id === want);
-        if (def) {
-          this.order = [def, ...this.order.filter((l) => l !== def)];
-          this.legends.push(new Roadside(d, def, at, p));
-          this.next = 1;
-        }
-      }
-    }
+    this.debugWant = new URLSearchParams(location.search).get('myth');
+    if (this.debugWant) (window as any).__myth = this;
+  }
+  private debugWant: string | null = null;
+  /** placements wait until the hunter is really standing on the trail (the run places him after enter) */
+  private pending = 0;
+  private t = 0;
+
+  /** debug (?myth=<id>): that legend (or the dog) 14 m ahead of the hunter */
+  private debugPlace() {
+    const d = this.d, want = this.debugWant!;
+    this.debugWant = null;
+    const p = d.player.pos, f = new THREE.Vector3();
+    (d.ctx.camera as THREE.Camera).getWorldDirection(f);
+    f.y = 0;
+    if (f.lengthSq() < 1e-4) f.set(0, 0, 1);
+    f.normalize();
+    const at = new THREE.Vector3(p.x + f.x * 14, 0, p.z + f.z * 14);
+    if (want === 'dog') return void (this.dog = new Mojo(d, at));
+    const def = LEGENDS.find((l) => l.id === want);
+    if (!def) return;
+    this.order = [def, ...this.order.filter((l) => l !== def)];
+    this.next = Math.max(this.next, 1);
+    this.legends.push(new Roadside(d, def, at, p.clone()));
   }
 
   /** debug (?myth=...): the Fool's dog, right here */
@@ -1119,15 +1128,25 @@ export class MythRoad {
   }
 
   /** place the next legend somewhere down the trail (called as zones open) */
-  spawn(near: THREE.Vector3) {
-    if (this.legends.filter((l) => l.phase !== 'done').length >= 2 || this.next >= this.order.length) return;
+  spawn(_near?: THREE.Vector3) {
+    this.pending = Math.min(2, this.pending + 1);
+  }
+  private place() {
+    const near = this.d.player.pos.clone();
+    if (this.legends.filter((l) => l.phase !== 'done').length >= 2 || this.next >= this.order.length) return (this.pending = 0), void 0;
     const at = WagonRepair.findSpot(this.d.ctx, near, 45, 95);
     if (!at) return;
+    this.pending--;
     this.legends.push(new Roadside(this.d, this.order[this.next++], at, near));
   }
 
   update(dt: number) {
     const ctx = this.d.ctx, pl = this.d.player;
+    this.t += dt;
+    if (this.t > 1.2 && pl.alive) {
+      if (this.debugWant) this.debugPlace();
+      if (this.pending > 0 && Math.floor(this.t * 2) !== Math.floor((this.t - dt) * 2)) this.place();
+    }
     for (const l of this.legends) l.update(dt);
     for (let i = this.legends.length - 1; i >= 0; i--)
       if (this.legends[i].finished) {
@@ -1138,7 +1157,7 @@ export class MythRoad {
     // the next legend turns up a while after the last one moved on
     if (this.waitT > 0) {
       this.waitT -= dt;
-      if (this.waitT <= 0) this.spawn(pl.pos);
+      if (this.waitT <= 0) this.spawn();
     }
     // the Fool's dog finds him from the second wave on, once a ride
     this.dogTry -= dt;
