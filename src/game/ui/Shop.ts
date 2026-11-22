@@ -205,9 +205,9 @@ const TALK: { q: string; a: string[]; go?: 'enter' | 'bye'; haggle?: true }[] = 
 /** what he tells you unasked: his story, the tree, the road, and what he remembers of yours (docs/LORE.md) */
 const LORE = [
   'Ozymandias, merchant of the walking road. Nine hundred years on this shell.',
-  'I sold a young bounty hunter his first shovel once. Paid in pharaoh gold. Hrrm. I did not ask.',
+  'I sold a scavenger boy his first shovel once. A little thing with a tail. Paid in pharaoh gold. Hrrm. I did not ask.',
   'I sell, Gobi walks. We have done it since the pyramids were pointy.',
-  'A marshal bought a bear trap from me the week the storm came. I did not ask what for. I should have asked.',
+  'A young lawman bought a bear trap from me, years back. I did not ask what for. I should have asked.',
   'Gobi swallowed an acacia seed in the old kingdom. Now it shades us both.',
   'You remind me of a customer I had once. Better face. Fewer arms.',
   'When outlaws come, Gobi digs in and I bar the shutters. Sand is a fine door.',

@@ -38,7 +38,7 @@ export const TALK = {
   } as Record<CodexCat, string[]>,
   legend: {
     sundown: 'That is YOU! You look very bony in this one. Very handsome bones.',
-    pinch: 'Pinch! He pinched me. That is how he got his name! Probably.',
+    pinch: 'Pinch! She pinched me. Shh. I know who she REALLY is. She knows I know. We do not talk about it.',
     mamaToad: 'Mama Toad makes the best soup. I am not allowed soup after bedtime.',
     serket: 'Serket is very nice and very scary. Like a cactus with a hug.',
     anubis: 'Anubis weighed my heart once! It was light as a feather. I won!',
@@ -49,9 +49,9 @@ export const TALK = {
     ozymandias: 'Mister Ozymandias sells everything. He sold me a rock. It is a good rock.',
     // the pages of Sundown's Ledger
     lastBounty: 'This is the saddest page. I drew a little sun in the corner so it is less sad.',
-    ironJaw: 'Serket taught a bear trap to talk! I tried to teach my stool. It did not work.',
-    blackStinger: 'Aqrab was SO big. He let me ride on his tail once. Now it is YOUR tail! Can I ride it? No? Okay.',
-    lastBrood: 'Baby Pinch! He was the size of a raisin. I almost ate him. I did not! I did NOT.',
+    ironJaw: 'You learned to talk through a bear trap! I tried talking through a teapot. It did not work.',
+    blackStinger: 'Aqrab was SO big. He let me ride on his tail once. Yours is smaller. Can I ride it anyway? No? Okay.',
+    lastBrood: 'The little scorpion on the sarcophagus! She was the size of a raisin. Then she was a GODDESS. Eep.',
     soulDebt: 'I read the number Anubis wrote. I had to sit down. I am still a little bit sitting down.',
     starThatRusts: 'The marshal was mean. I put his page next to the vinegar. Hmph.',
     godsWork: 'I wrote the Treaty! With my best pen. Set read it VERY carefully. Too carefully.',
@@ -66,8 +66,8 @@ export const TALK = {
   loreHello: {
     lastBounty: 'I started your Ledger! Page one! It is about how you... oh. Maybe read it sitting down.',
     ironJaw: 'New page! It is about your jaw! Clack clack! Sorry. Clack.',
-    blackStinger: 'I wrote about the Black Stinger! Four arms! Now you can hold two cookies AND two more cookies!',
-    lastBrood: 'New page! Baby pictures of Pinch! Well. Baby words. Go look, go look!',
+    blackStinger: 'I wrote about the tomb in the Weeping Wall! The doors went BOOM and the little scorpion stood up! Eep!',
+    lastBrood: 'New page! About Pinch! Who is Serket! Who rides in your HAT! Go look, go look!',
     soulDebt: 'I wrote down your debt. Do not read the number before bedtime.',
     starThatRusts: 'You met the marshal! I wrote it all down. I used my angry pen.',
     godsWork: 'New page! It is about the Treaty. I wrote the Treaty! Did I say that already? I wrote it!',
@@ -102,7 +102,7 @@ export const TALK = {
     'I invented writing. Then I invented doodling. Doodling is better.',
     // gossip about the hunter's story (docs/LORE.md)
     'Your real name has a LOT of consonants. That is all I am saying. That is ALL.',
-    'Pinch hatched in your skull. That is the cosiest place in the whole Reach.',
+    'Pinch rides in your hat, and she is a whole goddess. A whole one! In a hat!',
     'Four arms! You could hold four books at once. Please hold four books at once.',
     'Serket keeps the canopic jars. I keep regular jars. Mine have more creatures in them.',
     'I wrote the Treaty of the Sands. Set says a storm is not a hand. RUDE.',

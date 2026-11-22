@@ -153,7 +153,7 @@ const MAMA_LINES = [
   "When the sand's done screaming, the stars come out lovely.",
   "Wear the poncho. It brings out your cheekbones.",
   "Ride careful. Come back hungry.",
-  "Your jar came home before you did again. It's on the mantel, sugar.",
+  "The jackal weighed you again and sent you home. I told him: mind those scales, that's my boy.",
   "I'm knitting you a sweater with four sleeves. Took me all winter.",
   "Keep that tail off my good rug, dear.",
   "You hid under my kitchen step when that lawman rode by. Shaking like a leaf. I put a plate of scraps down and never said a word.",

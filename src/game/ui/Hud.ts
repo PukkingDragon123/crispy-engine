@@ -20,7 +20,8 @@ import { SLOT, type ArsenalAnchors } from './ArsenalHud';
 import { shadowOffset, variant } from './HudSprites';
 import { nine, strip3, type PixelSprite } from './PixelUI';
 import { HUD_ART as ART } from './HudArt';
-import { text3d, T3D } from './Text3D';
+import { text3d, text3dReveal, uiMark, T3D } from './Text3D';
+import { blitObj } from './HudSprites';
 
 
 /** one quest note on the mission paper stack */
@@ -969,7 +970,9 @@ export class Hud {
         } else {
           const kc = keycap(s.prompt.key);
           const bw = Math.ceil(pixelTextWidth(s.prompt.text, 16)) + kc.width + 6;
-          this.blit(kc, x - bw / 2, y - 9 - pop, 1);
+          // the keycap gives a little press now and then, asking to be pressed
+          const press = this.promptT % 1.4 < 0.12 ? 1 : 0;
+          this.blit(kc, x - bw / 2, y - 9 - pop + press, 1 - press);
           text3d(c, s.prompt.text, x - bw / 2 + kc.width + 6, y - 8 - pop, { face: T3D.cream });
         }
         c.globalAlpha = 1;
@@ -1011,8 +1014,16 @@ export class Hud {
         const out = tt.t > life - 0.35 ? (life - tt.t) / 0.35 : 1;
         const yy = Math.round(H * 0.16 + (1 - easeOutBack(k)) * -16);
         c.globalAlpha = out * Math.min(1, k * 2.5) * heatA;
-        text3d(c, tt.text, cx, yy, { size: 32, face: tt.t < 0.2 ? '#ffffff' : T3D.cream, align: 'center', depth: 3 });
-        if (tt.sub && k > 0.6) text3d(c, tt.sub, cx, yy + 34, { face: T3D.gold, align: 'center' });
+        // the letters pop in one by one; a brass lotus blooms up off the title's left shoulder, a scarab gem
+        // hangs off its right foot (an asymmetric pair), both breathing gently while it stays
+        const tw2 = pixelTextWidth(tt.text, 32) / 2;
+        text3dReveal(c, tt.text, cx, yy, { size: 32, face: T3D.cream, align: 'center', depth: 3 }, tt.t / 0.45);
+        const bloom = easeOutBack(Math.min(1, Math.max(0, (tt.t - 0.3) / 0.3)));
+        if (bloom > 0) {
+          blitObj(c, uiMark('lotus'), cx - tw2 - 12, yy + 2 - bloom * 6 + Math.sin(this.t * 2.2) * 1.2, 2, Math.min(1, bloom));
+          blitObj(c, uiMark('gem'), cx + tw2 + 9, yy + 26 + Math.round(Math.sin(this.t * 2.2 + 1.6)), 1, Math.min(1, bloom));
+        }
+        if (tt.sub && k > 0.6) text3dReveal(c, tt.sub, cx, yy + 34, { face: T3D.gold, align: 'center' }, (tt.t - 0.35) / 0.35);
         c.globalAlpha = 1;
         continue;
       }
@@ -1020,9 +1031,11 @@ export class Hud {
       const out = tt.t > life - 0.3 ? (life - tt.t) / 0.3 : 1;
       const xr = W - 12 + Math.round((1 - easeOutBack(inK)) * 50);
       c.globalAlpha = out * Math.min(1, inK * 1.6) * heatA;
-      // new type flashes white for a beat, then settles into its colour
-      text3d(c, tt.text, xr, ty, { face: tt.t < 0.16 ? '#ffffff' : inkFor(tt.color), align: 'right' });
-      if (tt.sub) text3d(c, tt.sub, xr, ty + 15, { face: T3D.dim, align: 'right', depth: 1 });
+      // the letters tumble in one by one; a little scarab gem ticks it off at the left, winking when it lands
+      const tw = text3dReveal(c, tt.text, xr, ty, { face: inkFor(tt.color), align: 'right' }, tt.t / 0.3);
+      const wink = tt.t < 0.45 ? 1 + Math.round(Math.sin(tt.t * 40) * 0.5) : 1;
+      blitObj(c, uiMark('gem'), xr - tw - 8, ty + 6 + Math.round(Math.sin(this.t * 3 + i * 1.3) * 0.8), wink, 1);
+      if (tt.sub) text3d(c, tt.sub, xr - 6, ty + 15, { face: T3D.dim, align: 'right', depth: 1 });
       c.globalAlpha = 1;
       ty += (tt.sub ? 32 : 18) + 1;
     }

@@ -986,7 +986,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
     const herShot = (wide = false) => (wide ? shot(shoulder, soulAt.clone().add(new THREE.Vector3(0, soulH * 0.62, 0)), 46, true) : shot(herClose, soulAt.clone().add(new THREE.Vector3(0, soulH * 0.66, 0)).addScaledVector(side, 0.25), 40, true));
     const hisShot = () => shot(ap.clone().addScaledVector(fwd, 3.0).addScaledVector(side, 1.5).add(new THREE.Vector3(0, 1.45, 0)), ap.clone().add(new THREE.Vector3(0, 1.45, 0)).addScaledVector(side, 0.8), 44, true);
     herShot(true);
-    await say('serket', 'Easy, bone-rider. Holster that glare. I am the one who stitched you back together.', 1.0);
+    await say('serket', 'Easy, child of my sting. Holster that glare. I am the one who posted your bounty.', 1.0);
     spirit.pose = 'present';
     hisShot();
     actor.setExpression('determined');
@@ -1002,7 +1002,7 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
       'serket',
       [
         'Serket. Goddess of scorpions, healer of stings, patron saint of hopeless causes. Hello, cause.',
-        'Manners! On a skeleton! Pinch, you have raised him well.',
+        'Manners! From a boy the sand raised. I did keep half an eye on you.',
         'I see. Sethos, a million dollars, one pistol, no plan. My favourite kind of fool.',
       ][a1],
       1.0
@@ -1025,8 +1025,8 @@ export async function playIntro(d: IntroDeps): Promise<IntroResult> {
       'serket',
       [
         'I want my sands back. You want your name back. Funny how the stars line up.',
-        'Your name, bone-rider. Every bounty you bring down, I carve one letter of it back onto your soul.',
-        'He says you are rusty, reckless and you snore. He adores you.',
+        'Your name, bone-rider. Every bounty you bring down, I carve one letter of it back onto your heart.',
+        'Of course she hears it. She is me, made small. Rusty, reckless, snores. I adore you anyway.',
       ][a2],
       1.0
     );

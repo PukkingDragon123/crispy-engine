@@ -12,6 +12,7 @@
 // The palette (T3D) is the bright UI set: warm creams, bright brass and jade, blood and sky.
 import * as THREE from 'three';
 import { pixelTextWidth } from './HudSprites';
+import { sprite, type PixelSprite } from './PixelUI';
 
 /** the bright UI type colours */
 export const T3D = {
@@ -199,4 +200,64 @@ export function text3dScaled(c: CanvasRenderingContext2D, q: number, str: string
 /** advance width of a line of 3D type (HUD px) */
 export function text3dWidth(str: string, size = 16) {
   return pixelTextWidth(str, size);
+}
+
+/**
+ * A playful reveal: the letters pop in one after another (p 0..1), the newest dropping
+ * into place from a couple of pixels above. Same layout as text3d once p reaches 1.
+ */
+export function text3dReveal(c: CanvasRenderingContext2D, str: string, x: number, y: number, o: Text3DOpts, p: number) {
+  if (p >= 1 || !str) return text3d(c, str, x, y, o);
+  const al = o.align ?? 'left';
+  const size = o.size ?? 16;
+  const fw = pixelTextWidth(str, size);
+  const X = al === 'center' ? x - fw / 2 : al === 'right' ? x - fw : x;
+  const n = Math.max(0, Math.min(str.length, Math.floor(p * (str.length + 1))));
+  const frac = p * (str.length + 1) - n;
+  const lead = str.slice(0, Math.max(0, n - 1));
+  if (lead) text3d(c, lead, X, y, { ...o, align: 'left' });
+  if (n >= 1) {
+    const ch = str[n - 1];
+    if (ch !== ' ') {
+      const lx = X + (lead ? pixelTextWidth(lead, size) : 0);
+      const drop = Math.round((1 - Math.min(1, frac * 2)) * -3 * (size / 16));
+      text3d(c, ch, lx, y + drop, { ...o, align: 'left', face: '#ffffff' });
+    }
+  }
+  return fw;
+}
+
+// ------------------------------------------------------------------ authored UI marks (palette sprites)
+// Small hand-authored pixel motifs that give the floating type its Egyptian voice:
+// a brass lotus with jade sepals (titles), a brass-and-jade scarab gem (toast ticks).
+const LOTUS: PixelSprite = {
+  w: 11,
+  h: 8,
+  rows: [
+    '.....k.....',
+    '....kjk....',
+    '..k.kijk.k.',
+    '.kIkihjhkIk',
+    '.kHIhhghIHk',
+    '..kHIggIHk.',
+    '...kGHHGk..',
+    '....kkkk...',
+  ],
+};
+const GEM: PixelSprite = {
+  w: 7,
+  h: 7,
+  rows: [
+    '...k...',
+    '..kjk..',
+    '.kiIik.',
+    'kjIJHhk',
+    '.khGhk.',
+    '..kgk..',
+    '...k...',
+  ],
+};
+/** a UI mark as a cached canvas */
+export function uiMark(name: 'lotus' | 'gem') {
+  return sprite(name === 'lotus' ? LOTUS : GEM);
 }

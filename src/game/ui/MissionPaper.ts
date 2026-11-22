@@ -22,7 +22,7 @@ import { PixelFx, wrapInk, h3, clamp, clamp01, TAU, uiSfx, KNZ } from './HudKit'
 import { blitObj, blitShear, blitShearObj, shadowOffset, variant, pixelText, pixelTextWidth } from './HudSprites';
 import { sprite, nine } from './PixelUI';
 import { HUD_ART as ART } from './HudArt';
-import { text3d, T3D } from './Text3D';
+import { text3d, uiMark, T3D } from './Text3D';
 
 /** what one note says */
 export interface PaperQuest {
@@ -168,6 +168,9 @@ class Note {
   private lastObjective = '';
   progLine = -1;
   progW = 0;
+  /** width and line of the title's first row (the lotus sits off its left shoulder) */
+  titleW = 0;
+  titleY = 0;
   strokeT = -1;
   ending: 'done' | 'fail' | 'quiet' | null = null;
   stamped = false;
@@ -235,8 +238,15 @@ class Note {
     c.drawImage(paper, 0, 0);
     let y = PAD + Math.round(3 * u);
     this.progLine = -1;
+    this.titleW = 0;
     for (const l of lines) {
-      if (l.kind === 'title') text3d(c, l.t, w / 2, y, { size: fs, face: T3D.brass, align: 'center' });
+      if (l.kind === 'title') {
+        if (!this.titleW) {
+          this.titleW = pixelTextWidth(l.t, fs);
+          this.titleY = y;
+        }
+        text3d(c, l.t, w / 2, y, { size: fs, face: T3D.brass, align: 'center' });
+      }
       else if (l.kind === 'obj') text3d(c, l.t, PAD, y, { size: fs, face: T3D.cream, depth: 1 });
       else if (l.kind === 'prog') {
         text3d(c, l.t, PAD + IND, y, { size: fs, face: T3D.jade, depth: 1 });
@@ -568,6 +578,11 @@ export class MissionPaper {
       blitShear(c, variant(n.base, 'shadow'), left + ox, top + oy, sway, 0.34 * (1 - n.burnP));
       blitShear(c, pic, left, top, sway, alpha);
     } else blitShearObj(c, pic, left, top, sway, alpha, rise, n.base);
+    // a brass lotus on the title's left shoulder, breathing, tipping a little in the wind (asymmetric on purpose)
+    if (n.state !== 'burn' && n.titleW > 0) {
+      const lx = left + n.w / 2 - n.titleW / 2 - 9 * u, ly = top + n.titleY + 5 * u + Math.sin(t * 1.9) * 1.1;
+      blitObj(c, uiMark('lotus'), lx + Math.sin(t * 1.3) * 0.6, ly, 1, alpha);
+    }
   }
 
   private drawScrap(c: CanvasRenderingContext2D, sc: { n: Note; t: number; ox: number; oy: number }, ax: number, ay: number, wind: number) {

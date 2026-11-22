@@ -3,7 +3,7 @@
 // walking in, a boss going down). Each one types itself out as a small Alagard
 // subtitle beside his head and is spoken in his voice (Voice 'sundown').
 // A boss walking in gets a line of its own where the story has one (docs/LORE.md),
-// and Pinch, in the hat, sometimes clicks his two cents after (jade type, his side).
+// and Pinch (Serket made small), in the hat, sometimes clicks her two cents after (jade type, her side).
 //
 // Self-driving: hooks ctx.events and engine.onAfterUpdate itself and tears down
 // when the run scene goes away. RunScene needs one line:
@@ -27,7 +27,7 @@ type Kind = 'multi' | 'massacre' | 'lowHp' | 'reload' | 'trick' | 'zone' | 'boss
 /** Sundown on a boss walking in, matched on "name title" (first match wins; the rest get the plain boss lines) */
 const BOSS_LINES: [RegExp, string[]][] = [
   [/marshal/i, ["Evenin', partner.", 'Wade. You owe me a horse.', 'Draw, Wade. Slow this time.']],
-  [/^sethos/i, ['Sethos. You bought the trap.', 'A million on your head. Hold still.']],
+  [/^sethos/i, ['Sethos. You bought the man with the trap.', 'A million on your head. Hold still.']],
   [/avatar of set/i, ['Red God. Seen redder.', "Storm's over, big fella."]],
   [/shifting sands/i, ["Sand's got a face. Ugly one.", "Wake up, moon. Rent's due."]],
   [/khonsu/i, ["Evenin', moon. You're early.", 'Paid for those nights. Ask Thoth.']],
@@ -39,21 +39,21 @@ const BOSS_LINES: [RegExp, string[]][] = [
   [/thornback/i, ['Hold still, cactus.']],
   [/cleopatra/i, ["Paint it black, ma'am.", 'Nice veil. Keep it on.']],
   [/^ra\b/i, ['Sun sets. Ask me how I know.', 'They call me Sundown for a reason.']],
-  [/sphinx/i, ["Ask away. I'm dead, not dumb."]],
+  [/sphinx/i, ["Ask away. I'm cursed, not dumb."]],
   [/sebekhotep/i, ["Big jaws. Mine are iron."]],
   [/leviathan/i, ['Nice boat. Shame about it.']],
   [/oasis king/i, ['Your water tastes like frog.']],
   [/olm/i, ["Can't see me? Lucky you."]],
 ];
 
-/** Pinch's two cents after a bark (he talks in clicks; the words are what he does) */
+/** Pinch's two cents after a bark (she talks in clicks; the words are what she does) */
 const PINCH_LINES: Partial<Record<Kind, string[]>> = {
   boss: ['*click click click*', '*snaps both claws*', '*tail up, ready*', '*clicks nervously*'],
   bossDown: ['*victory dance on the hat brim*', '*snip snip*', '*clicks, very smug*', '*tiny claw salute*'],
   lowHp: ['*worried clicking*', '*taps your skull twice*', '*clicks: get up, get up*'],
-  massacre: ['*counts on his claws, gives up*', '*one impressed click*'],
+  massacre: ['*counts on her claws, gives up*', '*one impressed click*'],
 };
-/** ...and on a boss walking in, where he has an opinion */
+/** ...and on a boss walking in, where she has an opinion */
 const PINCH_BOSS: [RegExp, string][] = [
   [/bertha/i, '*hides in the hat*'],
   [/marshal/i, '*hisses at the tin star*'],
