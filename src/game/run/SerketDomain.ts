@@ -530,6 +530,20 @@ export class SerketDomain {
       o.groundAt = H;
       this.restore.push(() => (o.groundAt = g0));
     }
+    // no storm reaches her domain (the run's storm checks go by x/z only)
+    const storm = w.storm as Record<string, unknown> | undefined;
+    if (storm) {
+      const own = { sdf: Object.getOwnPropertyDescriptor(storm, 'sdf'), devilDamageAt: Object.getOwnPropertyDescriptor(storm, 'devilDamageAt') };
+      storm.sdf = () => 999;
+      storm.devilDamageAt = () => 0;
+      this.restore.push(() => {
+        for (const k of ['sdf', 'devilDamageAt'] as const) {
+          const dsc = own[k];
+          if (dsc) Object.defineProperty(storm, k, dsc);
+          else delete storm[k];
+        }
+      });
+    }
     // Sundown at the ring's heart, facing her; Pinch is not on him (Pinch is her)
     const st = { x: pp.x, z: pp.z, heading: this.player.board.heading };
     this.player.board.place(C.x, C.y, C.z + 7, Math.PI);

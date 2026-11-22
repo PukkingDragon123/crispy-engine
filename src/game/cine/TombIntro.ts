@@ -673,6 +673,8 @@ export async function playTombIntro(d: TombDeps): Promise<{ skipped: boolean }> 
     spirit.setExpression('smug');
     await say('serket', 'No door here but the one I open. Ride for me, shoot for me, bleed a little for me, and I will open it.', 0.6);
   } finally {
+    // hand the screen back first, so nothing below can leave the run looking at an empty set
+    if (prevScene && prevCam) eng.post.setSceneCamera(prevScene, prevCam);
     window.removeEventListener('keydown', onKey);
     window.removeEventListener('pointerdown', onDown);
     skipEl.remove();
@@ -684,9 +686,6 @@ export async function playTombIntro(d: TombDeps): Promise<{ skipped: boolean }> 
     night.dispose();
     arena.dispose();
     fx.group.removeFromParent();
-    scene.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh && geos.includes((o as THREE.Mesh).geometry)) o.removeFromParent();
-    });
     for (const g of geos) g.dispose();
     for (const r of stoneRigs) r.root.removeFromParent();
     matSet.dispose();
@@ -694,7 +693,6 @@ export async function playTombIntro(d: TombDeps): Promise<{ skipped: boolean }> 
     matArena.dispose();
     skyMat.dispose();
     sun.shadow.map?.dispose();
-    if (prevScene && prevCam) eng.post.setSceneCamera(prevScene, prevCam);
     phase('done');
   }
   return { skipped };

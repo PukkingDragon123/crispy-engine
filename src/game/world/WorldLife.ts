@@ -230,7 +230,7 @@ export class WorldLife {
           if (a.timer <= 0.12 && a.timer + dt > 0.12) {
             const hx = t.x + ux * reach * 0.85, hz = t.z + uz * reach * 0.85;
             if (pl.alive && Math.hypot(pl.pos.x - hx, pl.pos.z - hz) < 2.2) pl.takeHit({ base: 16, kind: 'phys', source: 'melee', knock: 9, dirX: ux, dirZ: uz }, _v.set(t.x, t.y + 1, t.z));
-            ctx.enemies.inRadius(_w.set(hx, t.y + 1, hz), 2.4, (e) => ctx.enemies.damage(e, { base: 40, kind: 'phys', source: 'melee', knock: 8, dirX: ux, dirZ: uz }, _w.clone(), new THREE.Vector3(ux, 0, uz)));
+            ctx.enemies?.inRadius(_w.set(hx, t.y + 1, hz), 2.4, (e) => ctx.enemies.damage(e, { base: 40, kind: 'phys', source: 'melee', knock: 8, dirX: ux, dirZ: uz }, _w.clone(), new THREE.Vector3(ux, 0, uz)));
             ctx.fx.dust({ x: hx, y: ctx.world.groundAt(hx, hz) + 0.2, z: hz }, 1.1, undefined, 5);
             ctx.shake(0.18);
           }
@@ -344,7 +344,7 @@ export class WorldLife {
     const v = pl.board?.vel;
     if (pl.alive) this.stepBody(pl, pl.pos.x, pl.pos.y, pl.pos.z, v?.x ?? 0, v?.z ?? 0, 1, dt);
     const fx = pl.pos.x, fz = pl.pos.z;
-    for (const e of this.ctx.enemies.list) {
+    for (const e of this.ctx.enemies?.list ?? []) {
       if (!e.alive || e.flying || Math.abs(e.pos.x - fx) > 70 || Math.abs(e.pos.z - fz) > 70) continue;
       this.stepBody(e, e.pos.x, e.pos.y, e.pos.z, e.vel.x, e.vel.z, Math.min(3, e.radius * 1.6), dt);
     }
