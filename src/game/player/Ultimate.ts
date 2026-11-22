@@ -201,7 +201,8 @@ export class Ultimate {
   }
 
   async trigger() {
-    if (this.active) return;
+    // never while Sundown is off his board (bail ragdoll, walking back to it)
+    if (this.active || this.player.bail?.active) return;
     const ctx = this.ctx;
     const eng = ctx.engine;
     if (this.hero) {

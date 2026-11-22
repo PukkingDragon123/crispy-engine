@@ -370,7 +370,11 @@ export class Skills {
     if (this.player.alive) {
       const q = Qte.current;
       const eaten = (a: Action) => !!q && (q.quickWants(a) || q.ate(a));
-      if (this.aiming) this.updateAim(dt);
+      // off the board (bail ragdoll, walking back to the board): no casting
+      const offBoard = !!this.player.bail?.active;
+      if (offBoard) {
+        if (this.aiming) this.endAim();
+      } else if (this.aiming) this.updateAim(dt);
       else {
         if (inp.hit('skill1') && !eaten('skill1')) this.tryCast('E');
         if (inp.hit('skill2') && !eaten('skill2')) this.tryCast('C');

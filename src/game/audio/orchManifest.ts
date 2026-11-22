@@ -61,6 +61,7 @@ export const ORCH: Record<OrchInst, OrchSample[]> = {
     { midi: 53, file: 'orch/horn/horn_53.mp3', len: 6.0, ls: 1.0, le: 5.5 },
     { midi: 57, file: 'orch/horn/horn_57.mp3', len: 6.0, ls: 1.0, le: 5.5 },
     { midi: 60, file: 'orch/horn/horn_60.mp3', len: 6.0, ls: 1.0, le: 5.5 },
+    { midi: 74, file: 'orch/horn/horn_74.mp3', len: 6.0, ls: 1.0, le: 5.5 },
     { midi: 77, file: 'orch/horn/horn_77.mp3', len: 6.0, ls: 1.0, le: 5.5 },
   ],
   lowbr: [

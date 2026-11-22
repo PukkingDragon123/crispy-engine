@@ -13,7 +13,8 @@
 //      coat and collar onto his hat, whispers, and the domain opens onto the first desert day
 // Every step's goal hangs in the air as 3D text; all her words are floating 3D text. No 2D boxes.
 // Events listened for on the run's bus: 'jump', 'chargeJump', 'flip', 'trick', 'wipeout', 'boardRecovered',
-// 'skillCast', 'cast', 'ultimate', 'propShot'. Also the board's onJump callback (charge >= 0.3 = charged).
+// 'skillCast', 'cast', 'ultimate', 'propShot'. Also the board's onJump callback (charge >= 0.3 = charged), and it sets
+// player.balanceAssist (1 while he learns the board, 0.5 after; restored when the domain opens).
 import * as THREE from 'three';
 import type { Ctx } from '../Ctx';
 import type { Player } from '../player/Player';
@@ -609,6 +610,17 @@ export class SerketDomain {
     if (d > 0) pl.takeHit({ base: d, kind: 'magic', source: 'scorpion', knock } as Hit, from);
   }
 
+  /** BOARD's balance assist (0.5 soft .. 1 full) while she teaches; put back as it was when the domain opens */
+  private assistWas: number | undefined | null = null;
+  private assist(v: number) {
+    const p = this.player as any;
+    if (this.assistWas === null) {
+      this.assistWas = p.balanceAssist;
+      this.restore.push(() => (p.balanceAssist = this.assistWas ?? undefined));
+    }
+    p.balanceAssist = v;
+  }
+
   private applyNight() {
     const env = this.host.world.env as { apply?: (p: any) => void; preset?: any };
     if (!this.basePreset || !env.apply) return;
@@ -645,7 +657,8 @@ export class SerketDomain {
         this.hideMark();
         yield 0.3;
       }
-      // 2. the board
+      // 2. the board (she steadies him while he learns)
+      this.assist(1);
       this.rideDist = 0;
       this.carveT = 0;
       this.setGoals([tk('RIDE   W, steer with A / D', 'RIDE   hold your left thumb down'), tk('CARVE   lean into the bowl', 'CARVE   drag into the turns')]);
@@ -662,8 +675,8 @@ export class SerketDomain {
       yield this.until(20, () => this.check(0, this.ev.jump + this.ev.charge > 0));
       yield* this.passGoals('Light on your feet.');
       this.ev.charge = 0;
-      this.setGoals([tk('CHARGED JUMP   hold SHIFT, then SPACE', 'CHARGED JUMP   hold, then flick up'), tk('FARTHER   hold it longer', 'FARTHER   hold it longer')]);
-      yield* this.line(tk('Now coil those bones. Hold SHIFT and jump: the longer you hold, the farther you fly.', 'Now coil those bones. Hold, then jump: the longer you hold, the farther you fly.'), 'neutral', 'beckon', 0.4);
+      this.setGoals([tk('CHARGED JUMP   hold SHIFT + SPACE, no A / D', 'CHARGED JUMP   hold, then flick up'), tk('FARTHER   hold it longer, then let go', 'FARTHER   hold it longer, then let go')]);
+      yield* this.line(tk('Now coil those bones. Hold SHIFT and SPACE together, hands off A and D: the longer you hold, the farther you fly.', 'Now coil those bones. Hold, then jump: the longer you hold, the farther you fly.'), 'neutral', 'beckon', 0.4);
       yield this.until(25, () => {
         if (this.ev.charge > 0) (this.check(0, true), this.check(1, true));
         return this.ev.charge > 0;
@@ -671,8 +684,8 @@ export class SerketDomain {
       yield* this.passGoals('Graceful. For a scorpion.');
       this.ev.flip = 0;
       this.ev.wipe = 0;
-      this.setGoals([tk('FLIP   in the air, hold SHIFT', 'FLIP   in the air, hold'), 'LAND IT   come down straight']);
-      yield* this.line(tk('Up in the air, hold SHIFT to throw a flip. Land it straight, or eat my slate.', 'Up in the air, hold to throw a flip. Land it straight, or eat my slate.'), 'smug', 'beckon', 0.4);
+      this.setGoals([tk('FLIP   in the air, SHIFT + W or S  (A / D spins)', 'FLIP   in the air, hold'), tk('LAND IT   keep SHIFT held to the landing', 'LAND IT   come down straight')]);
+      yield* this.line(tk('Jump off the rim, and in the air hold SHIFT with W or S to flip, A or D to spin. Keep holding to the landing, or eat my slate.', 'Up in the air, hold to throw a flip. Land it straight, or eat my slate.'), 'smug', 'beckon', 0.4);
       let wipes = 0;
       yield this.until(30, () => {
         if (this.ev.wipe > wipes) {
@@ -684,7 +697,8 @@ export class SerketDomain {
       });
       yield* this.passGoals('Show-off. I love it.');
       if (wipes > 0 && this.ev.recover < wipes) yield this.until(10, () => this.ev.recover >= wipes);
-      yield* this.line('Speed is a friend with a temper. Go too fast, land crooked, and the sand throws you off. Keep your balance.', 'stern', 'open', 0.6);
+      yield* this.line('Speed is a friend with a temper. Go too fast, land crooked, and the sand throws you off. Keep your balance. Out there I will not be holding you up.', 'stern', 'open', 0.6);
+      this.assist(0.5);
       // 3. the gun
       this.spirit.pose = 'raise';
       this.spirit.flick();
