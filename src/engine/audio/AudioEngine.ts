@@ -136,6 +136,49 @@ export class LoopHandle {
   }
 }
 
+// Audio packs: a build may bundle the audio folder into a few pack-*.bin files with an index
+// (audio/pack.json: path -> [pack file, byte offset, byte length]). Hosts with a file-count cap
+// (the artifact page) serve the packs; every other build falls back to the loose files.
+type PackIndex = Record<string, [string, number, number]>;
+const packIdx = new Map<string, Promise<PackIndex | null>>();
+const packBin = new Map<string, Promise<ArrayBuffer>>();
+function loadPackIndex(root: string) {
+  let p = packIdx.get(root);
+  if (!p) {
+    p = fetch(root + 'pack.json')
+      .then((r) => (r.ok ? (r.json() as Promise<PackIndex>) : null))
+      .catch(() => null);
+    packIdx.set(root, p);
+  }
+  return p;
+}
+export async function audioFetch(url: string): Promise<ArrayBuffer> {
+  const i = url.lastIndexOf('audio/');
+  if (i >= 0) {
+    const root = url.slice(0, i + 6);
+    const idx = await loadPackIndex(root);
+    const e = idx?.[url.slice(i + 6)];
+    if (e) {
+      let bin = packBin.get(root + e[0]);
+      if (!bin) {
+        bin = fetch(root + e[0]).then((r) => {
+          if (!r.ok) throw new Error(r.status + '');
+          return r.arrayBuffer();
+        });
+        packBin.set(root + e[0], bin);
+      }
+      try {
+        return (await bin).slice(e[1], e[1] + e[2]);
+      } catch {
+        /* fall through to the loose file */
+      }
+    }
+  }
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(res.status + '');
+  return res.arrayBuffer();
+}
+
 export class AudioEngine {
   ctx: AudioContext;
   master: GainNode;
@@ -234,9 +277,7 @@ export class AudioEngine {
     let done = 0;
     const worker = async (f: string) => {
       try {
-        const res = await fetch(base + f);
-        if (!res.ok) throw new Error(res.status + '');
-        const arr = await res.arrayBuffer();
+        const arr = await audioFetch(base + f);
         const buf = await this.ctx.decodeAudioData(arr);
         this.buffers.set(f, buf);
       } catch (e) {
@@ -257,8 +298,7 @@ export class AudioEngine {
   /** load arbitrary extra buffers (e.g. instrument samples) */
   async loadBuffer(path: string) {
     if (this.buffers.has(path)) return this.buffers.get(path)!;
-    const res = await fetch(path);
-    const arr = await res.arrayBuffer();
+    const arr = await audioFetch(path);
     const buf = await this.ctx.decodeAudioData(arr);
     this.buffers.set(path, buf);
     return buf;
