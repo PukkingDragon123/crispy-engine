@@ -22,6 +22,7 @@ import { nine, strip3, type PixelSprite } from './PixelUI';
 import { HUD_ART as ART } from './HudArt';
 import { text3d, text3dReveal, uiMark, T3D } from './Text3D';
 import { blitObj } from './HudSprites';
+import { DayPlaque } from './DayPlaque';
 
 
 /** one quest note on the mission paper stack */
@@ -225,6 +226,8 @@ export class Hud {
   /** the boss's themed health bar */
   private bossBar = new BossBar();
   private bossBottom = 0;
+  /** bottom of the top-centre cluster (wave plaque / boss bar / hourglass), HUD px: side notes keep below it */
+  topClear = 0;
   private promptKey = '';
   private promptT = 9;
   /** the magazine's spot on top of the tarot pile (HUD px) and the pile's size factor */
@@ -725,6 +728,7 @@ export class Hud {
         glass.k = k;
         glass.visible = true;
       }
+      this.topClear = glass ? glass.y + Math.round((glass.h / 2) * k) : Math.round(py + 44 * k);
       this.outlawBase.watch = brk && !glass ? { left: s.intermission!, total: s.intermissionTotal ?? 30, bell: s.bell ?? 0 } : null;
       if (brk && !glass) {
         // beside the watch: how to cut the break short
@@ -766,6 +770,7 @@ export class Hud {
         this.tl(c, `${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}`, cx + sw, sy + sgH + 2, UI.wood.o, 16, 'center', false);
       }
       this.tl(c, s.zone, cx, sy + sgH + 20, 'rgba(240,220,180,0.85)', 16, 'center');
+      this.topClear = sy + sgH + 36;
     } else {
       // the boss's own themed bar (ui/BossBar): segments that crack, phase gems, hit jolts
       this.bossBottom = this.bossBar.paint(c, dt, s.boss, cx, 4 - slide * 60, W);
@@ -776,6 +781,7 @@ export class Hud {
         glass.k = k;
         glass.visible = true;
       }
+      this.topClear = glass ? glass.y + Math.round((glass.h / 2) * k) : this.bossBottom;
     }
     for (const sl of this.slots.values())
       if (sl.id !== 'hourglass') {
@@ -1003,7 +1009,8 @@ export class Hud {
     for (let i = this.toasts.length - 1; i >= 0; i--) {
       const tt = this.toasts[i];
       tt.t += dt;
-      const life = tt.big ? 2.1 : tt.sub ? 1.5 : 1.2;
+      // (long enough to read a two-line hint once)
+      const life = tt.big ? 2.1 : tt.sub ? 2.6 : 1.5;
       if (tt.t > life) {
         this.toasts.splice(i, 1);
         continue;
@@ -1012,8 +1019,9 @@ export class Hud {
         // big title: drops in high over the action, clear of the rider, as bold 3D type
         const k = Math.min(1, tt.t / 0.4);
         const out = tt.t > life - 0.35 ? (life - tt.t) / 0.35 : 1;
-        // below the day plaque and hourglass, above the rider
-        const yy = Math.round(H * 0.27 + (1 - easeOutBack(k)) * -16);
+        // below the day plaque (its tag and warning too) and the hourglass, above the rider
+        const dp = this.painters.find((p): p is DayPlaque => p instanceof DayPlaque);
+        const yy = Math.round(Math.max(H * 0.27, this.topClear + 10, (dp?.bottom ?? 0) + 6) + (1 - easeOutBack(k)) * -16);
         c.globalAlpha = out * Math.min(1, k * 2.5) * heatA;
         // the letters pop in one by one; a brass lotus blooms up off the title's left shoulder, a scarab gem
         // hangs off its right foot (an asymmetric pair), both breathing gently while it stays
@@ -1032,13 +1040,16 @@ export class Hud {
       const out = tt.t > life - 0.3 ? (life - tt.t) / 0.3 : 1;
       const xr = W - 12 + Math.round((1 - easeOutBack(inK)) * 50);
       c.globalAlpha = out * Math.min(1, inK * 1.6) * heatA;
-      // the letters tumble in one by one; a little scarab gem ticks it off at the left, winking when it lands
-      const tw = text3dReveal(c, tt.text, xr, ty, { face: inkFor(tt.color), align: 'right' }, tt.t / 0.3);
+      // whole words slide in from the right margin (a letter-by-letter reveal read as clipped labels);
+      // a little scarab gem ticks it off at the left, winking when it lands
+      const tw = text3d(c, tt.text, xr, ty, { face: inkFor(tt.color), align: 'right' });
       const wink = tt.t < 0.45 ? 1 + Math.round(Math.sin(tt.t * 40) * 0.5) : 1;
       blitObj(c, uiMark('gem'), xr - tw - 8, ty + 6 + Math.round(Math.sin(this.t * 3 + i * 1.3) * 0.8), wink, 1);
-      if (tt.sub) text3d(c, tt.sub, xr - 6, ty + 15, { face: T3D.dim, align: 'right', depth: 1 });
+      // the hint under it keeps to the right margin: a sentence a line, at most three, never across the middle
+      const subs = tt.sub ? wrapLines(tt.sub, Math.min(270, Math.round(W * 0.42)), 3) : [];
+      subs.forEach((ln, j) => text3d(c, ln, xr - 6, ty + 15 + j * 14, { face: T3D.dim, align: 'right', depth: 1 }));
       c.globalAlpha = 1;
-      ty += (tt.sub ? 32 : 18) + 1;
+      ty += 18 + subs.length * 14 + 1;
     }
     this.outlawBase.k = k;
     this.anchors.outlaw = this.use3D ? this.outlawBase : null;
@@ -1059,6 +1070,22 @@ function easeOutBounce(t: number) {
   if (t < 2 / d1) return n1 * (t -= 1.5 / d1) * t + 0.75;
   if (t < 2.5 / d1) return n1 * (t -= 2.25 / d1) * t + 0.9375;
   return n1 * (t -= 2.625 / d1) * t + 0.984375;
+}
+/** word wrap to `maxW` HUD px (Alagard 16), each sentence on its own line(s), at most `max` lines (the rest is cut) */
+function wrapLines(str: string, maxW: number, max: number) {
+  const out: string[] = [];
+  for (const sen of str.split(/(?<=[.!?])\s+/)) {
+    let cur = '';
+    for (const wd of sen.split(/\s+/)) {
+      const nx = cur ? cur + ' ' + wd : wd;
+      if (cur && pixelTextWidth(nx, 16) > maxW) {
+        out.push(cur);
+        cur = wd;
+      } else cur = nx;
+    }
+    if (cur) out.push(cur);
+  }
+  return out.slice(0, max);
 }
 /** toast type: the toast's own colour, lifted toward the bright UI ramp if it is too dark to read over the sand */
 function inkFor(css: string) {

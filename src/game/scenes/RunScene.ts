@@ -12,6 +12,7 @@ import { ClothRenderer } from '../../engine/physics/Cloth';
 import { Player, PlayerVisuals } from '../player/Player';
 import { CameraRig } from '../player/CameraRig';
 import { Enemies } from '../enemies/Enemies';
+import { ENEMIES } from '../enemies/EnemyDefs';
 import { NileFleet } from '../enemies/NileFleet';
 import { WorldLife } from '../world/WorldLife';
 import { Pickups } from '../run/Pickups';
@@ -93,6 +94,9 @@ import { unlock, technique } from '../player/Techniques';
 import { KhonsuAvatar } from '../bosses/Khonsu';
 import { ULT_INFO } from '../player/Ultimate';
 import { markVisuals, installMark } from '../player/heroes/Mark';
+
+/** the first wave a Rolling Stone can roll in (its rig is carved a few waves ahead) */
+const STONE_WAVE = ENEMIES.rollingStone?.firstWave ?? 12;
 
 export interface RunOptions {
   area: 'A' | 'B' | 'C';
@@ -682,6 +686,8 @@ export class RunScene implements GameScene {
       },
     });
     prewarmReaping();
+    // the Rolling Stone's granite rig takes 0.5-1 s to carve: on a late start carve it while loading
+    if ((this.opts.startWave ?? 1) >= STONE_WAVE - 3) this.warmStone(0);
     this.director.onWaveStart = (s) => this.onWaveStart(s);
     this.director.spawnBoss = (wave) => this.spawnBoss(wave);
     this.director.onWaveEnd = (s) => this.onWaveEnd(s);
@@ -895,7 +901,26 @@ export class RunScene implements GameScene {
     this.engine.tweens.after(1.2, () => this.director.beginCombat());
   }
 
+  /** carve the Rolling Stone's instanced rigs ahead of its first roll-in (no hitch when it spawns) */
+  private stoneWarm = false;
+  private warmStone(delay: number) {
+    if (this.stoneWarm) return;
+    this.stoneWarm = true;
+    const go = () => {
+      try {
+        this.enemies.render.get('rolling_stone', 96);
+        this.enemies.render.get('rolling_stone_alpha', 96);
+      } catch (e) {
+        console.warn('[run] stone prewarm', e);
+      }
+    };
+    if (delay <= 0) go();
+    else setTimeout(() => this.engine.current === this && go(), delay);
+  }
+
   private onWaveEnd(s: WaveSpec) {
+    // in the break a few waves before the stone can first roll in
+    if (s.n >= STONE_WAVE - 3) this.warmStone(600);
     // the storm parts after Sethos falls: ride on to the next sub-area
     if ((s.n === 50 && this.opts.area === 'A') || (s.n === 75 && this.opts.area === 'B')) {
       this.pickups.vacuum();

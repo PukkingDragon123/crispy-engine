@@ -169,6 +169,10 @@ export class DayPlaque implements HudPainter {
   private lastDay = -1;
   private warnK = 0;
   private lastWarn: PlaqueState['warn'] = null;
+  /** the lowest HUD px it draws to, its tag and any night warning included (side notes keep below) */
+  get bottom() {
+    return this.rect.shown ? this.rect.y + this.rect.h + 24 + (this.warnK > 0.02 ? 46 : 0) : 0;
+  }
 
   /** `slot`: where it hangs (HUD px): its top edge `y`, and either its centre `x` or its `right` edge */
   constructor(private state: () => PlaqueState, private slot?: () => { x?: number; right?: number; y: number } | null) {}

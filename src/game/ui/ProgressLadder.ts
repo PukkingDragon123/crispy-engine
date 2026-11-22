@@ -54,6 +54,7 @@ import { Blueprints } from '../meta/Blueprints';
 import { SUBAREAS } from '../world/RegionGen';
 import { NILE_AREAS } from '../world/NileGen';
 import { isTouchDevice } from './TouchControls';
+import { DayPlaque } from './DayPlaque';
 
 export interface LadderDeps {
   engine: Engine;
@@ -425,9 +426,13 @@ export class ProgressLadder {
     const open = (brk || this.hold > 0) && !tipOn;
     const k = 1;
     const x0 = Math.round(-30 * (1 - this.show)) + 4;
-    const top = Math.max(58, Math.round(this.h * 0.17));
+    // (a clear gap under the purse: the strap's buckle never touches the gold coin)
+    const top = Math.max(72, Math.round(this.h * 0.2));
     this.paintLedger(c, dt, x0, top, open, S, k);
-    this.paintTip(c, dt, x0 + 52, top + 10); // right of the badges and their figures
+    // right of the badges and their figures, below the day plaque, its tag and the hourglass (never over them)
+    const dp = hud.painters.find((p): p is DayPlaque => p instanceof DayPlaque);
+    const clear = Math.max(hud.topClear ?? 0, dp?.bottom ?? 0);
+    this.paintTip(c, dt, x0 + 52, Math.max(top + 10, clear + 8));
     this.paintCompass(c, dt, shop, brk);
     this.paintSparks(c, dt);
   }
