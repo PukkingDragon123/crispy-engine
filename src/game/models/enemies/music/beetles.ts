@@ -27,7 +27,7 @@
 // antennae ant_l/_r), arm/fore (gold pauldrons, sawtooth tibiae) → fist_l (a
 // toothed chitin claw) / fist_r (the silver hammer), cannon_l/_r (shoulder
 // guns for the salute), elytra_l/_r. Sockets: mouth, disc_c, muzzle_l/_r, fist_l/_r.
-import { TRig, VF, TOON, ell, seg, chain, rbox, paintSurf, bossExpressions } from '../tk';
+import { TRig, VF, TOON, ell, seg, chain, paintSurf, bossExpressions } from '../tk';
 import type { RigSpec, V3 } from '../tk';
 import type { VoxelModel } from '../../../../engine/voxel/VoxelModel';
 import { hash3 } from '../../../../engine/math/rand';
