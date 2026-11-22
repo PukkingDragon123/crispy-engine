@@ -156,6 +156,13 @@ const MAMA_LINES = [
   "Your jar came home before you did again. It's on the mantel, sugar.",
   "I'm knitting you a sweater with four sleeves. Took me all winter.",
   "Keep that tail off my good rug, dear.",
+  "You hid under my kitchen step when that lawman rode by. Shaking like a leaf. I put a plate of scraps down and never said a word.",
+  "If you find me crying in a puddle out there, you bring my toadlets home. Then we never speak of it.",
+  "Taweret sends her love. Big girl, hippo, bites. We knit together some winters.",
+  "If a scruffy little dog comes sniffing at your purse, sugar, give him gum. Not gold. Gum.",
+  "That potter Khnum says he made you with a grin. I believe it. You have his grin.",
+  "Every stranger out there is a card in somebody's deck. You are the Fool, honey. The Fool always gets home.",
+  "Isis came by for tea once. Lovely manners. Wouldn't tell me a single secret.",
 ];
 
 const ease = (u: number) => (u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2);

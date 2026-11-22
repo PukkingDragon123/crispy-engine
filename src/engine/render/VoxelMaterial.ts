@@ -41,6 +41,11 @@ export const ATMO = {
   sunColor: new THREE.Color(1, 0.85, 0.65),
   /** 0..1 post sun-shaft strength */
   shafts: 0.45,
+  /**
+   * The hour's colour grade (Env writes it per time of day, Post applies it in its world look):
+   * shade tint, light tint, and p = (exposure gain, moonlit shadow lift, vibrance, golden warmth)
+   */
+  grade: { s: new THREE.Color(0.93, 0.965, 1.08), h: new THREE.Color(1.045, 1.0, 0.935), p: new THREE.Vector4(1, 0, 0.22, 0) },
 };
 
 /** haze colour along a view ray: cool sky haze away from the sun, warm forward-scattered glow toward it */
@@ -163,9 +168,10 @@ export type VoxelMaterial = THREE.MeshStandardMaterial & {
  * smooth so the shade tone keeps the sky's colour.
  */
 const CEL_FUNCS = /* glsl */ `
-float celRamp(float x){ return smoothstep(0.0, 0.09, x) * 0.84 + smoothstep(0.5, 0.64, x) * 0.16; }
+// a light cel ramp over a soft lambert: painted form shading with only a gentle two-tone step (not flat toon)
+float celRamp(float x){ float lam = pow(clamp(x, 0.0, 1.0), 0.72); float toon = smoothstep(0.0, 0.16, x) * 0.8 + smoothstep(0.38, 0.78, x) * 0.2; return mix(lam, toon, 0.46); }
 // crisp shadow edges up close, softer with distance (painted far field, no hard frustum seam)
-float celShadow(float s){ float w = mix(0.1, 0.42, smoothstep(14.0, 70.0, length(vViewPosition))); return smoothstep(0.5 - w, 0.5 + w, s); }
+float celShadow(float s){ float w = mix(0.2, 0.45, smoothstep(14.0, 70.0, length(vViewPosition))); return smoothstep(0.5 - w, 0.5 + w, s); }
 #ifndef CEL_SHADOW_HOOK
 #define CEL_SHADOW_HOOK(s) (s)
 #endif
@@ -365,10 +371,10 @@ export function makeVoxelMaterial(o: VoxelMaterialOptions = {}): VoxelMaterial {
             float sl = length(sv.xy);
             float side = sl > 1e-3 ? dot(normalize(normal.xy + vec2(1e-5)), sv.xy / sl) : 0.0;
             float back = clamp(0.5 - sv.z * 0.5, 0.0, 1.0);
-            float band = smoothstep(0.5, 0.64, fres) * smoothstep(-0.05, 0.4, side);
+            float band = smoothstep(0.42, 0.78, fres) * smoothstep(-0.1, 0.45, side);
             totalEmissiveRadiance += diffuseColor.rgb * uSunCol * band * (0.18 + 0.82 * back * back) * uLook.y;
             // cool sky rim on the shade side keeps dark silhouettes readable
-            totalEmissiveRadiance += diffuseColor.rgb * vec3(0.42, 0.55, 0.85) * smoothstep(0.58, 0.8, fres) * (1.0 - smoothstep(-0.35, 0.15, side)) * uLook.w;
+            totalEmissiveRadiance += diffuseColor.rgb * vec3(0.42, 0.55, 0.85) * smoothstep(0.5, 0.86, fres) * (1.0 - smoothstep(-0.35, 0.15, side)) * uLook.w;
             // warm bounce from the sunlit sand onto undersides (chins, hat brims, bellies)
             vec3 nW = (vec4(normal, 0.0) * viewMatrix).xyz;
             float under = clamp(0.42 - nW.y * 0.58, 0.0, 1.0);

@@ -14,11 +14,15 @@
 //     nail (a torn scrap stays impaled for a moment)
 //   • failed: the note catches fire and burns away to embers
 // Several quests stack on the same nail, fanned a little, the newest on top.
+// User note (less paper): the note is now floating 3D type (ui/Text3D) on a faint smoked wash, no parchment
+// and no nail; only the tracked quest shows, it slides in from the right, sits still, and sinks back while
+// the fight is hot (PaperAnchor.heat).
 import * as THREE from 'three';
 import { PixelFx, wrapInk, h3, clamp, clamp01, TAU, uiSfx, KNZ } from './HudKit';
 import { blitObj, blitShear, blitShearObj, shadowOffset, variant, pixelText, pixelTextWidth } from './HudSprites';
 import { sprite, nine } from './PixelUI';
 import { HUD_ART as ART } from './HudArt';
+import { text3d, T3D } from './Text3D';
 
 /** what one note says */
 export interface PaperQuest {
@@ -38,7 +42,7 @@ export interface PaperQuest {
 const REWARDS: [RegExp, string][] = [
   [/^escort/i, 'Reward: bounty & snake oil'],
   [/wagon/i, 'Reward: bounty & gold'],
-  [/rain frog/i, "Reward: a mother's thanks"],
+  [/rain frog|mama toad/i, "Reward: a mother's thanks"],
   [/clear the fort/i, 'Reward: gold strongbox'],
   [/strike it rich/i, 'Reward: bounty for the ore'],
   [/camel rustlers/i, "Reward: Humphrey's swift legs"],
@@ -78,7 +82,21 @@ function notePaper(w: number, h: number, seed: number, coffee: [number, number, 
   cv.width = w;
   cv.height = h;
   const c = cv.getContext('2d')!;
-  c.drawImage(nine(seed > 0.5 ? ART.nine_parch2 : ART.nine_parch, w, h, 8), 0, 0);
+  // a faint smoked wash under the type (readable over bright sand, never a panel): feathered on every side
+  const img = c.createImageData(w, h);
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const e = Math.min(x, w - 1 - x, y, h - 1 - y);
+      const a = clamp01(e / 7) * (0.85 + 0.15 * h3(x >> 1, y >> 1, 5));
+      const o = (y * w + x) * 4;
+      img.data[o] = 18;
+      img.data[o + 1] = 12;
+      img.data[o + 2] = 10;
+      img.data[o + 3] = Math.round(a * a * 0.17 * 255);
+    }
+  c.putImageData(img, 0, 0);
+  void nine;
+  void ART;
   void coffee;
   void scorch;
   return cv;
@@ -172,8 +190,8 @@ class Note {
   setQuest(q: PaperQuest, compact: boolean, fs: number, force = false) {
     this.q = q;
     const u = fs / 16;
-    const PAD = Math.round(9 * u), LH = Math.round(14 * u), IND = Math.round(11 * u);
-    const maxW = Math.round((compact ? 180 : 214) * u);
+    const PAD = Math.round(9 * u), LH = Math.round(16 * u), IND = Math.round(9 * u);
+    const maxW = Math.round((compact ? 164 : 196) * u);
     const obj = wrapInk(q.objective, maxW - PAD * 2, fs, compact ? 1 : 2);
     const prog = q.progress ? wrapInk(q.progress, maxW - PAD * 2 - IND, fs, 1)[0] : '';
     const reward = compact || !q.reward ? '' : wrapInk(q.reward, maxW - PAD * 2, fs, 1)[0];
@@ -218,13 +236,13 @@ class Note {
     let y = PAD + Math.round(3 * u);
     this.progLine = -1;
     for (const l of lines) {
-      if (l.kind === 'title') pixelText(c, l.t, w / 2, y, { size: fs, color: '#5c160a', align: 'center' });
-      else if (l.kind === 'obj') pixelText(c, l.t, PAD, y, { size: fs, color: '#33200e' });
+      if (l.kind === 'title') text3d(c, l.t, w / 2, y, { size: fs, face: T3D.brass, align: 'center' });
+      else if (l.kind === 'obj') text3d(c, l.t, PAD, y, { size: fs, face: T3D.cream, depth: 1 });
       else if (l.kind === 'prog') {
-        pixelText(c, l.t, PAD + IND, y, { size: fs, color: '#6e1a0a' });
+        text3d(c, l.t, PAD + IND, y, { size: fs, face: T3D.jade, depth: 1 });
         this.progLine = y;
         this.progW = pixelTextWidth(l.t, fs);
-      } else pixelText(c, l.t, PAD, y + 2, { size: fs, color: '#6a5232' });
+      } else text3d(c, l.t, PAD, y + 2, { size: fs, face: T3D.dim, depth: 1, shadow: 0.45 });
       y += LH;
       if (l.kind === 'title') y += 1;
     }
@@ -249,9 +267,9 @@ class Note {
     // the progress stroke: a quick brush underline (a little wobbly, thicker mid-stroke)
     if (this.strokeT >= 0 && this.progLine >= 0) {
       const rev = clamp01(this.strokeT / 0.32);
-      const x0 = Math.round(9 * u + 10 * u), x1 = Math.round(x0 + (this.progW + 2 * u) * rev);
-      const yb = this.progLine + Math.round(13 * u);
-      c.fillStyle = '#6a120c';
+      const x0 = Math.round(9 * u + 9 * u), x1 = Math.round(x0 + (this.progW + 2 * u) * rev);
+      const yb = this.progLine + Math.round(15 * u);
+      c.fillStyle = T3D.jade;
       for (let x = x0; x < x1; x++) {
         const f = (x - x0) / Math.max(1, this.progW);
         const yy = yb + Math.round(Math.sin(x * 0.35 + this.seed * 9) * 0.6 + f * 1.2);
@@ -386,6 +404,8 @@ export interface PaperAnchor {
   compact: boolean;
   /** rider speed (m/s): the wind ruffles the note harder */
   speed: number;
+  /** 0..1 how hot the fight is: the note sinks back out of the way */
+  heat?: number;
 }
 
 
@@ -402,6 +422,8 @@ export class MissionPaper {
   bottom = 0;
   /** the nail's x (HUD px): the top note hangs centred on it, clear of the right margin */
   private nailX = -1;
+  /** sinks toward 0.4 while the fight is hot */
+  private fade = 1;
 
   constructor(private scene: THREE.Scene) {
     this.dust = new PixelFx(300, false, 9);
@@ -428,6 +450,7 @@ export class MissionPaper {
   paint(c: CanvasRenderingContext2D, dt: number, quests: PaperQuest[], pa: PaperAnchor, s: number, recent: { text: string; age: number }[]) {
     dt = Math.min(dt, 0.1);
     this.t += dt;
+    this.fade += (1 - (pa.heat ?? 0) * 0.6 - this.fade) * Math.min(1, dt * 5);
     const k = pa.k;
     // Alagard stays on whole pixels: full size from k 0.85 up, a hard-edged smaller cut on a phone
     const fs = k >= 0.85 ? 16 : Math.max(10, Math.round(16 * k * 1.1));
@@ -441,17 +464,17 @@ export class MissionPaper {
       if (!n) {
         n = new Note(q);
         n.setQuest(q, pa.compact, fs, true);
-        // blown in from off the right edge, tumbling
-        n.ox = 90 + Math.random() * 40;
-        n.oy = 20 + Math.random() * 30;
-        n.vx = -60;
-        n.vy = -40;
-        n.lean = 0.7 + Math.random() * 0.4;
+        // glides in from the right edge, level
+        n.ox = 70;
+        n.oy = 0;
+        n.vx = -40;
+        n.vy = 0;
+        n.lean = 0;
         n.state = 'in';
         n.st = 0;
         this.notes.unshift(n);
         this.ended.delete(q.id);
-        uiSfx('paper_flutter', 0.6, 1.1);
+        uiSfx('page_turn', 0.3, 1.25);
       } else {
         n.missing = 0;
         n.setQuest(q, pa.compact, fs);
@@ -489,12 +512,13 @@ export class MissionPaper {
       n.st += dt;
       n.tick(dt);
       const idx = n.ending ? -1 : order++;
-      n.angT = idx <= 0 ? -0.03 : idx === 1 ? 0.1 : idx === 2 ? -0.13 : 0.16;
+      n.angT = 0;
       n.ang += (n.angT - n.ang) * Math.min(1, dt * 5);
       this.advance(n, dt, ax, ay, k);
-      if (idx > 1) continue;
+      // only the top (tracked) note shows: the rest wait their turn (J cycles them)
+      if (idx > 0) continue;
       draw.push({ n, idx });
-      if (!n.ending) bottom = Math.max(bottom, ay + n.h - 7 * (fs / 16) + 6);
+      if (!n.ending) bottom = Math.max(bottom, ay + n.h - 7 * (fs / 16) + 2);
     }
     // back to front: the deepest of the stack first, the newest, then a note being stamped / torn off on top
     draw.sort((a, b) => b.idx - a.idx);
@@ -514,16 +538,8 @@ export class MissionPaper {
       this.drawScrap(c, sc, ax, ay, wind);
       if (sc.t > 4.5) this.scraps.splice(i, 1);
     }
-    // ---------------------------------------------------- the nail, driven through the top note
-    const anyPinned = this.notes.some((n) => n.state === 'pinned' || n.state === 'stamp' || n.state === 'burn');
-    this.nailShow += ((anyPinned || this.scraps.length ? 1 : 0) - this.nailShow) * Math.min(1, dt * 8);
-    this.nailT = Math.min(1, this.nailT + dt / 0.11);
-    const nl = { cv: this.nailSprite(), w: this.nailSprite().width };
-    if (nl && this.nailShow > 0.05) {
-      const drive = this.nailT < 1 ? 1 - this.nailT : 0;
-      const sz = nl.w * Math.max(0.2, this.nailShow) * (1 + drive * 0.7);
-      blitObj(c, nl.cv, ax, ay - Math.round(drive * 3), 1 + drive * 4, 1, sz, sz);
-    }
+    // (no nail: the note is floating type now)
+    void blitObj;
     this.bottom = bottom;
     void s;
   }
@@ -537,16 +553,16 @@ export class MissionPaper {
     const left = ax - n.w / 2 + Math.round(n.ox);
     const flying = n.state === 'in' || n.state === 'tear';
     // calm paper (user note): a slow, small sway, never a flap
-    const amp = (n.state === 'in' ? 0.45 : wind) * 0.55 + n.ruffle * 0.6 + (n.state === 'tear' ? 1.6 : 0);
+    const amp = ((n.state === 'in' ? 0.45 : wind) * 0.55 + n.ruffle * 0.6) * 0.25;
     const tilt = Math.tan(n.ang + n.lean);
     const t = this.t + n.seed * 10;
-    const alpha = n.state === 'tear' ? clamp01(1.6 - n.st * 0.8) : 1;
+    const alpha = (n.state === 'tear' ? clamp01(1 - n.st / 1.2) : n.state === 'in' ? clamp01(n.st / 0.25) : 1) * this.fade;
     const sway = (r: number) => {
       const hang = clamp01((r - 7 * u) / Math.max(1, n.h));
       return -(r - 7 * u) * tilt + Math.sin(t * 2.1 + r * 0.08) * amp * Math.pow(hang, 1.3) * (flying ? 1.15 : 1) + Math.sin(t * 3.4 - r * 0.12) * amp * 0.1 * hang * hang;
     };
     // worn paper off the board: its shadow sways with it, further off while it flies (and gone with what burnt)
-    const rise = flying ? 9 : 2 + n.ruffle * 3;
+    const rise = flying ? 3 : 1;
     if (n.state === 'burn') {
       const [ox, oy] = shadowOffset(rise);
       blitShear(c, variant(n.base, 'shadow'), left + ox, top + oy, sway, 0.34 * (1 - n.burnP));
@@ -579,14 +595,9 @@ export class MissionPaper {
         n.ox = n.oy = n.vx = n.vy = 0;
         n.lean = 0;
         n.ruffle = 1;
-        this.nailT = 0;
-        uiSfx('poster_slam', 0.55, 1.15);
-        uiSfx('rev_hammer', 0.5, 0.6);
-        for (let i = 0; i < 14; i++) {
-          const ang = Math.random() * TAU, v = 20 + Math.random() * 50;
-          this.dust.emit({ x: ax + Math.cos(ang) * 3 * k, y: ay + Math.sin(ang) * 3 * k, vx: Math.cos(ang) * v, vy: Math.sin(ang) * v * 0.6 - 10, ay: 90, drag: 2.5, life: 0.4 + Math.random() * 0.4, size: Math.random() < 0.3 ? 2 : 1, c0: 0xd8c09a, c1: 0x8a7050, alpha: 0.85 });
-        }
-        for (let i = 0; i < 4; i++) this.glow.emit({ x: ax, y: ay, vx: (Math.random() - 0.5) * 80, vy: -Math.random() * 60, ay: 200, drag: 1, life: 0.25 + Math.random() * 0.15, size: 1, c0: 0xffe8b0, c1: 0xff8a3a, alpha: 1 });
+        n.ruffle = 0.3;
+        // a few motes of light settle off the fresh type
+        for (let i = 0; i < 5; i++) this.glow.emit({ x: ax - n.w / 2 + Math.random() * n.w, y: ay + Math.random() * 10 * k, vx: (Math.random() - 0.5) * 30, vy: -10 - Math.random() * 20, ay: 30, drag: 1.5, life: 0.35 + Math.random() * 0.25, size: 1, c0: 0xfff0c0, c1: 0xffb84a, alpha: 0.9 });
       }
     } else if (n.state === 'stamp') {
       n.stampSl = clamp01(n.st / 0.13);
@@ -617,13 +628,10 @@ export class MissionPaper {
       }
       if (n.st > 1.75) n.state = 'gone';
     } else if (n.state === 'tear') {
-      // ripped loose: the wind takes it up and away to the left
-      n.vx -= 620 * dt;
-      n.vy -= 260 * dt;
+      // done with: the type glides off to the right and fades
+      n.vx += 260 * dt;
       n.ox += n.vx * dt;
-      n.oy += n.vy * dt;
-      n.lean += dt * 1.6;
-      if (n.st > 2.2 || ax + n.ox + n.w < 0 || ay + n.oy + n.h < 0) n.state = 'gone';
+      if (n.st > 1.2) n.state = 'gone';
     }
   }
 
@@ -644,22 +652,16 @@ export class MissionPaper {
     } else this.rip(n);
   }
 
-  /** the wind rips the note off the nail; a torn scrap stays behind */
+  /** the note is done with: it glides away */
   private rip(n: Note) {
     n.state = 'tear';
     n.st = 0;
-    n.vx = -40;
-    n.vy = -60;
-    n.ripped = true;
-    n.ruffle = 1;
+    n.vx = 10;
+    n.vy = 0;
+    n.ruffle = 0;
     n.markDirty();
-    uiSfx('paper_flutter', 0.8, 0.95);
-    const u = n.fs / 16;
-    const sw = Math.max(6, Math.round(n.w * 0.16)), shh = Math.max(6, Math.round(16 * u));
-    const sn = new Note(n.q);
-    Object.assign(sn, { base: n.base, w: n.w, h: n.h, fs: n.fs, seed: n.seed });
-    sn.scrap = { x: Math.round(n.w / 2 - sw / 2), y: 0, w: sw, h: shh };
-    this.scraps.push({ n: sn, t: 0, ox: 0, oy: 0, vx: 0, vy: 0 });
+    uiSfx('page_turn', 0.25, 1.4);
+    // (floating type leaves no torn scrap behind)
   }
 
   dispose() {

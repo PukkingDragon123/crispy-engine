@@ -737,7 +737,7 @@ export class RunScene implements GameScene {
     const chest = (x: number, z: number, t: any) => this.spawnChest(x, z, t);
     if (!this.frogs) {
       const at = FrogFamily.findSpot(this.ctx, pp);
-      if (at) this.frogs = new FrogFamily({ ctx: this.ctx, player: this.player, inter: this.inter, addBounty: (v) => this.addBounty(v), chest }, at);
+      if (at) this.frogs = new FrogFamily({ ctx: this.ctx, player: this.player, inter: this.inter, enemies: this.enemies, addBounty: (v) => this.addBounty(v), chest }, at);
     }
     // the broken wagon and the escort gave way to the roadside legends (gods and old stories, run/MythRoad)
     this.mythRoad ??= new MythRoad({ ctx: this.ctx, player: this.player, enemies: this.enemies, inter: this.inter, addBounty: (v) => this.addBounty(v), chest, card: () => this.picker.request() });

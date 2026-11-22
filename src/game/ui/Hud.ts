@@ -20,9 +20,8 @@ import { SLOT, type ArsenalAnchors } from './ArsenalHud';
 import { shadowOffset, variant } from './HudSprites';
 import { nine, strip3, type PixelSprite } from './PixelUI';
 import { HUD_ART as ART } from './HudArt';
+import { text3d, T3D } from './Text3D';
 
-/** the title banner's right tail: the authored left tail mirrored */
-const RIBBON_R: PixelSprite = { w: ART.ribbon_end.w, h: ART.ribbon_end.h, rows: ART.ribbon_end.rows.map((r) => r.split('').reverse().join('')) };
 
 /** one quest note on the mission paper stack */
 export type HudQuest = PaperQuest;
@@ -121,7 +120,7 @@ export interface HudAnchors {
   /** long-gun magazines, the carried-guns strip and treasure markers (3D layer) */
   arsenal: ArsenalAnchors | null;
   /** the mission paper: the right margin it keeps and its nail height */
-  paper: { right: number; y: number; k: number; compact: boolean; speed: number };
+  paper: { right: number; y: number; k: number; compact: boolean; speed: number; heat?: number };
 }
 
 interface Toast {
@@ -169,6 +168,8 @@ export class Hud {
   private hpTrail = 1;
   private hpShake = 0;
   private hpFlash = 0;
+  /** 0..1 how hot the fight is right now: notes and toasts sink back out of the way while it is */
+  private heat = 0;
   private lastHp = -1;
   // purse
   private goldShown = 0;
@@ -890,7 +891,10 @@ export class Hud {
       }
       this.anchors.arsenal = ar;
     } else this.anchors.arsenal = null;
-    this.anchors.paper = { right: W - 8 + slide * 220, y: 10 * k, k, compact: H < 250 || W < 520, speed: s.speed };
+    // combat heat: shots flying, a boss up, aiming or a fresh wound
+    const hot = s.hitMarker > 0 || s.killMarker > 0 || !!s.boss || s.aiming || this.hpFlash > 0;
+    this.heat += ((hot ? 1 : 0) - this.heat) * Math.min(1, dt * (hot ? 6 : 0.7));
+    this.anchors.paper = { right: W - 8 + slide * 220, y: 10 * k, k, compact: H < 250 || W < 520, speed: s.speed, heat: this.heat };
     if (s.objective && !this.use3D) {
       const ow = Math.max(150, Math.ceil(Math.max(measure(c, s.objective.text, 16), measure(c, s.objective.sub, 16))) + 20);
       const ox = W - ow - 8 + slide * 200, oy = 8;
@@ -957,22 +961,18 @@ export class Hud {
         }
         this.promptT += dt;
         const pop = Math.round((1 - Math.min(1, this.promptT / 0.18)) * 4);
+        // floating 3D type with its keycap, no plate: it fades in and sits still and readable
+        c.globalAlpha = Math.min(1, this.promptT / 0.16);
         if (this.touch) {
           // touch: no key, just the verb (the thing itself is what you touch)
-          const label = s.prompt.text || 'TOUCH IT';
-          const bw = Math.ceil(pixelTextWidth(label, 16)) + 16;
-          this.blit(toastPlate(bw + 4, 20, UI.brass.l), x - bw / 2 - 2, y - 10 - pop, 3);
-          pixelText(c, label, x, y - 6 - pop, { size: 16, color: UI.text, align: 'center', outline: UI.shadow });
-          sweep(c, x - bw / 2, y - 9 - pop, bw, 18, this.promptT / 0.45);
+          text3d(c, s.prompt.text || 'TOUCH IT', x, y - 8 - pop, { face: T3D.cream, align: 'center' });
         } else {
           const kc = keycap(s.prompt.key);
-          const tw = Math.ceil(pixelTextWidth(s.prompt.text, 16)) + 14;
-          const bw = tw + kc.width + 6;
-          this.blit(toastPlate(bw + 4, 20, UI.brass.l), x - bw / 2 - 2, y - 10 - pop, 3);
-          this.blit(kc, x - bw / 2 + 5, y - 7 - pop, 1);
-          pixelText(c, s.prompt.text, x - bw / 2 + kc.width + 10, y - 6 - pop, { size: 16, color: UI.text, outline: UI.shadow });
-          sweep(c, x - bw / 2, y - 9 - pop, bw, 18, this.promptT / 0.45);
+          const bw = Math.ceil(pixelTextWidth(s.prompt.text, 16)) + kc.width + 6;
+          this.blit(kc, x - bw / 2, y - 9 - pop, 1);
+          text3d(c, s.prompt.text, x - bw / 2 + kc.width + 6, y - 8 - pop, { face: T3D.cream });
         }
+        c.globalAlpha = 1;
       }
     }
     if (s.marker && this.project) {
@@ -993,46 +993,38 @@ export class Hud {
       px(c, Math.round(mx) - 1, Math.round(my) - 8 + bob, 3, 2, col);
     }
 
-    // ---------------------------------------------------------- toasts (ribbons)
-    let ty = Math.round(Math.max(H * 0.3, this.use3D ? this.paperBottom + 8 : 0));
+    // ---------------------------------------------------------- toasts: floating 3D type, no plates
+    // they keep to the right margin under the mission note, live briefly and sink back while the fight is hot
+    const heatA = 1 - this.heat * 0.5;
+    let ty = Math.round(Math.max(H * 0.2, this.use3D ? this.paperBottom + 6 : 0));
     for (let i = this.toasts.length - 1; i >= 0; i--) {
       const tt = this.toasts[i];
       tt.t += dt;
-      const life = tt.big ? 2.8 : 1.7;
+      const life = tt.big ? 2.1 : tt.sub ? 1.5 : 1.2;
       if (tt.t > life) {
         this.toasts.splice(i, 1);
         continue;
       }
       if (tt.big) {
-        // big title: drops in centre with a bounce on its red banner, crisp type, a sweep of light when new
-        const k = Math.min(1, tt.t / 0.5);
-        const out = tt.t > life - 0.4 ? (life - tt.t) / 0.4 : 1;
-        const tw = Math.ceil(pixelTextWidth(tt.text, 32)) + 24;
-        const yy = Math.round(H * 0.3 + (1 - easeOutBounce(k)) * -50);
-        c.globalAlpha = out;
-        const rb = strip3(ART.ribbon_end, ART.ribbon_mid, RIBBON_R, Math.round((tw + 24) * Math.min(1, k * 1.5)), 'ribbon');
-        this.blit(rb, cx - rb.width / 2, yy - 8, 3);
-        if (k > 0.4) {
-          pixelText(c, tt.text, cx, yy - 6, { size: 32, color: '#fff6e0', align: 'center', outline: '#2a0604' });
-          sweep(c, cx - tw / 2, yy - 6, tw, 22, (tt.t - 0.35) / 0.55);
-        }
-        if (tt.sub && k > 0.6) pixelText(c, tt.sub, cx, yy + 24, { size: 16, color: '#f0dcb4', align: 'center', outline: UI.shadow });
+        // big title: drops in high over the action, clear of the rider, as bold 3D type
+        const k = Math.min(1, tt.t / 0.4);
+        const out = tt.t > life - 0.35 ? (life - tt.t) / 0.35 : 1;
+        const yy = Math.round(H * 0.16 + (1 - easeOutBack(k)) * -16);
+        c.globalAlpha = out * Math.min(1, k * 2.5) * heatA;
+        text3d(c, tt.text, cx, yy, { size: 32, face: tt.t < 0.2 ? '#ffffff' : T3D.cream, align: 'center', depth: 3 });
+        if (tt.sub && k > 0.6) text3d(c, tt.sub, cx, yy + 34, { face: T3D.gold, align: 'center' });
         c.globalAlpha = 1;
         continue;
       }
-      const inK = Math.min(1, tt.t / 0.25);
+      const inK = Math.min(1, tt.t / 0.22);
       const out = tt.t > life - 0.3 ? (life - tt.t) / 0.3 : 1;
-      const tw = Math.ceil(Math.max(pixelTextWidth(tt.text, 16), tt.sub ? pixelTextWidth(tt.sub, 16) : 0)) + 16;
-      const xx = W - 10 - tw - Math.round((1 - easeOutBack(inK)) * -120);
-      const th = tt.sub ? 34 : 20;
-      c.globalAlpha = out;
-      // a dark riveted plate with a brass rule and the toast's colour as its edge stripe
-      this.blit(toastPlate(tw + 10, th, tt.color), xx - 6, ty - 3, 3);
-      pixelText(c, tt.text, xx + 3, ty + 1, { size: 16, color: inkFor(tt.color), outline: UI.shadow });
-      if (tt.sub) pixelText(c, tt.sub, xx + 3, ty + 15, { size: 16, color: '#d8c8a8', outline: UI.shadow });
-      sweep(c, xx - 4, ty - 2, tw + 6, th - 2, tt.t / 0.5);
+      const xr = W - 12 + Math.round((1 - easeOutBack(inK)) * 50);
+      c.globalAlpha = out * Math.min(1, inK * 1.6) * heatA;
+      // new type flashes white for a beat, then settles into its colour
+      text3d(c, tt.text, xr, ty, { face: tt.t < 0.16 ? '#ffffff' : inkFor(tt.color), align: 'right' });
+      if (tt.sub) text3d(c, tt.sub, xr, ty + 15, { face: T3D.dim, align: 'right', depth: 1 });
       c.globalAlpha = 1;
-      ty += th + 2;
+      ty += (tt.sub ? 32 : 18) + 1;
     }
     this.outlawBase.k = k;
     this.anchors.outlaw = this.use3D ? this.outlawBase : null;
@@ -1054,60 +1046,14 @@ function easeOutBounce(t: number) {
   if (t < 2.5 / d1) return n1 * (t -= 2.25 / d1) * t + 0.9375;
   return n1 * (t -= 2.625 / d1) * t + 0.984375;
 }
-/** a band of light sweeping across a fresh line of type (p 0..1) */
-function sweep(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, p: number) {
-  if (p <= 0 || p >= 1) return;
-  const a = c.globalAlpha;
-  const hx = Math.round(x + p * (w + h));
-  for (let r = 0; r < h; r++) {
-    const sx = hx - r;
-    if (sx < x || sx >= x + w) continue;
-    c.globalAlpha = a * 0.55 * (1 - p * 0.6);
-    px(c, sx, y + r, 2, 1, '#ffffff');
-  }
-  c.globalAlpha = a;
-}
-/** a toast's plate: dark leather in an ink outline, brass top rule, rivets, a colour stripe at the left */
-const plateCache = new Map<string, HTMLCanvasElement>();
-function toastPlate(w: number, h: number, col: string) {
-  const key = `${w}x${h}${col}`;
-  let cv = plateCache.get(key);
-  if (cv) return cv;
-  cv = document.createElement('canvas');
-  cv.width = w;
-  cv.height = h;
-  const g = cv.getContext('2d')!;
-  const stripe = col.startsWith('#') ? col : UI.brass.l;
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) {
-      const edge = x === 0 || y === 0 || x === w - 1 || y === h - 1;
-      const corner = (x === 0 || x === w - 1) && (y === 0 || y === h - 1);
-      if (corner) continue;
-      let cc = '#2a1a10';
-      if (edge) cc = '#120a06';
-      else if (y === 1) cc = UI.brass.l;
-      else if (y === 2) cc = UI.brass.d;
-      else if (y === h - 2) cc = '#1a100a';
-      else if (x <= 2) cc = x === 1 ? stripe : '#120a06';
-      else if ((x * 7 + y * 3) % 23 === 0) cc = '#332014';
-      px(g, x, y, 1, 1, cc);
-    }
-  for (const rx of [5, w - 6]) {
-    px(g, rx, 1, 2, 2, UI.brass.d);
-    px(g, rx, 1, 1, 1, UI.brass.h);
-  }
-  plateCache.set(key, cv);
-  if (plateCache.size > 60) plateCache.delete(plateCache.keys().next().value!);
-  return cv;
-}
-/** toast type on the dark plate: the toast's own colour, lifted a little if it is too dark to read */
+/** toast type: the toast's own colour, lifted toward the bright UI ramp if it is too dark to read over the sand */
 function inkFor(css: string) {
   if (!css.startsWith('#') || css.length < 7) return UI.text;
   const n = parseInt(css.slice(1, 7), 16);
   const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
   const l = 0.299 * r + 0.587 * g + 0.114 * b;
-  if (l > 120) return css;
-  const k = 150 / Math.max(1, l);
+  if (l > 165) return css;
+  const k = 190 / Math.max(1, l);
   return `rgb(${Math.min(255, r * k) | 0},${Math.min(255, g * k) | 0},${Math.min(255, b * k) | 0})`;
 }
 

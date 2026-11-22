@@ -236,7 +236,7 @@ function mythSave(): { met: string[]; done: string[]; fed: number } {
 // =================================================================== a ward that turns every shot
 let wardId = 700000;
 /** registers a legend with the enemies as a target that is never hurt: every hit sparks off and calls `hit` */
-class Ward implements ExternalTarget {
+export class Ward implements ExternalTarget {
   id = wardId++;
   vel = new THREE.Vector3();
   alive = true;
@@ -262,6 +262,19 @@ class Ward implements ExternalTarget {
     this.hit(point ?? this.pos.clone().setY(this.pos.y + this.height * 0.6), dir ?? new THREE.Vector3(0, 0, 1));
     return 0;
   }
+}
+
+/** the look of a shot turned by a ward: sparks, a gold ring, the round glancing back up and wide, a ricochet */
+export function sparkOff(ctx: Ctx, p: THREE.Vector3, dir: THREE.Vector3) {
+  ctx.fx.sparkle(p, 0xffe6a0, 10, 0.5);
+  ctx.fx.ring(p, 0xffd36b, 1.1, 0.3);
+  const back = _w.copy(dir).multiplyScalar(-1);
+  back.x += (rnd.next() - 0.5) * 0.8;
+  back.y = Math.abs(back.y) + 0.35;
+  back.z += (rnd.next() - 0.5) * 0.8;
+  back.normalize();
+  ctx.fx.tracer(p, { x: p.x + back.x * 9, y: p.y + back.y * 9, z: p.z + back.z * 9 }, 0xffe6a0, 260);
+  ctx.sfx('ricochet', p, 0.7, 0.9 + rnd.next() * 0.3);
 }
 
 // =================================================================== a figure on the trail
@@ -479,7 +492,7 @@ class Roadside {
     this.inter = {
       pos: f.pos,
       radius: 5.5,
-      label: `Talk to ${def.name}`,
+      label: `Talk to ${def.name.replace(/^The /, 'the ')}`,
       enabled: true,
       promptY: Math.min(2.6, f.height + 0.2),
       use: () => this.use(),
@@ -535,7 +548,7 @@ class Roadside {
   private accept() {
     const ctx = this.d.ctx, def = this.def;
     this.phase = 'quest';
-    this.inter.label = `${def.name}: ${def.task.what}`;
+    this.inter.label = `Talk to ${def.name.replace(/^The /, 'the ')}`;
     ctx.toast(def.song.toUpperCase(), '#ffd36b', def.task.what, true);
     ctx.sfx('page_turn', null, 0.6, 0.9);
     const pl = this.d.player as any;
@@ -553,7 +566,7 @@ class Roadside {
   private finish() {
     const d = this.d, ctx = d.ctx, def = this.def, R = def.reward, f = this.fig;
     this.phase = 'thanks';
-    this.inter.label = `Talk to ${def.name}`;
+    this.inter.label = `Talk to ${def.name.replace(/^The /, 'the ')}`;
     f.cheer = 1;
     this.play(def.done, () => (this.phase = 'done'));
     ctx.toast(`${def.song.toUpperCase()}: DONE`, '#ffd36b', `${def.arcana}: ${def.name}`, true);
@@ -639,15 +652,7 @@ class Roadside {
   private deflect(p: THREE.Vector3, dir: THREE.Vector3, serpent: boolean) {
     const ctx = this.d.ctx;
     // the round sparks off a ward and goes back the way it came, a little wide
-    ctx.fx.sparkle(p, 0xffe6a0, 10, 0.5);
-    ctx.fx.ring(p, 0xffd36b, 1.1, 0.3);
-    const back = _w.copy(dir).multiplyScalar(-1);
-    back.x += (rnd.next() - 0.5) * 0.8;
-    back.y = Math.abs(back.y) + 0.35;
-    back.z += (rnd.next() - 0.5) * 0.8;
-    back.normalize();
-    ctx.fx.tracer(p, { x: p.x + back.x * 9, y: p.y + back.y * 9, z: p.z + back.z * 9 }, 0xffe6a0, 260);
-    ctx.sfx('ricochet', p, 0.7, 0.9 + rnd.next() * 0.3);
+    sparkOff(ctx, p, dir);
     if (this.wardCd > 0) return;
     this.wardCd = 2.2;
     ctx.sfx('gem_chime', p, 0.4, 1.3);
@@ -1090,6 +1095,7 @@ export class MythRoad {
     this.order = [...sh(LEGENDS.filter((l) => !met.has(l.id))), ...sh(LEGENDS.filter((l) => met.has(l.id)))];
     const want = new URLSearchParams(location.search).get('myth');
     if (want) {
+      (window as any).__myth = this;
       const p = d.player.pos, yaw = (d.player as any).yaw ?? 0;
       const at = new THREE.Vector3(p.x + Math.sin(yaw) * 14, 0, p.z + Math.cos(yaw) * 14);
       if (want === 'dog') this.dog = new Mojo(d, at);
@@ -1102,6 +1108,14 @@ export class MythRoad {
         }
       }
     }
+  }
+
+  /** debug (?myth=...): the Fool's dog, right here */
+  debugDog() {
+    const p = this.d.player.pos;
+    this.dog?.dispose();
+    this.dog = new Mojo(this.d, new THREE.Vector3(p.x + 4, 0, p.z + 7));
+    return this.dog;
   }
 
   /** place the next legend somewhere down the trail (called as zones open) */

@@ -52,8 +52,8 @@ export const PRESETS: Record<string, EnvPreset> = {
   todGolden: { zenith: 0x34548e, horizon: 0xffb266, ground: 0xc8864e, sunColor: 0xffb05e, sunIntensity: 3.45, sunElev: 10, sunAzim: 238, hemiSky: 0xb4a8cc, hemiGround: 0xc8804a, hemiIntensity: 1.0, fog: 0xe8b088, fogNear: 34, fogFar: 380, exposure: 1.04, stars: 0, clouds: 0.62, cloudColor: 0xffb888 },
   todSunset: { zenith: 0x2c2c64, horizon: 0xff7a40, ground: 0x8c4c36, sunColor: 0xff7c3c, sunIntensity: 2.6, sunElev: 2, sunAzim: 248, hemiSky: 0x9a7ab2, hemiGround: 0x8a4a34, hemiIntensity: 0.95, fog: 0xb06c62, fogNear: 24, fogFar: 300, exposure: 1.06, stars: 0.2, clouds: 0.7, cloudColor: 0xff8a62 },
   todDusk: { zenith: 0x141c46, horizon: 0x5a4c88, ground: 0x2e2a40, sunColor: 0x8a74c4, sunIntensity: 0.7, sunElev: 4, sunAzim: 252, hemiSky: 0x5a5a9a, hemiGround: 0x3a3048, hemiIntensity: 0.8, fog: 0x2e2c52, fogNear: 18, fogFar: 200, exposure: 1.1, stars: 0.6, clouds: 0.45, cloudColor: 0x6a5a92 },
-  todNight: { zenith: 0x081430, horizon: 0x22406c, ground: 0x1c2232, sunColor: 0x86a6ff, sunIntensity: 0.95, sunElev: 38, sunAzim: 118, hemiSky: 0x3a5498, hemiGround: 0x1e2034, hemiIntensity: 0.58, fog: 0x15223e, fogNear: 12, fogFar: 150, exposure: 1.12, stars: 1, clouds: 0.3, cloudColor: 0x4a5a88 },
-  todDeep: { zenith: 0x050c22, horizon: 0x1a2c52, ground: 0x161a28, sunColor: 0x7c9cf0, sunIntensity: 0.85, sunElev: 52, sunAzim: 150, hemiSky: 0x324a8c, hemiGround: 0x1a1828, hemiIntensity: 0.52, fog: 0x101a32, fogNear: 10, fogFar: 132, exposure: 1.14, stars: 1, clouds: 0.25, cloudColor: 0x3a4876 },
+  todNight: { zenith: 0x081430, horizon: 0x22406c, ground: 0x1c2232, sunColor: 0x86a6ff, sunIntensity: 0.95, sunElev: 38, sunAzim: 118, hemiSky: 0x4862a8, hemiGround: 0x242a40, hemiIntensity: 0.66, fog: 0x1a2a4a, fogNear: 14, fogFar: 165, exposure: 1.12, stars: 1, clouds: 0.3, cloudColor: 0x4a5a88 },
+  todDeep: { zenith: 0x050c22, horizon: 0x1a2c52, ground: 0x161a28, sunColor: 0x7c9cf0, sunIntensity: 0.85, sunElev: 52, sunAzim: 150, hemiSky: 0x3e56a0, hemiGround: 0x1e2034, hemiIntensity: 0.6, fog: 0x142040, fogNear: 12, fogFar: 145, exposure: 1.14, stars: 1, clouds: 0.25, cloudColor: 0x3a4876 },
   todPredawn: { zenith: 0x1a2252, horizon: 0x8a6a96, ground: 0x3a3040, sunColor: 0xc0a0d8, sunIntensity: 0.8, sunElev: 6, sunAzim: 76, hemiSky: 0x7070a8, hemiGround: 0x4a3a48, hemiIntensity: 0.9, fog: 0x5a5070, fogNear: 10, fogFar: 200, exposure: 1.08, stars: 0.55, clouds: 0.5, cloudColor: 0x9a7aa0 },
   underworld: { zenith: 0x02080f, horizon: 0x0d3a4a, ground: 0x061018, sunColor: 0x8ff0ff, sunIntensity: 1.6, sunElev: 60, sunAzim: 200, hemiSky: 0x3a8ab0, hemiGround: 0x101820, hemiIntensity: 0.8, fog: 0x07222e, fogNear: 20, fogFar: 140, exposure: 1.15, stars: 1, clouds: 0, cloudColor: 0x203040 },
 };
@@ -205,6 +205,9 @@ export class AirSand {
   }
 }
 
+const _nightS = new THREE.Color(0.9, 0.98, 1.12);
+const _nightH = new THREE.Color(0.97, 1.0, 1.06);
+
 export class Env {
   sky: THREE.Mesh;
   sun: THREE.DirectionalLight;
@@ -318,7 +321,8 @@ export class Env {
     this.sun.intensity = p.sunIntensity * dn(1.35, 1);
     this.hemi.color.setHex(p.hemiSky);
     this.hemi.groundColor.setHex(p.hemiGround);
-    this.hemi.intensity = p.hemiIntensity * dn(0.34, 0.8);
+    // soft sky fill (a little more than before so the shade side is open, never muddy; moonlit nights stay readable)
+    this.hemi.intensity = p.hemiIntensity * dn(0.4, 0.98);
     this.fog.color.setHex(p.fog);
     this.fog.near = p.fogNear;
     this.fog.far = p.fogFar;
@@ -340,14 +344,24 @@ export class Env {
     u[11] = this.dustDensity;
     ATMO.sunDir.copy(this.sunDir);
     ATMO.sunColor.setHex(p.sunColor);
-    ATMO.shafts = dn(0.5, 0.18);
+    // golden hour: a low sun through dust throws long warm shafts and haze
+    const gold = (1 - nk) * THREE.MathUtils.smoothstep(26 - p.sunElev, 0, 20);
+    ATMO.shafts = dn(0.5 + gold * 0.38, 0.18);
+    // the hour's grade (Post world look): exposure, shade/light tints, moonlit shadow lift, vibrance, warmth
+    {
+      const G = ATMO.grade;
+      G.s.setRGB(0.93 - gold * 0.03, 0.965 - gold * 0.04, 1.08 + gold * 0.03).lerp(_nightS, nk);
+      G.h.setRGB(1.045 + gold * 0.045, 1.0 - gold * 0.005, 0.935 - gold * 0.07).lerp(_nightH, nk);
+      G.p.set(1.06 + gold * 0.02 + nk * 0.2, 0.022 + nk * 0.055, 0.26 + gold * 0.06 - nk * 0.12, gold);
+    }
     // look uniforms for every voxel model
     const gu = globalUniforms;
     gu.uSunDirW.value.copy(this.sunDir);
     gu.uSunCol.value.copy(this.sun.color).multiplyScalar(this.sun.intensity);
     const sunOnGround = this.sun.intensity * Math.max(0, this.sunDir.y);
-    gu.uBounceCol.value.setHex(p.hemiGround).multiplyScalar(0.26 * sunOnGround);
-    gu.uLook.value.set(gu.uLook.value.x, dn(0.34, 0.2), 1, dn(0.22, 0.35));
+    gu.uBounceCol.value.setHex(p.hemiGround).multiplyScalar(0.3 * sunOnGround);
+    // rim: a warm sun rim on characters (stronger, golden at low sun), a cool sky rim that keeps night silhouettes readable
+    gu.uLook.value.set(gu.uLook.value.x, dn(0.42 + gold * 0.16, 0.26), 1, dn(0.26, 0.5));
     this.air?.setLight(gu.uSunCol.value, 0.36, dn(0.3, 0.12));
     void day;
     this.clouds.visible = p.clouds > 0.01;
@@ -433,7 +447,7 @@ export class Env {
     this.envRT?.dispose();
     this.envRT = rt;
     this.scene.environment = rt.texture;
-    this.scene.environmentIntensity = day ? 0.52 : 0.6;
+    this.scene.environmentIntensity = day ? 0.56 : 0.68;
     if (!day) this.hemi.intensity = this.preset.hemiIntensity * 0.7;
     pm.dispose();
     sky.geometry.dispose();

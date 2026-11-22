@@ -26,6 +26,7 @@ import { RigEyes, emote } from '../fx/FaceFx';
 import { rnd } from '../../engine/math/rand';
 import { unlockShelf, refreshShelf } from './UnlockWares';
 import { Unlocks } from '../meta/Unlocks';
+import { gumWare } from './MythRoad';
 
 export interface MissionDeps {
   ctx: Ctx;
@@ -177,6 +178,7 @@ export class Missions {
         [
           ...merchantStock(d.ctx, (id) => d.items.add(id), () => d.player.heal(d.player.maxHp), () => d.card(), { pockets, hp: () => [d.player.hp, d.player.maxHp] }),
           ...(d.gearWares?.() ?? []),
+          gumWare(d.ctx),
         ],
         deps
       )

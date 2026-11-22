@@ -636,7 +636,9 @@ export class BackstoryScene implements GameScene {
     };
     line('WANTED', 32, 5, '#2a1a10');
     line('DEAD  OR  ALIVE', 16, 36, '#7a1e12');
-    try {
+    // his photographed silhouette (built behind the loading cover; skipped under automation, where the
+    // software renderer takes minutes over the studio's environment pass)
+    if (!navigator.webdriver) try {
       const photo = mysteryPhoto(this.engine.renderer, buildRigGeo(spec, 'shadow:bandit'));
       if (photo) {
         const pr = pressPrint(photo);

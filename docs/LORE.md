@@ -301,6 +301,31 @@ Ozymandias keeps saying "it is always noon here." He means it as a joke. It is l
 - **The meerkats** trade anything for shiny things, and four of them, the Beatle Meerkats, only play when the colony is
   safe and only know the old songs.
 
+### The roadside legends (each a tarot trump, each a real old story)
+
+Gods and storytellers wait by the trail with a job (`src/game/run/MythRoad.ts`). Shots never land on them: the round
+sparks off and they tell you what they think of that. The job's title is a song.
+
+| Trump | Who | The story | The job |
+| --- | --- | --- | --- |
+| VII The Chariot | Bes, the dwarf protector, all mane, belly and tongue | guardian of mothers, babies and the bedroom door | Bad Moon Rising: drive Set's night riders off the cradle camp |
+| III The Empress | Taweret, the hippo mother with the crocodile back | she bites whatever crawls toward a cradle | Mama Kin: her four ivory birth wands |
+| VI The Lovers | Hathor in her cow aspect | as Sekhmet she would not stop killing, until Ra flooded the fields with red-ochre beer | Red Red Wine: three jars of the red beer before Sekhmet wakes |
+| XIV Temperance | Khnum, the ram-headed potter | he throws every child on his wheel; he remembers the one with the tail | Wheel in the Sky: wet Nile clay |
+| II The High Priestess | Isis | she tricked Ra out of his secret name; she gathered Osiris after Set scattered him | Dust in the Wind: four pieces of Osiris. She knows how names come back: earned, never tricked |
+| V The Hierophant | Khun-Anup, the Eloquent Peasant (a shadow) | robbed on the road, he petitioned the High Steward nine times | Simple Man: the steward's thugs |
+| XX Judgement | the Shipwrecked Sailor (a shadow) and the gold serpent with lapis brows | the Island of the Ka; the serpent who says the survivor lives to tell it | Sloop John B: the serpent's myrrh, so he can go home |
+| IV The Emperor | Sinuhe the exile (a shadow) | he fled, grew great abroad, killed the strongman of Retjenu, and came home to be buried | Ramble On: the strongman again, dug up by Set |
+| XV The Devil | Setne Khamwas (a shadow) | the prince who stole the Book of Thoth from Neferkaptah's tomb | Sympathy for the Pages: three torn pages of the Book |
+
+**Mojo, the Fool's dog.** Every tarot Fool has a little dog at his heels. Sundown's is a scruffy wire-haired terrier
+who loves coffee gum more than life (the turtle shop sells it; Bes gives it away). No gum, and he snatches a fistful
+of gold and bolts. Run him down while he pants, or bribe him. Fed, he digs up gold he buried earlier.
+
+**Mama Toad on the road.** Some rides she is out in the dunes by a puddle, crying for her five toadlets. It is the
+same toad from the hideout, and she knows him: the scraps on her kitchen step, the boy hiding under it when the
+lawman rode by, the nights on her couch (`meta/ToadMemory`).
+
 ---
 
 ## Factions

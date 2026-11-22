@@ -5,17 +5,18 @@ import { RNG } from '../../engine/math/rand';
 import { HUD_ART } from './HudArt';
 
 export const UI = {
-  wood: { o: '#24140a', d: '#4f2f15', m: '#74461f', l: '#93602f', h: '#b98244', g: '#603818' },
-  iron: { o: '#121519', d: '#2b323a', m: '#465260', l: '#6d7b89', h: '#a9b6c2' },
-  brass: { o: '#2e1c06', d: '#7c5214', m: '#b88426', l: '#e2b24a', h: '#fff0a6' },
-  parch: { o: '#4e3218', d: '#a9844e', m: '#d6b985', l: '#efdcb0', h: '#fff4d8' },
-  leather: { o: '#1e110a', d: '#3e2414', m: '#5e3820', l: '#80502c' },
-  blood: { o: '#2a0604', d: '#6a120c', m: '#a8221a', l: '#dc4430', h: '#ff8a6a' },
-  venom: { o: '#0e2208', d: '#2e6a18', m: '#4fa52a', l: '#8fe03a', h: '#d8ff9a' },
-  sky: { o: '#0e1a22', d: '#1f5a6a', m: '#35a8b8', l: '#6fe3cf', h: '#c8fff0' },
-  bone: { o: '#3a2a1a', d: '#b8a07a', m: '#e0cfa8', l: '#f6ead0', h: '#ffffff' },
-  text: '#fff3d6',
-  textDim: '#c9a97c',
+  // brighter UI (user note): warmer creams, brighter brass and jade, higher contrast over the desert
+  wood: { o: '#24140a', d: '#5a3519', m: '#82502a', l: '#a46e38', h: '#cc9450', g: '#6a3e1c' },
+  iron: { o: '#121519', d: '#323a44', m: '#525f6e', l: '#7c8b9a', h: '#bcc8d2' },
+  brass: { o: '#2e1c06', d: '#8a5c16', m: '#cc962c', l: '#f2c656', h: '#fff6c4' },
+  parch: { o: '#4e3218', d: '#bc965a', m: '#e6ca94', l: '#f8e8c0', h: '#fffaec' },
+  leather: { o: '#1e110a', d: '#462a17', m: '#6a4024', l: '#8e5a32' },
+  blood: { o: '#2a0604', d: '#761510', m: '#bc2a1e', l: '#ee5238', h: '#ff9c7c' },
+  venom: { o: '#0e2208', d: '#327620', m: '#58b830', l: '#9cf048', h: '#e0ffac' },
+  sky: { o: '#0e1a22', d: '#226878', m: '#3cbccc', l: '#7cf3dc', h: '#d8fff6' },
+  bone: { o: '#3a2a1a', d: '#c4ae88', m: '#ebdbb6', l: '#fbf1dc', h: '#ffffff' },
+  text: '#fff9ea',
+  textDim: '#e0c494',
   shadow: '#1a0e06',
 };
 
@@ -305,7 +306,8 @@ export interface PixelSprite {
 }
 
 /** the HUD's limited warm palette (ramps dark to light) */
-export const HUD_PAL: Record<string, string> = { 'k': '#1a0e08', 'K': '#3a2414', '0': '#0c0806', 'a': '#22262c', 'b': '#3a424c', 'c': '#56616e', 'd': '#7c8a98', 'e': '#b4c0ca', 'f': '#4a300c', 'g': '#7c5214', 'h': '#b88426', 'i': '#e2b24a', 'j': '#fff0a6', 'l': '#3a200e', 'm': '#5a3418', 'n': '#7a4a22', 'o': '#9a6430', 'p': '#c08848', 'q': '#7a5430', 'r': '#a9844e', 's': '#d6b985', 't': '#efdcb0', 'u': '#fff4d8', 'v': '#2e180c', 'w': '#4e2a16', 'x': '#6e3c20', 'y': '#8e5430', 'z': '#b07040', 'A': '#3a0806', 'B': '#6a120c', 'C': '#a8221a', 'D': '#dc4430', 'E': '#ff8a6a', 'F': '#0b3d2c', 'G': '#1d6a4a', 'H': '#2fbf7e', 'I': '#7cf2b4', 'J': '#eafff2', 'L': '#6e5a40', 'M': '#b8a07a', 'N': '#e0cfa8', 'O': '#f6ead0', 'P': '#4e4a44', 'Q': '#8a867c', 'R': '#bdb9ae', 'S': '#f2efe6', 'T': '#141c3a', 'U': '#283a7a', 'V': '#4468c0', 'W': '#8ab0e8', 'X': '#5a2a12', 'Y': '#8a4a22', 'Z': '#c06a2e', '#': '#ffffff', '@': '#d4ebe0', '%': '#a2c8b8', '&': '#6e9a8a', '1': '#2a0806', '2': '#4a0e0a', '3': '#6a1a14', '4': '#c8a070', '5': '#e8c890' };
+// brighter UI ramps (user note): warmer creams, brighter brass and jade, higher contrast
+export const HUD_PAL: Record<string, string> = { 'k': '#1a0e08', 'K': '#3a2414', '0': '#0c0806', 'a': '#262a31', 'b': '#414a55', 'c': '#5f6b79', 'd': '#8796a5', 'e': '#c2cdd6', 'f': '#4e330c', 'g': '#8a5c16', 'h': '#cc962c', 'i': '#f2c656', 'j': '#fff6c4', 'l': '#3c220f', 'm': '#653b1b', 'n': '#875428', 'o': '#a97136', 'p': '#d09a54', 'q': '#865e36', 'r': '#bc965a', 's': '#e6ca94', 't': '#f8e8c0', 'u': '#fffaec', 'v': '#30190c', 'w': '#572f18', 'x': '#7a4424', 'y': '#9c5e36', 'z': '#c07c48', 'A': '#3a0806', 'B': '#761510', 'C': '#bc2a1e', 'D': '#ee5238', 'E': '#ff9c7c', 'F': '#0c4430', 'G': '#1f7a54', 'H': '#36d18c', 'I': '#8cf8c4', 'J': '#f0fff6', 'L': '#7a6446', 'M': '#c6ae86', 'N': '#ebdbb4', 'O': '#fcf2dc', 'P': '#4e4a44', 'Q': '#8a867c', 'R': '#bdb9ae', 'S': '#f2efe6', 'T': '#141c3a', 'U': '#283a7a', 'V': '#4468c0', 'W': '#8ab0e8', 'X': '#5a2a12', 'Y': '#8a4a22', 'Z': '#c06a2e', '#': '#ffffff', '@': '#d4ebe0', '%': '#a2c8b8', '&': '#6e9a8a', '1': '#2a0806', '2': '#4a0e0a', '3': '#6a1a14', '4': '#c8a070', '5': '#e8c890' };
 /** the palette's ramps, darkest first (palette swaps step along them) */
 export const HUD_RAMPS: Record<string, string> = {
   iron: 'abcde', brass: 'fghij', wood: 'lmnop', parch: 'qrstu', leather: 'vwxyz', blood: 'ABCDE', jade: 'FGHIJ',

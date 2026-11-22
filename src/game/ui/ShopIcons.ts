@@ -184,6 +184,26 @@ const CARD = S([
   '...kkkkkkkkkk...',
   '................',
 ]);
+/** coffee gum: a brown paper pack with a parchment band, a roasted bean on it, two sticks poking out */
+const GUM = S([
+  '................',
+  '.........kk.kk..',
+  '........kNOkNOk.',
+  '........kNOkNOk.',
+  '..kkkkkkkkkkkkk.',
+  '.kooooooooooooyk',
+  '.knnnnnnnnnnnnyk',
+  '.kttttkkkkttttyk',
+  '.kuttkvlvlkttuyk',
+  '.kttkvlXlvlkttyk',
+  '.kttkvlvlvlkttyk',
+  '.kuttkvlvlkttuyk',
+  '.kttttkkkkttttyk',
+  '.knnnnnnnnnnnnyk',
+  '.kmmmmmmmmmmmmmk',
+  '..kkkkkkkkkkkkk.',
+]);
+
 /** the purse's gold coin (9 x 9) */
 export const COIN_ICON = S(['..kkkkk..', '.kiiiiik.', 'kijjiihgk', 'kijhhhhgk', 'kiihjhhgk', 'kiihhhhgk', 'khhhhhggk', '.kgggggk.', '..kkkkk..']);
 
@@ -192,7 +212,7 @@ export const LINEN_SWAP: Record<string, string> = { O: '#fff0a6', N: '#e2b24a', 
 
 const ICONS: Record<string, PixelSprite> = {
   bandage: BANDAGE, goldBandage: BANDAGE, dagger: DAGGER, smoke: SMOKE, shield: SHIELD, charm: CHARM, dynamite: DYNAMITE,
-  snakeoil: SNAKEOIL, whiskey: WHISKEY, heal: TONIC, card: CARD,
+  snakeoil: SNAKEOIL, whiskey: WHISKEY, heal: TONIC, card: CARD, gum: GUM,
 };
 
 /** the icon for a ware id (null: none authored); `swap` is the palette swap it wants, if any */

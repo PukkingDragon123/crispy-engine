@@ -40,7 +40,10 @@ import { modelEntry } from '../models/lookup';
 import { buildRigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { VoxelModel, VF, mix } from '../../engine/voxel/VoxelModel';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
-import { sharedVoxelMaterial } from '../../engine/render/VoxelMaterial';
+import { sharedVoxelMaterial, makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
+import { toadMemory } from '../meta/ToadMemory';
+import { Ward, sparkOff } from './MythRoad';
+import type { Enemies } from '../enemies/Enemies';
 import { clamp, damp, dampAngle, rnd, hash3, smoothstep, lerp } from '../../engine/math/rand';
 import { SpringF } from '../anim/spring';
 import { frogWigHat, frogWigPivot } from '../models/enemies/frog';
@@ -50,10 +53,16 @@ export interface FrogFamilyDeps {
   ctx: Ctx;
   player: Player;
   inter: Interactions;
+  /** with the enemies, Mama Toad gets a ward: shots spark off her (run/MythRoad Ward) */
+  enemies?: Enemies;
   addBounty(v: number): void;
   /** drop a loot chest (RunScene.spawnChest) */
   chest?(x: number, z: number, tier: ChestTier): unknown;
 }
+
+const _ax = new THREE.Vector3();
+/** Mama Toad, shot at */
+const WARD_LINES = ['Not at your mama, sugar!', 'I raised you better than that. Well. I fed you better than that.', 'Put that thing away before you hit a toadlet!', 'Do that again and you sleep on the floor.'];
 
 type FrogState = 'idle' | 'flee' | 'tired' | 'flying' | 'carried' | 'home' | 'bless' | 'return';
 
@@ -267,6 +276,13 @@ export class FrogFamily {
   private finaleT = -1;
   private rainT = 0;
   private buryT = -1;
+  // ---- Mama Toad remembers him (meta/ToadMemory)
+  private greeted = false;
+  private toSay: string[] = [];
+  private sayT = 0;
+  private ward: Ward | null = null;
+  private wardCd = 0;
+  private wardN = 0;
   private hintCd = 0;
   private squeakCd = 0;
   private lastPlayerVel = new THREE.Vector3();
@@ -310,7 +326,8 @@ export class FrogFamily {
     } catch (e) {
       console.warn('[frogs] puddle failed', e);
     }
-    this.mama = this.makeFrog('rain_frog_mama', true, 0, at.clone());
+    // Mama Toad herself, out looking for her toadlets (the same toad who keeps the hideout: models/creatures/toad)
+    this.mama = this.makeFrog('mama_toad', true, 0, at.clone());
     this.mama.yaw = rnd.next() * Math.PI * 2;
     const tm = this.mama.rig.geo.spec.meta?.tongue as { segments: number; segLen: number; reach: number } | undefined;
     if (tm) {
@@ -321,14 +338,26 @@ export class FrogFamily {
     this.mamaInter = {
       pos: this.mama.pos,
       radius: 4.2,
-      label: 'Comfort Mama Rain Frog',
+      label: 'Talk to Mama Toad',
       enabled: true,
       promptY: 1.3,
       use: () => this.talk(),
     };
     d.inter.add(this.mamaInter);
+    // quest folk turn every shot: sparks off her, and a word about it
+    if (d.enemies) {
+      this.ward = new Ward(this.mama.pos, 0.75, this.mama.height + 0.2, 'Mama Toad', (p, dir) => {
+        sparkOff(d.ctx, p, dir);
+        if (this.wardCd > 0) return;
+        this.wardCd = 2.5;
+        this.toSay.length = 0;
+        this.sayT = 0;
+        this.queue([WARD_LINES[this.wardN++ % WARD_LINES.length]]);
+      });
+      d.enemies.registerExternal(this.ward);
+    }
     // five froglets scattered over the dunes around her, each hiding in a different direction
-    const keys = ['rain_frog_baby', 'rain_frog_baby_v1', 'rain_frog_baby_v2', 'rain_frog_baby_v3', 'rain_frog_baby_v4'];
+    const keys = ['toadlet', 'toadlet_v1', 'toadlet_v2', 'toadlet_v3', 'toadlet_v1'];
     const a0 = rnd.next() * Math.PI * 2;
     for (let i = 0; i < 5; i++) {
       let p: THREE.Vector3 | null = null;
@@ -343,7 +372,7 @@ export class FrogFamily {
       const b = this.makeFrog(keys[i], false, i, p);
       b.yaw = rnd.next() * Math.PI * 2;
       b.home.copy(p);
-      const inter: Interactable = { pos: b.pos, radius: 2.6, label: 'Grab the froglet', enabled: true, promptY: 0.7, use: () => this.grab(b) };
+      const inter: Interactable = { pos: b.pos, radius: 2.6, label: 'Grab the toadlet', enabled: true, promptY: 0.7, use: () => this.grab(b) };
       b.inter = inter;
       d.inter.add(inter);
       this.babies.push(b);
@@ -360,9 +389,20 @@ export class FrogFamily {
     const fallback = !spec?.parts ? (modelEntry(mama ? 'rain_frog_mama' : 'rain_frog_baby')?.() as RigSpec | undefined) : spec;
     if (!fallback?.parts) throw new Error('[frogs] missing rig ' + key);
     const rig = new RigInstance(buildRigGeo(fallback, key + ':quest'), { castShadow: true });
+    // the hideout toads: Mama a little bigger out here (as by her fire), her spectacles real glass
+    const toadScale = fallback.name === 'mama_toad' ? 1.18 : 1;
+    const lens = rig.meshes[(fallback.meta?.lensPart as string) ?? ''];
+    if (lens) {
+      const glass = makeVoxelMaterial({ transparent: true, opacity: 0.16 });
+      glass.depthWrite = false;
+      lens.material = glass;
+      lens.castShadow = false;
+      lens.renderOrder = 3;
+    }
     const root = new THREE.Group();
     root.rotation.order = 'YXZ'; // pitch in the frog's own frame, then yaw
     root.add(rig.root);
+    root.scale.setScalar(toadScale);
     root.position.copy(at);
     this.group.add(root);
     // the tongue's root aims with yaw-then-pitch
@@ -375,7 +415,7 @@ export class FrogFamily {
       restP[p.name] = p.offset.clone();
     }
     return {
-      mama, idx, rig, root, pos: at, yaw: 0, height: (meta.height as number) ?? (mama ? 0.9 : 0.19), R: (meta.radius as number) ?? (mama ? 0.48 : 0.13),
+      mama, idx, rig, root, pos: at, yaw: 0, height: ((meta.height as number) ?? (mama ? 0.9 : 0.19)) * toadScale, R: (meta.radius as number) ?? (mama ? 0.48 : 0.13),
       state: 'idle', t: rnd.next() * 3, hop: null, pause: 0, stamina: 0, flees: 0, home: at.clone(),
       breath: rnd.next() * 6, blinkIn: 1 + rnd.next() * 3, blinkT: -1, wailIn: 1.5 + rnd.next() * 2, wailT: -1, joy: 0,
       squash: new SpringF(1, 3.2, 0.32), jiggle: new SpringF(1, 4.5, 0.25), sway: new SpringF(0, 2.2, 0.4), hatWob: new SpringF(0, 3, 0.3),
@@ -402,8 +442,40 @@ export class FrogFamily {
   reveal() {
     if (this.revealed) return;
     this.revealed = true;
-    this.d.ctx.toast('MAMA RAIN FROG', '#9fd8e0', 'Her five froglets wandered off — find them and bring them home');
+    this.d.ctx.toast('MAMA TOAD', '#9fd8e0', 'Her five toadlets wandered off — find them and bring them home');
     this.d.ctx.sfx('squeak', this.mama.pos, 0.8, 0.55);
+  }
+
+  // ------------------------------------------------------------- Mama Toad remembers
+  private queue(lines: string[]) {
+    this.toSay.push(...lines);
+  }
+  private engineAfter(s: number, fn: () => void) {
+    this.d.ctx.engine.tweens.after(s, () => !this.finished && fn());
+  }
+  /** her lines out on the trail: she knows him from her kitchen step and her couch (Sundown's past, docs/LORE.md) */
+  private memoryLines(end: boolean): string[] {
+    const m = toadMemory.get();
+    const n = m.nursed, road = Number(m.facts['roadRescues'] ?? 0);
+    const nights = m.last?.nights ?? 0;
+    if (!end) {
+      const hi = road > 0
+        ? `You again! That is ${road + 1} times you have found me crying in a puddle. Do not tell the toadlets.`
+        : n > 0
+          ? `Sugar? Is that you? I have patched you up on my couch ${n === 1 ? 'once' : n + ' times'}, and now you find me out here in a puddle.`
+          : 'Well, I will be. Is that you under that hat? All grown up and four arms on you.';
+      const past = [
+        'I used to leave scraps on my kitchen step for a little scorpion boy. He never said thank you. He never had to.',
+        'Folks left you by a cold fire once, honey. I know. I will not leave a single one of mine out in this sand.',
+        'You used to hide under my step when the lawman rode by. I never told him. I never told anybody.',
+      ];
+      return [hi, past[(n + road) % past.length], 'Five of my toadlets hopped off into the dunes. Bring my babies home, sugar. Slow down when you grab them.'];
+    }
+    toadMemory.fact('roadRescues', road + 1);
+    const out = ['You brought them all home. You always did bring things back to my step. Bones, mostly. Once a whole jackal.'];
+    if (n > 0) out.push(nights > 0 ? `Now do not make me sit up with you again. ${nights} nights, last time. I counted them on my knitting.` : 'Now do not make me sit up with you again. My knitting cannot take it.');
+    out.push('The lamp is in the window, same as always. You come home when you are done out here.');
+    return out;
   }
 
   // ------------------------------------------------------------- verbs
@@ -411,14 +483,18 @@ export class FrogFamily {
     const ctx = this.d.ctx;
     const carried = this.babies.filter((b) => b.state === 'carried');
     if (carried.length) return this.deliver();
+    if (!this.greeted && !this.done) {
+      this.greeted = true;
+      this.queue(this.memoryLines(false));
+    }
     if (this.done) {
-      if (!this.thanks || this.thanks.stage === 'done') ctx.toast('A HAPPY FAMILY', '#9fd8e0', 'Mama hums. The froglets snore.');
+      if (!this.thanks || this.thanks.stage === 'done') ctx.toast('A HAPPY FAMILY', '#9fd8e0', 'Mama hums. The toadlets snore.');
       return;
     }
     this.reveal();
     this.wail(this.mama, true);
     const left = 5 - this.returned;
-    ctx.toast(left === 5 ? 'FIVE LITTLE FROGLETS' : `${left} STILL OUT THERE`, '#9fd8e0', 'They hop off when you ride close — slow down and grab them [T]');
+    ctx.toast(left === 5 ? 'FIVE LITTLE TOADLETS' : `${left} STILL OUT THERE`, '#9fd8e0', 'They hop off when you ride close — slow down and grab them [T]');
   }
 
   private grab(b: Frog) {
@@ -496,7 +572,7 @@ export class FrogFamily {
             chatter3D(ctx.engine, 'frog', 'joy', this.mama.pos, { key: 'frog:mama', lift: 0.75, size: 0.14, color: '#e8fff6', glow: '#0e3a44' });
             ctx.particles.emit({ pos: { x: slot.x, y: slot.y + 0.05, z: slot.z }, count: 6, spread: 1, up: 1.2, life: [0.3, 0.6], size: [0.05, 0.03], sprite: 'dot3', color: [0xe0c08a, 0xc9a06a], gravity: 12, ground: true });
             if (this.returned >= 5) this.finale();
-            else ctx.toast(`FROGLET HOME (${this.returned}/5)`, '#9fd8e0', this.returned === 4 ? 'One more out there…' : 'Mama squeaks with joy');
+            else ctx.toast(`TOADLET HOME (${this.returned}/5)`, '#9fd8e0', this.returned === 4 ? 'One more out there…' : 'Mama squeaks with joy');
           },
         };
       });
@@ -510,9 +586,9 @@ export class FrogFamily {
     this.finaleT = 0;
     this.rainT = 6;
     this.mamaInter.label = 'Say goodbye';
-    ctx.toast('REUNITED', '#9fd8e0', 'Mama Rain Frog sings to her babies', true);
+    ctx.toast('REUNITED', '#9fd8e0', 'Mama Toad sings her toadlets the swamp song', true);
     // the song floats over her as she sings it
-    speak3D(ctx.engine, 'frog', 'Rain... rain, rain... rain. Mmm, mmm.', this.mama.pos, { key: 'frog:mama', lift: 0.8, size: 0.15, cps: 9, hold: 3, color: '#e8fff6', glow: '#0e3a44', voice: { sing: [0, 3, 5, 7, 5, 3, 0], delay: 0.5, duck: 0.6 } });
+    speak3D(ctx.engine, 'mamaToad', 'Hush now, little ones... down by the water... mmm, mmm.', this.mama.pos, { key: 'frog:mama', lift: 0.8, size: 0.15, cps: 9, hold: 3, color: '#e8fff6', glow: '#0e3a44', voice: { sing: [0, 3, 5, 7, 5, 3, 0], delay: 0.5, duck: 0.6 } });
     ctx.sfx('sting_positive', null, 0.9);
     ctx.sfx('divine_chime', this.mama.pos, 0.6);
     ctx.engine.tweens.after(0.6, () => ctx.sfx('thunder', this.mama.pos, 0.25, 1.4));
@@ -529,6 +605,8 @@ export class FrogFamily {
       this.d.chest?.(this.at.x + Math.sin(a) * 2.6, this.at.z + Math.cos(a) * 2.6, 'silver');
       ctx.toast("A MOTHER'S THANKS", '#ffd36b', `+${bounty} bounty · +25 gold · healed`);
     });
+    // she remembers him, and says so once the song is done
+    this.engineAfter(5.5, () => this.queue(this.memoryLines(true)));
     // after the song: a lick, the frog blessing, and her wig
     this.thanks = { stage: 'approach', t: -7.2, fired: false, far: false, mask: 0 };
   }
@@ -578,22 +656,30 @@ export class FrogFamily {
     const ctx = this.d.ctx;
     const pl = this.d.player;
     this.t += dt;
+    // what she says to him, one line at a time
+    this.sayT -= dt;
+    this.wardCd -= dt;
+    if (this.toSay.length && this.sayT <= 0) {
+      const line = this.toSay.shift()!;
+      speak3D(ctx.engine, 'mamaToad', line, this.mama.pos, { key: 'frog:mama', lift: 1.15, size: 0.15, color: '#fff3d6', glow: '#0e3a44', voice: { follow: true } });
+      this.sayT = 1.6 + line.length / 28;
+    }
     this.hintCd -= dt;
     this.squeakCd -= dt;
     const pd = Math.hypot(pl.pos.x - this.mama.pos.x, pl.pos.z - this.mama.pos.z);
     if (!this.revealed && pd < 45) this.reveal();
     // the storm swallowed the puddle: the family digs in and is gone
     if (!this.done && this.buryT < 0 && ctx.world.storm.sdf(this.mama.pos.x, this.mama.pos.z) < 2 && !this.babies.some((b) => b.state === 'carried')) {
-      ctx.toast('THE STORM TOOK THE PUDDLE', '#c9a97c', 'The rain frogs dug in deep. Maybe another time.');
+      ctx.toast('THE STORM TOOK THE PUDDLE', '#c9a97c', 'Mama Toad and her toadlets dug in deep. Maybe another time.');
       this.buryT = 0;
     }
     // ride up with froglets on the hat: they hop home on their own
     const carried = this.babies.filter((b) => b.state === 'carried').length;
     if (carried > 0 && pd < 3.4 && pl.speed < 9) this.deliver();
-    this.mamaInter.label = carried > 0 ? `Return ${carried === 1 ? 'the froglet' : carried + ' froglets'}` : this.done ? 'Say goodbye' : 'Comfort Mama Rain Frog';
+    this.mamaInter.label = carried > 0 ? `Return ${carried === 1 ? 'the toadlet' : carried + ' toadlets'}` : this.done ? 'Say goodbye' : 'Talk to Mama Toad';
     if (this.revealed && !this.done && carried === 0 && pd < 7 && this.hintCd <= 0) {
       this.hintCd = 14;
-      ctx.toast('MAMA RAIN FROG', '#9fd8e0', `${5 - this.returned} froglets still out in the dunes`);
+      ctx.toast('MAMA TOAD', '#9fd8e0', `${5 - this.returned} toadlets still out in the dunes`);
     }
     // board acceleration rocks the stack on the hat
     const acc = this.acc.copy(pl.board.vel).sub(this.lastPlayerVel);
@@ -1559,8 +1645,13 @@ export class FrogFamily {
     f.lidX = damp(f.lidX, lx, 12, dt);
     f.lidZ = damp(f.lidZ, lz, 8, dt);
     const close = Math.min(1.95, f.lidX + blink * 1.95);
-    set('lid_l', close, 0, f.lidZ);
-    set('lid_r', close, 0, -f.lidZ);
+    // a real toad's lower lid sweeps up about its own axis (models/creatures/toad meta.blink)
+    const BL = f.rig.geo.spec.meta?.blink as { l: number[]; r: number[]; close: number } | undefined;
+    if (BL) for (const sd of ['l', 'r'] as const) n['lid_' + sd]?.quaternion.setFromAxisAngle(_ax.fromArray(BL[sd]), Math.min(1, close / 1.95) * BL.close);
+    else {
+      set('lid_l', close, 0, f.lidZ);
+      set('lid_r', close, 0, -f.lidZ);
+    }
     // eye contact: the glossy globes roll toward the hunter when he is close
     const camD = ctx.camera.position.distanceTo(f.pos);
     if (camD < 30 && n['eye_l'] && n['eye_r']) {
@@ -1616,12 +1707,17 @@ export class FrogFamily {
       marker = best.pos.clone().setY(best.pos.y + 0.9);
     }
     return {
-      objective: { text: 'Mama Rain Frog', sub: `Bring her froglets home — ${this.returned}/5 home${carried ? ` · ${carried} on your hat` : ''}` },
+      objective: { text: 'Mama Toad', sub: `Bring her toadlets home — ${this.returned}/5 home${carried ? ` · ${carried} on your hat` : ''}` },
       marker,
     };
   }
 
   dispose() {
+    if (this.ward) {
+      this.ward.alive = false;
+      this.d.enemies?.unregisterExternal(this.ward);
+      this.ward = null;
+    }
     for (const b of this.babies) {
       if (b.inter) this.d.inter.remove(b.inter);
       b.root.removeFromParent();

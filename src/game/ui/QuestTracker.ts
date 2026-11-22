@@ -7,8 +7,8 @@
 //  • QUEST GIVERS: a little parchment tag with a red "!" over everyone who has a job
 //    for you (landmarks, the stranded prospector, the traveler, the frog mother) once
 //    they are within a couple of hundred metres; a job not open yet is greyed.
-//  • ONE-KEY TRACKING: J (or tapping the plaque under the mission notes on a touch
-//    screen) tracks the next quest; a new quest is tracked as it comes in, and when
+//  • ONE-KEY TRACKING: J (or, on a touch screen only, tapping the little plaque under the
+//    mission notes; the desktop "NEXT QUEST" plaque is gone) tracks the next quest; a new quest is tracked as it comes in, and when
 //    the tracked one ends the nearest one left takes over. The tracked quest's note
 //    goes to the top of the mission paper stack with its live distance on it.
 // run/Progression feeds it (quests with world positions, givers) and draws nothing else.
@@ -19,6 +19,7 @@ import type { PaperQuest } from './MissionPaper';
 import { blitObj, pixelText, pixelTextWidth } from './HudSprites';
 import { sprite, nine, keycap, drawSprite, SWAP_DIM, type PixelSprite } from './PixelUI';
 import { HUD_ART as ART } from './HudArt';
+import { text3d, T3D } from './Text3D';
 import { isTouchDevice } from './TouchControls';
 
 export interface TrackQuest {
@@ -214,7 +215,9 @@ export class QuestTracker {
     for (const g of src.givers) this.paintGiver(g, src.at);
     const tq = this.list.find((q) => q.id === this.tracked) ?? null;
     if (tq?.pos) this.paintWaypoint(tq, src.at, dt);
-    this.paintPlaque(tq, dt);
+    // the plaque is only the touch screen's button now (desktop: J, said in the journal)
+    if (this.touch) this.paintPlaque(tq, dt);
+    else this.plaque.pulse = 0;
     c.globalAlpha = 1;
   }
 
@@ -241,8 +244,9 @@ export class QuestTracker {
       }
       c.globalAlpha = this.show;
       blitObj(c, pin, x, y - 8 + bob, 2, this.show);
-      pixelText(c, dtext, x, y + 2 + bob, { size: 16, color: '#ffd36b', align: 'center', outline: '#1a0e06' });
-      if (dist > 12) pixelText(c, q.title, x, y - 30 + bob, { size: 16, color: '#fff3d6', align: 'center', outline: '#1a0e06' });
+      text3d(c, dtext, x, y + 2 + bob, { face: T3D.gold, align: 'center', depth: 1 });
+      // the quest's name only while it is still far off (up close the place speaks for itself)
+      if (dist > 30) text3d(c, q.title, x, y - 30 + bob, { face: T3D.cream, align: 'center', depth: 1 });
       this.bob.on = false;
       return;
     }
@@ -267,7 +271,7 @@ export class QuestTracker {
     // the pin and the distance on the inner side
     const ix = x - sx * 18, iy = y - sy * 16;
     blitObj(c, pin, ix, iy - 6, 1, this.show * 0.95);
-    pixelText(c, dtext, ix, iy + 4, { size: 16, color: '#ffd36b', align: 'center', outline: '#1a0e06' });
+    text3d(c, dtext, ix, iy + 4, { face: T3D.gold, align: 'center', depth: 1 });
   }
 
   // ---------------------------------------------------------------- quest givers
@@ -284,7 +288,7 @@ export class QuestTracker {
     const spr = g.open ? sprite(GIVER) : sprite(GIVER, SWAP_DIM, 'dim');
     blitObj(c, spr, x, y - 6 + bob, 2, this.show * (near ? 1 : 0.85));
     const label = near ? g.name : `${Math.round(dist)} m`;
-    pixelText(c, label, x, y + 2 + bob, { size: 16, color: g.open ? '#fff3d6' : '#c9a97c', align: 'center', outline: '#1a0e06' });
+    text3d(c, label, x, y + 2 + bob, { face: g.open ? T3D.cream : T3D.dim, align: 'center', depth: 1 });
   }
 
   // ---------------------------------------------------------------- the plaque under the notes
@@ -301,13 +305,15 @@ export class QuestTracker {
     const tw = Math.ceil(pixelTextWidth(label, 16)) + 12 + (kc ? kc.width + 4 : 0);
     const w = tw, h = 20;
     const x = Math.round(this.w - 10 - w), y = Math.round(bottom + 4 + P.pulse * -2);
-    blitObj(c, nine(ART.nine_toast, w, h, 6), x + w / 2, y + h / 2, 2, this.show);
+    // keycap + 3D type, no plate
+    c.globalAlpha = this.show * 0.92;
     let tx = x + 6;
     if (kc) {
       c.drawImage(kc, tx, y + 3);
       tx += kc.width + 4;
     }
-    pixelText(c, label, tx, y + 3, { size: 16, color: '#3a1c0a' });
+    text3d(c, label, tx, y + 3, { face: T3D.dim, depth: 1 });
+    c.globalAlpha = 1;
     P.x = x;
     P.y = y;
     P.w = w;

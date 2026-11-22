@@ -152,7 +152,7 @@ void main(){
   float edge = pow(f, 2.2);
   float glint = pow(max(0.0, dot(reflect(-v, n), normalize(vec3(0.4, 0.8, 0.5)))), 24.0);
   float shimmer = 0.75 + 0.25 * sin(uTime * 2.3 + uSeed * 7.0 + dot(n, vec3(5.0, 3.0, 4.0)));
-  vec3 col = uCol * (0.14 + edge * 1.5 * shimmer) * (0.7 + uGlow) + vec3(1.0, 0.97, 0.9) * glint * 1.6;
+  vec3 col = uCol * (0.3 + edge * 1.6 * shimmer) * (0.7 + uGlow) + vec3(1.0, 0.97, 0.9) * glint * 1.6;
   float a = (0.16 + edge * 0.7 + glint) * uFade;
   gl_FragColor = vec4(col * uFade, a);
 }`;
@@ -204,7 +204,7 @@ interface Shard {
 }
 
 const COLS = [0xffc070, 0xff9a4a, 0x7affb0, 0xffd890, 0x9ab4ff, 0xc8c0d8, 0xffb060];
-const LENS = new THREE.Vector3(0, 0.35, 3.1);
+const LENS = new THREE.Vector3(0, 0.62, 3.7);
 const GLASS_TOP = new THREE.Vector3(0, 1.25, 0);
 
 export class MemoryShards {
@@ -225,6 +225,8 @@ export class MemoryShards {
   private ptVel: Float32Array;
   private ptN = 0;
   private light = new THREE.PointLight(0xffc070, 0, 4, 1.5);
+  /** a warm memory-light so the little moments read inside their glass */
+  private glow = new THREE.HemisphereLight(0xffe2b0, 0x3a2a4a, 0.9);
 
   constructor() {
     for (let i = 0; i < MEMORY_LINES.length; i++) {
@@ -261,7 +263,7 @@ export class MemoryShards {
       })
     );
     this.pts.frustumCulled = false;
-    this.group.add(this.pts, this.light);
+    this.group.add(this.pts, this.light, this.glow);
   }
 
   setPx(px: number) {
@@ -326,7 +328,7 @@ export class MemoryShards {
         s.root.scale.setScalar(Math.max(0.0001, sc));
         s.root.rotation.set(Math.sin(t * 0.4 + s.i) * 0.3, t * s.spin, Math.sin(t * 0.3 + s.i * 2) * 0.2);
         s.u.uFade.value = e;
-        s.u.uGlow.value = 0.2 + s.hover * 1.2 + 0.15 * Math.sin(t * 2 + s.i);
+        s.u.uGlow.value = 0.55 + s.hover * 1.2 + 0.2 * Math.sin(t * 2 + s.i);
         // the pointer finds it
         const ndc = _p.copy(s.root.position).project(cam);
         const d = Math.hypot(ndc.x - this.ptr.x, (ndc.y - this.ptr.y) * (cam.aspect > 1 ? 1 / cam.aspect : 1));
@@ -345,7 +347,7 @@ export class MemoryShards {
         const e = 1 - (1 - k) ** 3;
         s.root.position.copy(s.from).lerp(LENS, e);
         s.root.position.y += Math.sin(t * 1.3) * 0.02;
-        s.root.scale.setScalar(0.42 + e * 0.5);
+        s.root.scale.setScalar(0.42 + e * 0.72);
         s.root.rotation.set(Math.sin(t * 0.7) * 0.15, s.root.rotation.y + dt * 0.8, 0);
         s.u.uGlow.value = 0.6 + e * 0.8;
         this.light.position.copy(s.root.position);

@@ -30,6 +30,10 @@ const GradeShader = {
     uResolution: { value: new THREE.Vector2(1, 1) },
     /** 0..1 painterly desert grade (on while an Env-lit world is on screen) */
     uLook: { value: 0.0 },
+    /** the hour's grade (ATMO.grade): shade tint, light tint, (exposure, shadow lift, vibrance, warmth) */
+    uLookS: { value: new THREE.Color(0.93, 0.965, 1.08) },
+    uLookH: { value: new THREE.Color(1.045, 1.0, 0.935) },
+    uLookP: { value: new THREE.Vector4(1, 0, 0.22, 0) },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -37,8 +41,8 @@ const GradeShader = {
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
     uniform float uTime, uVignette, uCA, uGrain, uSaturation, uContrast, uDesat, uRadial, uDamage, uPoison, uSpirit, uLook;
-    uniform vec3 uTintShadows, uTintHighlights;
-    uniform vec4 uFlash;
+    uniform vec3 uTintShadows, uTintHighlights, uLookS, uLookH;
+    uniform vec4 uFlash, uLookP;
     uniform vec2 uRadialCenter, uResolution;
     varying vec2 vUv;
     float h12(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
@@ -78,14 +82,20 @@ const GradeShader = {
       col = mix(vec3(l), col, uSaturation * (1.0 - uDesat));
       // painterly desert grade: lavender-blue shade, warm gold light, soft S-curve, vibrance
       if (uLook > 0.001) {
-        vec3 g = col;
+        // exposure for the hour as a soft screen-like lift: mids open up, highlights never clip flat
+        vec3 g = 1.0 - pow(1.0 - clamp(col, 0.0, 1.0), vec3(uLookP.x));
         float lg = dot(g, vec3(0.2126, 0.7152, 0.0722));
-        g *= mix(vec3(0.93, 0.965, 1.08), vec3(1.045, 1.0, 0.935), smoothstep(0.06, 0.72, lg));
+        // shadows open up toward a clean sky blue instead of sinking into mud (moonlight at night)
+        g += uLookP.y * vec3(0.5, 0.62, 1.0) * (1.0 - smoothstep(0.0, 0.42, lg));
+        lg = dot(g, vec3(0.2126, 0.7152, 0.0722));
+        g *= mix(uLookS, uLookH, smoothstep(0.06, 0.72, lg));
+        // golden hour: the low sun pours warmth through the upper mids
+        g += uLookP.w * vec3(0.06, 0.028, -0.012) * smoothstep(0.25, 0.85, lg);
         vec3 sc = clamp(g, 0.0, 1.0);
-        g = mix(g, sc * sc * (3.0 - 2.0 * sc), 0.2);
+        g = mix(g, sc * sc * (3.0 - 2.0 * sc), 0.18);
         float mx = max(g.r, max(g.g, g.b)), mn = min(g.r, min(g.g, g.b));
         lg = dot(g, vec3(0.2126, 0.7152, 0.0722));
-        g = mix(vec3(lg), g, 1.0 + 0.22 * (1.0 - clamp((mx - mn) * 2.0, 0.0, 1.0)) * (1.0 - uDesat));
+        g = mix(vec3(lg), g, 1.0 + uLookP.z * (1.0 - clamp((mx - mn) * 2.0, 0.0, 1.0)) * (1.0 - uDesat));
         col = mix(col, g, uLook);
       }
       // spirit world: cold teal with gold highlights
@@ -133,8 +143,8 @@ export class OutlinePass extends Pass {
         uFar: { value: 1000 },
         uRes: { value: new THREE.Vector2(1, 1) },
         uColor: { value: new THREE.Color(0x150a05) },
-        uStrength: { value: 0.92 },
-        uThick: { value: 1.4 },
+        uStrength: { value: 0.74 },
+        uThick: { value: 1.05 },
         /** contact shadow strength (0 = off) */
         uAO: { value: 0 },
         /** pixels per metre at 1 m depth (projection scale) */
@@ -180,6 +190,20 @@ export class OutlinePass extends Pass {
             }
             occ = clamp(occ / 8.0 * 1.6, 0.0, 1.0) * (1.0 - smoothstep(35.0, 70.0, d0));
             c.rgb = mix(c.rgb, c.rgb * vec3(0.5, 0.47, 0.6), occ * uAO);
+          } else if (uAO > 0.001 && d0 < 38.0) {
+            // creases on models (armpits, under plates and brims): one ring of 4 opposite pairs, depth only
+            float rpx = clamp(0.16 * uProjY / d0, 2.0, 18.0);
+            float rot = ign(gl_FragCoord.xy) * 6.2831853;
+            float occ = 0.0;
+            for (int i = 0; i < 4; i++) {
+              float a = rot + float(i) * 0.7853982;
+              vec2 o = vec2(cos(a), sin(a)) * rpx / uRes;
+              float da = ld(vUv + o), db = ld(vUv - o);
+              float dz = d0 - 0.5 * (da + db);
+              occ += smoothstep(0.006, 0.04, dz / d0) * step(0.0, min(d0 - da, d0 - db)) * (1.0 - smoothstep(0.25, 0.7, max(abs(d0 - da), abs(d0 - db))));
+            }
+            occ = clamp(occ * 0.25 * 1.4, 0.0, 1.0) * (1.0 - smoothstep(22.0, 38.0, d0));
+            c.rgb = mix(c.rgb, c.rgb * vec3(0.58, 0.54, 0.66), occ * uAO * 0.55);
           }
           float px = uThick / uRes.x, py = uThick / uRes.y;
           float dm = 0.0;
@@ -197,7 +221,8 @@ export class OutlinePass extends Pass {
           e *= 1.0 - smoothstep(90.0, 220.0, d0);
           // far silhouettes melt into the haze instead of carrying hard ink
           e *= 1.0 - smoothstep(30.0, 115.0, d0) * mix(0.8, 0.95, t0);
-          vec3 ink = mix(uColor * c.rgb * 0.25 + uColor, c.rgb * 0.6, smoothstep(25.0, 140.0, d0));
+          // a painted line: the surface's own colour deepened (lighter than flat black ink)
+          vec3 ink = mix(c.rgb * vec3(0.34, 0.31, 0.36) + uColor * 0.7, c.rgb * 0.64, smoothstep(25.0, 140.0, d0));
           // alpha passes through (the motion blur reads it: models 1, terrain and plants 0)
           gl_FragColor = vec4(mix(c.rgb, ink, e * uStrength), c.a);
         }`,
@@ -379,6 +404,11 @@ export class PostStack {
     if (!on && g.value < 0.01) g.value = 0;
     const ou = this.outline.material.uniforms;
     ou.uAO.value = on ? 0.62 : 0;
+    // the hour's grade
+    const gr = ATMO.grade, gk = Math.min(1, dt * 3);
+    this.u.uLookS.value.lerp(gr.s, gk);
+    this.u.uLookH.value.lerp(gr.h, gk);
+    this.u.uLookP.value.lerp(gr.p, gk);
     // the scene's own target height (the 3D view may render below the canvas resolution, see Engine.renderScale)
     if (cam.isPerspectiveCamera) ou.uProjY.value = cam.projectionMatrix.elements[5] * 0.5 * this.composer.renderTarget1.height;
     // sun shafts only when the camera faces the sun

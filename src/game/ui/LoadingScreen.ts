@@ -353,7 +353,7 @@ export class LoadingScreen implements LoadingCover {
   /** a piece of memory came back: its line is written under the glass */
   private onShard(ev: MemoryEvent) {
     this.taken++;
-    this.frag = { line: ev.line, t: performance.now() / 1000, hold: ev.hold };
+    this.frag = { line: ev.line, t: performance.now() / 1000, hold: Math.max(ev.hold, 2.4) };
     this.drawUi();
   }
 

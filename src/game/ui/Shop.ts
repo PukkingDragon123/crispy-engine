@@ -218,6 +218,13 @@ const LORE = [
   'That shovel boy had a name. It is on the tip of my tongue. Tortoise tongues are slow.',
   'Hrrm. My knees are older than that dune.',
   'Thoth says I was a king once. Thoth says a lot of things.',
+  'Isis got the sun to whisper his secret name to her. Names are like that. Hrrm. Yours is out there too.',
+  'Hathor came by once. Bought every red jar I had and would not say why. The next day the lions were all asleep.',
+  'Little fellow with a feather crown, all tongue and belly. Bes. If he offers to dance, let him. It keeps the snakes off.',
+  'Khnum the potter says he made everyone on his wheel. He says he remembers the one with the tail. Hrrm. He grinned when he said it.',
+  'A scruffy terrier has been nosing round the shell. If he looks at your purse, buy coffee gum. Trust me.',
+  'Some boy with a stolen book walks these dunes at night. The pages keep blowing away. I tell him: return it. He does not listen.',
+  'Every stranger on this road is a card in somebody\'s deck. I am the Hermit, they say. I prefer "the Shopkeeper".',
 ];
 /** small noises while he waits */
 const GRUMBLE = ['Hrrm.', 'Hrrm. Where did I put my spectacles.', 'Mmm. Mmm-hm.', 'Gobi, stop swaying.', 'Dust. Always dust.'];
@@ -238,6 +245,7 @@ const SOLD_LINE: Record<string, string[]> = {
   whiskey: ['Not before noon. Hrrm. It is always noon here.'],
   smoke: ['Pop it, and I never saw you.'],
   dagger: ['A little of you for a lot of oomph. Mind the fingers.'],
+  gum: ['For the dog. Do not ask how I know about the dog.', 'Chew slowly. It is bitter on purpose.'],
 };
 const VOICE_T = { title: TITLE, lines: LINES };
 const VOICE_C = { title: 'OZYMANDIAS', lines: LINES_C };
@@ -255,6 +263,7 @@ const COMMENT: Record<string, string[]> = {
   whiskey: ['Cactus-aged. Most spines out.', 'Steadies the aim. Then it does not.', 'One sip and you see two of me.'],
   heal: ['Fresh from my camel. Do not ask.', 'Heals everything but pride.', 'It is warm. That is not a good sign.'],
   card: ['Your fortune, sealed in wax.', 'Pick one, regret the other two.', 'The cards like you. Mostly.'],
+  gum: ['Coffee gum. Bitter as a sheriff.', 'There is a little dog out there who would sell his soul for this.', 'Wakes you up. Wakes the dead up, nearly.'],
   _: ['A fine thing, that.', 'Old, but so am I.', 'Lovely, isn\'t it?'],
   _gear: ['Good work, that. Better than what you have on, I think.', 'A dead gunslinger sold me that. He did not need it.', 'Try it on. No, do not try it on. Buy it first.', 'Made to last. Unlike its last owner.'],
 };
