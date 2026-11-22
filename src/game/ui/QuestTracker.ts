@@ -264,6 +264,8 @@ export class QuestTracker {
     const k = Math.min(sx < 0 ? (L - cx) / sx : sx > 0 ? (R - cx) / sx : 1e9, sy < 0 ? (T - cy) / sy : sy > 0 ? (Bt - cy) / sy : 1e9);
     x = cx + sx * k;
     y = cy + sy * k;
+    // never on the day plaque and the hourglass at the top centre
+    if (Math.abs(x - cx) < 170) y = Math.max(y, (this.d.hud.topCentreBottom?.() ?? 0) + 24);
     const oct = ((Math.round((B.ang / (Math.PI * 2)) * 8) % 8) + 8) % 8;
     const diag = oct % 2 === 1;
     const push = Math.round(Math.sin(this.t * 6) * 1.5);

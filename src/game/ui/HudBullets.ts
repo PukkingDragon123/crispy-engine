@@ -1,11 +1,12 @@
-// THE BULLET ROW: Sundown's rounds as big 3D voxel cartridges standing in a row on top of
+// THE BULLET ROW: Sundown's rounds as big chunky 3D voxel cartridges (drawn low-res, flat-shaded and
+// ink-outlined like 2D icons: ui/HudFlat) standing in a row on top of
 // the tarot card pile (the sculpted HUD rounds of props/hud.ts: drawn brass case, lead or
 // venom-glass nose, stamped head), readable at a glance. A shot kicks the last loaded round
 // up off the row, tumbling away; an empty place keeps a dark spent case, leaning; a reload
 // drops fresh rounds in one by one with a little bounce; the last round shivers and warms.
 import * as THREE from 'three';
-import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
-import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
+import type { VoxelMaterial } from '../../engine/render/VoxelMaterial';
+import { coarseGeo, flatMat, outline, HUD_COARSE } from './HudFlat';
 import { hudRound, type HudRoundKind } from '../models/props/hud';
 
 export interface BulletRowAnchor {
@@ -47,8 +48,9 @@ export class HudBullets {
   private ok = true;
 
   constructor(private scene: THREE.Scene) {
-    this.mat = makeVoxelMaterial({ fog: false });
-    this.dimMat = makeVoxelMaterial({ fog: false });
+    // the lower HUD look (ui/HudFlat): chunky low-res rounds, flat colour, a dark ink outline
+    this.mat = flatMat();
+    this.dimMat = flatMat();
     this.dimMat.userData.tint.value.setRGB(0.34, 0.3, 0.28);
     scene.add(this.root);
   }
@@ -57,7 +59,7 @@ export class HudBullets {
     let e = this.geo[kind];
     if (!e) {
       const r = hudRound(kind, 6);
-      const g = buildVoxelGeometry(r.model, { voxelSize: 1, pivot: r.pivot });
+      const g = coarseGeo(r.model, HUD_COARSE.round, 1, r.pivot);
       g.computeBoundingBox();
       const b = g.boundingBox!;
       e = { g, len: Math.max(1, b.max.z - b.min.z) };
@@ -72,6 +74,7 @@ export class HudBullets {
       const b = new THREE.Mesh(this.round('spent').g, this.dimMat);
       for (const m of [a, b]) {
         m.frustumCulled = false;
+        outline(m);
         this.root.add(m);
       }
       this.live.push(a);
@@ -115,7 +118,7 @@ export class HudBullets {
     // shots: each round that left the row flies off, spinning
     if (this.lastShown >= 0 && A.shown < this.lastShown && !A.reloading)
       for (let i = A.shown; i < this.lastShown && i < A.n; i++) {
-        const m = new THREE.Mesh(i < A.venom ? venom.g : brass.g, this.mat);
+        const m = outline(new THREE.Mesh(i < A.venom ? venom.g : brass.g, this.mat));
         m.scale.setScalar(sc);
         m.frustumCulled = false;
         this.scene.add(m);

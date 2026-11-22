@@ -54,7 +54,6 @@ import { Blueprints } from '../meta/Blueprints';
 import { SUBAREAS } from '../world/RegionGen';
 import { NILE_AREAS } from '../world/NileGen';
 import { isTouchDevice } from './TouchControls';
-import { DayPlaque } from './DayPlaque';
 
 export interface LadderDeps {
   engine: Engine;
@@ -167,6 +166,9 @@ export class ProgressLadder {
   private seen = seenTips();
   private tipQ: string[] = [];
   private tip: { id: string; t: number } | null = null;
+  /** where the showing tip sits (HUD px): the shop compass keeps off it */
+  private tipRect: { x: number; y: number; w: number; h: number } | null = null;
+  private tipHold = 0;
   private lastZone = 0;
   private wasBreak = false;
 
@@ -430,9 +432,7 @@ export class ProgressLadder {
     const top = Math.max(72, Math.round(this.h * 0.2));
     this.paintLedger(c, dt, x0, top, open, S, k);
     // right of the badges and their figures, below the day plaque, its tag and the hourglass (never over them)
-    const dp = hud.painters.find((p): p is DayPlaque => p instanceof DayPlaque);
-    const clear = Math.max(hud.topClear ?? 0, dp?.bottom ?? 0);
-    this.paintTip(c, dt, x0 + 52, Math.max(top + 10, clear + 8));
+    this.paintTip(c, dt, x0 + 52, Math.max(top + 10, hud.topCentreBottom() + 8));
     this.paintCompass(c, dt, shop, brk);
     this.paintSparks(c, dt);
   }
@@ -551,6 +551,11 @@ export class ProgressLadder {
     const t = Math.min(sx < 0 ? (L - cx) / sx : sx > 0 ? (R - cx) / sx : 1e9, sy < 0 ? (T - cy) / sy : sy > 0 ? (B - cy) / sy : 1e9);
     x = cx + sx * t;
     y = cy + sy * t;
+    // never on the day plaque and the hourglass at the top centre
+    if (Math.abs(x - cx) < 170) y = Math.max(y, this.d.hud.topCentreBottom() + 30);
+    // never over a first-time tip: slide down the edge below it
+    const tr = this.tipRect;
+    if (tr && x < tr.x + tr.w + 40 && y > tr.y - 44 && y < tr.y + tr.h + 30) y = Math.min(B, tr.y + tr.h + 30);
     C.ang += Math.atan2(Math.sin(ang - C.ang), Math.cos(ang - C.ang)) * Math.min(1, dt * 8);
     const frame = ((Math.round((C.ang / TAU) * 16) % 16) + 16) % 16;
     const cmp = this.compass(frame);
@@ -566,7 +571,10 @@ export class ProgressLadder {
 
   // ---------------------------------------------------------------- first-time tips
   private paintTip(c: CanvasRenderingContext2D, dt: number, x0: number, y: number) {
-    if (!this.tip && this.tipQ.length && this.show > 0.9) {
+    // a big title card has the band under the plaque: the tip waits, faded out, until it is gone
+    const hold = this.d.hud.bigToast;
+    this.tipHold += ((hold ? 1 : 0) - this.tipHold) * Math.min(1, dt * 10);
+    if (!this.tip && this.tipQ.length && this.show > 0.9 && !hold) {
       const id = this.tipQ.shift()!;
       this.tip = { id, t: 0 };
       this.seen.add(id);
@@ -578,8 +586,9 @@ export class ProgressLadder {
       this.d.ctx.sfx('paper_flutter', null, 0.45, 1.1);
     }
     const T = this.tip;
+    this.tipRect = null;
     if (!T) return;
-    T.t += dt;
+    if (!hold) T.t += dt;
     const DUR = 5.5;
     if (T.t > DUR) {
       this.tip = null;
@@ -596,6 +605,7 @@ export class ProgressLadder {
     const e = 1 - Math.pow(1 - inK, 3) - outK * outK;
     const x = Math.round(x0 - (W + 30) * (1 - e));
     const yy = y;
+    this.tipRect = { x: x0, y: yy - 6, w: W + 24, h: H };
     const sway = Math.sin(T.t * 2.4) * Math.max(0, 1 - T.t * 0.6) * 2;
     // it slides out from behind the ledger's figures
     c.save();
@@ -603,9 +613,10 @@ export class ProgressLadder {
     c.rect(x0 - 6, yy - 12, this.w, H + 30);
     c.clip();
     // floating 3D type, no paper (user note): a brass title with a lotus off its shoulder, the lines spelled in
-    c.globalAlpha = this.show * clamp01(e * 1.5);
+    const vis = this.show * clamp01(e * 1.5) * (1 - this.tipHold);
+    c.globalAlpha = vis;
     const sw = Math.round(sway);
-    blitObj(c, uiMark('lotus'), x + 8, yy + 11 + sw + Math.sin(T.t * 2) * 1.1, 1, this.show * clamp01(e * 1.5));
+    blitObj(c, uiMark('lotus'), x + 8, yy + 11 + sw + Math.sin(T.t * 2) * 1.1, 1, vis);
     text3dReveal(c, lines[0], x + 18, yy + 5 + sw, { face: T3D.brass }, T.t / 0.4);
     text3d(c, lines[1], x + 18, yy + 21, { face: T3D.cream, depth: 1 });
     text3d(c, lines[2], x + 18, yy + 35, { face: T3D.cream, depth: 1 });

@@ -34,6 +34,7 @@ import { Cinema, type BossLike } from '../cine/Cinema';
 import { ArsenalHud } from './ArsenalHud';
 import { MoonCrestHud } from './MoonCrestHud';
 import { SpriteBank, blitObj, glint, setGlintFx } from './HudSprites';
+import { coarseGeo, coarseRig, flatMat, outline, setOutlinePx, HUD_COARSE } from './HudFlat';
 import { PixelFx } from './HudKit';
 import { HUD_ART as ART } from './HudArt';
 import { sprite } from './PixelUI';
@@ -226,7 +227,8 @@ export class Hud3D implements HudPainter {
     this.scene.add(this.glints.points);
     setGlintFx(this.glints);
 
-    this.mat = makeVoxelMaterial({ fog: false });
+    // the lower HUD pieces (cylinder, rounds, items, heart) read like 2D icons: low-res, flat-shaded, ink-outlined (ui/HudFlat)
+    this.mat = flatMat();
     this.ghostMat = makeVoxelMaterial({ fog: false, transparent: true, opacity: 0.22 });
     this.ghostMat.depthWrite = false;
     this.ghostMat.depthTest = false;
@@ -249,10 +251,11 @@ export class Hud3D implements HudPainter {
       this.hinge.add(gg);
     }
     // health: a real heart in old linen, beating
-    this.heartMat = makeVoxelMaterial({ fog: false });
+    this.heartMat = flatMat();
     try {
-      const spec = hudHeartRig();
-      this.heart = new RigInstance(buildRigGeo(spec, 'hud_heart'), { material: this.heartMat, castShadow: false });
+      const spec = coarseRig(hudHeartRig(), HUD_COARSE.heart, 0.22);
+      this.heart = new RigInstance(buildRigGeo(spec, 'hud_heart_c' + HUD_COARSE.heart), { material: this.heartMat, castShadow: false });
+      for (const m of Object.values(this.heart.meshes)) outline(m);
       this.scene.add(this.heart.root);
       this.heartFx = new HeartFx(this.heart, (spec.meta?.height as number) ?? 0.14, this.scene);
     } catch (e) {
@@ -363,13 +366,13 @@ export class Hud3D implements HudPainter {
     try {
       const hc = hudCylinder(n);
       const u = CR / hc.meta.radius; // HUD units per metre
-      geo = buildVoxelGeometry(hc.model, { voxelSize: hc.voxelSize * u, pivot: hc.pivot });
+      geo = coarseGeo(hc.model, HUD_COARSE.cylinder, hc.voxelSize * u, hc.pivot);
       geoZ = -hc.meta.rearZ * u;
       chambers = hc.meta.chambers.map(([x, y]) => [x * u, y * u]);
       const mkRound = (k: 'brass' | 'venom' | 'spent') => {
         const r = hudRound(k, n);
         seat = r.meta.seatOffset * u;
-        return buildVoxelGeometry(r.model, { voxelSize: r.voxelSize * u, pivot: r.pivot });
+        return coarseGeo(r.model, HUD_COARSE.cylinder, r.voxelSize * u, r.pivot);
       };
       this.roundGeo = mkRound('brass');
       this.venomGeo = mkRound('venom');
@@ -381,10 +384,12 @@ export class Hud3D implements HudPainter {
     }
     const mk = (g: THREE.Group, mat: THREE.Material, keep: boolean) => {
       const body = new THREE.Mesh(geo, mat);
+      if (keep) outline(body);
       body.position.z = geoZ;
       g.add(body);
       for (let i = 0; i < n; i++) {
         const r = new THREE.Mesh(this.roundGeo, mat);
+        if (keep) outline(r);
         r.position.set(chambers[i][0], chambers[i][1], seat);
         r.userData.seat = seat;
         g.add(r);
@@ -419,7 +424,7 @@ export class Hud3D implements HudPainter {
       this.itemGeo.set(key, e);
     }
     if (!e) return null;
-    const mesh = new THREE.Mesh(e.geo, this.mat);
+    const mesh = outline(new THREE.Mesh(e.geo, this.mat));
     mesh.userData.size = e.size;
     const holder = new THREE.Group();
     holder.add(mesh);
@@ -476,6 +481,8 @@ export class Hud3D implements HudPainter {
     this.cam.top = 0;
     this.cam.bottom = -H;
     this.cam.updateProjectionMatrix();
+    // the lower pieces' ink line: one HUD pixel and a bit, like the 2D art's outlines
+    setOutlinePx(s * 1.25, W, H);
     this.quad.position.set(W / 2, -H / 2, -3000);
     this.quad.scale.set(W, H, 1);
     if (hud.canvas.width !== this.texW || hud.canvas.height !== this.texH) {
@@ -530,7 +537,7 @@ export class Hud3D implements HudPainter {
       const n = this.rounds.length;
       for (let i = 0; i < n; i++) {
         const a = chamberAngle(i, n) - cy.rot;
-        const mesh = new THREE.Mesh(this.spentGeo ?? this.roundGeo, this.mat);
+        const mesh = outline(new THREE.Mesh(this.spentGeo ?? this.roundGeo, this.mat));
         mesh.scale.setScalar(vox);
         this.scene.add(mesh);
         const wx = hx + (CR * 1.05 - CR * 0.3) * vox + Math.cos(a) * CH * vox * 0.6;

@@ -40,7 +40,10 @@
 - Very high voxel counts everywhere. Fluid, procedural animation.
 - Enemy skill names reference Rolling Stones / Guns N' Roses / Beatles songs.
 - UI (latest note): the lower HUD stays live 3D: the heart (more 3D, with an effect), big revolver bullets on top of the
-  tarot card pile, the tarot cards (the ultimate is one of the cards). The soul jar is removed. Never replace those with 2D. The rest (bounty plank, wave plaque, notes, toasts, ledger, codex card,
+  tarot card pile, the tarot cards (the ultimate is one of the cards). The soul jar is removed. Never replace those with 2D,
+  but draw them low-res, flat-shaded and outlined so they read like 2D icons that still turn and move in 3D: 2-4x coarser
+  chunky voxels, flat colour with one soft shade step (no specular or bloom), a crisp dark ink outline
+  (`src/game/ui/HudFlat.ts`). The rest (bounty plank, wave plaque, notes, toasts, ledger, codex card,
   prompts) is detailed, stylized 2D pixel art that reads as UI, not photographed 3D or texture: moderate pixel
   resolution, hand-authored pixel sprites allowed there, polished and consistent.
 - All spoken dialogue and story text is floating 3D text in the world (FloatText3D), never 2D boxes or balloons.

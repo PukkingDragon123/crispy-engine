@@ -327,6 +327,15 @@ export class Hud {
   setVisible(v: boolean) {
     this.visible = v;
   }
+  /** the lowest HUD px of the top-centre cluster (day plaque with its tag and warning, hourglass, boss bar) */
+  topCentreBottom() {
+    const dp = this.painters.find((p): p is DayPlaque => p instanceof DayPlaque);
+    return Math.max(this.topClear, dp?.bottom ?? 0);
+  }
+  /** a big title card is up (side notes such as the ledger's first-time tips step back for it) */
+  get bigToast() {
+    return this.toasts.some((t) => t.big);
+  }
   /** toasts of the last few seconds with their age (s) */
   recentToasts() {
     return this.recent.map((r) => ({ text: r.text + (r.sub ? ' ' + r.sub : ''), age: this.t - r.at }));
@@ -877,8 +886,9 @@ export class Hud {
         for (const { t, d } of list) {
           const p = this.project(t);
           let mx = p.x / this.scale, my = p.y / this.scale;
-          const M = 24;
-          let edge = !p.visible || mx < M || mx > W - M || my < M || my > H - M;
+          // the edge frame keeps clear of the trail ledger (left), the bounty bar (top) and the bottom HUD
+          const L = 104, R = W - 24, T = 44, Bt = H - 78;
+          let edge = !p.visible || mx < L || mx > R || my < T || my > Bt;
           let ang = 0;
           if (edge) {
             let dx = mx - W / 2, dy = my - H / 2;
@@ -887,11 +897,13 @@ export class Hud {
               dy = Math.abs(dy) + H;
             }
             ang = Math.atan2(dy, dx);
-            const kk = Math.min((W / 2 - M) / Math.max(1, Math.abs(dx)), (H / 2 - M) / Math.max(1, Math.abs(dy)));
+            const kk = Math.min(dx < 0 ? (L - W / 2) / dx : dx > 0 ? (R - W / 2) / dx : 1e9, dy < 0 ? (T - H / 2) / dy : dy > 0 ? (Bt - H / 2) / dy : 1e9);
             mx = W / 2 + dx * kk;
             my = H / 2 + dy * kk;
             edge = true;
           }
+          // never on the day plaque and the hourglass
+          if (Math.abs(mx - W / 2) < 170) my = Math.max(my, this.topCentreBottom() + 10);
           ar.markers.push({ x: mx, y: my, kind: t.kind, edge, ang });
           if (hw) this.tl(c, `${Math.round(d)} m`, mx - (edge ? Math.cos(ang) * 8 : 0), my + 14, 'rgba(255,236,190,0.95)', 16, 'center');
         }
@@ -1004,7 +1016,7 @@ export class Hud {
 
     // ---------------------------------------------------------- toasts: floating 3D type, no plates
     // they keep to the right margin under the mission note, live briefly and sink back while the fight is hot
-    const heatA = 1 - this.heat * 0.5;
+    const heatA = 1 - this.heat * 0.3; // (still easy to read mid-fight)
     let ty = Math.round(Math.max(H * 0.2, this.use3D ? this.paperBottom + 6 : 0));
     for (let i = this.toasts.length - 1; i >= 0; i--) {
       const tt = this.toasts[i];
@@ -1020,8 +1032,7 @@ export class Hud {
         const k = Math.min(1, tt.t / 0.4);
         const out = tt.t > life - 0.35 ? (life - tt.t) / 0.35 : 1;
         // below the day plaque (its tag and warning too) and the hourglass, above the rider
-        const dp = this.painters.find((p): p is DayPlaque => p instanceof DayPlaque);
-        const yy = Math.round(Math.max(H * 0.27, this.topClear + 10, (dp?.bottom ?? 0) + 6) + (1 - easeOutBack(k)) * -16);
+        const yy = Math.round(Math.max(H * 0.27, this.topCentreBottom() + 8) + (1 - easeOutBack(k)) * -16);
         c.globalAlpha = out * Math.min(1, k * 2.5) * heatA;
         // the letters pop in one by one; a brass lotus blooms up off the title's left shoulder, a scarab gem
         // hangs off its right foot (an asymmetric pair), both breathing gently while it stays

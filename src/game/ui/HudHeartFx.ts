@@ -12,17 +12,17 @@ import type { RigInstance } from '../../engine/voxel/Rig';
 import { PixelFx } from './HudKit';
 
 const VS = /* glsl */ `
-varying vec3 vP; varying vec3 vN; varying vec3 vV; varying vec3 vC;
+varying vec3 vP; varying vec3 vN; varying vec3 vV; varying vec3 vC; varying vec3 vNm;
 void main(){
-  vP = position; vC = color;
+  vP = position; vC = color; vNm = normal;
   vN = normalize(normalMatrix * normal);
   vec4 mv = modelViewMatrix * vec4(position, 1.0);
   vV = -mv.xyz;
   gl_Position = projectionMatrix * mv;
 }`;
 const FS = /* glsl */ `
-uniform float uBeat, uDmg, uHeal, uHurt, uT, uScale, uKind;
-varying vec3 vP; varying vec3 vN; varying vec3 vV; varying vec3 vC;
+uniform float uBeat, uDmg, uHeal, uHurt, uT, uScale, uKind, uVox;
+varying vec3 vP; varying vec3 vN; varying vec3 vV; varying vec3 vC; varying vec3 vNm;
 vec3 h33(vec3 p){ p = vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6))); return fract(sin(p) * 43758.5453); }
 // distance to the nearest Voronoi edge, and the cell's random id
 vec2 crack(vec3 p){
@@ -40,10 +40,12 @@ void main(){
   vec3 n = normalize(vN), v = normalize(vV);
   float fres = 1.0 - clamp(dot(n, v), 0.0, 1.0);
   float muscle = uKind < 0.5 ? smoothstep(0.04, 0.18, vC.r - max(vC.g, vC.b)) : 0.0;
-  vec3 q = vP * uScale;
+  // snapped to the centre of its (low-res) voxel, so the cracks and the heal band step in whole blocks
+  vec3 q = (floor((vP - vNm * 0.5 * uVox) / uVox) + 0.5) * uVox * uScale;
   vec3 col = vec3(0.0);
   // subsurface: light through the thin silhouette, pulsing with the beat
-  float sss = pow(fres, 2.0) * (0.3 + 0.7 * uBeat);
+  // (flat, one step: only faces turned well away glow, and softer, so it reads as a 2D icon)
+  float sss = step(0.55, fres) * 0.55 * (0.3 + 0.7 * uBeat);
   col += vec3(1.0, 0.28, 0.14) * sss * (0.6 * muscle + 0.1) * (0.45 + 0.55 * (1.0 - uDmg));
   // cracks open below half health
   if (uDmg > 0.45 && muscle > 0.01) {
@@ -74,6 +76,7 @@ export class HeartFx {
     uHurt: { value: 0 },
     uT: { value: 0 },
     uScale: { value: 1 },
+    uVox: { value: 1 },
   };
   /** pixel embers, blood drops and heal motes around the heart (HUD px) */
   fx = new PixelFx(160, true, 64);
@@ -83,6 +86,7 @@ export class HeartFx {
 
   constructor(heart: RigInstance, height: number, scene: THREE.Scene) {
     this.u.uScale.value = 1 / Math.max(1e-4, height);
+    this.u.uVox.value = heart.geo.spec.voxelSize;
     for (const [name, mesh] of Object.entries(heart.meshes)) {
       const m = new THREE.ShaderMaterial({
         uniforms: { ...this.u, uKind: { value: name === 'heart' ? 0 : 1 } },

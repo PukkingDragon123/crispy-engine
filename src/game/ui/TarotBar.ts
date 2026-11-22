@@ -16,7 +16,8 @@ import * as THREE from 'three';
 import type { Hud } from './Hud';
 import type { RigSpec } from '../../engine/voxel/Rig';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
-import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
+import type { VoxelMaterial } from '../../engine/render/VoxelMaterial';
+import { coarseGeo, flatMat, outline, HUD_COARSE } from './HudFlat';
 import { CardStudio } from './CardStudio';
 import { Kit, TAROT_BAR, TarotDef, TarotFx } from './TarotCards';
 import { CARD, tarotFrame } from '../models/props/tarot';
@@ -367,7 +368,8 @@ export class TarotBar {
   private *makeJob(renderer: THREE.WebGLRenderer, hero: RigSpec, heroKey: string, gun: RigSpec | null): Generator<void, void, void> {
     const fr = tarotFrame();
     yield;
-    this.frameGeo = buildVoxelGeometry(fr.model, { voxelSize: 1, pivot: fr.pivot });
+    // the lower HUD look (ui/HudFlat): a chunkier frame, flat-shaded and ink-outlined, like a 2D card icon
+    this.frameGeo = coarseGeo(fr.model, HUD_COARSE.card, 1, fr.pivot);
     yield;
     this.env = giltEnv(renderer);
     TAROT_BAR.forEach((d, i) => this.cards.push(this.makeCard(d, i)));
@@ -417,10 +419,8 @@ export class TarotBar {
     const group = new THREE.Group();
     const tilt = new THREE.Group();
     group.add(tilt);
-    const frameMat = makeVoxelMaterial({ fog: false });
-    frameMat.envMap = this.env?.texture ?? null;
-    frameMat.envMapIntensity = 1.15;
-    const frame = new THREE.Mesh(this.frameGeo!, frameMat);
+    const frameMat = flatMat();
+    const frame = outline(new THREE.Mesh(this.frameGeo!, frameMat));
     tilt.add(frame);
     // card-stock core inside the slab so sub-pixel cracks in the relief never show the game behind
     this.coreMat ??= new THREE.MeshStandardMaterial({ color: 0xb8a078, roughness: 0.9, side: THREE.DoubleSide });
