@@ -15,12 +15,12 @@
 //  • the BEATS: before the first wave of a day the camera turns to the rising sun,
 //    before the night to the moon coming up; RunScene stamps "DAY N" / "NIGHTFALL" in
 //    big voxel letters as that wave opens (dayLabel).
-//  • the HUD: the day plaque (ui/DayPlaque) and the hourglass (ui/HourglassHud), whose
+//  • the HUD: the day plaque (ui/DayPlaque) and the soul glass (ui/SoulGlassHud), whose
 //    shake hurries the break.
 import * as THREE from 'three';
 import { PRESETS, type EnvPreset } from '../world/Env';
 import { DayPlaque, type PlaqueState } from '../ui/DayPlaque';
-import { HourglassHud } from '../ui/HourglassHud';
+import { SoulGlassHud } from '../ui/SoulGlassHud';
 import { HURRY } from './WaveDirector';
 
 export const WAVES_PER_DAY = 5;
@@ -112,7 +112,7 @@ export interface DaysHost {
   hud3d: { scene: THREE.Scene };
   camRig: { cine: unknown; setCine(s: { pos: THREE.Vector3; look: THREE.Vector3; fov?: number } | null): void };
   player: { pos: THREE.Vector3; alive: boolean };
-  props?: { list: { kind: string; matrix: THREE.Matrix4; broken: boolean }[] };
+  props?: { list: { kind: string; matrix: THREE.Matrix4; broken: boolean }[]; glows?: THREE.Vector3[] };
   scene: THREE.Scene;
   opts: { stage?: string };
 }
@@ -141,7 +141,7 @@ export class Days {
   private torchT = 0;
   private nightLoop: { setVolume(v: number, t?: number): void; stop(t?: number): void } | null = null;
   private plaque: DayPlaque;
-  private glass: HourglassHud;
+  private glass: SoulGlassHud;
   private beatFor = -1;
   private beatShot: unknown = null;
   private beatOffT = -1;
@@ -153,7 +153,7 @@ export class Days {
     this.key = r.world.sa.env;
     this.skyOn = r.opts.stage !== 'nile' && !!PRESETS[this.key];
     if (this.skyOn) this.saved = { ...PRESETS[this.key] };
-    // a lantern pool round the hunter and two campfire pools, dark by day (made once: no shader rebuilds later)
+    // a lantern pool round the hunter and two camp-glow pools, dark by day (made once: no shader rebuilds later)
     this.lantern = new THREE.PointLight(0xffb066, 0, 13, 1.7);
     r.scene.add(this.lantern);
     for (let i = 0; i < 2; i++) {
@@ -165,14 +165,14 @@ export class Days {
     const hud = r.hud as typeof r.hud & Slotted & { timeHud?: boolean };
     hud.timeHud = true;
     // the HUD keeps the hourglass a spot at the top centre (and retires the stopwatch); the plaque hangs to its left
-    this.slot = hud.reserveSlot?.('hourglass', 32, 50) ?? null;
+    this.slot = hud.reserveSlot?.('hourglass', 40, 58) ?? null;
     this.plaque = new DayPlaque(() => this.plaqueState(), () => {
       const sl = this.slot;
       if (!sl || !sl.visible) return null;
       return { right: Math.round(sl.x - (sl.w / 2) * sl.k - 8), y: Math.max(4, Math.round(sl.y - (sl.h / 2) * sl.k)) };
     });
     hud.painters.push(this.plaque);
-    this.glass = new HourglassHud(r.hud3d.scene, r.hud);
+    this.glass = new SoulGlassHud(r.hud3d.scene, r.hud);
     this.glass.onShake = (a) => r.ctx.shake(a);
     if (typeof window !== 'undefined') (window as any).__days = this; // dev handle: __days.skip(t)
   }
@@ -281,6 +281,10 @@ export class Days {
       for (const pr of r.props?.list ?? []) {
         if (pr.broken || !/campfire|torch|lantern|brazier/i.test(pr.kind)) continue;
         const v = new THREE.Vector3().setFromMatrixPosition(pr.matrix);
+        const d = v.distanceTo(p);
+        if (d < 80) fires.push({ d, v });
+      }
+      for (const v of r.props?.glows ?? []) {
         const d = v.distanceTo(p);
         if (d < 80) fires.push({ d, v });
       }

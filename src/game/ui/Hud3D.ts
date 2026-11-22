@@ -1,7 +1,8 @@
 // 3D HUD layer: the 2D pixel-art HUD canvas is composited in WebGL and real
 // voxel models sit on top of it in the lower part of the HUD — the revolver
 // cylinder (rounds in chambers, spins per shot with motion ghosts, swings out on
-// reload, spits brass that tumbles off the screen), the beating wrapped heart and
+// reload, spits brass that tumbles off the screen), the beating wrapped heart on the soul vessel's
+// medallion (health and stamina are the soul and venom vessels, HudVessels.ts) and
 // the consumables as little turntable models in their slots. The upper and
 // framing pieces are stylized 2D pixel art painted into the canvas (Hud.painters):
 // this class paints the purse coin, the mission notes and the outlaw readouts. cutIn() no longer draws anything on
@@ -38,6 +39,7 @@ import { coarseGeo, coarseRig, flatMat, outline, setOutlinePx, HUD_COARSE } from
 import { PixelFx } from './HudKit';
 import { HUD_ART as ART } from './HudArt';
 import { sprite } from './PixelUI';
+import { LiquidVessel } from './HudVessels';
 
 export interface CutInOpts {
   /** the subject's rig (a boss cut-in passes the boss rig) */
@@ -212,6 +214,9 @@ export class Hud3D implements HudPainter {
   private keyLight: THREE.DirectionalLight;
   /** the tarot ability cards (built lazily once the renderer and the player rig are known) */
   private tarot: TarotBar;
+  /** health and stamina as living liquids (ui/HudVessels): the heart sits on the soul vessel's medallion */
+  private soulV: LiquidVessel;
+  private venomV: LiquidVessel;
 
   constructor(private hud: Hud) {
     this.tex = this.makeTex();
@@ -270,6 +275,8 @@ export class Hud3D implements HudPainter {
     this.moonCrests = new MoonCrestHud(this.scene);
 
     this.tarot = new TarotBar(this.scene, hud);
+    this.soulV = new LiquidVessel('soul', this.scene);
+    this.venomV = new LiquidVessel('venom', this.scene);
 
   }
 
@@ -601,6 +608,10 @@ export class Hud3D implements HudPainter {
       this.heartFx?.update(dt, Math.min(1, lub), frac, this.heartHurt, this.t, hh.x, hh.y, HEART_PX * 0.45, s, visible);
     }
 
+    // ------------------------------------------------ the soul and venom vessels
+    this.soulV.update(dt, A.soul, s, visible);
+    this.venomV.update(dt, A.venom, s, visible);
+
     // ------------------------------------------------ items
     A.items.forEach((it, i) => {
       if (this.itemKeys[i] !== it.model) {
@@ -703,6 +714,8 @@ export class Hud3D implements HudPainter {
     const pi = this.hud.painters.indexOf(this);
     if (pi >= 0) this.hud.painters.splice(pi, 1);
     this.tarot.dispose();
+    this.soulV.dispose();
+    this.venomV.dispose();
     this.bullets.dispose();
     this.heartFx?.dispose();
     this.paper.dispose();

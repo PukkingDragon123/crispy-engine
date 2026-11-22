@@ -23,6 +23,12 @@ import { HUD_ART as ART } from './HudArt';
 import { text3d, text3dReveal, uiMark, T3D } from './Text3D';
 import { blitObj } from './HudSprites';
 import { DayPlaque } from './DayPlaque';
+import { soulSocket, vesselWidth, type VesselAnchor } from './HudVessels';
+import { sprite } from './PixelUI';
+
+/** the soul vessel's and the venom vessel's glass length (HUD px) */
+const SOUL_LEN = 124;
+const VENOM_LEN = 98;
 
 
 /** one quest note on the mission paper stack */
@@ -46,6 +52,9 @@ export interface HudState {
   venom: number;
   reload: { active: boolean; t: number; window: [number, number]; jam: number; phase: string };
   boost: number;
+  /** stamina now and its most (Player.stamina / staminaMax); absent: the venom vessel shows the board's boost */
+  stamina?: number;
+  staminaMax?: number;
   speed: number;
   rank: number;
   bountyFrac: number;
@@ -114,6 +123,9 @@ export interface HudAnchors {
   items: { x: number; y: number; size: number; model: string; count: number }[];
   ult: { x: number; y: number; frac: number; ready: boolean };
   heart: { x: number; y: number; frac: number };
+  /** the soul (health) and venom (stamina) vessels (ui/HudVessels, 3D layer) */
+  soul: VesselAnchor | null;
+  venom: VesselAnchor | null;
   slide: number;
   /** the big 3D rounds standing on the tarot pile (HudBullets) */
   bullets: BulletRowAnchor | null;
@@ -205,6 +217,8 @@ export class Hud {
     items: [],
     ult: { x: 0, y: 0, frac: 0, ready: false },
     heart: { x: 0, y: 0, frac: 1 },
+    soul: null,
+    venom: null,
     slide: 0,
     bullets: null,
     outlaw: null,
@@ -297,6 +311,11 @@ export class Hud {
       this.toasts.splice(i, 1);
     }
   }
+  /** stamina ran dry (the 'staminaEmpty' event): the venom vessel flashes and shakes */
+  staminaEmpty() {
+    this.stamEmpty++;
+  }
+  private stamEmpty = 0;
   onShot() {
     this.cylVel = 14;
     this.recoil = 1;
@@ -610,10 +629,8 @@ export class Hud {
       this.drawCylinder(dt, s, this.magX, this.magY);
     } else this.drawCylinder(dt, s, cx, H - 32 + slide * 70);
 
-    // ---------------------------------------------------------- health (bottom left)
+    // ---------------------------------------------------------- health and stamina (bottom left)
     {
-      // the 3D beating heart sits left of the bar, so the bar moves over for it
-      const x = (this.use3D ? 40 : 8) - slide * 200, y = H - 28;
       if (this.lastHp >= 0 && s.hp < this.lastHp - 0.5) this.onHurt(this.lastHp - s.hp);
       this.lastHp = s.hp;
       const frac = Math.max(0, s.hp / s.maxHp);
@@ -621,17 +638,59 @@ export class Hud {
       this.hpShake = Math.max(0, this.hpShake - dt * 3);
       this.hpFlash = Math.max(0, this.hpFlash - dt * 5);
       const sx = Math.round((Math.random() - 0.5) * 6 * this.hpShake), sy = Math.round((Math.random() - 0.5) * 4 * this.hpShake);
-      const bw = 156, bh = 16;
-      this.blit(barFrame(bw, bh), x + 18 + sx, y + sy);
       const low = frac < 0.3;
-      drawBarFill(c, x + 18 + sx, y + sy, bw, bh, frac, this.hpFlash > 0.5 ? { o: '#fff', d: '#fff', m: '#ffe0d0', l: '#fff', h: '#fff' } : low && Math.sin(this.t * 9) > 0 ? { ...UI.blood, m: '#ff5a3a' } : UI.blood, this.hpTrail);
-      if (s.shield > 0) drawBarFill(c, x + 18 + sx, y - 6 + sy, bw, 9, Math.min(1, s.shield / s.maxHp), UI.sky);
-      this.anchors.heart = { x: x - (this.use3D ? 16 : 12), y: y + (this.use3D ? 3 : 4), frac };
+      // stamina: Player.stamina / staminaMax; the board's boost meter stands in until a player carries one
+      const stam = s.stamina !== undefined && (s.staminaMax ?? 0) > 0 ? Math.max(0, Math.min(1, s.stamina / s.staminaMax!)) : Math.max(0, Math.min(1, s.boost));
+      let x: number, y: number, itemX: number, itemY: number, stx: number, sty: number;
+      if (this.use3D) {
+        // the SOUL VESSEL with the heart on its medallion and the VENOM VESSEL under it (ui/HudVessels, drawn by Hud3D)
+        x = 6 - slide * 220;
+        const cy = H - 27;
+        y = cy - 8;
+        this.anchors.soul = { x, cy, len: SOUL_LEN, frac, trail: this.hpTrail, shield: s.shield > 0 ? Math.min(1, s.shield / s.maxHp) : 0, speed: s.speed, shake: this.hpShake };
+        const vx = x + 14, vcy = H - 9;
+        this.anchors.venom = { x: vx, cy: vcy, len: VENOM_LEN, frac: stam, speed: s.speed, empty: this.stamEmpty };
+        const sk = soulSocket(x, cy);
+        this.anchors.heart = { x: sk.x, y: sk.y - 1, frac };
+        // the reading beside the stopper: an ankh, the soul left, the soul it can hold
+        const tx = Math.round(x + vesselWidth('soul', SOUL_LEN) + 3);
+        const pulse = low && Math.sin(this.t * 9) > 0;
+        this.lt(() => blitObj(c, sprite(ART.glyph_ankh), tx + sx, cy - 5 + sy + (pulse ? -1 : 0), 1, 1));
+        const hpS = `${Math.ceil(s.hp)}`;
+        this.tl(c, hpS, tx + 10 + sx, cy - 8 + sy, pulse ? UI.blood.h : this.hpFlash > 0.5 ? '#ffffff' : UI.text, 16);
+        const hw = Math.ceil(measure(c, hpS, 16));
+        this.tl(c, `/${Math.round(s.maxHp)}`, tx + 10 + hw + sx, cy - 8 + sy, UI.textDim, 16);
+        this.tl(c, `${Math.round(s.speed)} m/s`, Math.round(vx + vesselWidth('venom', VENOM_LEN) + 8), vcy - 8, s.speed > 20 ? UI.venom.l : UI.textDim, 16, 'left');
+        itemX = x + 30;
+        itemY = cy - 38;
+        stx = tx + 10 + hw + Math.ceil(measure(c, `/${Math.round(s.maxHp)}`, 16)) + 8;
+        sty = cy - 10;
+      } else {
+        x = 8 - slide * 200;
+        y = H - 28;
+        this.anchors.soul = this.anchors.venom = null;
+        const bw = 156, bh = 16;
+        this.blit(barFrame(bw, bh), x + 18 + sx, y + sy);
+        drawBarFill(c, x + 18 + sx, y + sy, bw, bh, frac, this.hpFlash > 0.5 ? { o: '#fff', d: '#fff', m: '#ffe0d0', l: '#fff', h: '#fff' } : low && Math.sin(this.t * 9) > 0 ? { ...UI.blood, m: '#ff5a3a' } : UI.blood, this.hpTrail);
+        if (s.shield > 0) drawBarFill(c, x + 18 + sx, y - 6 + sy, bw, 9, Math.min(1, s.shield / s.maxHp), UI.sky);
+        this.anchors.heart = { x: x - 12, y: y + 4, frac };
+        this.spr('skullIcon', x - 2 + sx, y - 1 + sy + (low ? Math.round(Math.sin(this.t * 9)) : 0));
+        this.tl(c, `${Math.ceil(s.hp)}`, x + 26 + sx, y + 1 + sy, UI.text, 16);
+        this.tl(c, `/${Math.round(s.maxHp)}`, x + 26 + measure(c, `${Math.ceil(s.hp)}`) + sx, y + 1 + sy, UI.textDim, 16);
+        const by = y + 18;
+        this.blit(barFrame(110, 10), x + 18, by);
+        drawBarFill(c, x + 18, by, 110, 10, stam, UI.venom);
+        this.spr('scorp', x + 130, by + 1);
+        itemX = x + 18;
+        itemY = y - 30;
+        stx = x + 182;
+        sty = y - 2;
+      }
       if (this.use3D && s.combo > 1) {
         // the kill streak sits above the consumables, crisp and quiet until it climbs
         const col = s.combo >= 25 ? '#ffffff' : s.combo >= 10 ? UI.brass.h : UI.parch.l;
         const bump = Math.round(this.streakPop * 3);
-        const sx0 = x + 18, sy0 = y - 60;
+        const sx0 = itemX, sy0 = itemY - 30;
         this.lt(() => {
           const w0 = pixelText(c, `x${s.combo}`, sx0, sy0 - bump, { size: 16, color: col, outline: UI.shadow });
           pixelText(c, 'STREAK', sx0 + w0 + 4, sy0, { size: 16, color: UI.textDim, outline: UI.shadow });
@@ -640,37 +699,28 @@ export class Hud {
       if (s.combo > this.lastCombo) this.streakPop = 1;
       this.lastCombo = s.combo;
       this.streakPop = Math.max(0, this.streakPop - dt * 5);
-      if (!this.use3D) this.spr('skullIcon', x - 2 + sx, y - 1 + sy + (low ? Math.round(Math.sin(this.t * 9)) : 0));
-      this.tl(c, `${Math.ceil(s.hp)}`, x + 26 + sx, y + 1 + sy, UI.text, 16);
-      this.tl(c, `/${Math.round(s.maxHp)}`, x + 26 + measure(c, `${Math.ceil(s.hp)}`) + sx, y + 1 + sy, UI.textDim, 16);
-      // boost tail
-      const by = y + 18;
-      this.blit(barFrame(110, 10), x + 18, by);
-      drawBarFill(c, x + 18, by, 110, 10, s.boost, UI.sky);
-      this.spr('scorp', x + 130, by + 1);
-      if (this.use3D) this.tl(c, `${Math.round(s.speed)} m/s`, x + 146, by - 3, s.speed > 20 ? UI.brass.h : UI.textDim, 16, 'left');
       // statuses
-      let stx = x + 182;
       for (const st of s.status) {
         if (st.stacks <= 0) continue;
         const info = STATUS_INFO[st.id];
-        this.blit(slot(18, 2), stx, y - 2);
-        this.spr(info.icon, stx + 5, y + 3);
-        this.tl(c, String(Math.round(st.stacks)), stx + 15, y + 6, info.css, 16);
+        this.blit(slot(18, 2), stx, sty);
+        this.spr(info.icon, stx + 5, sty + 5);
+        this.tl(c, String(Math.round(st.stacks)), stx + 15, sty + 8, info.css, 16);
         stx += 30;
       }
       // consumables above
-      let ix = x + 18;
+      let ix = itemX;
       this.anchors.items.length = 0;
       for (let ii = 0; ii < s.items.length; ii++) {
         const it = s.items[ii];
-        this.blit(slot(22, 5), ix, y - 30);
-        this.anchors.items.push({ x: ix + 11, y: y - 19, size: 22, model: it.count > 0 ? it.model ?? '' : '', count: it.count });
-        if (it.icon && !(this.use3D && this.items3D[ii])) this.spr(it.icon, ix + 7, y - 24);
-        if (!this.touch) this.blit(keycap(it.key), ix + 3, y - 42);
-        if (it.count > 1) this.tl(c, 'x' + it.count, ix + 14, y - 20, UI.text, 16);
+        this.blit(slot(22, 5), ix, itemY);
+        this.anchors.items.push({ x: ix + 11, y: itemY + 11, size: 22, model: it.count > 0 ? it.model ?? '' : '', count: it.count });
+        if (it.icon && !(this.use3D && this.items3D[ii])) this.spr(it.icon, ix + 7, itemY + 6);
+        if (!this.touch) this.blit(keycap(it.key), ix + 3, itemY - 12);
+        if (it.count > 1) this.tl(c, 'x' + it.count, ix + 14, itemY + 10, UI.text, 16);
         ix += 28;
       }
+      void y;
     }
 
     // ---------------------------------------------------------- rank + purse (top left)

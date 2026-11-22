@@ -376,6 +376,8 @@ export class Board {
   /** Shift + Space: the long jump starts charging / launches (charge 0..1) */
   onLongCharge?: () => void;
   onLongJump?: (charge: number) => void;
+  /** stamina (player/Stamina): pay for a jump / kick / trick; false = winded, the move does not happen */
+  spend?: (kind: 'jump' | 'long' | 'longStart' | 'kick' | 'wall' | 'trick', charge: number) => boolean;
 
   private n = new THREE.Vector3();
   private surf: SurfaceInfo = { h: 0, drag: 0, speedMul: 1, kind: 'sand' };
@@ -599,7 +601,7 @@ export class Board {
     const t = this.t, w = this.wall;
     w.t += dt;
     this.airTime += dt;
-    if (inp.jumpPressed && first) {
+    if (inp.jumpPressed && first && (this.spend?.('wall', 0) ?? true)) {
       this.endWall(true);
       return;
     }
@@ -819,7 +821,7 @@ export class Board {
         this.vel.z *= ns / sp;
       }
       // Shift + Space: crouch and wind up a long jump (a tap of Space alone is the normal jump below)
-      if (inp.jumpPressed && first && inp.drift && !this.drifting && !this.longCharging && this.stumble <= 0 && !this.manual) {
+      if (inp.jumpPressed && first && inp.drift && !this.drifting && !this.longCharging && this.stumble <= 0 && !this.manual && (this.spend?.('longStart', 0) ?? true)) {
         this.longCharging = true;
         this.longCharge = 0;
         this.pushT = Math.max(this.pushT, PUSH.dur);
@@ -834,14 +836,18 @@ export class Board {
           this.compress = Math.max(this.compress, 0.3 + 0.6 * this.longCharge);
           this.applyGrapple(dt);
         } else if (first) {
-          this.longJump(env);
-          return;
+          if (this.spend?.('long', this.longCharge) ?? true) {
+            this.longJump(env);
+            return;
+          }
+          this.longCharging = false;
+          this.longCharge = this.jumpCharge = 0;
         }
       }
       // jump charge / release
       if (inp.jumpHeld && !this.longCharging) this.jumpCharge = Math.min(1, this.jumpCharge + dt / 0.5);
       this.compress = Math.max(this.compress * Math.exp(-6 * dt), this.jumpCharge * 0.8);
-      if (inp.jumpReleased && first && this.stumble <= 0 && !this.longCharging) {
+      if (inp.jumpReleased && first && this.stumble <= 0 && !this.longCharging && (this.spend?.('jump', this.jumpCharge) ?? true)) {
         const charge = this.jumpCharge;
         const booster = this.boosting && this.boostMeter > 0.2;
         const coyote = !this.drifting && this.clock - this.driftEndAt < 0.14;
@@ -954,7 +960,7 @@ export class Board {
       this.surfing = false;
       this.vel.y -= t.gravity * dt;
       // sand kick: a second hop off a burst of sand (unlockable)
-      if (inp.jumpPressed && first && this.moves.sandKick && this.airJumps > 0 && this.airTime > 0.08 && this.stumble <= 0) {
+      if (inp.jumpPressed && first && this.moves.sandKick && this.airJumps > 0 && this.airTime > 0.08 && this.stumble <= 0 && (this.spend?.('kick', 0) ?? true)) {
         this.airJumps = 0;
         this.vel.y = Math.max(this.vel.y * 0.3, 0) + 6.4 * (0.9 + 0.1 * mob);
         const kx = hasDir ? inp.dirX : fwd.x, kz = hasDir ? inp.dirZ : fwd.z;
@@ -1330,6 +1336,7 @@ export class Board {
 
   private planTrick(inp: BoardInput, env: BoardEnv) {
     const T = this.airLeft(env) - 0.08, P = this.plan, R = TRICK;
+    this.spend?.('trick', 0);
     P.on = true;
     P.t = 0;
     P.yaw = this.trickYaw;

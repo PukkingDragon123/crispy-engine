@@ -582,6 +582,8 @@ export class RunScene implements GameScene {
     const ctx = this.ctx;
     // the rain-frog family's thanks: skills cast twice for the rest of the run, and Mama's wig (kept forever)
     ev.on('frogBlessing', () => (this.skills.echo = true));
+    // the venom vessel runs dry with a flash and a shake (ui/HudVessels)
+    ev.on('staminaEmpty', () => this.hud.staminaEmpty());
     ev.on('frogWig', () => {
       const sv = loadSave();
       if (!sv.unlocked.includes('hat:wig')) sv.unlocked.push('hat:wig');
@@ -1418,6 +1420,8 @@ export class RunScene implements GameScene {
       venom: p.venomRounds,
       reload: { active: p.reload.active, t: p.reload.t, window: p.reload.window, jam: p.reload.jam, phase: p.reload.phase },
       boost: p.board.boostMeter,
+      stamina: (p as { stamina?: number }).stamina,
+      staminaMax: (p as { staminaMax?: number }).staminaMax,
       speed: p.speed,
       rank: this.run.rank,
       bountyFrac: this.run.bounty / this.run.bountyToNext,

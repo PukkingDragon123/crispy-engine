@@ -12,7 +12,7 @@
 // and tougher packs and more alphas (Balance.setDay / dayMul, `nightFactor`,
 // `dayFactor`). Each combat wave carries a bounty BUDGET of bodies: `remaining`
 // counts down as they fall, and clearing it ends the wave early. The hourglass
-// (ui/HourglassHud) hurries the break: while Sundown shakes it, `hurry` runs the
+// (ui/SoulGlassHud) hurries the break: while Sundown shakes it, `hurry` runs the
 // countdown HURRY times faster (the old bell is gone). RunScene's usual
 // `start(n + 1)` call after a clear just arms the break; the wave begins when the
 // countdown runs out. Each wave opens on a short beat: the

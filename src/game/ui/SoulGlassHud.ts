@@ -1,24 +1,24 @@
-// THE DAY GLASS: a live 3D voxel hourglass in the HUD (ebony lotus caps, bone
-// spindles, blown glass, real draining sand), and the bone hand that hurries it.
+// THE SOUL GLASS: the HUD's day timer is the loading screen's sculpted hourglass (loading/HourglassRig: gold
+// caps with the jade-inlaid glyph band, bone papyrus columns, jackal feet, the winged soul-disc), live in the
+// 3D HUD layer with its real solved sand, its grain stream and jade and violet souls flowing down through the
+// bulbs and the neck, a few soul wisps swimming round it.
 //
-//  • the sand tracks the clock: the top bulb drains with the wave timer (the boss's
-//    life on a boss wave, the countdown in the break between waves), the heap below
-//    grows at the angle of repose, single grains stream through the neck. Every new
-//    wave or break the glass flips over with a weighty turn.
-//  • HOLD IT (H, or T when nothing else wants T, or the mouse held on the glass while
-//    the cursor is free) between waves: Sundown's skeletal gun hand reaches in from the
-//    edge of the screen, closes its finger bones round the waist of the glass, rips it
-//    off the HUD toward you and shakes it hard. While it shakes, the break runs HURRY
-//    times faster (WaveDirector.hurry). Let go and the hand slams it back into its slot
-//    and withdraws. During a fight the sand will not be hurried: the glass only rattles.
-// Everything is a spring or an eased track, never a cut: the hourglass lags the hand,
-// the forearm swings with the shake, the finger bones tremble on the glass.
+//  • the sand tracks the clock: the top bulb drains with the wave timer (the boss's life on a boss wave, the
+//    countdown in the break between waves). Every new wave or break the glass turns over with a weighty flip.
+//  • HOLD IT (H, or T when nothing else wants T, or the mouse held on the glass while the cursor is free)
+//    between waves: Sundown's skeletal gun hand (models/props/boneHand) reaches in from the edge of the
+//    screen, closes its finger bones round the waist of the glass, rips it off the HUD toward you and shakes
+//    it hard. While it shakes the break runs HURRY times faster (WaveDirector.hurry) and the sand and souls
+//    pour. Let go and the hand slams it back into its slot and withdraws. Mid-fight the glass only rattles.
+// Everything is a spring or an eased track, never a cut: the glass lags the hand, the forearm swings with the
+// shake, the finger bones tremble on the glass.
 import * as THREE from 'three';
 import type { Hud } from './Hud';
-import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { makeVoxelMaterial, type VoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { buildRigGeo, RigInstance } from '../../engine/voxel/Rig';
-import { hourglassFrame, hourglassGlass, hourglassSand, sandGrain, boneHandRig, glassR, GLASS_H, SAND_STAGES, HOURGLASS_HEIGHT, type HandMeta } from '../models/props/dayGlass';
+import { boneHandRig, type HandMeta } from '../models/props/boneHand';
+import { HourglassRig } from './loading/HourglassRig';
+import { HG } from '../models/props/hourglass';
 import { uiSfx } from './HudKit';
 
 export interface GlassState {
@@ -42,9 +42,13 @@ export interface GlassState {
 type Mode = 'idle' | 'reach' | 'grip' | 'lift' | 'shake' | 'back' | 'release' | 'retreat';
 const DUR: Record<Mode, number> = { idle: 0, reach: 0.3, grip: 0.12, lift: 0.3, shake: 0, back: 0.26, release: 0.12, retreat: 0.32 };
 /** how much bigger the glass is in the hand than on the HUD */
-const LIFT = 2.35;
+const LIFT = 2.1;
 /** forearm angle (rad from +X): the arm comes in from the upper right */
 const ARM_ANGLE = 0.36;
+/** the hand's size against the glass (cm of hand per voxel of glass height, tuned on the old 66-voxel glass) */
+const HAND_PER_H = 2.4 / 66;
+/** where the palm closes on the glass (voxels, glass space): in front of the waist, between two columns */
+const GRIP_AT = new THREE.Vector3(2.5, 3.0, 21);
 
 const ease = (t: number) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 const easeOut = (t: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
@@ -54,19 +58,20 @@ const backOut = (t: number) => {
   return 1 + (c + 1) * t * t * t + c * t * t;
 };
 
-export class HourglassHud {
+export class SoulGlassHud {
   group = new THREE.Group();
-  /** the glass's own pivot (flips and wobbles about its centre) */
+  /** the glass's own pivot (flips, turns and wobbles about its waist) */
   private body = new THREE.Group();
-  private mat: VoxelMaterial;
-  private glassMat: VoxelMaterial;
-  private top: THREE.Mesh;
-  private bottom: THREE.Mesh;
-  private topGeo: THREE.BufferGeometry[] = [];
-  private botGeo: THREE.BufferGeometry[] = [];
-  private stream: THREE.InstancedMesh;
-  private spray: THREE.InstancedMesh;
-  private sprayP: { x: number; y: number; z: number; vx: number; vy: number; vz: number }[] = [];
+  private rig: HourglassRig;
+  /** the wisps' frame (metres): they ride with the glass but do not turn with it */
+  private wispHold = new THREE.Group();
+  /** voxels from the waist to the middle of the frame's bounds, and its full height */
+  private midY: number;
+  private fullH: number;
+  private viewCam = new THREE.Camera();
+  private keyDir = new THREE.Vector3(-0.45, 0.8, 1);
+  private rimDir = new THREE.Vector3(0.8, 0.2, -0.6);
+  private handMat: VoxelMaterial;
   private hand: RigInstance | null = null;
   private handMeta: HandMeta | null = null;
   private mode: Mode = 'idle';
@@ -106,41 +111,30 @@ export class HourglassHud {
   private v3 = new THREE.Vector3();
 
   constructor(private scene: THREE.Scene, private hud: Hud) {
-    this.mat = makeVoxelMaterial({ fog: false });
-    this.glassMat = makeVoxelMaterial({ fog: false, transparent: true, opacity: 0.2 });
-    this.glassMat.depthWrite = false;
-    const frame = new THREE.Mesh(buildVoxelGeometry(hourglassFrame(), { voxelSize: 1, pivot: [0, 0, 0] }), this.mat);
-    const glass = new THREE.Mesh(buildVoxelGeometry(hourglassGlass(), { voxelSize: 1, pivot: [0, 0, 0], ao: 0.3 }), this.glassMat);
-    glass.renderOrder = 3;
-    const sand = hourglassSand();
-    for (const m of sand.top) this.topGeo.push(buildVoxelGeometry(m, { voxelSize: 1, pivot: [0, 0, 0], ao: 0.6 }));
-    for (const m of sand.bottom) this.botGeo.push(buildVoxelGeometry(m, { voxelSize: 1, pivot: [0, 0, 0], ao: 0.6 }));
-    this.top = new THREE.Mesh(this.topGeo[SAND_STAGES - 1], this.mat);
-    this.bottom = new THREE.Mesh(this.botGeo[0], this.mat);
-    const grainGeo = buildVoxelGeometry(sandGrain(), { voxelSize: 1, pivot: 'center', ao: 0 });
-    this.stream = new THREE.InstancedMesh(grainGeo, this.mat, 26);
-    this.spray = new THREE.InstancedMesh(grainGeo, this.mat, 34);
-    this.stream.frustumCulled = this.spray.frustumCulled = false;
-    for (let i = 0; i < 34; i++) this.sprayP.push({ x: 0, y: -20, z: 0, vx: 0, vy: 0, vz: 0 });
-    this.body.add(frame, this.top, this.bottom, this.stream, this.spray, glass);
+    this.rig = new HourglassRig({ ortho: true, wisps: 4, trail: 60, wispK: [0.42, 0.4], souls: 46 });
+    const b = this.rig.box;
+    this.midY = (b.max.y + b.min.y) / 2;
+    this.fullH = Math.max(1, b.max.y - b.min.y);
+    this.body.add(this.rig.body);
     this.group.add(this.body);
+    if (this.rig.wisps) {
+      this.wispHold.add(this.rig.wisps);
+      this.wispHold.scale.setScalar(1 / HG.vs);
+      this.group.add(this.wispHold);
+    }
     this.group.visible = false;
     scene.add(this.group);
+    this.handMat = makeVoxelMaterial({ fog: false });
     try {
       const spec = boneHandRig();
       this.handMeta = spec.meta as unknown as HandMeta;
-      this.hand = new RigInstance(buildRigGeo(spec, 'hud_bone_hand'), { material: this.mat, castShadow: false });
+      this.hand = new RigInstance(buildRigGeo(spec, 'hud_bone_hand'), { material: this.handMat, castShadow: false });
       this.hand.root.rotation.order = 'ZYX';
       this.hand.root.visible = false;
       scene.add(this.hand.root);
     } catch (e) {
-      console.warn('[hourglass] hand failed', e);
+      console.warn('[soul glass] hand failed', e);
     }
-  }
-
-  /** css px per voxel at the HUD size */
-  private px(st: GlassState) {
-    return (st.h * this.hud.scale) / HOURGLASS_HEIGHT;
   }
 
   private held(st: GlassState) {
@@ -170,7 +164,7 @@ export class HourglassHud {
     this.t += dt;
     this.mt += dt;
     const s = this.hud.scale;
-    const px = this.px(st);
+    const px = (st.h * s) / this.fullH;
     this.home.set(st.x * s, -st.y * s);
     if (!this.placed) {
       this.pos.copy(this.home);
@@ -295,7 +289,7 @@ export class HourglassHud {
     if (this.rattle > 0) this.rattle = Math.max(0, this.rattle - dt * 2.5);
     const ratX = this.rattle * 3 * Math.sin(this.t * 70);
 
-    // ------------------------------------------------ flips and sand
+    // ------------------------------------------------ flips, sand and souls
     if (st.phaseKey !== this.lastKey) {
       if (this.lastKey && !carried && this.mode === 'idle' && st.visible) {
         this.flipT = 0;
@@ -306,7 +300,7 @@ export class HourglassHud {
     }
     let flip = 0;
     if (this.flipT < 1) {
-      this.flipT = Math.min(1, this.flipT + dt / 0.55);
+      this.flipT = Math.min(1, this.flipT + dt / 0.6);
       flip = backOut(this.flipT) * Math.PI;
       if (this.flipT >= 1) flip = 0;
     }
@@ -314,90 +308,29 @@ export class HourglassHud {
     const frac = this.flipT < 1 ? 0 : Math.min(1, Math.max(0, st.frac));
     this.shownFrac += (frac - this.shownFrac) * Math.min(1, dt * (this.flipT < 1 ? 30 : 6));
     if (this.flipT >= 1 && Math.abs(frac - this.shownFrac) > 0.5) this.shownFrac = frac;
-    const f = this.shownFrac;
-    this.top.geometry = this.topGeo[Math.round(f * (SAND_STAGES - 1))];
-    this.bottom.geometry = this.botGeo[Math.round((1 - f) * (SAND_STAGES - 1))];
-    this.updateStream(dt, f, st.flowing && this.flipT >= 1);
-    this.updateSpray(dt, f);
+    this.rig.setFill(1 - this.shownFrac, dt, st.flowing && this.flipT >= 1);
+    const u = this.rig.ptU;
+    u.uTime.value = this.t;
+    u.uHurry.value += ((this.hurrying ? 1 : 0) - u.uHurry.value) * Math.min(1, dt * 8);
+    // one point = half a HUD pixel at the HUD size: the motes stay on the HUD's pixel grid
+    u.uPx.value = (window.devicePixelRatio || 1) * s * 0.5 * Math.max(1, this.scale * 0.8);
+    this.rig.lights(this.viewCam, this.keyDir, this.rimDir);
 
     // ------------------------------------------------ place the glass
     const vis = st.visible || this.mode !== 'idle';
     this.group.visible = vis;
     const vs = px * this.scale;
-    this.group.position.set(this.pos.x + ratX, this.pos.y + (carried ? 0 : Math.sin(this.t * 1.4) * 1.2 * s), 60 * this.scale);
+    const bob = carried ? 0 : Math.sin(this.t * 1.4) * 1.2 * s;
+    // the frame's middle sits on the slot (the waist is a little below it: the soul-disc crowns the top)
+    this.group.position.set(this.pos.x + ratX, this.pos.y + bob - this.midY * vs, 60 * this.scale);
     this.group.scale.setScalar(vs);
-    this.body.rotation.set(0.16 + (carried ? 0.1 : 0), (carried ? -0.35 : 0.3) + Math.sin(this.t * 0.6) * 0.08, this.rot + flip + this.rattle * 0.08 * Math.sin(this.t * 55));
+    this.body.rotation.set(0.14 + (carried ? 0.1 : 0), this.t * 0.3 + (carried ? -0.35 : 0), this.rot + flip + this.rattle * 0.08 * Math.sin(this.t * 55));
     this.group.updateMatrixWorld(true);
-    const half = (HOURGLASS_HEIGHT / 2) * vs;
-    this.box = { x: this.pos.x - half * 0.7, y: -this.pos.y - half, w: half * 1.4, h: half * 2 };
+    const half = (this.fullH / 2) * vs;
+    this.box = { x: this.pos.x - half * 0.6, y: -this.pos.y - half, w: half * 1.2, h: half * 2 };
 
     // ------------------------------------------------ the hand
     this.updateHand(dt, vs);
-  }
-
-  /** a stream of single grains through the neck (thicker while shaken) */
-  private updateStream(dt: number, f: number, flowing: boolean) {
-    const m = this.stream;
-    const on = flowing && f > 0.002 && f < 0.998;
-    m.visible = on;
-    if (!on) return;
-    const speed = this.hurrying ? 46 : 18;
-    const off = (this.t * speed) % 2;
-    const mtx = new THREE.Matrix4();
-    let n = 0;
-    for (let i = 0; i < 13; i++) {
-      const y = 1 - i * 2 - off;
-      if (y < -GLASS_H + 1) break;
-      mtx.makeTranslation(Math.sin(i * 7.3 + this.t * 9) * 0.25, y, 0);
-      m.setMatrixAt(n++, mtx);
-      if (this.hurrying) {
-        mtx.makeTranslation(0.8 + Math.sin(i * 3.1) * 0.3, y - 1, 0.4);
-        m.setMatrixAt(n++, mtx);
-      }
-    }
-    m.count = n;
-    m.instanceMatrix.needsUpdate = true;
-  }
-
-  /** shaken: grains thrown up off the heap rattle round the bottom bulb */
-  private updateSpray(dt: number, f: number) {
-    const m = this.spray;
-    const k = this.shakeK;
-    m.visible = k > 0.05 && f < 0.995;
-    if (!m.visible) return;
-    const mtx = new THREE.Matrix4();
-    // the glass's acceleration, in its own frame (the shake throws the grains)
-    const ax = -this.vel.x * 0.06, ay = -this.vel.y * 0.04;
-    const n = Math.round(34 * k);
-    for (let i = 0; i < n; i++) {
-      const p = this.sprayP[i];
-      p.vx += (ax + (Math.random() - 0.5) * 60) * dt;
-      p.vy += (ay - 70 + (Math.random() - 0.3) * 90) * dt;
-      p.vz += (Math.random() - 0.5) * 60 * dt;
-      p.x += p.vx * dt;
-      p.y += p.vy * dt;
-      p.z += p.vz * dt;
-      if (p.y < -GLASS_H + 2) {
-        p.y = -GLASS_H + 2;
-        p.vy = Math.abs(p.vy) * 0.6 + 20 * Math.random();
-      }
-      if (p.y > -2) {
-        p.y = -2;
-        p.vy = -Math.abs(p.vy) * 0.5;
-      }
-      const r = glassR(p.y) - 1.2;
-      const d = Math.hypot(p.x, p.z);
-      if (d > r) {
-        p.x *= r / d;
-        p.z *= r / d;
-        p.vx *= -0.5;
-        p.vz *= -0.5;
-      }
-      mtx.makeTranslation(p.x, p.y, p.z);
-      m.setMatrixAt(i, mtx);
-    }
-    m.count = n;
-    m.instanceMatrix.needsUpdate = true;
   }
 
   private updateHand(dt: number, vs: number) {
@@ -407,10 +340,12 @@ export class HourglassHud {
     const on = m !== 'idle';
     h.root.visible = on && this.group.visible;
     if (!on) return;
-    // the hand scales with the glass: about one glass-width of finger per bulb
-    const cm = vs * 2.4;
-    // where the palm sits: the waist of the glass, in front of it, a touch above the neck
-    const g = this.v3.set(2.5, 2.2, 16.5).applyMatrix4(this.body.matrixWorld);
+    // the hand scales with the glass
+    const cm = vs * this.fullH * HAND_PER_H;
+    // where the palm sits: the waist of the glass, in front of it (the glass turns: grip where it faces us)
+    const g = this.v3.copy(GRIP_AT);
+    g.applyMatrix4(this.group.matrixWorld);
+    g.z = Math.max(g.z, this.group.position.z + GRIP_AT.z * vs);
     // grip state: open while reaching, closing on the glass, opening to let go
     const closing = m === 'grip' ? ease(this.mt / DUR.grip) : m === 'lift' || m === 'shake' || m === 'back' ? 1 : m === 'release' ? 1 - ease(this.mt / DUR.release) : 0;
     this.grip += (closing - this.grip) * Math.min(1, dt * 30);
@@ -455,10 +390,8 @@ export class HourglassHud {
   dispose() {
     this.group.removeFromParent();
     this.hand?.dispose();
-    this.topGeo.forEach((g) => g.dispose());
-    this.botGeo.forEach((g) => g.dispose());
-    this.mat.dispose();
-    this.glassMat.dispose();
+    this.rig.dispose();
+    this.handMat.dispose();
     void this.scene;
   }
 }

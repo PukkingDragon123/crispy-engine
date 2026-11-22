@@ -13,6 +13,7 @@ import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { sharedFoliageMaterial, sharedVoxelMaterial, makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { Foliage } from './Foliage';
 import { TREE_KINDS } from './Trees';
+import { firePit } from '../models/props/menuSet';
 import { buildSkinGeometry, type SkinHint } from './BlockSkin';
 import { pixelAtlas, PIXEL_GLSL } from './PixelTex';
 import type { World } from './World';
@@ -220,7 +221,6 @@ const KINDS: Record<string, KindDef> = {
   mineEntrance: { variants: 1, build: () => P.railSegment(6, 2), solid: 'none' },
   wagon: { variants: 2, build: (v) => P.wagon(v), solid: 'voxel', unique: true },
   tent: { variants: 3, build: (v) => ruined(P.tent(v), { seed: 101 + v, collapse: 0.15, breach: 0, tear: 0.45, lean: 0.06, sand: 0.3 }), solid: 'voxel' },
-  campfire: { variants: 1, build: () => P.campfire(1), solid: 'circle', radius: 0.5 },
   wantedBoard: { variants: 2, build: (v) => P.wantedBoard(v), solid: 'voxel' },
   well: { variants: 1, build: () => P.well(0), solid: 'circle', radius: 0.6 },
   trough: { variants: 1, build: () => P.trough(0), solid: 'box' },
@@ -319,9 +319,13 @@ const SIGHT_KINDS = new Set(['hoodoo', 'mesaButte', 'balancedRock', 'sandstoneLe
 
 const LANDMARKS: Record<string, () => SM> = {
   // the trading post is a giant travelling tortoise now (Ozymandias, spawned by
-  // Missions); his landmark is just the campfire he plods round, so the mission
-  // scan and the escort routes still find "the trading post"
-  tradingPost: () => ({ ...P.campfire(3), meta: { entrance: [0, 3], footprint: [6, 6], height: 1.5, turtleCamp: true } }), // Gobi the turtle house walks round this fire (run/Missions.ts)
+  // Missions); his landmark is just the stone fire pit he plods round (the hero fire pit
+  // from the title scene: sooty stones, coals, a charred teepee, a coffee pot), so the
+  // mission scan and the escort routes still find "the trading post"
+  tradingPost: () => {
+    const f = firePit();
+    return { model: f.model, voxelSize: f.voxelSize, meta: { entrance: [0, 3], footprint: [6, 6], height: 1.5, turtleCamp: true } };
+  }, // Gobi the turtle house walks round this fire (run/Missions.ts)
   // the rest are ghost towns now: abandoned, caved in and full of spiders (built once per type)
   outlawFort: () => memoRuin('outlawFort', () => ruined(P.outlawFort(2), { seed: 201, collapse: 0.55, breach: 0.5, sand: 0.7 }))!,
   mineHeadframe: () => memoRuin('mineHeadframe', () => ruined(P.mineHeadframe(3), { seed: 202, collapse: 0.35, keepBelow: 3.2, breach: 0.5, lean: 0.025, sand: 0.6 }))!,
@@ -379,6 +383,8 @@ export class Props {
   group = new THREE.Group();
   variants = new Map<string, Variant>();
   list: PropInst[] = [];
+  /** camp light pools (warm glow at night, no model): Days lights the nearest */
+  glows: THREE.Vector3[] = [];
   built = new Set<number>();
   tumbleweeds: { inst: PropInst; vel: THREE.Vector3; spin: number }[] = [];
   rotors: { mesh: THREE.Mesh; speed: number }[] = [];
@@ -512,6 +518,11 @@ export class Props {
       }
       if (a.kind === 'oasisPool') {
         this.addPool(a);
+        continue;
+      }
+      if (a.kind === 'campfire') {
+        // the old stone-ring campfire model is gone; the camp keeps its warm night glow
+        this.glows.push(new THREE.Vector3(a.x, this.world.groundAt(a.x, a.z), a.z));
         continue;
       }
       if (TREE_KINDS.has(a.kind)) {
@@ -785,7 +796,7 @@ export class Props {
     }
     let v = this.lmVariants.get(type);
     if (!v) {
-      // the ghost-town landmarks wear the plank skin (the turtle's campfire stays as it is)
+      // the ghost-town landmarks wear the plank skin (the turtle's fire pit stays as it is)
       const skin: SkinHint | undefined = sm.meta?.turtleCamp ? undefined : 'wood';
       const geo = skin ? buildSkinGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot ?? 'bottom', hint: skin }) : buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot ?? 'bottom' });
       geo.computeBoundingBox();

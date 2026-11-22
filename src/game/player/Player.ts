@@ -27,6 +27,7 @@ import { installHairSway } from '../models/characters/hairSway';
 import { CigSmoke } from './CigSmoke';
 import type { HeroKit } from './heroes/HeroKit';
 import { CHEATS } from '../admin/Cheats';
+import { Stamina } from './Stamina';
 
 export interface PlayerVisuals {
   rig: RigSpec;
@@ -141,6 +142,10 @@ export class Player {
   material: VoxelMaterial;
   hp = 100;
   shield = 0;
+  /** the rider's wind (player/Stamina): live numbers for the HUD vessel; staminaSys runs the costs and the refill */
+  stamina = 100;
+  staminaMax = 100;
+  staminaSys!: Stamina;
   alive = true;
   invuln = 0;
   hurtFlash = 0;
@@ -278,6 +283,7 @@ export class Player {
     this.ammo = Math.round(this.stats.get('ammo'));
     this.weapons = new Weapons(ctx, this, input, holder);
     this.wireBoardEvents();
+    this.staminaSys = new Stamina(ctx, this);
     this.bail = new RiderBail(ctx, this);
     this.bail.onRecovered = () => this.pa.prevVel.copy(this.board.vel);
     // crits are rolled inside the enemy damage resolve: listen so the shot can feel them
@@ -509,13 +515,14 @@ export class Player {
     this.dodgeCd -= dt;
     this.dodgeT = Math.max(0, this.dodgeT - dt);
     // (Shift + Space with no strafe is the charged long jump: Board)
-    if (this.alive && !stunned && bi.jumpPressed && bi.drift && fx !== 0 && this.dodgeCd <= 0 && !this.bail.active) this.dodge(fx, fz, cf);
+    if (this.alive && !stunned && bi.jumpPressed && bi.drift && fx !== 0 && this.dodgeCd <= 0 && !this.bail.active && this.staminaSys.spend('dodge')) this.dodge(fx, fz, cf);
     if (this.dodgeHold) {
       if (!inp.held('jump')) this.dodgeHold = false;
       bi.jumpHeld = bi.jumpPressed = bi.jumpReleased = false;
     }
     if (sliding) bi.drift = this.alive && !stunned && inp.held('drift');
     const wasBoost = this.board.boosting;
+    this.staminaSys.preBoard(dt, bi);
     this.kit?.preBoard(dt, bi);
     // off the board (wipeout): the bail drives him; any jump / push / fire skips ahead
     if (this.bail.active) this.bail.update(dt, inp.hit('jump') || inp.hit('push') || inp.hit('fire'));
@@ -529,6 +536,7 @@ export class Player {
     }
     // push rhythm feedback, drift spray + board slash, move unlocks, the style combo
     (this.moves ??= new BoardMoves(this.ctx, this)).update(dt);
+    this.staminaSys.update(dt);
 
     // timers
     this.invuln = Math.max(0, this.invuln - dt);
@@ -1551,6 +1559,7 @@ export class Player {
   }
 
   dispose() {
+    this.staminaSys.dispose();
     this.smoke.dispose();
     this.kit?.dispose();
     this.weapons?.dispose();

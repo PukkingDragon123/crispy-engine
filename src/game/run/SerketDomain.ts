@@ -594,6 +594,16 @@ export class SerketDomain {
       else E.jump++;
     };
     this.restore.push(() => (b.onJump = prevJump));
+    // stamina (player/Stamina): she shelters him while he learns (cheap moves, quick breath, never winded)
+    const stam = this.player.staminaSys;
+    if (stam) {
+      stam.shelter = true;
+      stam.refill();
+      this.restore.push(() => {
+        stam.shelter = false;
+        stam.refill();
+      });
+    }
     window.addEventListener('keydown', this.onKey);
     (window as any).__domain = this;
     this.co = this.script();

@@ -416,6 +416,8 @@ export class Skills {
       }
       return;
     }
+    // winded (player/Stamina): no casting until he has his breath back
+    if (!this.player.staminaSys.canCast()) return;
     if (this.hero) {
       if (k === 'X' || !this.hero.cast(k)) return;
     } else if (k === 'E' && this.scorpCd <= 0) this.tossScorpions();

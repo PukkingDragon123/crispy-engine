@@ -695,7 +695,6 @@ function applyTheme(ctx: ThemeCtx, zn: ZoneDef) {
       const startZ = zn.cz - R * 0.45;
       zn.anchors.push({ kind: 'shack', x: home.x, z: home.z, rot: zn.dir + 0.4 });
       zn.anchors.push({ kind: 'wagon', x: home.x + 9, z: home.z - 4, rot: zn.dir - 1.2 });
-      zn.anchors.push({ kind: 'campfire', x: zn.cx - 6, z: startZ, rot: 0 });
       zn.anchors.push({ kind: 'wantedBoard', x: zn.cx + 5, z: startZ + 4, rot: zn.dir - Math.PI / 2 });
       zn.anchors.push({ kind: 'dumbScarab', x: zn.cx + 12, z: startZ + 14 });
       zn.anchors.push({ kind: 'totem', x: zn.cx - R * 0.3, z: zn.cz + R * 0.3 });
@@ -1629,7 +1628,6 @@ function buildPoi(ctx: ThemeCtx, zn: ZoneDef, p: Poi) {
           zn.anchors.push({ kind: 'tent', ...at(7.5, a), rot: a + Math.PI });
         }
         const ra = a0 + Math.PI / 3;
-        zn.anchors.push({ kind: 'rug', ...at(3.6, ra), rot: ra + Math.PI / 2 });
         for (let i = 0; i < 4; i++) zn.anchors.push({ kind: 'pot', ...at(rng.range(2.5, 5), ra + rng.range(-0.6, 0.6)), rot: rng.range(0, 6.28), scale: rng.range(0.8, 1.05) });
         zn.anchors.push({ kind: 'well', ...at(11, a0 + Math.PI), rot: 0 });
         zn.anchors.push({ kind: 'trough', ...at(12.5, a0 + Math.PI + 0.35), rot: a0 });
@@ -1777,7 +1775,6 @@ function placeOasis(ctx: ThemeCtx, zn: ZoneDef, R: number) {
   zn.pois.push({ kind: 'oasis', name: 'Oasis', x, z, r: half, data: { level } });
   // hard markers keep the scatter / set pieces out of the water
   for (let i = 0; i < 9; i++) zn.anchors.push({ kind: 'oasisMark', ...(i === 0 ? { x, z } : at(0.65, (i / 8) * Math.PI * 2)) });
-  zn.anchors.push({ kind: 'rug', ...rest, rot: restA + Math.PI / 2 });
   const ring = (kind: string, n: number, d0: number, d1: number, extra?: (a: Anchor) => void) => {
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + rng.range(-0.25, 0.25);

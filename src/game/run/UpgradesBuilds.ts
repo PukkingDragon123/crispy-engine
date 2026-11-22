@@ -35,6 +35,10 @@ export const BUILD_UPGRADES: UpgradeDef[] = [
   { id: 'wishYouWereHere', name: 'Wish You Were Here', cat: 'insect', rarity: 'epic', maxLv: 2, icon: 'glyph0', god: 'Thoth', desc: (l) => `Every skill cast has a ${Math.round(22 * l)}% chance to cast itself again a moment later, free.`, lore: 'Two lost souls, swimming in a fishbowl. Both of them throw dung bombs.' },
   { id: 'bohemian', name: 'Bohemian Rhapsody', cat: 'relic', rarity: 'rare', maxLv: 3, icon: 'ankh', god: 'Serket', desc: (l) => `Stairway to Serket charges ${pc(0.25 * l)} faster, and the beast stays ${f1(1.5 * l)} s longer.`, lore: 'Is this the real life? Is this a scorpion the size of a house?' },
   { id: 'welcomeJungle', needs: 'learnGunsNRoses', name: 'Welcome to the Jungle', cat: 'gun', rarity: 'uncommon', maxLv: 3, icon: 'spark', god: 'Hathor', desc: (l) => `Guns N' Roses roots ${cnt(l)} more prey, fires ${pc(0.2 * l)} more rounds, and its roses bloom ${pc(0.3 * l)} harder.`, lore: 'We got fun and games. Mostly thorns.' },
+  // ---- wind (player/Stamina): a deeper vessel, a quicker breath, kills that keep him going
+  { id: 'fuel', name: 'Fuel', cat: 'passive', rarity: 'uncommon', maxLv: 3, icon: 'spark', god: 'Ra', mods: (l) => [{ stat: 'staminaMax', type: 'flat', value: 25 * l }], desc: (l) => `A deeper vessel: +${Math.round(25 * l)} stamina for jumps, surfing, shots and skills.`, pros: (l) => [`+${Math.round(25 * l)} max stamina`], per: '+25 max stamina', lore: 'Ra burns all day and never once stops for breath.' },
+  { id: 'windOfChange', name: 'Wind of Change', cat: 'insect', rarity: 'uncommon', maxLv: 3, icon: 'star4', god: 'Shu', mods: (l) => [{ stat: 'staminaRegen', type: 'pct', value: 0.3 * l }], desc: (l) => `Shu fills his ribs with desert air: stamina refills ${pc(0.3 * l)} faster.`, pros: (l) => [`+${pc(0.3 * l)} stamina regen`], per: '+30% stamina regen', lore: 'Pinch whistles it on the long rides. The band is called Scorpions, so Serket allows it.' },
+  { id: 'dontStopMeNow', name: "Don't Stop Me Now", cat: 'relic', rarity: 'rare', maxLv: 3, icon: 'speedline', god: 'Montu', desc: (l) => `Every kill pours ${Math.round(5 * l)} stamina back, and jumps, sand kicks and wall kicks cost ${Math.round(10 * l)}% less.`, pros: (l) => [`+${Math.round(5 * l)} stamina per kill`, `−${Math.round(10 * l)}% jump costs`], per: '+5 stamina per kill, −10% jump costs', lore: 'A shooting star leaping through the dunes, and he is having such a good time.' },
   // ---- evolutions
   { id: 'thunderstruck', name: 'Thunderstruck', cat: 'evolution', rarity: 'mythic', maxLv: 1, icon: 'bolt', god: 'Set', evolveFrom: ['rideLightning', 'backInBlack'], desc: () => 'EVOLUTION: every kill hurls a bolt into the next enemy and takes 1.2 s more off every cooldown. Ride the Lightning bolts chain to a second target.' },
   { id: 'killerQueen', name: 'Killer Queen', cat: 'evolution', rarity: 'mythic', maxLv: 1, icon: 'skull', god: 'Anubis', evolveFrom: ['bitesDust', 'comeTogether'], desc: () => 'EVOLUTION: executions explode (80 damage, 5 m) and hand every status the victim carried to everyone in the blast.' },
@@ -46,6 +50,7 @@ export const BUILD_UPGRADES: UpgradeDef[] = [
 export const BUILD_ART_FAMILY: Record<string, string> = {
   learnGunsNRoses: 'gunstorm', backInBlack: 'anubis', rockYou: 'gun', highwayToHell: 'board', comeTogether: 'swarm', bitesDust: 'bottles',
   rideLightning: 'gunstorm', wishYouWereHere: 'thoth', bohemian: 'serket', welcomeJungle: 'gunstorm',
+  fuel: 'fire', windOfChange: 'serket', dontStopMeNow: 'board',
   thunderstruck: 'gunstorm', killerQueen: 'anubis', darkSide: 'moon', novemberRain: 'gunstorm',
 };
 
@@ -77,6 +82,8 @@ export function buildNumbers(pw: (id: string) => number) {
     rain: pw('novemberRain') ? 4 : 0,
     executeBelow: 0.09 * pw('bitesDust'),
     recastChance: Math.min(0.9, 0.22 * pw('wishYouWereHere')),
+    killStamina: 5 * pw('dontStopMeNow'),
+    jumpCostMul: Math.max(0.5, 1 - 0.1 * pw('dontStopMeNow')),
   };
 }
 
@@ -189,6 +196,12 @@ export class BuildEffects {
       sk.roses.bulletMul = b.bulletMul;
       sk.roses.bloomMul = b.bloomMul;
       sk.roses.rain = b.rain;
+    }
+    // Don't Stop Me Now: kills pour wind back, jumps cost less (player/Stamina)
+    const st = this.player.staminaSys;
+    if (st) {
+      st.killRefill = b.killStamina;
+      st.jumpCostMul = b.jumpCostMul;
     }
     const ult = Ultimate.current;
     if (ult) {

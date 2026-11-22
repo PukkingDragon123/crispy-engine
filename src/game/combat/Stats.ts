@@ -10,7 +10,7 @@ export type DerivedStat =
   | 'moveSpeed' | 'accel' | 'jump' | 'boostRegen' | 'dodge'
   | 'pickupRange' | 'bountyGain' | 'goldGain' | 'ultCharge' | 'cdr' | 'lifesteal'
   | 'poisonStacks' | 'scorpions' | 'swarmSize' | 'explosionRadius' | 'knockback' | 'thorns' | 'speedDamage'
-  | 'rarity' | 'shield';
+  | 'rarity' | 'shield' | 'staminaMax' | 'staminaRegen';
 export type StatId = CoreStat | DerivedStat;
 
 export const CORE_INFO: Record<CoreStat, { name: string; short: string; color: string; desc: string }> = {
@@ -43,6 +43,8 @@ export const DERIVED_INFO: Partial<Record<DerivedStat, { name: string; fmt: 'int
   jump: { name: 'Jump Power', fmt: 'x', formula: '1 + 2%·MOB' },
   boostRegen: { name: 'Boost Regen', fmt: 'x', formula: '1 + 5%·MOB' },
   dodge: { name: 'Dodge Chance', fmt: 'pct', formula: '0.5%·MOB (cap 40%)' },
+  staminaMax: { name: 'Stamina', fmt: 'int', formula: '90 + 2·MOB' },
+  staminaRegen: { name: 'Stamina Regen', fmt: 'x', formula: '0.9 + 2%·MOB' },
   pickupRange: { name: 'Pickup Range', fmt: 'f1', formula: '4 m' },
   bountyGain: { name: 'Bounty Gain', fmt: 'x', formula: '1' },
   goldGain: { name: 'Gold Gain', fmt: 'x', formula: '1 + 2%·LCK' },
@@ -157,6 +159,8 @@ export class StatSheet {
       case 'knockback': return 1 + 0.02 * V('phys');
       case 'spread': return 1;
       case 'shield': return 0;
+      case 'staminaMax': return 90 + 2 * V('mob');
+      case 'staminaRegen': return 0.9 + 0.02 * V('mob');
     }
   }
 
