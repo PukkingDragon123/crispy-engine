@@ -44,7 +44,7 @@ export function rollingStoneRig(o: { alpha?: boolean } = {}): RigSpec {
   const ARRIS = A ? 0x6e6660 : 0xb9aa92;
   const QUARTZ = A ? 0xc9c0d8 : 0xdcd4c6, FELD = A ? 0x7a5a52 : 0xbc9c86, MICA = 0x2e2a27;
   const LICHEN = [0xb89a3a, 0x9aa078, 0xc8b060];
-  const RUNE = A ? 0xfff2c4 : 0xffa43a, RUNE_DEEP = A ? 0xffd27a : 0xe8641a, CRACK = A ? 0xff9a3a : 0x2a221c;
+  const RUNE = A ? 0xfff2c4 : 0xffa43a, RUNE_DEEP = A ? 0xd8a040 : 0xb8501a, CRACK = A ? 0x14100e : 0x2a221c;
   const SOCKET = 0x1a120c;
 
   // ---------------------------------------------------------------- the boulder shape (shared by every chunk)
@@ -115,7 +115,6 @@ export function rollingStoneRig(o: { alpha?: boolean } = {}): RigSpec {
         let fl: number = VF.SOLID;
         if (seam) {
           col = CRACK;
-          if (A) fl = VF.SOLID | VF.EMISSIVE;
         } else if (arris(x, y, z)) col = ARRIS;
         models[b].set(x, y, z, col, fl);
       }
@@ -155,7 +154,7 @@ export function rollingStoneRig(o: { alpha?: boolean } = {}): RigSpec {
             for (let z = Math.floor(q[2] - r1); z <= Math.ceil(q[2] + r1); z++) {
               const dd = Math.hypot(x + 0.5 - q[0], y + 0.5 - q[1], z + 0.5 - q[2]);
               if (dd < w) del(x, y, z);
-              else if (dd < r1 && solid(x, y, z)) setAt(x, y, z, dd < w + 0.55 ? glow : RUNE_DEEP, VF.SOLID | VF.EMISSIVE);
+              else if (dd < w + 0.75 && solid(x, y, z)) setAt(x, y, z, dd < w + 0.4 ? glow : RUNE_DEEP, VF.SOLID | VF.EMISSIVE);
             }
       }
     }
@@ -269,7 +268,7 @@ export function rollingStoneRig(o: { alpha?: boolean } = {}): RigSpec {
             for (let z = Math.floor(qz - 4); z <= Math.ceil(qz + 1); z++) {
               const dy = Math.abs(y + 0.5 - qy), dz = qz - (z + 0.5);
               if (dy < 0.6 + open * 0.9 && dz < 2.6 * open + 0.6) del(x, y, z);
-              else if (dy < 1.6 + open && dz < 3.6 && solid(x, y, z)) setAt(x, y, z, dz > 2.2 ? RUNE : RUNE_DEEP, VF.SOLID | VF.EMISSIVE);
+              else if (dy < 1.1 + open * 0.5 && dz < 3.6 && dz > 0.6 && solid(x, y, z)) setAt(x, y, z, dz > 2.2 ? RUNE : RUNE_DEEP, VF.SOLID | VF.EMISSIVE);
             }
       }
     }

@@ -147,7 +147,8 @@ function member(rig: TRig, i: number) {
   // ---- antennae: stalk out through the fringe to a three-plate lamellate club
   const ant = rig.part(P + 'ant_l', P + 'head', [2.5, 43, 6.5]);
   chain(ant, [[2.5, 43, 6.5], [4, 44.5, 8.5], [5.5, 45.5, 9.5]], [0.5, 0.5, 0.45], C.dark);
-  for (let k = 0; k < 3; k++) rbox(ant, 5 + k, 45, 10, 6 + k, 47 - k * 0, 11, k === 1 ? GOLD.hi : GOLD.base, 0);
+  // the club: three stacked lamellae fanned from the stalk tip
+  for (let k = 0; k < 3; k++) ell(ant, 5.8 + k * 0.7, 46 + (k - 1) * 0.9, 10.2, 1.3, 0.55, 1.1, k === 1 ? GOLD.hi : GOLD.base, VF.SOLID | VF.METAL);
   // ---- elytra over the back (they open for flight), folded wings beneath
   const ely = rig.part(P + 'elytra_l', P + 'torso', [1, 36, -3.5]);
   ell(ely, 3.6, 25, -5.2, 4.4, 11.2, 3.8, C.base, undefined, (x, y, z) => x >= 1 && z <= -2);
@@ -419,7 +420,8 @@ export function beetlesColossusRig(): RigSpec {
   chain(mand, [[3.5, 65.5, 15], [5, 64, 19], [2, 63.5, 21.5]], [1.5, 1.1, 0.6], EM.dark);
   const ant = rig.part('ant_l', 'head', [5.5, 75, 13]);
   chain(ant, [[5.5, 75, 13], [8, 79, 16], [10, 81, 18]], [0.8, 0.7, 0.6], BRONZE.dark);
-  for (let k = 0; k < 3; k++) rbox(ant, 9 + k, 81, 18, 10 + k, 85, 20, k === 1 ? GOLD.hi : GOLD.base, 0, undefined, VF.SOLID | VF.METAL);
+  // the lamellate club: three curved gold leaves fanned from the stalk tip
+  for (let k = 0; k < 3; k++) ell(ant, 10.5 + k * 0.4, 81 + (k - 1) * 1.6, 18.6 + k * 0.3, 1.6, 0.8, 2.6, k === 1 ? GOLD.hi : GOLD.base, VF.SOLID | VF.METAL);
   // ---- arms: gold pauldrons, sawtooth tibiae; a toothed claw left, the silver hammer right
   const arm = rig.part('arm_l', 'torso', [19.5, 60, 2]);
   ell(arm, 20, 62, 1, 5.4, 4.2, 5.4, GOLD.base);
@@ -459,15 +461,21 @@ export function beetlesColossusRig(): RigSpec {
 /** the silver hammer: a bevelled mallet block with gold rims and an engraved band, on a bronze haft */
 function bevelHammer(m: VoxelModel) {
   seg(m, [-24, 33, 9], [-24, 30, 9], 2.2, BRONZE.base);
-  for (let x = -31; x <= -17; x++)
-    for (let y = 22; y <= 30; y++)
-      for (let z = 4; z <= 14; z++) {
-        const dx = Math.min(x + 31, -17 - x), dy = Math.min(y - 22, 30 - y), dz = Math.min(z - 4, 14 - z);
-        if (dx + dy < 2 || dx + dz < 2 || dy + dz < 2) continue;
-        const rim = dx === 0 || dx === 1;
-        const band = Math.abs(x + 24) < 1 && (dz === 0 || dy === 0);
-        m.set(x, y, z, rim ? GOLD.base : band ? LAPIS.base : dy === 8 ? SILVER.hi : dy === 0 ? SILVER.shade : SILVER.base, VF.SOLID | VF.METAL);
+  for (let x = -32; x <= -16; x++) {
+    const u = (x + 24) / 8; // -1 .. 1 along the head
+    const flare = Math.abs(u) > 0.82 ? 0.6 : 0;
+    const R = 4.6 + flare - Math.abs(u) * 0.3;
+    for (let y = 20; y <= 32; y++)
+      for (let z = 3; z <= 15; z++) {
+        const rr = Math.hypot(y - 26, z - 9);
+        if (rr > R) continue;
+        const face = Math.abs(u) > 0.94;
+        const collar = Math.abs(Math.abs(u) - 0.78) < 0.08;
+        const band = Math.abs(u) < 0.1;
+        const c = face ? (rr < R - 1.2 ? SILVER.hi : SILVER.base) : collar ? GOLD.base : band ? LAPIS.base : rr > R - 0.8 && y > 26 ? SILVER.hi : y < 24 ? SILVER.shade : SILVER.base;
+        m.set(x, y, z, c, VF.SOLID | VF.METAL);
       }
+  }
 }
 
 /** parents before children (parts authored against a mirrored parent come out of mirrorLR late) */
