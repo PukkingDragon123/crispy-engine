@@ -5,6 +5,8 @@
 //    being fought an ember inlay that breathes, the night waves set in indigo
 //  • a linen TAG on two cords under it: the hour and the bodies still standing on
 //    this wave ("DUSK  14 LEFT"), or the countdown in the break ("NIGHT IN 12")
+//  • KHEPRI: a lapis scarab walks the cartouche's top rim with the time of day, rolling the sun ahead of
+//    it (the moon by night), as the god rolls the sun across the sky
 //  • the NIGHT WARNING: an indigo plate edged in blood red that drops in before the
 //    night ("NIGHT FALLS / THE DEAD HUNT HARDER") and the witching hour; a gold one
 //    before the dawn.
@@ -27,6 +29,8 @@ export interface PlaqueState {
   /** the count on the tag turns red */
   urgent: boolean;
   warn: { title: string; sub: string; kind: 'night' | 'dawn' } | null;
+  /** the time of day 0..1 (Days.clock): Khepri's place on the rim */
+  clock?: number;
 }
 
 const P = (ch: string) => HUD_PAL[ch];
@@ -161,6 +165,18 @@ const PIP_NOW2 = pip({ A: 'E', B: 'E', C: 'D', D: 'C' });
 const PIP_DAY = pip({ A: 'q', B: 'L', C: 'L', D: 'K' });
 const PIP_NIGHT = pip({ A: 'V', B: 'U', C: 'U', D: 'T' });
 
+// KHEPRI (9 x 6, two steps) and the ball he rolls (5 x 5, two turns): authored
+const SCARAB_A: PixelSprite = { w: 9, h: 6, rows: ['..kkkk...', '.kVWWVk..', 'kUVWVVUkk', 'kTUUUUhik', '.kkkkkkk.', '.k..k..k.'] };
+const SCARAB_B: PixelSprite = { w: 9, h: 6, rows: ['..kkkk...', '.kVWWVk..', 'kUVWVVUkk', 'kTUUUUhik', '.kkkkkkk.', 'k..k..k..'] };
+const SUN: PixelSprite[] = [
+  { w: 5, h: 5, rows: ['.kkk.', 'kjiik', 'kiihk', 'khhgk', '.kkk.'] },
+  { w: 5, h: 5, rows: ['.kkk.', 'kiijk', 'khiik', 'kghhk', '.kkk.'] },
+];
+const MOON: PixelSprite[] = [
+  { w: 5, h: 5, rows: ['.kkk.', 'kSRRk', 'kRRQk', 'kRQQk', '.kkk.'] },
+  { w: 5, h: 5, rows: ['.kkk.', 'kRSRk', 'kQRRk', 'kQQRk', '.kkk.'] },
+];
+
 export class DayPlaque implements HudPainter {
   /** where it was drawn (HUD px), for the hourglass beside it */
   rect = { x: 0, y: 0, w: 0, h: 0, shown: false };
@@ -203,6 +219,15 @@ export class DayPlaque implements HudPainter {
     this.rect = { x, y, w, h, shown: true };
     const cv = cartouche(w, h);
     blitObj(c, cv, x + w / 2, y + h / 2, 3);
+    // Khepri on the rim, rolling the sun (the moon by night) along with the hours
+    {
+      const r = h / 2;
+      const k = Math.max(0, Math.min(1, (st.clock ?? (st.slot + 0.5) / 5) % 1));
+      const bx = Math.round(x + r - 4 + k * (w - 2 * r - 6));
+      const step = Math.floor(this.t * 4) % 2;
+      c.drawImage(sprite(step ? SCARAB_B : SCARAB_A), bx, y - 5);
+      c.drawImage(sprite((st.slot >= 3 ? MOON : SUN)[step]), bx + 9, y - 4);
+    }
     // the day, carved into the stone
     pixelText(c, label, x + w / 2 - 1, y + (small ? 3 : 4), { size: fs, color: '#2a1406', align: 'center', lip: '#fff4d8' });
     // the waves of the day

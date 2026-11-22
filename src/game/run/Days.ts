@@ -374,7 +374,7 @@ export class Days {
     else if (brk && ns === 4) warn = { title: 'THE WITCHING HOUR', sub: 'DARKEST BEFORE THE DAWN', kind: 'night' };
     else if (brk && ns === 0 && d.nextWave > 1) warn = { title: 'DAWN BREAKS', sub: `DAY ${dayOf(d.nextWave)} RISES`, kind: 'dawn' };
     else if (!brk && slot >= 3 && d.timer < 5 && d.phase !== 'idle') warn = { title: slot === 3 ? 'NIGHT FALLS' : 'THE WITCHING HOUR', sub: 'MORE OF THEM, AND MEANER', kind: 'night' };
-    return { visible: d.wave > 0 && !boss && this.r.hud.visible, day: dayOf(w), slot, done, inBreak: brk, tag, urgent, warn };
+    return { visible: d.wave > 0 && !boss && this.r.hud.visible, day: dayOf(w), slot, done, inBreak: brk, tag, urgent, warn, clock: this.clock() % 1 };
   }
 
   private glassState() {

@@ -55,7 +55,7 @@ export interface CutInOpts {
 }
 
 /** the beating heart's height on screen, HUD px */
-const HEART_PX = 46;
+const HEART_PX = 34;
 const CR = 14; // cylinder radius in voxels
 const CL = 10; // cylinder length in voxels
 const CH = 8.4; // chamber distance from axis

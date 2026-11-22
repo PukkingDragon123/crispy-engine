@@ -186,7 +186,7 @@ void main(){
       } else if (soul && dd >= 0.0 && pc.x >= front && pc.x < uTrail) {
         // the ghost of what was lost, dissolving
         float k = clamp((uTrail - pc.x) / max(1.0, uTrail - front), 0.0, 1.0);
-        if (bayer4(p + floor(t * 7.0)) < 0.35 + 0.3 * k) col = vec4(liq(dd < 1.0 ? 3.0 : 1.0), 0.9);
+        if (bayer4(p + floor(t * 7.0)) < 0.06 + 0.22 * k * k) col = vec4(liq(dd < 1.0 ? 2.0 : 0.0), 0.8);
       }
       // the wisps: a bright head and a fading, weaving tail
       if (soul) for (int i = 0; i < NWS; i++) {

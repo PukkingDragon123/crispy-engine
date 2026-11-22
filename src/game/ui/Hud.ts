@@ -645,13 +645,14 @@ export class Hud {
       if (this.use3D) {
         // the SOUL VESSEL with the heart on its medallion and the VENOM VESSEL under it (ui/HudVessels, drawn by Hud3D)
         x = 6 - slide * 220;
-        const cy = H - 27;
+        const cy = H - 31;
         y = cy - 8;
         this.anchors.soul = { x, cy, len: SOUL_LEN, frac, trail: this.hpTrail, shield: s.shield > 0 ? Math.min(1, s.shield / s.maxHp) : 0, speed: s.speed, shake: this.hpShake };
-        const vx = x + 14, vcy = H - 9;
+        const vx = x + 14, vcy = H - 13;
         this.anchors.venom = { x: vx, cy: vcy, len: VENOM_LEN, frac: stam, speed: s.speed, empty: this.stamEmpty };
         const sk = soulSocket(x, cy);
-        this.anchors.heart = { x: sk.x, y: sk.y - 1, frac };
+        // (the heart rig's pivot sits up and left of its middle: this centres it on the medallion)
+        this.anchors.heart = { x: sk.x + 5, y: sk.y + 5, frac };
         // the reading beside the stopper: an ankh, the soul left, the soul it can hold
         const tx = Math.round(x + vesselWidth('soul', SOUL_LEN) + 3);
         const pulse = low && Math.sin(this.t * 9) > 0;
@@ -1047,7 +1048,8 @@ export class Hud {
           // the keycap gives a little press now and then, asking to be pressed
           const press = this.promptT % 1.4 < 0.12 ? 1 : 0;
           this.blit(kc, x - bw / 2, y - 9 - pop + press, 1 - press);
-          text3d(c, s.prompt.text, x - bw / 2 + kc.width + 6, y - 8 - pop, { face: T3D.cream });
+          const ptw = text3d(c, s.prompt.text, x - bw / 2 + kc.width + 6, y - 8 - pop, { face: T3D.cream });
+          brassRule(c, x - bw / 2 + kc.width + 6 + ptw, y + 6 - pop, Math.round(ptw * easeOutCubic(Math.min(1, this.promptT / 0.3))), this.promptT);
         }
         c.globalAlpha = 1;
       }
@@ -1110,13 +1112,15 @@ export class Hud {
       // whole words slide in from the right margin (a letter-by-letter reveal read as clipped labels);
       // a little scarab gem ticks it off at the left, winking when it lands
       const tw = text3d(c, tt.text, xr, ty, { face: inkFor(tt.color), align: 'right' });
+      // a brass rule draws itself in under the words, a bud at its tip, a glint running along it once
+      brassRule(c, xr, ty + 14, Math.round(tw * easeOutCubic(Math.min(1, Math.max(0, (tt.t - 0.1) / 0.35)))), tt.t);
       const wink = tt.t < 0.45 ? 1 + Math.round(Math.sin(tt.t * 40) * 0.5) : 1;
       blitObj(c, uiMark('gem'), xr - tw - 8, ty + 6 + Math.round(Math.sin(this.t * 3 + i * 1.3) * 0.8), wink, 1);
       // the hint under it keeps to the right margin: a sentence a line, at most three, never across the middle
       const subs = tt.sub ? wrapLines(tt.sub, Math.min(270, Math.round(W * 0.42)), 3) : [];
-      subs.forEach((ln, j) => text3d(c, ln, xr - 6, ty + 15 + j * 14, { face: T3D.dim, align: 'right', depth: 1 }));
+      subs.forEach((ln, j) => text3d(c, ln, xr - 6, ty + 17 + j * 14, { face: T3D.dim, align: 'right', depth: 1 }));
       c.globalAlpha = 1;
-      ty += 18 + subs.length * 14 + 1;
+      ty += 20 + subs.length * 14 + 1;
     }
     this.outlawBase.k = k;
     this.anchors.outlaw = this.use3D ? this.outlawBase : null;
@@ -1165,3 +1169,20 @@ function inkFor(css: string) {
   return `rgb(${Math.min(255, r * k) | 0},${Math.min(255, g * k) | 0},${Math.min(255, b * k) | 0})`;
 }
 
+const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+/** a thin brass rule ending at `right`, drawn leftward `w` px: a dark seat under it, a lotus bud at its open
+ *  end, and a glint that runs along it once as it lands (toasts, prompts) */
+function brassRule(c: CanvasRenderingContext2D, right: number, y: number, w: number, t: number) {
+  if (w < 3) return;
+  const l = Math.round(right - w);
+  px(c, l + 1, y + 1, w, 1, UI.shadow);
+  px(c, l, y, w, 1, UI.brass.l);
+  const g = Math.round((t - 0.35) * 160);
+  if (g >= 0 && g < w) px(c, right - g - 3, y, 3, 1, UI.brass.h);
+  // the bud: a little stepped lotus, ink-edged
+  px(c, l - 3, y - 1, 3, 3, UI.shadow);
+  px(c, l - 2, y - 2, 1, 5, UI.shadow);
+  px(c, l - 2, y - 1, 1, 3, UI.brass.h);
+  px(c, l - 3, y, 3, 1, UI.brass.m);
+  px(c, right, y - 1, 1, 3, UI.brass.m);
+}

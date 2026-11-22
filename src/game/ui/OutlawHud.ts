@@ -231,11 +231,14 @@ export class OutlawHud {
         const fw = Math.round(iw * this.barShown), lw = Math.round(iw * this.barLead);
         const G = [HUD_PAL.j, HUD_PAL.i, HUD_PAL.h, HUD_PAL.h, HUD_PAL.g, HUD_PAL.f];
         if (lw > fw) px(c, ix + fw, iy, lw - fw, ih, '#fff6d0');
+        const shine = ((this.t * 55) % (iw + 90)) - 10;
         for (let xx = 0; xx < fw; xx++)
           for (let r = 0; r < ih; r++) {
             let col = G[Math.min(G.length - 1, Math.floor((r / ih) * G.length))];
             // stacked coins: a darker rim every few pixels
             if (xx % 5 === 4 && r > 0) col = HUD_PAL.g;
+            // light runs along the stack now and then, catching each coin's milled edge
+            else if (Math.abs(xx - shine - r * 0.6) < 1.2) col = r < ih / 2 ? '#fffbe8' : HUD_PAL.i;
             if (this.barFlash > 0.4) col = '#fffbe8';
             px(c, ix + xx, iy + r, 1, 1, col);
           }
