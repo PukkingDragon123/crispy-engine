@@ -281,15 +281,21 @@ export class Hud {
   toast(t: string, color = UI.text, sub?: string, big = false) {
     this.recent.push({ text: t, sub, at: this.t });
     if (this.recent.length > 12) this.recent.shift();
-    const ex = this.toasts.find((x) => x.text === t && x.t < 0.5);
+    // the same message never stacks twice: refresh the live one instead
+    const ex = this.toasts.find((x) => x.text === t);
     if (ex) {
-      ex.t = 0.05;
+      ex.t = Math.min(ex.t, 0.05);
+      if (sub) ex.sub = sub;
       return;
     }
     // a new title card replaces the previous one instead of stacking on it
     if (big) this.toasts = this.toasts.filter((x) => !x.big);
     this.toasts.push({ text: t, color, sub, t: 0, big });
-    if (this.toasts.length > 5) this.toasts.shift();
+    // keep the right-hand column short: at most 3 small toasts at once
+    while (this.toasts.filter((x) => !x.big).length > 3) {
+      const i = this.toasts.findIndex((x) => !x.big);
+      this.toasts.splice(i, 1);
+    }
   }
   onShot() {
     this.cylVel = 14;
