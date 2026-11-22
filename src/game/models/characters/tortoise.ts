@@ -9,13 +9,17 @@
 // offset (metres, parent space) that pulls it inside; meta.shellDrop is how far
 // the shell sinks to the ground once the legs are in.
 //
-// GRID: 1/36 m, origin on the ground between the feet, faces +Z, LEFT = +X,
+// GRID: designed at 1/36 m and re-cut to 1/72 m with fine detail passes (see DETAIL RE-CUT;
+// she also carries a merchant's pack frame, a kettle, a chilli ristra and a brass balance),
+// origin on the ground between the feet, faces +Z, LEFT = +X,
 // even-width symmetry (voxel x mirrors to -1 - x, geometric gx to -gx).
 import { VoxelModel, VF } from '../../../engine/voxel/VoxelModel';
 import type { RigSpec, PartSpec, SocketSpec, V3 } from '../../../engine/voxel/Rig';
 import { defaultExpressions } from '../toon/humanoid';
 import { lump, tube } from './organic';
 import { noise } from '../../../engine/math/rand';
+import { cellular } from '../materials';
+import { weather } from '../wear';
 
 export const TORTOISE_EXPRESSIONS = ['neutral', 'laugh', 'surprised', 'scared', 'squinty'];
 const VS = 1 / 36;
@@ -38,7 +42,7 @@ function mirrorPart(src: VoxelModel, name: string) {
 // ------------------------------------------------------------------ palette (clean regions for cel shading)
 const SKIN = { base: 0x8a8261, shade: 0x6d6649, hi: 0xa39b78, dark: 0x4c4734, scale: 0xa9a17c, scaleEdge: 0x5d573f };
 const HORN = { base: 0x4a4030, hi: 0x6a5c44, claw: 0xd8cba0 };
-const CARA = { base: 0x8a6a3a, ring: 0x9c7a46, seam: 0x4a3520, bleach: 0xb59360, chip: 0xc9a46c, paintR: 0xb04a32, paintW: 0xe8dcc0 };
+const CARA = { base: 0x8a6a3a, ring: 0x9c7a46, seam: 0x4a3520, bleach: 0xb59360, chip: 0xc9a46c, paintR: 0xb04a32, paintW: 0xe8dcc0, mid: 0x7e5f33, winter: 0x5e4426, sun: 0xa88552 };
 const PLAS = { base: 0xc8b07a, seam: 0x7a6038, ring: 0xb89e68 };
 const KNIT = { a: 0xb0563a, b: 0x8e4028, cream: 0xe8d6b0 };
 const SCARF = { base: 0x3f4c7c, shade: 0x2f3a62, motif: 0xd9a53a };
@@ -113,9 +117,20 @@ function carapaceColor(x: number, y: number, z: number): number {
   if (band === 3 && Math.abs(Math.hypot(lu, lv) - 0.85) < 0.12 && Math.floor((Math.atan2(lv, lu) + 4) * 2.5) % 2 === 0) return CARA.paintR;
   if (band === 11 && u > 0 && Math.abs(lv - Math.sin(lu * 3.2) * 0.35) < 0.14 && Math.abs(lu) < 0.9) return CARA.paintW;
   if (band === 12 && u < 0 && ((Math.abs(lu) < 0.18 && Math.abs(lv) < 0.6) || (Math.abs(lv + 0.1) < 0.12 && Math.abs(lu) < 0.65) || (lu > 0.45 && Math.abs(lv - 0.45) < 0.14))) return CARA.paintR;
+  if (FINE_RINGS) {
+    // the 1/72 re-cut: dense growth rings in three tones (wide summer bands, thin dark winter
+    // lines), each scute's areola paler, the sun-bleached crown, and the worn marginal rim
+    const k = d / 0.031, ri = Math.floor(k), fr = k - ri;
+    if (d < 0.05) return v > 0.4 ? CARA.chip : CARA.bleach;
+    if (fr < 0.2) return v > 0.5 ? CARA.ring : CARA.winter;
+    if (v > 0.5) return ri % 2 ? CARA.bleach : CARA.sun;
+    if (v < -0.84) return ri % 2 ? CARA.ring : CARA.base;
+    return ri % 3 === 0 ? CARA.ring : ri % 3 === 1 ? CARA.base : CARA.mid;
+  }
   if (v > 0.55 && ring) return CARA.bleach;
   return ring ? CARA.ring : CARA.base;
 }
+let FINE_RINGS = false;
 
 function buildShell() {
   const m = new VoxelModel('shell');
@@ -544,8 +559,219 @@ function buildBeads() {
   return m;
 }
 
+// ================================================================== MERCHANT PACK (a travelling trader's frame on her back)
+const COPPER = { base: 0xb0643a, hi: 0xd88a58, dark: 0x6a3a20, verd: 0x5a8a6a };
+const ROPE = 0xc9a86a;
+const poleWood = (x: number, y: number, z: number) => {
+  const g = Math.floor(y * 0.55 + noise.n2(x * 0.6 + 3, z * 0.6) * 2.2);
+  return g % 7 === 3 ? WOOD.knot : g % 3 === 0 ? WOOD.shade : g % 3 === 1 ? WOOD.base : WOOD.hi;
+};
+/** the pack frame, lashings, a scroll case and a herb bundle: rigid, so they go on the shell */
+function addPack(m: VoxelModel) {
+  for (const s of [1, -1]) {
+    tube(m, [[s * 7.6, 19.5, -17.6], [s * 7.3, 38, -18.2], [s * 6.9, 58.6, -15.9]], 0.95, 0.8, poleWood, { wobble: 0.08, seed: 90 + s });
+    // lashings where the bars cross the poles
+    for (const [y, z] of [[24, -18.4], [50.2, -17.2], [57.6, -16.1]] as [number, number][])
+      lump(m, [s * 7.2, y, z], [1.35, 0.9, 1.3], (x, yy) => ((yy + x) & 1 ? ROPE : 0xa88a52), { wobble: 0.1, seed: 95 + y });
+  }
+  tube(m, [[-8.6, 24, -18.6], [0, 23.6, -18.9], [8.6, 24, -18.6]], 0.7, 0.7, poleWood, { wobble: 0.06, seed: 97 });
+  tube(m, [[-8.2, 50.2, -17.4], [0, 49.7, -17.7], [8.2, 50.2, -17.4]], 0.7, 0.7, poleWood, { wobble: 0.06, seed: 98 });
+  tube(m, [[-11.2, 57.8, -16.1], [0, 57.3, -16.4], [11.2, 57.8, -16.1]], 0.75, 0.7, poleWood, { wobble: 0.06, seed: 99 });
+  // straps from the frame over the shell to the shoulders
+  for (const s of [1, -1])
+    tube(m, [[s * 7.2, 50, -17], [s * 7.6, 47.6, -11.5], [s * 8.4, 41.5, -4.2], [s * 9.4, 36.5, -1.8]], 0.55, 0.55, (x, y) => (y % 3 === 0 ? LEATHER.stitch : LEATHER.shade), { wobble: 0.04, seed: 100 + s });
+  // a leather scroll case strapped to the right pole, brass end caps
+  tube(m, [[-9.6, 29, -19.4], [-9.7, 37, -19.6], [-9.6, 45, -19.3]], 1.35, 1.3, (x, y) => (y < 30.2 || y > 43.8 ? GOLD.dark : y % 4 === 0 ? LEATHER.shade : LEATHER.base), { wobble: 0.05, seed: 103 });
+  for (const y of [33, 41]) lump(m, [-9.6, y, -19.4], [1.65, 0.55, 1.6], () => LEATHER.stitch, { wobble: 0.04, seed: 104 + y });
+  // a bundle of dried desert sage tied to the left pole
+  for (let i = 0; i < 6; i++) {
+    const a = i * 1.1;
+    tube(m, [[8.2, 44.5, -18.6], [8.6 + Math.cos(a) * 1.2, 40.2, -18.8 + Math.sin(a) * 1.0], [9 + Math.cos(a) * 2.0, 36.8 - (i % 3), -19 + Math.sin(a) * 1.6]], 0.55, 0.75, (x, y) => (y > 43 ? 0x8a6a3a : (i + y) % 3 ? 0x8a9a6a : 0x6e7e52), { wobble: 0.14, seed: 110 + i });
+  }
+  lump(m, [8.3, 43.4, -18.6], [1.3, 0.7, 1.3], () => ROPE, { wobble: 0.08, seed: 117 });
+}
+
+/** a dented copper kettle swinging from the top bar (pivot at its hook) */
+function buildKettle() {
+  const m = new VoxelModel('kettle');
+  lump(m, [9.6, 51.6, -15.8], [2.7, 2.2, 2.7], (x, y, z) => (y <= 49 ? COPPER.dark : y >= 53 ? COPPER.hi : noise.n3(x * 0.6, y * 0.6, z * 0.6) > 0.45 ? COPPER.verd : COPPER.base), { wobble: 0.06, seed: 120, power: 2.3, flags: VF.METAL });
+  lump(m, [9.6, 54, -15.8], [1.8, 0.6, 1.8], () => COPPER.dark, { wobble: 0.04, seed: 121, flags: VF.METAL });
+  lump(m, [9.6, 54.9, -15.8], [0.6, 0.6, 0.6], () => 0x2a2420, { wobble: 0.02, seed: 122 });
+  tube(m, [[11.6, 51, -15.8], [12.9, 52.2, -15.8], [13.6, 53.8, -15.8]], 0.75, 0.45, () => COPPER.base, { wobble: 0.04, seed: 123, flags: VF.METAL });
+  tube(m, [[7.4, 53.2, -15.8], [7.9, 56.2, -15.8], [9.6, 57.4, -15.8], [11.3, 56.2, -15.8], [11.8, 53.2, -15.8]], 0.42, 0.42, () => 0x3a3a3e, { wobble: 0.02, seed: 124, flags: VF.METAL });
+  m.del(8, 50, -14).set(8, 50, -15, COPPER.dark, VF.METAL); // a dent on the belly
+  return m;
+}
+
+/** a ristra of sun-dried red chillies on a cord */
+function buildRistra() {
+  const m = new VoxelModel('ristra');
+  for (let y = 44; y <= 57; y++) m.set(-10, y, -16, ROPE);
+  for (let i = 0; i < 9; i++) {
+    const y = 55.6 - i * 1.35, s = i % 2 ? 1 : -1, a = i * 1.7;
+    const tip: V3 = [-9.5 + s * 1.6 + Math.cos(a) * 0.4, y - 2.3, -15.5 + Math.sin(a) * 1.3];
+    tube(m, [[-9.5, y, -15.5], [-9.5 + s * 1.1, y - 1.1, -15.5 + Math.sin(a) * 0.7], tip], 0.8, 0.35, (x, yy) => (yy > y - 0.4 ? 0x4a6a2a : i % 3 === 0 ? 0x8a1c14 : i % 3 === 1 ? 0xb02a1e : 0xc8402a), { wobble: 0.08, seed: 130 + i });
+  }
+  return m;
+}
+
+/** a little brass trader's balance: beam, two pans on cords */
+function buildScale() {
+  const m = new VoxelModel('scale');
+  const B = (x: number, y: number) => ((x + y) % 4 === 0 ? GOLD.hi : GOLD.base);
+  for (let y = 54; y <= 57; y++) m.set(0, y, -17, ROPE);
+  tube(m, [[-4.6, 53.6, -17], [0, 54, -17], [4.6, 53.6, -17]], 0.45, 0.45, B, { wobble: 0.02, seed: 140, flags: VF.METAL });
+  lump(m, [0, 54.4, -17], [0.8, 0.9, 0.8], () => GOLD.dark, { wobble: 0.02, seed: 141, flags: VF.METAL });
+  for (const s of [1, -1]) {
+    for (const [dx, dz] of [[-1.4, 0], [1.4, 0], [0, 1.3]] as [number, number][]) {
+      const n = 9;
+      for (let j = 0; j <= n; j++) {
+        const t = j / n;
+        m.set(Math.round(s * 4.6 + dx * t), Math.round(53.4 - t * 4.2), Math.round(-17 + dz * t), 0xb8a070);
+      }
+    }
+    lump(m, [s * 4.6, 48.7, -17], [2.1, 0.55, 2.0], (x, y) => (y >= 49 ? GOLD.hi : GOLD.dark), { wobble: 0.03, seed: 142 + s, power: 2.2, flags: VF.METAL });
+  }
+  // a gold nugget and a turquoise bead being weighed
+  m.set(4, 49, -17, 0xf2d77a, VF.METAL).set(5, 49, -17, 0xd8b04a, VF.METAL).set(-5, 49, -17, 0x45b0a0);
+  return m;
+}
+
+// ================================================================== DETAIL RE-CUT (user note: "a lot a lot more detailed")
+// Every part is sculpted on the 1/36 design grid above, then re-cut at 1/72: each design voxel
+// becomes 2 x 2 x 2, convex corners are rounded off and concave creases filled in (a smooth
+// re-cut of the same sculpt, thin threads and glints kept whole), then the fine grid gets its
+// own hand-written detail: carved scute seams, dense growth rings, scratches, chips and lichen
+// on the carapace; folded, creased old skin on the neck and face; pebbled scales on the limbs;
+// glossy domed eyes with an iris, pupil, limbal ring and a catch-light; wear on the gear.
+const RES = 2;
+const OFF = 512;
+const KEY = (x: number, y: number, z: number) => ((x + OFF) << 20) | ((y + OFF) << 10) | (z + OFF);
+const D6: V3[] = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+
+function recut(src: VoxelModel, taken: Set<number>): VoxelModel {
+  const o = new VoxelModel(src.name);
+  const W = [0.75, 0.25];
+  const w8 = (x: number, y: number, z: number, sx: number, sy: number, sz: number) => {
+    let w = 0;
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) for (let k = 0; k < 2; k++) if (src.has(x + i * sx, y + j * sy, z + k * sz)) w += W[i] * W[j] * W[k];
+    return w;
+  };
+  const cand = new Map<number, V3>();
+  src.forEach((x, y, z, c, f) => {
+    let nb = 0;
+    for (const [dx, dy, dz] of D6) {
+      if (src.has(x + dx, y + dy, z + dz)) nb++;
+      else if (!taken.has(KEY(x + dx, y + dy, z + dz))) cand.set(KEY(x + dx, y + dy, z + dz), [x + dx, y + dy, z + dz]);
+    }
+    const thin = nb < 3;
+    for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) for (let dz = 0; dz < 2; dz++) {
+      if (!thin && w8(x, y, z, dx ? 1 : -1, dy ? 1 : -1, dz ? 1 : -1) < 0.43) continue;
+      o.set(x * RES + dx, y * RES + dy, z * RES + dz, c, f);
+    }
+  });
+  for (const [x, y, z] of cand.values())
+    for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) for (let dz = 0; dz < 2; dz++) {
+      const sx = dx ? 1 : -1, sy = dy ? 1 : -1, sz = dz ? 1 : -1;
+      if (w8(x, y, z, sx, sy, sz) < 0.4) continue;
+      const v = src.get(x + sx, y, z) ?? src.get(x, y + sy, z) ?? src.get(x, y, z + sz);
+      if (v !== undefined) o.set(x * RES + dx, y * RES + dy, z * RES + dz, v & 0xffffff, v >>> 24);
+    }
+  return o;
+}
+const surf = (m: VoxelModel, x: number, y: number, z: number) => D6.some(([dx, dy, dz]) => !m.has(x + dx, y + dy, z + dz));
+const FC = (X: number) => (X + 0.5) / RES - 0.5; // fine voxel index -> design-grid voxel coordinate (fractional)
+const CARA_SET = new Set<number>([CARA.base, CARA.ring, CARA.bleach, CARA.seam, CARA.chip]);
+const SKIN_SET = new Set<number>([SKIN.base, SKIN.shade, SKIN.hi, SKIN.scale, SKIN.scaleEdge]);
+
+/** carapace: dense rings, carved seams, scratches, chips and lichen */
+function fineShell(m: VoxelModel) {
+  FINE_RINGS = true;
+  const cx = 0, cy = 28 * RES, cz = -6 * RES;
+  const carve: V3[] = [];
+  const todo: [number, number, number, number][] = [];
+  m.forEach((x, y, z, c) => {
+    if (!CARA_SET.has(c)) return;
+    let col = carapaceColor(FC(x), FC(y), FC(z));
+    const s = surf(m, x, y, z);
+    if (s && col === CARA.seam) {
+      // outward neighbour empty: carve a groove one fine voxel deep along the seam
+      const ox = x - cx, oy = y - cy, oz = z - cz, ax = Math.abs(ox), ay = Math.abs(oy), az = Math.abs(oz);
+      const n: V3 = ax > ay && ax > az ? [Math.sign(ox), 0, 0] : ay > az ? [0, Math.sign(oy), 0] : [0, 0, Math.sign(oz)];
+      if (!m.has(x + n[0], y + n[1], z + n[2]) && oz < 4) carve.push([x, y, z]);
+    }
+    if (s && col !== CARA.seam) {
+      if (Math.abs(noise.n3(x * 0.085 + 2, y * 0.3 + x * 0.21, z * 0.085)) < 0.011) col = CARA.chip; // scratches
+      const li = noise.n3(x * 0.16 + 7, y * 0.16, z * 0.16 - 3);
+      if (y > cy + 14 && li > 0.5) col = li > 0.6 ? 0xb8b884 : 0x8e9a68; // pale desert lichen
+    }
+    if (col !== c) todo.push([x, y, z, col]);
+  });
+  FINE_RINGS = false;
+  for (const [x, y, z, c] of todo) m.set(x, y, z, c);
+  for (const [x, y, z] of carve) m.del(x, y, z);
+}
+
+/** old skin: folds on the neck, a crease network on the face, pebbled scales on the limbs */
+function fineSkin(m: VoxelModel, kind: 'neck' | 'head' | 'limb') {
+  const todo: [number, number, number, number][] = [];
+  m.forEach((x, y, z, c) => {
+    if (!SKIN_SET.has(c) || !surf(m, x, y, z)) return;
+    let col = c;
+    if (kind === 'neck') {
+      const f = (((y + noise.n2(x * 0.28, z * 0.28) * 2.4) % 4.6) + 4.6) % 4.6;
+      if (f < 0.9) col = SKIN.shade;
+      else if (f < 1.7 && c !== SKIN.shade) col = SKIN.hi;
+      if (Math.abs(noise.n3(x * 0.3, y * 0.12, z * 0.3)) < 0.03) col = SKIN.dark;
+    } else if (kind === 'head') {
+      const n = noise.n3(x * 0.24 + 5, y * 0.34, z * 0.24);
+      if (Math.abs(n) < 0.026) col = SKIN.shade; // fine crease lines only, no blotches
+    } else {
+      const [f1, f2] = cellular(x / 3.4, y / 3.0, z / 3.4, 7);
+      if (f2 - f1 < 0.13) col = SKIN.scaleEdge;
+      else if (f1 < 0.3 && c !== SKIN.shade) col = SKIN.scale;
+    }
+    if (col !== c) todo.push([x, y, z, col]);
+  });
+  for (const [x, y, z, c] of todo) m.set(x, y, z, c);
+}
+
+/** glossy domed eye: limbal ring, warm amber-brown iris, round pupil, one wet catch-light */
+function fineEye(eye: VoxelModel, head: VoxelModel, at: V3) {
+  const ex = at[0] * RES, ey = at[1] * RES;
+  const front = new Map<string, number>();
+  eye.forEach((x, y, z) => {
+    const k = x + ',' + y;
+    if ((front.get(k) ?? -999) < z) front.set(k, z);
+  });
+  const add: [number, number, number, number][] = [];
+  eye.forEach((x, y, z) => {
+    const u = (x + 0.5 - ex) / 2.1, v = (y + 0.5 - ey + 0.4) / 2.9, r = Math.hypot(u, v);
+    let c = r < 0.4 ? EYE.pupil : r < 0.62 ? (v > 0 ? 0xa86e26 : 0x7a4a18) : r < 0.82 ? 0x8a5a1c : 0x2e1c10;
+    if (x === Math.floor(ex - 1) && y === Math.floor(ey)) c = 0xf2eee4; // catch-light, upper inner edge of the pupil (clear of the lid)
+    eye.set(x, y, z, c);
+    if (front.get(x + ',' + y) === z && r < 0.62 && y <= Math.floor(ey + 0.6)) add.push([x, y, z + 1, c === 0xf2eee4 ? c : r < 0.4 ? EYE.pupil : 0x9a6422]);
+  });
+  for (const [x, y, z, c] of add) eye.set(x, y, z, c);
+  eyeRim(eye, head);
+}
+/** a dark wet rim of skin round the eye */
+function eyeRim(eye: VoxelModel, head: VoxelModel) {
+  const rim: V3[] = [];
+  head.forEach((x, y, z) => {
+    if (D6.some(([dx, dy]) => (dx || dy) && eye.has(x + dx, y + dy, z))) rim.push([x, y, z]);
+  });
+  for (const [x, y, z] of rim) head.set(x, y, z, 0x3a3024);
+}
+const mirrorFine = (src: VoxelModel, name: string) => mirrorPart(src, name);
+
 // ================================================================== RIG
+let TORTOISE: RigSpec | null = null;
+/** Old Mother Tamsin (built once: the 1/72 re-cut takes most of a second) */
 export function tortoiseLadyRig(): RigSpec {
+  return (TORTOISE ??= buildTortoise());
+}
+function buildTortoise(): RigSpec {
   const parts: PartSpec[] = [];
   const P = (name: string, model: VoxelModel, joint: V3, parent?: string) => {
     if (model.count > 0) parts.push({ name, model, pivot: joint, attach: joint, parent });
@@ -555,7 +781,9 @@ export function tortoiseLadyRig(): RigSpec {
   const foreL = buildForearm(false);
   const foreR = mirrorPart(buildForearm(true), 'fore_r');
   const legL = buildLeg();
-  P('shell', buildShell(), J.shell);
+  const shell = buildShell();
+  addPack(shell);
+  P('shell', shell, J.shell);
   P('neck', buildNeck(), J.neck, 'shell');
   P('head', F.head, J.head, 'neck');
   P('jaw', F.jaw, J.jaw, 'head');
@@ -580,20 +808,60 @@ export function tortoiseLadyRig(): RigSpec {
   P('pouch_3', buildPouch(3), [-8.5, 26, -15], 'shell');
   P('lantern', buildLantern(), [-13.5, 32.5, -8], 'shell');
   P('beads', buildBeads(), [0, 37.5, 3.5], 'shell');
+  P('kettle', buildKettle(), [9.6, 57.4, -15.8], 'shell');
+  P('ristra', buildRistra(), [-10, 57.4, -16], 'shell');
+  P('scale', buildScale(), [0, 57.2, -17], 'shell');
+  // ---- the 1/72 detail re-cut (see recut / fineShell / fineSkin / fineEye)
+  const lidClosed = F.lids.closed, lidSquint = F.lids.squint;
+  const lidClosedR = mirrorPart(lidClosed, 'brow_r'), lidSquintR = mirrorPart(lidSquint, 'brow_r');
+  const taken = new Set<number>();
+  for (const m of [...parts.map((p) => p.model), lidClosed, lidSquint, lidClosedR, lidSquintR]) m.forEach((x, y, z) => taken.add(KEY(x, y, z)));
+  const fine = new Map<VoxelModel, VoxelModel>();
+  const up = (m: VoxelModel) => {
+    let o = fine.get(m);
+    if (!o) {
+      o = recut(m, taken);
+      fine.set(m, o);
+    }
+    return o;
+  };
+  const x2 = (p: V3): V3 => [p[0] * RES, p[1] * RES, p[2] * RES];
+  const byName: Record<string, VoxelModel> = {};
+  for (const p of parts) {
+    if (p.name === 'eye_r') continue;
+    p.model = up(p.model);
+    byName[p.name] = p.model;
+  }
+  fineShell(byName.shell);
+  fineSkin(byName.neck, 'neck');
+  fineSkin(byName.head, 'head');
+  fineSkin(byName.jaw, 'head');
+  for (const n of ['arm_l', 'arm_r', 'fore_l', 'fore_r', 'leg_l', 'leg_r', 'tail']) if (byName[n]) fineSkin(byName[n], 'limb');
+  fineEye(byName.eye_l, byName.head, F.eyeAt);
+  const eyeR = mirrorFine(byName.eye_l, 'eye_r');
+  eyeRim(eyeR, byName.head);
+  for (const p of parts) {
+    if (p.name === 'eye_r') p.model = eyeR;
+    p.pivot = x2(p.pivot);
+    p.attach = x2(p.attach);
+    // worn edges, crease grime and dust (the eyes stay glossy and exact)
+    if (p.name !== 'eye_l' && p.name !== 'eye_r') weather(p.model, { seed: p.name.length, edge: 0.12, cavity: 0.18, dust: 0.08, scuffs: 0.25, stains: 0, dirtFrom: 0, dirtTo: p.name.startsWith('leg') ? 10 : 0, dirt: 0.3 });
+  }
+  const VSF = VS / RES;
   const v = (p: V3) => [p[0] * VS, p[1] * VS, p[2] * VS] as [number, number, number];
-  const sock = (part: string, at: V3): SocketSpec => ({ part, at });
+  const sock = (part: string, at: V3): SocketSpec => ({ part, at: x2(at) });
   let topY = 0;
   for (const p of parts) p.model.forEach((_x, y) => { if (y + 1 > topY) topY = y + 1; });
   // expressions: real lid alternates (droopy / squint / happy-closed), lids pulled away for wide eyes
-  const lidPair = (m: VoxelModel) => ({ brow_l: m, brow_r: mirrorPart(m, 'brow_r') });
+  const lidPair = (l: VoxelModel, r: VoxelModel) => ({ brow_l: up(l), brow_r: up(r) });
   const expressions = defaultExpressions(TORTOISE_EXPRESSIONS);
-  expressions.laugh = { ...expressions.laugh, parts: lidPair(F.lids.closed) };
-  expressions.squinty = { ...expressions.squinty, parts: lidPair(F.lids.squint) };
+  expressions.laugh = { ...expressions.laugh, parts: lidPair(lidClosed, lidClosedR) };
+  expressions.squinty = { ...expressions.squinty, parts: lidPair(lidSquint, lidSquintR) };
   expressions.surprised = { ...expressions.surprised, hide: ['brow_l', 'brow_r'] };
   expressions.scared = { ...expressions.scared, hide: ['brow_l', 'brow_r'] };
   return {
     name: 'tortoise_merchant',
-    voxelSize: VS,
+    voxelSize: VSF,
     parts,
     sockets: {
       hand_r: sock('fore_r', mg(J.hand)),
@@ -607,7 +875,7 @@ export function tortoiseLadyRig(): RigSpec {
       lantern_hook: sock('shell', [-13.5, 32.5, -8]),
     },
     meta: {
-      height: topY * VS,
+      height: topY * VSF,
       radius: 0.45,
       // local offsets (metres, parent space) that pull each part INSIDE the shell
       retract: {
@@ -621,7 +889,7 @@ export function tortoiseLadyRig(): RigSpec {
       /** how far the shell sinks (metres) once the legs are pulled in, so she rests on the ground */
       shellDrop: 8 * VS,
       /** parts that should swing / jingle (secondary motion) */
-      swing: ['coins', 'chain', 'scarf_tails', 'bells', 'pouch_1', 'pouch_2', 'pouch_3', 'lantern', 'beads'],
+      swing: ['coins', 'chain', 'scarf_tails', 'bells', 'pouch_1', 'pouch_2', 'pouch_3', 'lantern', 'beads', 'kettle', 'ristra', 'scale'],
       facePivots: { eye_l: v(F.eyeAt), eye_r: v(mg(F.eyeAt)), brow_l: v(F.lidAt), brow_r: v(mg(F.lidAt)), jaw: v(J.jaw) },
       eyes: 'voxel',
       expressions,

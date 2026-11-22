@@ -8,7 +8,9 @@
 import { EXTRA_ART_FAMILY } from '../run/UpgradesExtra';
 import * as THREE from 'three';
 import { CardStudio, Shot } from './CardStudio';
-import { Kit, neckSlicerShot, TAROT } from './TarotCards';
+import { Kit, Poser, neckSlicerShot, TAROT } from './TarotCards';
+import { roseVineRig } from '../models/props/roses';
+import { buildRigGeo } from '../../engine/voxel/Rig';
 import { diceModel, coinModel, cylinderModel } from './RankUpCine';
 import * as TP from '../models/props/tarot';
 import { hudRound } from '../models/props/hud';
@@ -44,6 +46,8 @@ const FAMILY: Record<string, string> = {
   venomPuddles: 'venom', mirrorBrood: 'brood', scorpionWhip: 'pinch',
   hellfireTrail: 'fire', bulletBallet: 'board', grappleSlam: 'tumbleweed', lodestone: 'coins', comboFever: 'blood',
   thunderChamber: 'gunstorm', hellrider: 'fire', venomBrood: 'brood',
+  // the build cards (run/UpgradesBuilds.ts): their own vignettes for the roses and the lightning
+  learnGunsNRoses: 'roses', welcomeJungle: 'roses', novemberRain: 'roses', rideLightning: 'lightning', thunderstruck: 'lightning',
 };
 const CAT_FALLBACK: Record<string, string> = { gun: 'gun', insect: 'swarm', passive: 'oasis', gear: 'rounds', relic: 'ra', evolution: 'venom', gamble: 'dice' };
 
@@ -515,6 +519,31 @@ const VIGS: Record<string, VigFn> = {
     yield;
     return { root, focus: [table!, ...(cyl ? [cyl] : [])], crop: [0.66, 1.45], yaw: 0.22, pitch: 0.38, fov: 30, fill: 0.95, look: 'saloon', lamps: [{ pos: [0.1, 1.3, 0.6], color: 0xff6a3a, intensity: 4.5, distance: 3 }] };
   },
+  *roses(k) {
+    const root = new THREE.Group();
+    yield* sand(k, root, 34, 0x8a3a4a);
+    const focus: THREE.Object3D[] = [];
+    for (const [x, z, sc, ry, b] of [[-0.55, -0.4, 1.3, 0.3, 0.3], [0.6, -0.55, 1.05, 2.4, -0.25], [0.15, 0.5, 0.55, 4.0, 0.4]] as [number, number, number, number, number][]) {
+      const r = roseVine(k, sc);
+      r.nodes['stem2']?.rotation.set(b, 0, 0.12);
+      r.nodes['stem3']?.rotation.set(b * 1.2, 0, -0.18);
+      r.nodes['bloom']?.rotation.set(b, 0, 0);
+      focus.push(put(r.root, root, [x, -0.02, z], ry)!);
+    }
+    put(k.mesh('skull_cow', 0.32), root, [-0.75, 0, 0.55], 0.9);
+    yield;
+    return { root, focus, yaw: 0.2, pitch: 0.1, fov: 30, fill: 0.9, look: 'sunset', lamps: [{ pos: [0.2, 1.4, 0.9], color: 0xff7a8a, intensity: 3, distance: 3 }] };
+  },
+  *lightning(k) {
+    const root = new THREE.Group();
+    yield* sand(k, root, 35, 0x4a5a7a);
+    const rock = put(k.mesh('rock_2', 0.8), root, [-0.9, -0.05, -0.5], 0.7);
+    put(k.mesh(TP.stormCloud(3, 9), 1, k.material([0.55, 0.58, 0.72])), root, [0.2, 6.2, -4]);
+    put(k.mesh(TP.lightningBolt(4, 4.2), 1, k.glow), root, [0.25, 6.3, -0.15]);
+    put(k.mesh(TP.embers(6, 14, 1.6, 1.6), 1, k.glow), root, [0.2, 1.4, 0]);
+    yield;
+    return { root, focus: rock ? [rock] : undefined, yaw: 0.25, pitch: 0.05, fov: 32, fill: 0.86, look: 'night', lamps: [{ pos: [0.2, 2.3, 0.7], color: 0xbfe0ff, intensity: 8, distance: 5 }] };
+  },
   *moon(k) {
     const root = new THREE.Group();
     yield* sand(k, root, 28, 0x5a6a8a, 10, 14);
@@ -566,6 +595,151 @@ function frameShot(v: Vig, aspect = ASPECT, display: 'screen' | 'scene' = 'scene
   };
 }
 
+// ------------------------------------------------------------------ the hero in every vignette
+// User note: the upgrade art uses the player model as the standard, so every diorama features the
+// current Sundown (the four-armed scorpion-man, the player's own rig and revolver) posed for it.
+
+/** a rigged rose vine (props/roses.ts) at a scale; geometry shared with the Guns N' Roses skill */
+function roseVine(k: Kit, scale: number) {
+  const r = new RigInstance(buildRigGeo(roseVineRig(), 'rose_vine'), { material: k.mat });
+  r.root.scale.setScalar(scale);
+  return r;
+}
+
+type PoseId = 'sky' | 'aim' | 'hip' | 'kneel' | 'crouch' | 'flip' | 'throw' | 'salute';
+const LEGS_EASY = (p: Poser) => p.aim('thigh_l', [0.12, -1, 0.12]).aim('shin_l', [0.05, -1, -0.05]).aim('thigh_r', [-0.18, -1, -0.05]).aim('shin_r', [-0.08, -1, 0]);
+const POSES: Record<PoseId, (p: Poser) => void> = {
+  // revolver to the sky, the other hand to the earth
+  sky: (p) => {
+    p.rot('torso', -0.05, 0.1, 0.03).rot('head', -0.14, 0.1, -0.03);
+    p.aim('arm_r', [-0.22, 0.97, 0.1], 0.4).aim('fore_r', [-0.08, 1, 0.16]);
+    p.aim('arm_l', [0.36, -0.88, 0.3]).aim('fore_l', [0.42, -0.8, 0.44]);
+    p.aim('thigh_l', [0.15, -1, 0.05]).aim('shin_l', [0.08, -1, 0]).aim('thigh_r', [-0.12, -1, 0]).aim('shin_r', [-0.06, -1, 0]);
+  },
+  // two-handed aim, wide stance
+  aim: (p) => {
+    p.rot('torso', 0, 0.25, 0).rot('head', 0.04, 0.18, 0);
+    p.aim('arm_r', [-0.12, 0.08, 1]).aim('fore_r', [-0.02, 0.1, 1]);
+    p.aim('arm_l', [-0.35, -0.2, 0.9]).aim('fore_l', [-0.7, 0.15, 0.7]);
+    p.aim('thigh_l', [0.3, -1, 0.15]).aim('shin_l', [0.1, -1, -0.1]).aim('thigh_r', [-0.3, -1, -0.2]).aim('shin_r', [-0.15, -1, 0]);
+  },
+  // easy stance, iron lowered, the free hand on the belt, looking down at the table
+  hip: (p) => {
+    p.rot('torso', 0.06, -0.1, 0).rot('head', 0.16, -0.15, 0);
+    p.aim('arm_r', [-0.18, -0.95, 0.2]).aim('fore_r', [-0.08, -0.55, 0.85]);
+    p.aim('arm_l', [0.35, -0.9, -0.1]).aim('fore_l', [-0.3, -0.4, 0.6]);
+    LEGS_EASY(p);
+  },
+  // down on one knee before a god, head bowed
+  kneel: (p) => {
+    p.rot('torso', 0.15, 0, 0).rot('head', 0.38, 0, 0);
+    p.aim('thigh_l', [0.12, -0.15, 1]).aim('shin_l', [0.02, -1, 0.05]);
+    p.aim('thigh_r', [-0.12, -0.95, 0.25]).aim('shin_r', [0, -0.15, -1]);
+    p.aim('arm_l', [0.15, -0.6, 0.8]).aim('fore_l', [0.05, -0.85, 0.5]);
+    p.aim('arm_r', [-0.2, -0.95, 0.1]).aim('fore_r', [-0.1, -0.9, 0.4]);
+  },
+  // crouched, the free hand reaching for the brood
+  crouch: (p) => {
+    p.rot('torso', 0.4, 0, 0).rot('head', -0.28, 0, 0);
+    p.aim('thigh_l', [0.3, -0.35, 0.9]).aim('shin_l', [0.05, -1, -0.35]);
+    p.aim('thigh_r', [-0.3, -0.5, 0.8]).aim('shin_r', [-0.05, -1, -0.45]);
+    p.aim('arm_l', [0.15, -0.55, 0.82]).aim('fore_l', [0.05, -0.5, 0.86]);
+    p.aim('arm_r', [-0.4, -0.85, 0.2]).aim('fore_r', [-0.2, -0.6, 0.75]);
+  },
+  // flicking a coin, eyes up after it
+  flip: (p) => {
+    p.rot('torso', 0, 0.12, 0).rot('head', -0.3, 0.2, 0);
+    p.aim('arm_l', [0.25, -0.35, 0.9]).aim('fore_l', [0.1, 0.85, 0.5]);
+    p.aim('arm_r', [-0.2, -0.95, 0.1]).aim('fore_r', [-0.1, -0.7, 0.7]);
+    LEGS_EASY(p);
+  },
+  // winding up a throw, the iron covering
+  throw: (p) => {
+    p.rot('torso', 0.05, 0.45, 0).rot('head', 0, -0.25, 0);
+    p.aim('arm_l', [0.45, 0.55, -0.7]).aim('fore_l', [0.1, 0.95, -0.3]);
+    p.aim('arm_r', [-0.15, -0.2, 0.97]).aim('fore_r', [-0.05, 0, 1]);
+    p.aim('thigh_l', [0.2, -0.85, 0.5]).aim('shin_l', [0.05, -1, -0.1]).aim('thigh_r', [-0.2, -0.9, -0.45]).aim('shin_r', [-0.1, -0.95, -0.3]);
+  },
+  // tipping the hat brim
+  salute: (p) => {
+    p.rot('torso', 0, 0.08, 0).rot('head', 0.08, 0.1, 0.05);
+    p.aim('arm_l', [0.4, -0.1, 0.9]).aim('fore_l', [-0.35, 0.9, 0.15]);
+    p.aim('arm_r', [-0.18, -0.95, 0.2]).aim('fore_r', [-0.08, -0.55, 0.85]);
+    LEGS_EASY(p);
+  },
+};
+
+/** where Sundown stands in each vignette: root-space x / z, pose, how far he turns to the props (0 camera, 1 props), framing */
+interface Spot { x: number; z: number; pose: PoseId; face?: number; crop?: [number, number]; fill?: number; pitch?: number }
+const TABLE: Spot = { x: 0.08, z: -0.72, pose: 'hip', face: 0.1, crop: [0.3, 1.03], fill: 0.94, pitch: 0.2 };
+const SHRINE: Spot = { x: 1.0, z: 1.05, pose: 'kneel', face: 0.72, crop: [0.04, 1.02], fill: 0.92 };
+const HERO: Record<string, Spot> = {
+  gun: TABLE, dice: TABLE, deadman: TABLE, roulette: TABLE,
+  gunstorm: { x: 0.95, z: -0.35, pose: 'sky', face: 0.2 },
+  rounds: { x: -0.75, z: -0.35, pose: 'hip', face: 0.5, crop: [0.2, 1.03] },
+  venom: { x: 0.15, z: -0.85, pose: 'crouch', face: 0.1 },
+  bottles: { x: 0.95, z: 0.35, pose: 'aim', face: 0.85, crop: [0.15, 1.03] },
+  horus: SHRINE, serket: SHRINE, anubis: SHRINE, thoth: SHRINE, bastet: SHRINE, ra: SHRINE, sekhmet: SHRINE,
+  brood: { x: 0, z: -0.95, pose: 'crouch', face: 0 },
+  pinch: { x: 0.75, z: -0.4, pose: 'crouch', face: 0.6 },
+  swarm: { x: 0, z: -0.6, pose: 'sky', face: 0 },
+  fire: { x: 0.95, z: 0.2, pose: 'aim', face: 0.75 },
+  dung: { x: 0.05, z: -0.85, pose: 'throw', face: 0.1 },
+  dungcrown: { x: 0.05, z: -0.85, pose: 'hip', face: 0 },
+  sunroller: { x: 0.05, z: -0.85, pose: 'sky', face: 0 },
+  scarab: { x: 0.1, z: -0.7, pose: 'salute', face: 0 },
+  oasis: { x: -0.85, z: 0.45, pose: 'hip', face: 0.25 },
+  ribs: { x: 0.55, z: 1.5, pose: 'hip', face: 0.1 },
+  tumbleweed: { x: 0.95, z: -0.4, pose: 'aim', face: 0.8 },
+  coins: { x: 0.75, z: -0.45, pose: 'flip', face: 0.3 },
+  board: { x: 0.55, z: -0.15, pose: 'salute', face: 0.1 },
+  star: { x: 0.85, z: 0.1, pose: 'hip', face: 0.5 },
+  dynamite: { x: -0.8, z: -0.3, pose: 'throw', face: 0.2 },
+  blood: { x: 0.8, z: -0.6, pose: 'aim', face: 0.6 },
+  moon: { x: 0.55, z: 1.0, pose: 'sky', face: 0.1, crop: [0.04, 1.02] },
+  roses: { x: 0.05, z: 0.05, pose: 'aim', face: 0.05 },
+  lightning: { x: 0.2, z: 0, pose: 'sky', face: 0, crop: [0.1, 1.4] },
+};
+
+/** the stock look when no run has handed SkillArt the player's rig yet */
+function ensureHero(k: Kit) {
+  if (k.heroSpec) return;
+  try {
+    k.heroSpec = (modelEntry('cowboy_stetson_punk')?.() as RigSpec | undefined) ?? null;
+    k.heroKey = 'cowboy_stetson_punk:player';
+  } catch (e) {
+    console.warn('[skill art] hero failed', e);
+  }
+}
+function lowest(o: THREE.Object3D) {
+  o.updateMatrixWorld(true);
+  const b = new THREE.Box3();
+  o.traverseVisible((c) => {
+    if ((c as THREE.Mesh).isMesh) b.expandByObject(c);
+  });
+  return b.isEmpty() ? 0 : b.min.y;
+}
+const lerpAngle = (a: number, b: number, t: number) => {
+  let d = ((b - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+  return a + d * t;
+};
+
+/** pose Sundown into a built vignette and frame him with its props */
+function stageHero(k: Kit, v: Vig, s: Spot): Vig {
+  ensureHero(k);
+  const h = k.hero(true);
+  if (!h) return v;
+  const { rig, pose } = h;
+  POSES[s.pose](pose);
+  const camYaw = v.yaw ?? 0.2;
+  rig.root.rotation.y = lerpAngle(camYaw, Math.atan2(-s.x, -s.z), s.face ?? 0.3);
+  v.root.add(rig.root);
+  rig.root.position.set(s.x, 0, s.z);
+  const hAt = v.root.userData.heightAt as ((x: number, z: number) => number) | undefined;
+  rig.root.position.y = (hAt ? hAt(s.x, s.z) : 0) - lowest(rig.root) - 0.02;
+  return { ...v, focus: [...(v.focus ?? [v.root]), rig.root], crop: s.crop ?? [0.14, 1.03], fill: s.fill ?? 0.9, pitch: s.pitch ?? Math.min(v.pitch ?? 0.1, 0.16) };
+}
+
 /** extra vignettes that are not upgrades (board moves) */
 export const NECK_SLICER = { key: 'neck_slicer', title: 'THE NECK SLICER' } as const;
 
@@ -578,7 +752,8 @@ export function* vignetteShot(key: string, k: Kit, aspect = ASPECT, display: 'sc
     yield;
     r = it.next();
   }
-  return frameShot(r.value, aspect, display);
+  yield;
+  return frameShot(stageHero(k, r.value, HERO[key] ?? HERO.gun), aspect, display);
 }
 
 /**

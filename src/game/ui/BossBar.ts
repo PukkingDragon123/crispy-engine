@@ -57,6 +57,9 @@ export const BOSS_THEMES: Record<string, Theme> = {
   stone: T(['#2a1c10', '#6e5a40', '#a48a64', '#d6c09a', '#f6ead0'], ['#a5752e', '#d6a64c', '#f8da86', '#fffbe0'], ['#a8221a', '#dc4430', '#ff8a6a', '#ffe0c0'], '#1a120a', '#f6ead0', 'glyph_ankh', 'rays'),
   water: T(['#0e1a22', '#1f5a6a', '#35a8b8', '#6fe3cf', '#c8fff0'], ['#1f5a6a', '#35a8b8', '#6fe3cf', '#e0fff8'], ['#1d6a4a', '#2fbf7e', '#7cf2b4', '#eafff2'], '#08141a', '#c8fff0', 'glyph_water', 'dots'),
   bone: T(['#1a0e06', '#6e5a40', '#b8a07a', '#e0cfa8', '#fff6e0'], ['#6a120c', '#a8221a', '#dc4430', '#ff8a6a'], ['#4a0a2a', '#8a1a4a', '#d03a6a', '#ffa0c0'], '#140a06', '#fff3d6', 'glyph_ankh', 'rivet'),
+  // BESTIARY: the Master of Puppets (black lacquer and gold, a lightning-blue fill) and the Beetles (gold, emerald chitin)
+  puppet: T(['#0a0606', '#241a16', '#4a3a30', '#c9952a', '#ffe58a'], ['#2a3ab0', '#4a6ae8', '#8fd4ff', '#f0f8ff'], ['#5a2ab0', '#8a5aff', '#c8a8ff', '#ffffff'], '#0a0a18', '#e8f0ff', 'glyph_ankh', 'rays'),
+  beetle: T(['#1a1006', '#5a3a10', '#b8842a', '#f2c443', '#fff0a6'], ['#0f3f22', '#1f6a3a', '#3fa060', '#b8f08a'], ['#8a2e1a', '#c0582c', '#ffb070', '#fff0d0'], '#081008', '#fff0c0', 'glyph_scarab', 'scales'),
 };
 const BY_NAME: [RegExp, string][] = [
   [/khonsu|moon/i, 'moon'],

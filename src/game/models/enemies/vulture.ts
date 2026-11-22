@@ -8,6 +8,7 @@
 // leg_l (feathered thigh + scaly bare shank) → foot_l (three hooked talons and a
 // hind claw) — tucked under the tail in flight, thrown forward for the strike.
 import { TRig, EnemyOpts, TOON, Ramp, RigSpec, V3, rbox, ell, seg, chain, paint, toonShade, eyeSocket, pick, VF, VoxelModel } from './tk';
+import { weather, WEAR_ENEMY } from '../wear';
 
 const FEATHER: Ramp[] = [
   { base: 0x5a3e2c, shade: 0x45301f, hi: 0x76543c, dark: 0x2c1d12 },
@@ -112,5 +113,6 @@ export function vultureRig(o: EnemyOpts = {}): RigSpec {
   rig.socket('beak', 'jaw', [0.5, 13, 18]);
   rig.socket('talons', 'body', [0.5, 5, -3]);
   rig.socket('talon_l', 'foot_l', [2.5, 4, -4.5]);
+  for (const p of rig.parts) weather(p.model, { ...WEAR_ENEMY, seed: p.name.length });
   return rig.build({ height: 20 / 24, radius: 0.35, wingspan: (span * 2 + 2) / 24, kind: 'vulture', flying: true, headY: 17 / 24 });
 }

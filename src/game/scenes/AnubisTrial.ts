@@ -42,6 +42,7 @@ import { Voice } from '../audio/Voice';
 import { rnd } from '../../engine/math/rand';
 import { REALM_MODELS, StaticModel, spiritNormals } from '../models/anubis/realm';
 import { anubisArmRig } from '../models/anubis/arm';
+import { hallDressing } from '../models/anubis/dressing';
 import { hudHeartRig } from '../models/props/hud';
 
 // ----------------------------------------------------------------------------- layout (metres)
@@ -568,6 +569,14 @@ export class AnubisTrial {
       light.position.set(x, fireY * k + 0.6, z);
       s.add(light);
       this.braziers.push({ pos: V(x, 0, z), fire: V(x, fireY * k, z), scale: k, light, lit: 0, target: 0, acc: 0, flare: 0 });
+    }
+    await this.tick();
+    // --- set dressing: jackal shrines, offering tables, Ma'at feather standards (models/anubis/dressing.ts)
+    const dg = new Map<object, THREE.BufferGeometry>();
+    for (const d of hallDressing()) {
+      let g = dg.get(d.sm);
+      if (!g) dg.set(d.sm, (g = buildVoxelGeometry(d.sm.model, { voxelSize: d.sm.voxelSize, pivot: 'bottom' }))), this.geos.push(g);
+      this.mesh(g, stoneMat, V(d.at[0], d.at[1], d.at[2]), { ry: d.ry, mirror: true });
     }
     await this.tick();
 

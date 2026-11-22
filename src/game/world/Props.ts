@@ -6,6 +6,7 @@
 // pieces rise from the sand when their zone unlocks.
 import * as THREE from 'three';
 import * as PM from '../models/props';
+import { weather, WEAR_PROP } from '../models/wear';
 import { deadBush, dryGrass } from '../models/props/flora';
 import type { VoxelModel } from '../../engine/voxel/VoxelModel';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
@@ -450,6 +451,7 @@ export class Props {
     if (!sm || !sm.model) return null;
     const sk = SKIN[kind];
     const skin = typeof sk === 'function' ? sk(v) : sk;
+    if (!skin && !/cactus|palm|bush|grass|tree|flower|reed|glass|bottle|foliage|plant/i.test(kind)) weather(sm.model, WEAR_PROP); // models/wear.ts texture pass
     const geo = skin ? buildSkinGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot ?? 'bottom', hint: skin }) : buildVoxelGeometry(sm.model, { voxelSize: sm.voxelSize, pivot: sm.pivot ?? 'bottom' });
     geo.computeBoundingBox();
     const bb = geo.boundingBox!;

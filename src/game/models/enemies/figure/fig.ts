@@ -17,6 +17,7 @@ import { hash3, noise } from '../../../../engine/math/rand';
 import { Sc } from '../real/sculpt';
 import { ell, cap, tube } from '../real/rk';
 import { defaultExpressions } from '../../toon/humanoid';
+import { weather, WEAR_ENEMY } from '../../wear';
 
 export { VoxelModel, VF, mix, mulRGB, hash3, noise, Sc, ell, cap, tube };
 export type { V3, CSpec, ColorFn, RigSpec };
@@ -343,6 +344,8 @@ export function finish(F: Fig, o: { up?: number; down?: number; skip?: string[] 
   for (const [n, p] of Object.entries(F.fig.parts)) {
     if (skip.has(n)) continue;
     const m = p.model;
+    // texture pass: worn edges, crease grime, dust and boot dirt (models/wear.ts)
+    weather(m, { ...WEAR_ENEMY, seed: n.length * 3 + (m.count % 17), dirtFrom: 0, dirtTo: 12, dirt: 0.36 });
     const todo: [number, number, number, number, number][] = [];
     m.forEach((x, y, z, c, f) => {
       if (f & (VF.EMISSIVE | VF.GLOW)) return;

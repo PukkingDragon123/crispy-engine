@@ -8,7 +8,7 @@
 //   C swarm     XVI  THE TOWER      — the struck watchtower, falling headfirst
 //   G dung      XIX  THE SUN        — the dung-sun held overhead like Khepri
 //   F kick      VIII STRENGTH       — a roundhouse kick before Sekhmet
-//   X roses     VI   THE LOVERS     — Guns N' Roses (placeholder: the Magician's diorama)
+//   X roses     VI   THE LOVERS     — Guns N' Roses: back to back with the thorned rose
 //   Z ult       XIII DEATH          — Stairway to Serket (the card of transformation): riding the pale camel with the black banner
 import * as THREE from 'three';
 import { buildRigGeo, clearRigCache, RigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
@@ -18,6 +18,7 @@ import type { VoxelModel } from '../../engine/voxel/VoxelModel';
 import { modelEntry } from '../models/lookup';
 import * as TP from '../models/props/tarot';
 import { deadBush } from '../models/props/flora';
+import { roseVineRig } from '../models/props/roses';
 import type { Shot } from './CardStudio';
 
 type V3 = [number, number, number];
@@ -715,6 +716,60 @@ export function* neckSlicerShot(k: Kit, aspect = 66 / 88, display: 'screen' | 's
   };
 }
 
+// VI THE LOVERS (Guns N' Roses): Sundown and the thorned desert rose, back to back. The vine rises
+// behind him and bows its bloom over his shoulder; he holds the iron up by his cheek like a vow,
+// his free hand reaching back to the stem. A rose-gold dusk, a corona where the Lovers' angel
+// would be, and young vines breaking the sand at his boots.
+function* lovers(k: Kit): Generator<void, Shot, void> {
+  const root = new THREE.Group();
+  const bed = yield* ground(k, root, 10, 16, 11, 0xc87a7a, 2, 0.3);
+  const g0 = bed.heightAt(0, 0);
+  const vine = (x: number, z: number, s: number, ry: number, bend: number, side: number) => {
+    const r = new RigInstance(buildRigGeo(roseVineRig(), 'rose_vine'), { material: k.mat });
+    r.root.scale.setScalar(s);
+    r.nodes['stem2']?.rotation.set(bend, 0, side * 0.16);
+    r.nodes['stem3']?.rotation.set(bend * 1.3, 0, side * 0.22);
+    r.nodes['bloom']?.rotation.set(bend * 1.1, 0, 0);
+    place(r.root, root, [x, bed.heightAt(x, z) - 0.03, z], ry);
+    return r;
+  };
+  // the great rose behind him, arching forward over his right shoulder
+  vine(-0.32, -0.42, 1.55, 0.25, 0.32, -1);
+  yield;
+  const h = k.hero(true);
+  if (h) {
+    const { rig, pose } = h;
+    root.add(rig.root);
+    pose.rot('torso', -0.02, -0.12, 0).rot('head', 0.04, 0.32, 0.02);
+    // the iron held upright by his cheek
+    pose.aim('arm_r', [-0.35, -0.75, 0.4]).aim('fore_r', [-0.05, 0.95, 0.3]);
+    // the free hand reaching back to the stem
+    pose.aim('arm_l', [0.45, -0.6, -0.6]).aim('fore_l', [0.3, -0.2, -0.9]);
+    pose.aim('thigh_l', [0.12, -1, 0.1]).aim('shin_l', [0.05, -1, -0.04]).aim('thigh_r', [-0.16, -1, -0.04]).aim('shin_r', [-0.07, -1, 0]);
+    rig.root.position.set(0.12, g0 - lowestY(rig.root), 0.1);
+    // the corona of the Lovers' sun behind his head
+    const top = pose.at('head', [0, 0.2, 0]);
+    place(k.mesh(TP.coronaHalo(5), 1.5, k.glowMat(0.6)), root, [top.x - 0.25, top.y + 0.35, top.z - 0.7]);
+  }
+  yield;
+  // young vines breaking the sand at his boots, a second rose leaning in from the other side
+  vine(0.85, -0.2, 1.0, 2.6, -0.28, 1);
+  vine(-0.75, 0.55, 0.42, 0.9, 0.2, 1);
+  vine(0.5, 0.75, 0.34, 3.6, -0.3, -1);
+  place(k.mesh('skull_cow', 0.3), root, [-1.0, bed.heightAt(-1.0, 1.2) - 0.03, 1.2], 0.6);
+  return {
+    root,
+    cam: cam([0, 1.35, 0.1], 0.1, 0.02, 4.9, 31),
+    sky: { zenith: 0x3a1a4a, mid: 0xb04a6a, horizon: 0xffb07a, ground: 0xb07060, sunDir: [-0.15, 0.3, -1], sunColor: 0xffc8a0, sunSize: 0.05, sunGlow: 0.4, sunGain: 1.25, clouds: 0.28, cloudLit: 0xffb0a0, cloudShade: 0x6a2a4a, cloudScale: 1.2, seed: 11, gain: 0.82 },
+    key: { dir: [-0.55, 0.65, 0.8], color: 0xffd8c0, intensity: 2.9, center: [0, 1.1, 0], radius: 3.4 },
+    hemi: { sky: 0xd08aa0, ground: 0x6a3a3a, intensity: 0.78 },
+    rim: { dir: [0.35, 0.45, -1], color: 0xff9a7a, intensity: 3.0 },
+    lamps: [{ pos: [-0.6, 1.9, 0.6], color: 0xff6a7a, intensity: 3.2, distance: 3 }],
+    fog: { color: 0xd08a8a, near: 10, far: 34 },
+    grade: { sat: 1.2, contrast: 1.08, shadowTint: 0xe6d0ff, highTint: 0xfff0e0, vignette: 0.52 },
+  };
+}
+
 /** every tarot card with a diorama: the bar's skills and ultimate, and the plain moves (the hideout book's Moves page looks moves up here by key) */
 export const TAROT: TarotDef[] = [
   { key: 'Q', num: 'XII', title: 'THE HANGED MAN', fx: 'rope', burst: [0xffd36b, 0xfff3d6, 0xc9a66b, 0x8a6a3a], scene: hangedMan },
@@ -722,8 +777,8 @@ export const TAROT: TarotDef[] = [
   { key: 'C', num: 'XVI', title: 'THE TOWER', fx: 'storm', burst: [0xffffff, 0xbfe0ff, 0xffb040, 0x2a2030], scene: tower },
   { key: 'G', num: 'XIX', title: 'THE SUN', fx: 'sun', burst: [0xffe08a, 0xffc63c, 0xfff6d0, 0x7a5530], scene: sun },
   { key: 'F', num: 'VIII', title: 'STRENGTH', fx: 'kick', burst: [0xf6dcac, 0xe9c48c, 0xffd36b, 0xfff3d6], scene: strength },
-  // X: GUNS N' ROSES. Art hook for the models worker: this borrows the Magician's revolver-to-the-sky diorama until THE LOVERS gets its own (Sundown and the thorned rose, back to back)
-  { key: 'X', num: 'VI', title: 'THE LOVERS', fx: 'kick', burst: [0xc8243a, 0xe8586a, 0x3f6f2a, 0xfff3d6], scene: magician },
+  // X: GUNS N' ROSES: Sundown and the thorned rose, back to back
+  { key: 'X', num: 'VI', title: 'THE LOVERS', fx: 'kick', burst: [0xc8243a, 0xe8586a, 0x3f6f2a, 0xfff3d6], scene: lovers },
   { key: 'Z', num: 'XIII', title: 'DEATH', fx: 'death', burst: [0x9dff3a, 0xfff3d6, 0x1a1418, 0xd8ccb0], scene: death },
   { key: 'neck_slicer', num: '0', title: 'THE NECK SLICER', fx: 'kick', burst: [0xfff6d0, 0xffd36b, 0xe9c48c, 0xd8ccb0], scene: (k) => neckSlicerShot(k) },
 ];

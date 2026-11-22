@@ -1340,6 +1340,18 @@ export function anubisSoulRig(): RigSpec {
   seg(wp, [-36.5, 224, 19], [-36.5, 222.5, 24], 1.8, GOLD_H, MET, 1);
   for (const s of [1, -1]) seg(wp, [-36.5 + s, 224, 13.5], [-36.5 + s * 1.4, 230, 12.5], 0.7, GOLD_H, MET);
   wp.set(-38, 224, 20, RUNE, GLW).set(-35, 224, 20, RUNE, GLW);
+  // fur sheen: short strands running down the obsidian hide (lit streaks, shadowed partings),
+  // so the black god reads as a living jackal, not a lacquered statue
+  for (const p of rig.parts) {
+    const m = p.model, todo: [number, number, number, number][] = [];
+    m.forEach((x, y, z, c) => {
+      if (c !== OBSIDIAN || !isSurf(m, x, y, z)) return;
+      const n = vnoise(x * 2.4, y * 0.6, z * 2.4, 2.2, 31);
+      if (n > 0.74) todo.push([x, y, z, OBS_H]);
+      else if (n < 0.22) todo.push([x, y, z, OBS_S]);
+    });
+    for (const [x, y, z, c] of todo) m.set(x, y, z, c);
+  }
   rig.socket('eye_l', 'head', [8.3, 203, 12]);
   rig.socket('eye_r', 'head', [-7.3, 203, 12]);
   rig.socket('staff_top', 'weapon', [-36, 226, 19]);

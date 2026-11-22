@@ -260,6 +260,21 @@ export const ENEMIES: Record<string, EnemyDef> = {
     firstWave: 26, weight: 0.8, group: [1, 2],
     lore: 'Khonsu\'s night-priests, wrapped for the tomb and woken for one more service. They sing the moon up, whatever the hour.',
   },
+  // the Rolling Stone (BESTIARY): behaviour in enemies/RollingStone.ts, model in models/enemies/music/rollingStone.ts
+  rollingStone: {
+    id: 'rollingStone', name: 'Rolling Stone', title: 'Gathers Moss Anyway', rig: 'rolling_stone', rigAlpha: 'rolling_stone_alpha',
+    hp: 170, armor: 45, physRes: 0.2, magicRes: 0, statusRes: { bleed: 1, poison: 1 }, speed: 4.2, radius: 0.85, height: 1.7,
+    ai: 'charger', attacks: [
+      { kind: 'charge', range: 26, minRange: 6, cooldown: 5, windup: 1.1, dmg: 24 },
+      { kind: 'leap', range: 13, minRange: 4, cooldown: 7.5, windup: 0.75, dmg: 18 },
+      { kind: 'ring', range: 10, cooldown: 6.5, windup: 0.8, dmg: 6, count: 10, speed: 9, proj: 'sand' },
+      { kind: 'lob', range: 24, minRange: 6, cooldown: 6, windup: 0.9, dmg: 14, count: 3, speed: 13, proj: 'cannon', alphaOnly: true },
+    ],
+    contact: 10, bounty: 18, gold: [3, 6], hitKind: 'rock', special: 'rollingStone', moveTitles: { crash: 'Torn and Frayed' },
+    weakness: 'Granite shrugs off bullets and bleeding. Explosions crack it; dodge sideways when it revs, then punish the crash.',
+    firstWave: 12, weight: 1.6, group: [1, 2],
+    lore: 'A standing stone of Khepri, rune-carved to roll the sun. Set woke it angry, and it has been rolling after travellers ever since, picking up moss it swears it never gathers.',
+  },
 };
 
 // Cleopatra's animal-human army (stage 'nile': never in the desert roster)
@@ -291,6 +306,7 @@ const SONG_TITLES: Record<string, string[]> = {
   thornyLizard: ["Don't Cry", 'Help!'],
   bellSnake: ['Sympathy for the Devil', 'Garden of Eden', 'Lucy in the Sky with Diamonds'],
   cursePriest: ['Eleanor Rigby', 'Tomorrow Never Knows'],
+  rollingStone: ["It's Only Rock 'n Roll", 'Trampled Under Foot', 'Dazed and Confused', 'Let There Be Rock'],
 };
 for (const [id, titles] of Object.entries({ ...SONG_TITLES, ...NILE_SONGS }))
   titles.forEach((t, i) => {

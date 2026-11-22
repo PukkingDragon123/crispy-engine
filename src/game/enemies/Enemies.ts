@@ -17,6 +17,7 @@ import { Spring } from '../../engine/Tween';
 import { EnemyAnim, animateEnemy, AnimEnv, GETUP } from '../anim/enemyAnim';
 import { Warnings, WarnTier, MarkHandle } from './Warnings';
 import { Dodge } from './Dodge';
+import { stoneThink, stoneDeath } from './RollingStone';
 import type { Qte } from '../ui/Qte';
 
 /** attacks that fire something: they wind up with a muzzle glint and share the ranged fairness cap */
@@ -1389,6 +1390,9 @@ export class Enemies implements EnemyApi {
       case 'buffAura':
         ctx.sfx('banjo_funny', c, 0.6, 0.8);
         break;
+      case 'rollingStone':
+        stoneDeath(ctx, e);
+        break;
       case 'acidBurst':
         if (e.alpha) {
           ctx.engine.tweens.after(0.35, () => {
@@ -2010,6 +2014,7 @@ export class Enemies implements EnemyApi {
     let spd = d.speed * e.spdMul * e.status.slowMul() * buff * (e.hp < e.maxHp * 0.3 ? 0.8 : 1);
     let wantX = 0, wantZ = 0, face = Math.atan2(toX, toZ);
     const ground = ctx.world.groundAt(e.pos.x, e.pos.z);
+    if (d.special === 'rollingStone') stoneThink(ctx, this, this.player, e, dt, ground);
 
     if (e.state === 'spawn') {
       const dur = e.emerge === 'sand' ? 1.1 : e.emerge === 'fly' ? 1.6 : 0.3;

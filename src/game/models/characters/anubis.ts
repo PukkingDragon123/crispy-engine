@@ -5,6 +5,8 @@ import { VoxelModel } from '../../../engine/voxel/VoxelModel';
 import type { RigSpec, PartSpec, V3 } from '../../../engine/voxel/Rig';
 import { TOON, Ramp } from '../style';
 import { roundBox, roundBoxX, mirrored, mirrorV3, autoShade, defaultExpressions } from '../toon/humanoid';
+import { anubisSoulRig } from '../anubis/realm';
+import { weather } from '../wear';
 
 export const ANUBIS_EXPRESSIONS = ['neutral', 'angry', 'judging', 'defeated'];
 const VS = 1 / 20;
@@ -195,7 +197,8 @@ function sceptre() {
   return m;
 }
 
-export function anubisRig(): RigSpec {
+/** the old STYLE v2 cartoon build (kept for reference; the registry now serves anubisRig below) */
+export function anubisToonRig(): RigSpec {
   const J = (name: string, model: VoxelModel, j: V3, parent?: string): PartSpec => ({ name, model, pivot: j, attach: j, parent });
   const arms = armL();
   const legs = legL();
@@ -248,6 +251,65 @@ export function anubisRig(): RigSpec {
       eyeColor: G.hi,
       expressions: defaultExpressions(ANUBIS_EXPRESSIONS),
       cloth: { cape: [0x1c1a3a, 0x0f0e22, G.base], capeLen: 2.4, capeWidth: 1.7 },
+    },
+  };
+}
+
+// ============================================================================ the god (registry `anubis`)
+// User note: "make anubis model better". The codex / hub Anubis is now the realistic jackal god
+// of the Weighing (anubis/realm.ts anubisSoulRig: obsidian hide with fur sheen over sculpted
+// anatomy, gold usekh, kilt and apron, was-sceptre) brought down to ~4 m (4.6 m to the ear
+// tips), with finely modelled amber eyes seated in the carved sockets (round pupil, limbal ring,
+// a wet catch-light) and the weathering pass (rubbed gold rims, grime in every crease).
+const GOD_VS = 1 / 54;
+const EYE_C: V3 = [7.8, 202.5, 11.0]; // socket centre (realm design voxels, mirror plane at x = 0)
+
+function godEye(side: 1 | -1, head: VoxelModel) {
+  const m = new VoxelModel(side > 0 ? 'eye_l' : 'eye_r');
+  const cx = side * EYE_C[0], cy = EYE_C[1], cz = EYE_C[2];
+  for (let x = Math.floor(cx - 4); x <= Math.ceil(cx + 4); x++)
+    for (let y = Math.floor(cy - 3); y <= Math.ceil(cy + 3); y++)
+      for (let z = Math.floor(cz - 3); z <= Math.ceil(cz + 4); z++) {
+        const u = (x - cx) / 3.2, v = (y - cy) / 1.95, w = (z - cz) / 2.7;
+        if (u * u + v * v + w * w > 1 || head.has(x, y, z)) continue;
+        const r = Math.hypot(u * 1.05, v * 0.95);
+        let c = r < 0.3 ? 0x0c0806 : r < 0.56 ? (v > 0 ? 0xf0b43a : 0xd88e22) : r < 0.78 ? 0xb06a16 : r < 0.9 ? 0x5a300c : 0x2a1a10;
+        if (w < 0.35) c = 0x1a120c; // the back of the eyeball, in the socket's shade
+        m.set(x, y, z, c);
+      }
+  // one wet catch-light, high on the outer side
+  const hx = Math.round(cx + side * 0.9), hy = Math.round(cy + 0.8);
+  let hz = -999;
+  m.forEach((x, y, z) => { if (x === hx && y === hy && z > hz) hz = z; });
+  if (hz > -999) m.set(hx, hy, hz, 0xfff6e8);
+  return m;
+}
+
+export function anubisRig(): RigSpec {
+  const s = anubisSoulRig();
+  const head = s.parts.find((p) => p.name === 'head');
+  for (const p of s.parts) weather(p.model, { seed: p.name.length, edge: 0.2, cavity: 0.22, dust: 0.05, scuffs: 0.4, stains: 0.15 });
+  if (head) {
+    for (const side of [1, -1] as const) {
+      const eye = godEye(side, head.model);
+      const at: V3 = [side * EYE_C[0] + 0.5, EYE_C[1] + 0.5, EYE_C[2] + 0.5];
+      s.parts.push({ name: eye.name, model: eye, pivot: at, attach: at, parent: 'head' });
+    }
+  }
+  const k = GOD_VS / s.voxelSize;
+  const m = s.meta ?? {};
+  return {
+    ...s,
+    name: 'anubis',
+    voxelSize: GOD_VS,
+    meta: {
+      ...m,
+      height: (m.height ?? 9) * k,
+      earTop: (m.earTop ?? 10.2) * k,
+      radius: (m.radius ?? 1.6) * k,
+      eyeColor: G.hi,
+      eyes: 'voxel',
+      expressions: defaultExpressions(ANUBIS_EXPRESSIONS),
     },
   };
 }

@@ -13,6 +13,8 @@ import { Sethos } from '../bosses/Sethos';
 import { RaSunKing } from '../bosses/Ra';
 import { Sphinx } from '../bosses/Sphinx';
 import { Cleopatra } from '../bosses/Cleopatra';
+import { MasterOfPuppets } from '../bosses/music/MasterOfPuppets';
+import { Beetles } from '../bosses/music/Beetles';
 
 /** every fifth wave carries a boss on both stages */
 export const BOSS_WAVES = Array.from({ length: 20 }, (_, i) => (i + 1) * 5);
@@ -43,10 +45,10 @@ export function bossLabel(stage: StageId, w: number): string | null {
   if (w === 50) return 'Sethos';
   if (w === 5 || w === 35 || w === 65) return 'Avatar of Khonsu';
   if (w === 10 || w === 25 || w === 40) return 'The Dust Marshal';
-  const first: Record<number, string> = { 15: 'thornback', 20: 'ironclad', 30: 'sandworm', 45: 'bertha', 55: 'pharaoh', 60: 'sunroller' };
-  const rot = ['bertha', 'sunroller', 'ironclad', 'sandworm', 'pharaoh', 'thornback'];
+  const first: Record<number, string> = { 15: 'thornback', 20: 'ironclad', 30: 'sandworm', 45: 'beetles', 55: 'pharaoh', 60: 'sunroller', 70: 'puppets', 80: 'bertha' };
+  const rot = ['beetles', 'sunroller', 'ironclad', 'sandworm', 'pharaoh', 'thornback'];
   const k = first[w] ?? rot[Math.floor(w / 5) % rot.length];
-  return { thornback: 'Old Thornback', ironclad: 'The Ironclad', sandworm: 'The Sandworm', bertha: 'Big Bertha', pharaoh: 'Pharaoh Nekh-Amun', sunroller: 'The Sunroller' }[k] ?? k;
+  return { thornback: 'Old Thornback', ironclad: 'The Ironclad', sandworm: 'The Sandworm', bertha: 'Big Bertha', pharaoh: 'Pharaoh Nekh-Amun', sunroller: 'The Sunroller', beetles: 'The Beetles', puppets: 'Master of Puppets' }[k] ?? k;
 }
 
 /** a gate boss (the big fights at 50 / 75 / 100, and Sethos at 85 on the dunes) */
@@ -75,8 +77,13 @@ export const BOSS_LIST: BossEntry[] = [
   { label: 'The Sunroller', stage: 'desert', make: (d, t) => new Sunroller(d, t) },
   { label: 'Sethos', stage: 'desert', make: (d, t) => new Sethos(d, t3(t)) },
   { label: 'Khonsu of the Sands', stage: 'desert', make: (d) => new KhonsuSandAvatar(d) },
+  { label: 'Master of Puppets', stage: 'desert', make: (d, t) => new MasterOfPuppets(d, t) },
+  { label: 'The Beetles', stage: 'desert', make: (d, t) => new Beetles(d, t) },
   ...Object.keys(NILE_NAMES).map((id): BossEntry => ({ label: NILE_NAMES[id], stage: 'nile', nile: id, make: (d, t) => NILE_BOSSES[id](d, t) })),
 ];
+
+// dev handle: __admin.spawnBoss(__bossList.find((e) => e.label === 'Master of Puppets'), 1)
+(globalThis as { __bossList?: BossEntry[] }).__bossList = BOSS_LIST;
 
 /** warm a Nile boss's off-thread geometry (no-op for the rest) */
 export function prewarmBoss(e: BossEntry, ctx: BossDeps['ctx']) {
@@ -88,6 +95,8 @@ const MOVES_KHONSU = ['moonlightMile', 'midnightRambler', 'timeIsOnMySide', 'pai
 const MOVES_KHONSU_SAND = ['helterSkelter', 'mrBrownstone', 'shattered', 'startMeUp', 'brownSugar', 'comeTogether', 'gimmeShelter', 'childOfTheMoon', 'springTide', 'shineALight', 'lucy', 'patience', 'tomorrowNeverKnows', 'novemberRain', 'rubyTuesday', 'yesterday'];
 const MOVES_RA = ['hereComesTheSun', 'shineALight', 'jumpinJackFlash', 'longWindingRoad', 'novemberRain', 'paintItBlack', 'liveAndLetDie', 'drift'];
 const MOVES_CLEO = ['something', 'universe', 'prudence', 'rainbow', 'strawberry', 'goldenSlumbers', 'goodDay', 'beast', 'letItBleed', 'reinforce'];
+const MOVES_PUPPETS = ['puppets', 'hook', 'lightning', 'runLikeHell', 'bell', 'creeping', 'sandman', 'heroes', 'voltage', 'drift'];
+const MOVES_BEETLES = ['here', 'tripper', 'within', 'eight', 'maxwell', 'hammer', 'dig', 'dayInLife', 'salute', 'kashmir'];
 const MOVES_SPHINX = ['bat', 'volley', 'pin', 'grab', 'pounce', 'whip', 'roar', 'roll', 'chase', 'riddle', 'flurry'];
 
 /** the named attacks a boss's dev hook can queue (null: it has no hook) */
@@ -98,10 +107,29 @@ export function bossMoves(b: Boss): string[] | null {
   if (b instanceof RaSunKing) return MOVES_RA;
   if (b instanceof Cleopatra) return MOVES_CLEO;
   if (b instanceof Sphinx) return MOVES_SPHINX;
+  if (b instanceof MasterOfPuppets) return MOVES_PUPPETS;
+  if (b instanceof Beetles) return MOVES_BEETLES;
   return [];
 }
 
 const TITLES: Record<string, string> = {
+  puppets: 'MASTER OF PUPPETS',
+  hook: 'TRAPPED UNDER ICE',
+  lightning: 'RIDE THE LIGHTNING',
+  bell: 'FOR WHOM THE BELL TOLLS',
+  creeping: 'CREEPING DEATH',
+  sandman: 'ENTER SANDMAN',
+  heroes: 'DISPOSABLE HEROES',
+  voltage: 'HIGH VOLTAGE',
+  here: 'HERE, THERE AND EVERYWHERE',
+  tripper: 'DAY TRIPPER',
+  within: 'WITHIN YOU WITHOUT YOU',
+  eight: 'EIGHT DAYS A WEEK',
+  maxwell: "MAXWELL'S SILVER HAMMER",
+  hammer: 'HAMMER TO FALL',
+  dig: 'DIG A PONY',
+  dayInLife: 'A DAY IN THE LIFE',
+  salute: 'FOR THOSE ABOUT TO ROCK',
   knockin: "KNOCKIN' ON HEAVEN'S DOOR",
   twoThousandLightYears: '2000 LIGHT YEARS',
   lucyInTheSky: 'LUCY IN THE SKY',

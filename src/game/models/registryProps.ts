@@ -4,6 +4,7 @@ import * as Pr from './props';
 import * as Hx from './props/hideout';
 import * as Ws from './props/workshop';
 import * as Hud from './props/hud';
+import { weatherEntry } from './wear';
 
 export const PROP_MODELS: Record<string, ModelEntry> = {
   ...seeds('cactus_saguaro', 8, (i) => Pr.cactus(i, 'saguaro')),
@@ -238,6 +239,11 @@ function menuSignPreview() {
   }
   return { model: m, voxelSize: s.post.voxelSize };
 }
+
+// texture pass (models/wear.ts): worn edges, crease grime, settled dust and ground dirt on the
+// props, applied once per built model; plants, glass and the live HUD pieces stay as authored
+const NO_WEAR = /^(hud_|cactus|palm|dry_bush|grass_tuft|cobweb|broken_glass|bottle|mirror|card_scatter|sawdust)/;
+for (const [k, f] of Object.entries(PROP_MODELS)) if (!NO_WEAR.test(k)) PROP_MODELS[k] = () => weatherEntry(f());
 
 function seeds(prefix: string, n: number, f: (i: number) => ReturnType<ModelEntry>): Record<string, ModelEntry> {
   const o: Record<string, ModelEntry> = {};

@@ -4,6 +4,7 @@
 // toothy maw whose lower lip (`jaw`) drops open. Faces +Z; segments trail toward
 // -Z, each parented to the previous (`head` -> seg1 -> ... -> segN).
 import { TRig, TOON, Ramp, RigSpec, VoxelModel, rbox, seg, paint, toonShade, eyeSocket, bossExpressions, hollow } from './tk';
+import { weather, WEAR_ENEMY } from '../wear';
 
 const HIDE: Ramp = { base: 0xc89a62, shade: 0xa47a48, hi: 0xe2b87c, dark: 0x6e4e2a };
 const PLATE: Ramp = { base: 0x8a5a36, shade: 0x6c4428, hi: 0xa8744a, dark: 0x40261a };
@@ -112,6 +113,7 @@ export function sandwormRig(o: { segments?: number; scale?: number } = {}): RigS
   rig.mirrorLR();
   rig.socket('maw', 'head', [0.5, mc + 0.5, zf + 1]);
   rig.socket('throat', 'head', [0.5, mc + 0.5, zf - K(6)]);
+  for (const p of rig.parts) weather(p.model, { ...WEAR_ENEMY, seed: p.name.length });
   return rig.build({
     height: (cy + R0 + K(3)) * VS,
     radius: R0 * VS,

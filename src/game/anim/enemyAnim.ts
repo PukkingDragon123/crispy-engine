@@ -12,6 +12,7 @@ import { SpringF, ChainFollower } from './spring';
 import { leg, GAITS, cycleRate, LegSample } from './gait';
 import { twoBoneIK, lookAngles } from './ik';
 import { attackPhase, AttackPhase } from './envelope';
+import { rollingStoneAnim } from '../enemies/RollingStone';
 import { clamp, clamp01, lerp, smooth, smoother, easeOutCubic, easeInCubic, easeOutBack, wobble, fbm, vnoise, damp, TAU, PI } from './math';
 
 /** particle hooks the animation fires (implemented by the enemy manager) */
@@ -406,6 +407,10 @@ export function animateEnemy(e: Enemy, env: AnimEnv) {
       bird(e, a, env, ap);
       break;
     default:
+      if (e.def.special === 'rollingStone') {
+        rollingStoneAnim(e, a, env);
+        break;
+      }
       a.lift = Math.abs(Math.sin(a.gait * TAU)) * 0.04 * clamp01(a.spd / 2);
       a.gait += dt * (1 + a.spd);
       if (a.dying) a.sink = easeInCubic(a.dT / a.dDur) * e.height;
