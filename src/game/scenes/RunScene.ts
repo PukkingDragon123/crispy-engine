@@ -68,6 +68,7 @@ import { JerboaDance } from '../run/JerboaDance';
 import { FrogFamily } from '../run/FrogFamily';
 import { TravelerEscort } from '../run/TravelerEscort';
 import { WagonRepair } from '../run/WagonRepair';
+import { MythRoad } from '../run/MythRoad';
 import { NeckSlicer } from '../player/NeckSlicer';
 import { ZoneCine } from './ZoneCine';
 import { Tutorial } from '../run/Tutorial';
@@ -233,6 +234,8 @@ export class RunScene implements GameScene {
   frogs: FrogFamily | null = null;
   escort: TravelerEscort | null = null;
   wagon: WagonRepair | null = null;
+  /** roadside legends of old Egypt and the Fool's dog (run/MythRoad): they took the wagon's and the escort's place */
+  mythRoad: MythRoad | null = null;
   slicer!: NeckSlicer;
   private pickerShown = false;
   private cineHudHidden = false;
@@ -534,6 +537,7 @@ export class RunScene implements GameScene {
     this.frogs?.dispose();
     this.escort?.dispose();
     this.wagon?.dispose();
+    this.mythRoad?.dispose();
     this.slicer?.cancel();
     this.zoneCine?.dispose();
     this.tutorial?.dispose();
@@ -735,18 +739,9 @@ export class RunScene implements GameScene {
       const at = FrogFamily.findSpot(this.ctx, pp);
       if (at) this.frogs = new FrogFamily({ ctx: this.ctx, player: this.player, inter: this.inter, addBounty: (v) => this.addBounty(v), chest }, at);
     }
-    if (!this.wagon) {
-      const at = WagonRepair.findSpot(this.ctx, pp);
-      if (at) this.wagon = new WagonRepair({ ctx: this.ctx, player: this.player, enemies: this.enemies, inter: this.inter, qte: this.qte, cloth: this.cloth, addBounty: (v) => this.addBounty(v), chest }, at);
-    }
-    if (!this.escort) {
-      const route = TravelerEscort.findRoute(this.ctx, this.props, pp, ['tradingPost', 'saloon', 'ranchBarn']);
-      if (route)
-        this.escort = new TravelerEscort(
-          { ctx: this.ctx, player: this.player, enemies: this.enemies, inter: this.inter, choice: this.choice, items: this.items, cloth: this.cloth, addBounty: (v) => this.addBounty(v), card: () => this.picker.request() },
-          route.start, route.dest, route.name
-        );
-    }
+    // the broken wagon and the escort gave way to the roadside legends (gods and old stories, run/MythRoad)
+    this.mythRoad ??= new MythRoad({ ctx: this.ctx, player: this.player, enemies: this.enemies, inter: this.inter, addBounty: (v) => this.addBounty(v), chest, card: () => this.picker.request() });
+    this.mythRoad.spawn(pp);
   }
 
   private questList(): HudQuest[] {
@@ -759,12 +754,13 @@ export class RunScene implements GameScene {
     if (m?.objective) out.push(questFromObjective(m.objective));
     const tq = this.thothErrand?.paperQuest();
     if (tq) out.push(tq);
+    if (this.mythRoad) out.push(...this.mythRoad.papers());
     return out;
   }
 
   private questHud() {
     if (!this.missions.active)
-      for (const q of [this.escort, this.wagon, this.frogs]) {
+      for (const q of [this.escort, this.wagon, this.frogs, this.mythRoad]) {
         const h = q?.hud();
         if (h) return h;
       }
@@ -1239,6 +1235,7 @@ export class RunScene implements GameScene {
       this.wagon.dispose();
       this.wagon = null;
     }
+    this.mythRoad?.update(dt);
     this.missions.update(dt);
     this.ruins?.update(dt);
     this.wildlife?.update(dt);

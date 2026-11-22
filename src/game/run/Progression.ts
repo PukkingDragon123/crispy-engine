@@ -211,6 +211,9 @@ export class Progression {
     for (const q of [h.frogs, h.wagon, h.escort, h.missions]) add(q);
     const tq = h.thothErrand?.paperQuest?.();
     if (tq) quests.push({ id: tq.id, title: tq.title, text: tq.objective, pos: null });
+    // the roadside legends (run/MythRoad): their jobs, and the ones still waiting by the trail
+    const myth = h.mythRoad?.track?.() as { quests: TrackQuest[]; givers: TrackGiver[] } | undefined;
+    if (myth) quests.push(...myth.quests);
     const p = h.player?.pos ?? { x: 0, z: 0 };
     // a revealed X: the nearest one is a quest of its own
     const xs = ((h.treasure?.waypoints?.() ?? []) as { x: number; y: number; z: number; kind: string }[]).filter((w) => w.kind === 'x');
@@ -225,7 +228,8 @@ export class Progression {
     const e = h.escort;
     if (e && e.phase === 'waiting' && e.npc?.pos) givers.push({ pos: { x: e.npc.pos.x, y: e.npc.pos.y + 3, z: e.npc.pos.z }, name: e.name ?? 'A traveler', open: true });
     const f = h.frogs;
-    if (f && !f.revealed && !f.done && f.mama?.pos) givers.push({ pos: { x: f.mama.pos.x, y: f.mama.pos.y + 1.8, z: f.mama.pos.z }, name: 'Mama Rain Frog', open: true });
+    if (f && !f.revealed && !f.done && f.mama?.pos) givers.push({ pos: { x: f.mama.pos.x, y: f.mama.pos.y + 1.8, z: f.mama.pos.z }, name: 'Mama Toad', open: true });
+    if (myth) givers.push(...myth.givers);
     return { quests, givers, at: { x: p.x, z: p.z } };
   }
 

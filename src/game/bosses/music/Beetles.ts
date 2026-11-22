@@ -58,6 +58,7 @@ interface Member {
   bow: number;
   contact: number;
   visible: boolean;
+  spd: number;
 }
 
 export class Beetles extends Boss {
@@ -94,7 +95,7 @@ export class Beetles extends Boss {
     this.mech = new RigInstance(buildRigGeo(spec, 'boss:beetles_colossus'), { ownMaterial: true });
     for (let i = 0; i < 4; i++) {
       const share = this.maxHp * 0.1125;
-      this.m.push({ i, pos: new THREE.Vector3(), yaw: 0, air: 0, share, shareMax: share, down: 0, hitT: 9, fly: 0, busy: false, script: false, walk: rnd.next() * 6, bow: 0, contact: 0, visible: true });
+      this.m.push({ i, pos: new THREE.Vector3(), yaw: 0, air: 0, share, shareMax: share, down: 0, hitT: 9, fly: 0, busy: false, script: false, walk: rnd.next() * 6, bow: 0, contact: 0, visible: true, spd: 0 });
       this.band.setPartVisible(`b${i}_wing_l`, false);
       this.band.setPartVisible(`b${i}_wing_r`, false);
     }
@@ -750,6 +751,7 @@ export class Beetles extends Boss {
     if (!this.alive) return;
     this.alive = false;
     this.form = 'dead';
+    this.stop();
     const ctx = this.ctx;
     ctx.engine.slowMo(0.2, 30);
     ctx.engine.tweens.after(0.9, () => ctx.engine.slowMo(1, 3), true);
@@ -861,7 +863,10 @@ export class Beetles extends Boss {
       // the band: the stage centre moves; members walk to their slots on it
       for (const m of this.m) {
         m.hitT += dt;
-        if (m.script || m.down > 0) continue;
+        if (m.script || m.down > 0) {
+          m.spd = 0;
+          continue;
+        }
         this.slot(m.i, _v);
         const dx = _v.x - m.pos.x, dz = _v.z - m.pos.z, d = Math.hypot(dx, dz);
         const sp = Math.min(d, 6 * dt);
@@ -870,6 +875,7 @@ export class Beetles extends Boss {
           m.pos.z += (dz / d) * sp;
         }
         m.walk += sp * 3.2;
+        m.spd = sp / Math.max(dt, 1e-3);
         const pp = this.player.pos;
         m.yaw = dampAngle(m.yaw, Math.atan2(pp.x - m.pos.x, pp.z - m.pos.z), 5, dt);
         // contact: a member you ride into hurts you (or you bowl it over at speed)
@@ -918,7 +924,7 @@ export class Beetles extends Boss {
       const down = m.down > 0;
       const sit = m.i === 3 && !m.fly && !down && !m.script;
       const moving = m.script && !m.fly;
-      const walkAmp = moving ? 1 : clamp(Math.abs(Math.sin(m.walk)) * 2, 0, 1) * 0;
+      const walkAmp = moving ? 1 : clamp(m.spd / 2.5, 0, 1);
       // the body: placed on the sand (rig space is world-aligned here: yaw 0)
       const lieY = down ? 0.28 : 0;
       body.position.set(m.pos.x - this.pos.x, g - gy + m.air + 16 / 30 + (down ? lieY - 16 / 30 + 0.2 : bob * 0.05 * (sit ? 0.4 : 1) - (sit ? 0.12 : 0)), m.pos.z - this.pos.z);

@@ -744,6 +744,7 @@ export class MasterOfPuppets extends Boss {
     if (!this.alive) return;
     this.alive = false;
     this.dying = true;
+    this.stop();
     const ctx = this.ctx;
     this.hook = null;
     this.hookFly = null;
