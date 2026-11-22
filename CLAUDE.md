@@ -40,7 +40,9 @@
 - Very high voxel counts everywhere. Fluid, procedural animation.
 - Enemy skill names reference Rolling Stones / Guns N' Roses / Beatles songs.
 - UI (latest note): the lower HUD stays live 3D: the heart (more 3D, with an effect), big revolver bullets on top of the
-  tarot card pile, the tarot cards (the ultimate is one of the cards). The soul jar is removed. Never replace those with 2D,
+  tarot card pile, the tarot cards (the ultimate is one of the cards). The soul jar is removed. Health is a soul vessel with swimming soul liquid and particles; stamina is a poison-green
+  liquid vessel with particles (jumping, surfing, shooting and skills spend stamina). The day timer uses the loading
+  screen's hourglass with soul particles. No lazy filler assets (random campfires and the like). Never replace those with 2D,
   but draw them low-res, flat-shaded and outlined so they read like 2D icons that still turn and move in 3D: 2-4x coarser
   chunky voxels, flat colour with one soft shade step (no specular or bloom), a crisp dark ink outline
   (`src/game/ui/HudFlat.ts`). The rest (bounty plank, wave plaque, notes, toasts, ledger, codex card,
@@ -49,8 +51,9 @@
 - All spoken dialogue and story text is floating 3D text in the world (FloatText3D), never 2D boxes or balloons.
 - Voxel models and environments carry detailed pixel-art surface textures (PixelTex), subtle and crisp.
 - World: near terrain, ruins and buildings read as big blocks with crisp pixel-art textures; procedural rock formations.
-- Plants (latest note): trees, bushes and grass are 2D pixel-art sprites with 3D volume (crossed/stacked billboards),
-  moderate pixel resolution but very detailed, bushy and wind-swayed. Water and oases are beautiful, with water physics.
+- Plants (latest note): super detailed voxel art, or true 3D plants built from many small 2D pixel-art leaf cards
+  arranged in 3D on modelled stems and branches (cattails: 3D stems with 2D leaves). Never a single flat billboard or
+  plane. Bushy, detailed, wind-swayed. Water and oases are beautiful, with water physics.
 - No low-res 2D sprite coins, bullets or particles: bullets/projectiles are small voxel models, coins are spinning 3D
   voxel coins (coins are the only drop), particles are realistic (soft volumetric dust, sparks, spray). More motion blur.
 - Text: much less glow. Important text is 3D, crisp, readable, interactive, with a highlight. Paper physics is calm.
