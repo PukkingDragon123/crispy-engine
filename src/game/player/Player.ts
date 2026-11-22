@@ -1,9 +1,12 @@
 // Sundown, the skeleton bounty hunter of Serket. Owns the board physics, the
 // procedural rig animation, the revolver (with Pinch's active-reload QTE),
 // melee/counter, grapple, health/shield/status and expression changes.
+import { GUN, fireRateCap } from '../run/Balance';
 import * as THREE from 'three';
 import { Board, BoardInput, LandingInfo } from './Board';
 import { BoardMoves } from './BoardMoves';
+import { RiderBail } from './RiderBail';
+import { AutoBrake, BrakeTarget } from './AutoBrake';
 import { CameraRig } from './CameraRig';
 import { buildRigGeo, RigInstance, RigSpec, voxelMesh } from '../../engine/voxel/Rig';
 import { RigEyes } from '../fx/FaceFx';
@@ -194,10 +197,20 @@ export class Player {
   weapons!: Weapons;
   /** another hero's kit (RunOptions.hero, e.g. Mark): it takes the weapon / melee turn and adds its own pose layer */
   kit: HeroKit | null = null;
+  /** wipeouts: the ragdoll tumble and the board retrieval (player/RiderBail) */
+  bail!: RiderBail;
+  /** the board eases to a stop and the camera frames an interactable you ride at (player/AutoBrake) */
+  autoBrake = new AutoBrake();
+  /** run/Interact registers itself here (the auto-brake reads its list) */
+  interactions: { list: BrakeTarget[] } | null = null;
+  /** the board's balance assist (0.5 soft .. 1 full); null: eased in over the first ranks */
+  balanceAssist: number | null = null;
   // tunables
   baseGunDamage = 18;
   fireInterval = 0.17;
-  fanInterval = 0.075;
+  fanInterval = GUN.fanInterval;
+  /** set by Skills while a skill is being aimed (s): the gun does not fire */
+  skillAimLock = 0;
   /** current shot cone (deg), for the crosshair bloom */
   spreadDeg = 0;
   /**
@@ -265,6 +278,8 @@ export class Player {
     this.ammo = Math.round(this.stats.get('ammo'));
     this.weapons = new Weapons(ctx, this, input, holder);
     this.wireBoardEvents();
+    this.bail = new RiderBail(ctx, this);
+    this.bail.onRecovered = () => this.pa.prevVel.copy(this.board.vel);
     // crits are rolled inside the enemy damage resolve: listen so the shot can feel them
     ctx.events.on('enemyHit', (_e: EnemyLike, hit: Hit, _amt: number, res: { crit?: boolean }) => {
       if (hit?.source === 'gun' && res?.crit) this.shotCrit = true;
@@ -315,6 +330,7 @@ export class Player {
   private wireBoardEvents() {
     const b = this.board;
     b.onJump = (charge, booster) => {
+      if (!b.longAir) this.ctx.events.emit('jump', charge, booster);
       this.ctx.sfx('board_jump', this.pos, 0.8 + charge * 0.4);
       if (booster) {
         this.ctx.sfx('boost', this.pos, 1);
@@ -322,6 +338,22 @@ export class Player {
         this.ctx.shake(0.25);
       }
       this.ctx.fx.sandBurst(this.pos, 0.5 + charge * 0.6);
+    };
+    b.onLongCharge = () => this.ctx.sfx('sand_spray', this.pos, 0.35, 0.8);
+    b.onLongJump = (c) => {
+      this.ctx.events.emit('chargeJump', c);
+      this.ctx.sfx('whoosh_big', this.pos, 0.4 + c * 0.4, 1.1 - c * 0.15);
+      this.cam.punch(-0.012 * c, 0, 1 + c * 2);
+      if (c > 0.6) this.express('determined', 0.8);
+    };
+    b.onStumble = (side) => {
+      this.ctx.events.emit('stumble', side);
+      this.ctx.sfx('board_land', this.pos, 0.35, 0.8);
+      this.ctx.fx.sandSpray(this.pos, { x: Math.cos(b.heading) * side * 2.5, y: 1, z: -Math.sin(b.heading) * side * 2.5 }, 1.2);
+      this.express('surprised', 0.7);
+    };
+    b.onWipeout = (reason) => {
+      if (!this.bail.start(reason)) b.stumble = Math.max(b.stumble, 0.8);
     };
     b.onLaunch = () => {
       if (this.speed > 17) this.express('surprised', 0.6);
@@ -355,6 +387,8 @@ export class Player {
 
   private onLand(l: LandingInfo) {
     this.landS.kick(-Math.min(6, l.impact * 0.25));
+    this.cam.land(l.impact);
+    if ((l.quality === 'clean' || l.quality === 'perfect') && (l.spins > 0 || l.flips > 0)) this.ctx.events.emit('flip', l.trickName, l);
     const vol = clamp(l.impact / 20, 0.3, 1.2);
     this.ctx.sfx('board_land', this.pos, vol);
     this.ctx.fx.sandBurst(this.pos, clamp(l.impact / 14, 0.4, 1.6));
@@ -443,6 +477,9 @@ export class Player {
       dz /= dl;
     }
     const stunned = this.status.stunned();
+    // the board gets twitchy at speed: softer through the first ranks so the ride is learnable
+    this.board.balanceAssist = this.balanceAssist ?? clamp(0.55 + (this.ctx.run.rank ?? 0) * 0.06, 0.55, 1);
+    const brake = this.autoBrake.update(dt, this.board, this.cam, this.interactions?.list, { alive: this.alive, fz, push: inp.hit('push'), mouseIdle: performance.now() - inp.mouseMovedAt, aiming: this.aiming });
     const bi: BoardInput = {
       dirX: stunned ? 0 : dx,
       dirZ: stunned ? 0 : dz,
@@ -459,6 +496,7 @@ export class Player {
       autoPush: !stunned && !this.weapons?.dig && inp.autoPush && (st.active ? fz > -0.25 : fz > 0 || fx !== 0),
       fx,
       fz,
+      autoBrake: brake,
     };
     if (!this.alive) {
       bi.dirX = bi.dirZ = bi.throttle = 0;
@@ -470,7 +508,8 @@ export class Player {
     // board-slide dodge: hold drift, tap jump (the press is spent on the dodge, not a charged jump)
     this.dodgeCd -= dt;
     this.dodgeT = Math.max(0, this.dodgeT - dt);
-    if (this.alive && !stunned && bi.jumpPressed && bi.drift && this.dodgeCd <= 0) this.dodge(fx, fz, cf);
+    // (Shift + Space with no strafe is the charged long jump: Board)
+    if (this.alive && !stunned && bi.jumpPressed && bi.drift && fx !== 0 && this.dodgeCd <= 0 && !this.bail.active) this.dodge(fx, fz, cf);
     if (this.dodgeHold) {
       if (!inp.held('jump')) this.dodgeHold = false;
       bi.jumpHeld = bi.jumpPressed = bi.jumpReleased = false;
@@ -478,7 +517,12 @@ export class Player {
     if (sliding) bi.drift = this.alive && !stunned && inp.held('drift');
     const wasBoost = this.board.boosting;
     this.kit?.preBoard(dt, bi);
-    this.board.step(dt * this.status.slowMul(), bi, { surface: this.ctx.world.surface, normal: this.ctx.world.normal, slope: this.ctx.world.slope, colliders: this.ctx.world.colliders });
+    // off the board (wipeout): the bail drives him; any jump / push / fire skips ahead
+    if (this.bail.active) this.bail.update(dt, inp.hit('jump') || inp.hit('push') || inp.hit('fire'));
+    else this.board.step(dt * this.status.slowMul(), bi, { surface: this.ctx.world.surface, normal: this.ctx.world.normal, slope: this.ctx.world.slope, colliders: this.ctx.world.colliders });
+    this.cam.balance = this.board.bal;
+    this.cam.wobble = this.board.wobble;
+    this.cam.wipe = this.bail.active ? 1 : 0;
     if (this.board.boosting && !wasBoost) {
       this.ctx.sfx('boost', this.pos, 0.9);
       this.ctx.fx.ring({ x: this.pos.x, y: this.pos.y + 0.3, z: this.pos.z }, P.turq0, 4);
@@ -524,7 +568,7 @@ export class Player {
     if (this.kit) {
       this.kit.update(dt);
       if (this.alive) this.updateGrapple(dt);
-    } else if (this.alive) {
+    } else if (this.alive && !this.bail.active) {
       this.weapons.preUpdate(dt);
       // a dig (treasure hunt) puts the gun away: no shooting with a shovel in hand
       if (this.weapons.dig) this.firing = this.fanning = false;
@@ -537,8 +581,9 @@ export class Player {
     this.spreadDeg = this.weapons.isLong ? this.weapons.coneDeg() : this.coneDeg(this.fanning);
     // a frozen frame (engine paused: the pause menu) keeps the last pose — the procedural
     // anim's springs divide by dt and would go NaN (the whole body vanishes on resume)
-    if (dt > 1e-6) {
+    if (dt > 1e-6 && !this.bail.active) {
       this.animate(dt);
+      this.bail.blendOut(dt);
       this.kit?.post(dt, this.pa);
       this.dodgeVisuals(dt);
       this.smoke.update(dt, this.pa.idleW > 0.8, this.alive && this.rig.root.visible);
@@ -912,13 +957,15 @@ export class Player {
     // coming back); holding from the hip fans the hammer, holding in ADS
     // thumb-cocks steady aimed shots
     const G = GUN_FEEL;
-    const want = inp.held('fire');
-    const pressed = inp.hit('fire');
+    // aiming a bomb / scarab deploy owns the trigger finger (Skills.aiming)
+    const skillAim = this.skillAimLock > 0;
+    const want = inp.held('fire') && !skillAim;
+    const pressed = inp.hit('fire') && !skillAim;
     this.firing = want;
     this.holdT = want ? this.holdT + dt : 0;
     if (pressed) this.shotBuffer = G.buffer;
     else this.shotBuffer -= dt;
-    const rate = this.stats.get('fireRate');
+    const rate = fireRateCap(this.stats.get('fireRate'));
     if (!R.active) {
       if (this.ammo <= 0) {
         if (pressed) {
@@ -1367,6 +1414,12 @@ export class Player {
       status: this.status,
     });
     const dealt = this.applyDamage(res.amount, hit.source, false);
+    // a hard hit throws him off the board (the bail keeps him safe until he is back on)
+    if (this.alive && this.bail.canThrow() && hit.source !== 'thorns' && (dealt >= Math.max(12, this.maxHp * 0.14) || (hit.knock ?? 0) >= 9)) {
+      const dir = from ? _v.copy(this.pos).sub(from).setY(0) : null;
+      if (dir && dir.lengthSq() > 1e-6) dir.normalize();
+      if (this.bail.start('hit', dir && dir.lengthSq() > 0.5 ? dir.clone() : null, clamp(dealt / 30, 0.6, 1.6))) return dealt;
+    }
     if (hit.knock && from) {
       const dir = _v.copy(this.pos).sub(from).setY(0).normalize();
       this.board.impulse.addScaledVector(dir, hit.knock).add(new THREE.Vector3(0, hit.knock * 0.35, 0));
@@ -1413,6 +1466,7 @@ export class Player {
   }
 
   revive() {
+    this.bail.abort();
     this.alive = true;
     this.hp = this.maxHp;
     this.invuln = 3;

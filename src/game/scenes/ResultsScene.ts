@@ -21,6 +21,7 @@ import { IconFactory } from '../ui/IconFactory';
 import { PARCHMENT_GLSL } from '../ui/Choice';
 import { Ease } from '../../engine/Tween';
 import { nav } from '../Nav';
+import { dayReached } from '../run/Days';
 
 export interface RunResult {
   run: RunState;
@@ -271,6 +272,7 @@ export function paintPoster(res: PosterData, lines: number, portrait: HTMLCanvas
   const r = res.run;
   const mm = Math.floor(r.time / 60), ss = Math.floor(r.time % 60);
   const rows: [string, string][] = [
+    ['Day reached', dayReached(Math.max(1, r.wave))],
     ['Waves survived', String(Math.max(0, r.wave - (res.won ? 0 : 1)))],
     ['Outlaws laid low', String(r.kills)],
     ['Bounty earned', `$${Math.round(r.totalBounty)}`],

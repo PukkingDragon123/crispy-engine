@@ -103,7 +103,7 @@ const STEPS: Step[] = [
   },
   {
     title: 'TAP A CARD TO CAST',
-    sub: 'tap the cylinder to reload, the soul jar to unleash',
+    sub: 'tap the cylinder to reload, the Death card to unleash',
     done: (s, b) => s.hud - b.hud >= 1,
     pose: (t, W, H, hud) => {
       const s = hud.scale;

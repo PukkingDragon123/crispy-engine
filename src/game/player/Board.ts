@@ -41,6 +41,8 @@ export interface BoardInput {
   autoPush?: boolean;
   /** a touch tap: the push was pressed this long ago (s), the beat is timed from the touch */
   pushLead?: number;
+  /** extra braking (m/s²): the auto-brake easing the board to a stop by an interactable */
+  autoBrake?: number;
 }
 
 export interface SurfaceInfo {
@@ -144,6 +146,65 @@ export const DRIFT = {
   minSpeed: 4.5,
 };
 
+/**
+ * Balance at speed: an unstable lateral balance (bal, -1 board-left .. +1 board-right) that the
+ * sand keeps steady when slow and throws around when fast. Speed wobble, the deck rolling under
+ * you (side slopes, dune lips), bumps, yanking the board round and bad landings push it; a tap of
+ * A / D against the tip (the change in steer, not a held carve) and easing off (S) bring it back.
+ * Past stumbleAt the rider wobbles and the board bleeds speed; at wipeAt he goes over.
+ */
+export const BALANCE = {
+  /** rock steady below this speed (m/s), fully twitchy at wild */
+  calm: 8.5,
+  wild: 15,
+  /** self-righting spring when slow / at full speed (1/s²) */
+  rightLow: 40,
+  rightHigh: 3,
+  /** how hard a fast board throws a tip further over (1/s²) */
+  tip: 9.5,
+  damp: 4.6,
+  /** speed wobble: a wandering shove at full twitch (1/s²) */
+  wobble: 6,
+  /** the deck rolling under you, per radian of roll change at 10 m/s */
+  rollKick: 1.5,
+  /** a standing side slope leans you downhill (1/s² per unit normal tilt) */
+  slopePull: 3,
+  /** bumps: kick per m/s of vertical jolt */
+  bumpKick: 0.05,
+  /** carving harder than this sideways acceleration (m/s²) throws you to the outside */
+  carveG: 16,
+  carveKick: 0.05,
+  /** counter-steer authority (1/s² per unit of steer change) and how fast a held steer stops counting (1/s) */
+  ctrl: 10,
+  ctrlFollow: 2.2,
+  stumbleAt: 0.62,
+  wipeAt: 1,
+  /** a stumble bleeds speed (m/s² at full wobble) */
+  stumbleDrag: 4.2,
+};
+
+/** Shift + Space: the charged long jump */
+export const LONG_JUMP = {
+  /** seconds to a full charge */
+  charge: 0.8,
+  /** forward shove (m/s) at no charge / added at full charge; the speed cap is lifted by capBonus through the air */
+  fwd0: 2,
+  fwd: 6,
+  capBonus: 7,
+  /** pop: share of the jump stat at no / full charge */
+  pop0: 0.85,
+  pop: 0.45,
+};
+
+/** Shift held in the air: planned flips and spins that finish on the landing if you hold through */
+export const TRICK = {
+  /** spin (yaw) and flip (pitch) rates the rider can reach (rad/s) */
+  yawRate: 8.5,
+  pitchRate: 10,
+  /** shorter airs than this only grab */
+  grabOnly: 0.38,
+};
+
 /** unlockable movement (player/Techniques sets these) */
 export interface BoardMoves {
   sandKick: boolean;
@@ -231,6 +292,31 @@ export class Board {
   manualT = 0;
   /** riding a dune face tucked with Dune Surf */
   surfing = false;
+  // ---- balance at speed (BALANCE)
+  bal = 0;
+  balV = 0;
+  /** 0..1 how hard he is stumbling (balance past stumbleAt): the wobble the body and camera show */
+  wobble = 0;
+  /** disturbance scale (0.5 early game, 1 full): the tutorial / run can soften the board */
+  balanceAssist = 1;
+  private balT = 0;
+  private fxSlow = 0;
+  private prevRoll = 0;
+  private prevVy = 0;
+  private wobbling = false;
+  /** the rider is off the board (wipeout / recovery): physics paused, the bail drives pos */
+  offBoard = false;
+  // ---- the charged long jump (Shift + Space)
+  longCharging = false;
+  longCharge = 0;
+  /** this air is a long jump */
+  longAir = false;
+  /** the speed cap lifted through a long jump, bled off after the landing */
+  capBonus = 0;
+  // ---- planned air trick (Shift held in the air)
+  private plan = { on: false, yaw: 0, pitch: 0, t: 0, keyless: false };
+  /** Shift still held from the ground (the long-jump charge) doesn't trick until pressed again in the air */
+  private trickArmed = true;
   /** every landing bumps this (observers poll it instead of wrapping onLand) */
   landSeq = 0;
   lastLand: LandingInfo | null = null;
@@ -283,6 +369,13 @@ export class Board {
   onWallRide?: (on: boolean, kicked: boolean, time: number) => void;
   /** manual start / end ('clean' | 'pop' | 'scrub' | 'air') */
   onManual?: (on: boolean, how: string, time: number) => void;
+  /** the rider goes over: 'balance' | 'bail' | 'slam' | 'crash' (Player starts the bail) */
+  onWipeout?: (reason: string, speed: number) => void;
+  /** the balance went past stumbleAt (side +1 board-right / -1) */
+  onStumble?: (side: number) => void;
+  /** Shift + Space: the long jump starts charging / launches (charge 0..1) */
+  onLongCharge?: () => void;
+  onLongJump?: (charge: number) => void;
 
   private n = new THREE.Vector3();
   private surf: SurfaceInfo = { h: 0, drag: 0, speedMul: 1, kind: 'sand' };
@@ -307,11 +400,25 @@ export class Board {
     this.airTime = 0;
     this.wall.on = false;
     this.manual = false;
+    this.bal = this.balV = this.wobble = 0;
+    this.longCharging = false;
+    this.longCharge = 0;
+    this.capBonus = 0;
+    this.prevVy = 0;
+    this.plan.on = false;
+    this.trickYaw = this.trickPitch = this.spinYaw = this.spinPitch = 0;
+  }
+
+  /** hand the rider over to the bail (no callback: a hard stumble instead) */
+  private wipe(reason: string) {
+    if (this.offBoard) return;
+    if (this.onWipeout) this.onWipeout(reason, this.speed);
+    else this.stumble = Math.max(this.stumble, 0.9);
   }
 
   step(dt: number, inp: BoardInput, env: BoardEnv) {
     // a frozen frame (pause): nothing to integrate (the ground-follow divides by dt)
-    if (!(dt > 0)) return;
+    if (!(dt > 0) || this.offBoard) return;
     this.clock += dt;
     this.landWin = Math.max(0, this.landWin - dt);
     this.wallCd = Math.max(0, this.wallCd - dt);
@@ -329,12 +436,12 @@ export class Board {
     // substeps for stability at high speed
     const sub = Math.max(1, Math.ceil(dt / (1 / 120)));
     const h = dt / sub;
-    for (let i = 0; i < sub; i++) this.sub(h, inp, env, i === 0);
+    for (let i = 0; i < sub && !this.offBoard; i++) this.sub(h, inp, env, i === 0);
   }
 
   // ---------------------------------------------------------------- pushing
   private pressPush(inp: BoardInput) {
-    if (!this.grounded || this.stumble > 0 || this.wall.on) return;
+    if (!this.grounded || this.stumble > 0 || this.wall.on || this.longCharging) return;
     const spd = this.speed;
     // pressed into a hard carve at speed: straight into a drift, no kick
     const err = Math.abs(wrapAngle(this.desired - this.heading));
@@ -589,7 +696,7 @@ export class Board {
       // the world normal is (-hx, 1, -hz)/l, so downhill (-grad h) is (n.x, n.z) / n.y
       const gx = this.n.x / Math.max(0.2, this.n.y), gz = this.n.z / Math.max(0.2, this.n.y);
       const s2 = gx * gx + gz * gz;
-      this.tucked = inp.jumpHeld && this.stumble <= 0 && !this.manual;
+      this.tucked = inp.jumpHeld && this.stumble <= 0 && !this.manual && !this.longCharging;
       const rollK = smooth01((spd - 0.6) / 1.9);
       const surf = this.tucked && this.moves.duneSurf;
       const pull = (surf ? SURF_G : t.slopeG * (this.tucked ? 1.25 : 1)) * rollK;
@@ -623,7 +730,7 @@ export class Board {
         const errA = wrapAngle(desired - this.heading);
         const carving = Math.abs(inp.fx) > 0.1 || Math.abs(errA) > 0.35;
         this.driftHold = inp.drift ? this.driftHold + dt : 0;
-        const canStart = this.driftHold >= DRIFT.hold && this.pushT >= PUSH.kickEnd && carving && spd > DRIFT.minSpeed && !this.manual;
+        const canStart = this.driftHold >= DRIFT.hold && this.pushT >= PUSH.kickEnd && carving && spd > DRIFT.minSpeed && !this.manual && !this.longCharging;
         const drifting = inp.drift && (this.drifting ? spd > 2.5 : canStart);
         if (drifting && !this.drifting) this.driftDir = Math.sign(errA) || this.driftDir || 1;
         if (!drifting && this.drifting) {
@@ -645,8 +752,10 @@ export class Board {
         const spdK = clamp(spd / t.cap, 0, 1);
         const rate = (drifting ? t.driftTurnRate : t.turnRate * (1 - spdK * 0.4) * (this.tucked ? 0.55 : 1)) * (0.8 + 0.2 * mob) * (this.manual ? 0.7 : 1);
         const h0 = this.heading;
-        if (hasDir) this.heading = dampAngle(this.heading, desired, rate, dt * 1.0);
-        this.turnSpeed = Math.abs(wrapAngle(this.heading - h0)) / Math.max(1e-4, dt);
+        if (hasDir) this.heading = dampAngle(this.heading, desired, rate * (this.longCharging ? 0.5 : 1), dt * 1.0);
+        const turnS = wrapAngle(this.heading - h0) / Math.max(1e-4, dt);
+        this.turnSpeed = Math.abs(turnS);
+        if (!this.manual) this.balance(dt, inp, spd, turnS);
         if (drifting) {
           this.driftCharge += dt * clamp(spd / 12, 0.35, 1.4) * (0.6 + Math.abs(wrapAngle(Math.atan2(this.vel.x, this.vel.z) - this.heading)));
         }
@@ -657,6 +766,7 @@ export class Board {
       } else {
         this.drifting = false;
         this.driftCharge = 0;
+        this.wobble *= Math.exp(-4 * dt);
       }
       // nose manual: an unstable balance you keep with W / S
       if (this.manual) {
@@ -702,14 +812,36 @@ export class Board {
         let dec = roll + t.dragLin * sp * (this.manual ? 0.4 : 1) + t.dragQuad * sp * sp * (this.tucked || this.manual ? 0.5 : 1) + s.drag * sp;
         if (lean < 0) dec += 6.5 * -lean * clamp(sp / 3, 0.4, 1);
         if (this.boosting) dec *= 0.5;
+        // a stumble bleeds speed; the auto-brake eases you to a stop by an interactable
+        dec += BALANCE.stumbleDrag * this.wobble + (inp.autoBrake ?? 0);
         const ns = Math.max(0, sp - dec * dt);
         this.vel.x *= ns / sp;
         this.vel.z *= ns / sp;
       }
+      // Shift + Space: crouch and wind up a long jump (a tap of Space alone is the normal jump below)
+      if (inp.jumpPressed && first && inp.drift && !this.drifting && !this.longCharging && this.stumble <= 0 && !this.manual) {
+        this.longCharging = true;
+        this.longCharge = 0;
+        this.pushT = Math.max(this.pushT, PUSH.dur);
+        this.pushQueue = null;
+        this.driftHold = 0;
+        this.onLongCharge?.();
+      }
+      if (this.longCharging) {
+        if (inp.jumpHeld && !inp.jumpReleased && this.stumble <= 0) {
+          this.longCharge = Math.min(1, this.longCharge + dt / LONG_JUMP.charge);
+          this.jumpCharge = this.longCharge;
+          this.compress = Math.max(this.compress, 0.3 + 0.6 * this.longCharge);
+          this.applyGrapple(dt);
+        } else if (first) {
+          this.longJump(env);
+          return;
+        }
+      }
       // jump charge / release
-      if (inp.jumpHeld) this.jumpCharge = Math.min(1, this.jumpCharge + dt / 0.5);
+      if (inp.jumpHeld && !this.longCharging) this.jumpCharge = Math.min(1, this.jumpCharge + dt / 0.5);
       this.compress = Math.max(this.compress * Math.exp(-6 * dt), this.jumpCharge * 0.8);
-      if (inp.jumpReleased && first && this.stumble <= 0) {
+      if (inp.jumpReleased && first && this.stumble <= 0 && !this.longCharging) {
         const charge = this.jumpCharge;
         const booster = this.boosting && this.boostMeter > 0.2;
         const coyote = !this.drifting && this.clock - this.driftEndAt < 0.14;
@@ -749,13 +881,17 @@ export class Board {
           const k = 3.2;
           this.spinYaw = ((dDir * half * Math.PI * k) / (1 - Math.exp(-k * T))) * 1.02;
           this.spinLock = Math.abs(inp.fx) > 0.1;
+          // held Shift in the air finishes the launch's spin cleanly
+          this.plan.on = true;
+          this.plan.yaw = dDir * half * Math.PI;
+          this.plan.pitch = 0;
           this.onSpinLaunch?.(half, dCharge);
         }
         this.onJump?.(charge, booster);
         this.applyGrapple(dt);
         return;
       }
-      if (!inp.jumpHeld) this.jumpCharge = 0;
+      if (!inp.jumpHeld && !this.longCharging) this.jumpCharge = 0;
 
       this.applyGrapple(dt);
       // integrate horizontal and follow ground (launch if ground falls away faster than free fall)
@@ -785,6 +921,7 @@ export class Board {
           this.vel.z *= 0.88;
           if (into > 10) this.stumble = 0.45;
           this.onWall?.(into, -wx, -wz);
+          if (into > 14.5) this.wipe('crash');
         }
         nx = ox + this.vel.x * dt;
         nz = oz + this.vel.z * dt;
@@ -827,26 +964,26 @@ export class Board {
         this.onSandKick?.();
       }
       // air control (horizontal), unless tricking
-      const trick = inp.drift;
+      if (this.airTime <= dt * 1.5) this.trickArmed = !inp.drift || this.launchSpin;
+      else if (!inp.drift) this.trickArmed = true;
+      const trick = inp.drift && this.trickArmed;
       if (!trick && hasDir) {
         this.vel.x += inp.dirX * t.airControl * dt;
         this.vel.z += inp.dirZ * t.airControl * dt;
         this.heading = dampAngle(this.heading, desired, 2.0, dt);
       }
-      // flips and spins have momentum: holding a direction winds the spin up,
-      // letting go it keeps turning and bleeds off — commit early, time the stop.
-      // D spins clockwise (to the right), A counter-clockwise.
-      const spinRate = 7.2 * (0.85 + 0.15 * mob);
-      const wind = 1 - Math.exp(-9 * dt), bleed = Math.exp(-3.2 * dt);
+      // Shift held in the air: a trick the rider plans from the keys (W front flip, S back flip,
+      // A / D spins) or, with no keys, from the takeoff (the carve picks the spin, a big air
+      // flips). Holding through finishes it on the landing; let go early and the board keeps
+      // turning on its own momentum and bleeds off (under / over-rotated: a sketchy landing or a
+      // bail). Keep a key held once it is done and there is air left: one more rotation.
+      const bleed = Math.exp(-3.2 * dt);
       if (this.spinLock && Math.abs(inp.fx) < 0.1) this.spinLock = false;
-      const sfx = this.spinLock ? 0 : inp.fx;
       if (trick && this.stumble <= 0) {
-        const ty = -sfx * spinRate, tp = inp.fz * spinRate * 0.95;
-        this.spinYaw = Math.abs(sfx) > 0.1 ? this.spinYaw + (ty - this.spinYaw) * wind : this.spinYaw * bleed;
-        this.spinPitch = Math.abs(inp.fz) > 0.1 ? this.spinPitch + (tp - this.spinPitch) * wind : this.spinPitch * bleed;
-        this.grabbing = Math.abs(inp.fx) < 0.1 && Math.abs(inp.fz) < 0.1;
-        if (this.grabbing) this.grabTime += dt;
+        if (!this.plan.on) this.planTrick(inp, env);
+        this.driveTrick(dt, inp, env);
       } else {
+        this.plan.on = false;
         this.spinYaw *= bleed;
         this.spinPitch *= bleed;
         this.grabbing = false;
@@ -951,8 +1088,9 @@ export class Board {
       }
     }
     if (this.stumble > 0) this.stumble -= dt;
-    // cap absurd speeds
-    const cap = (this.boosting ? t.boostCap : t.cap) * (0.85 + 0.15 * mob);
+    // cap absurd speeds (a long jump lifts it through the air and lets it down after the landing)
+    if (this.grounded) this.capBonus = Math.max(0, this.capBonus - dt * 3.5);
+    const cap = (this.boosting ? t.boostCap : t.cap) * (0.85 + 0.15 * mob) + this.capBonus;
     const sp2 = this.speed;
     if (sp2 > cap) {
       this.vel.x *= cap / sp2;
@@ -1033,6 +1171,10 @@ export class Board {
         score = Math.round(score * 0.5);
       }
     }
+    const spd0 = Math.hypot(this.vel.x, this.vel.z);
+    // landing across the line of travel at speed: the board snags and throws the balance
+    const mis = Math.abs(wrapAngle(Math.atan2(this.vel.x, this.vel.z) - this.heading - (halfSpins % 2 ? Math.PI : 0)));
+    const across = spd0 > 6 ? Math.min(mis, Math.PI - mis) : 0;
     if (quality === 'bail') {
       this.stumble = 0.8;
       this.vel.x *= 0.45;
@@ -1040,6 +1182,15 @@ export class Board {
       this.pushStreak = 0;
       name = 'BAIL';
     } else {
+      // clean landings carry you on (a long jump keeps its lifted cap for a moment)
+      if (quality === 'clean' || (quality === 'perfect' && !name)) {
+        this.vel.x += f.x * (tried ? 0.9 : 0.4);
+        this.vel.z += f.z * (tried ? 0.9 : 0.4);
+      }
+      if (quality === 'perfect') this.capBonus = Math.max(this.capBonus, 2.5);
+      // sketchy, or across the line: the balance takes the hit
+      const kick = (quality === 'sketchy' ? 1.4 + spd0 * 0.09 : 0) + (across > 0.45 ? (across - 0.45) * (2 + spd0 * 0.2) : 0) + (impact > 20 ? (impact - 20) * 0.08 : 0);
+      if (kick > 0) this.balV += (Math.sign(wrapAngle(this.trickYaw - halfSpins * Math.PI * Math.sign(this.trickYaw || 1))) || (this.clock % 2 > 1 ? 1 : -1)) * kick;
       if (transition > 0.05) {
         const add = Math.max(0, -this.vel.y) * transition * (quality === 'perfect' ? 0.6 : 0.45);
         this.vel.x += f.x * add;
@@ -1065,6 +1216,11 @@ export class Board {
     }
     this.grounded = true;
     this.vel.y = 0;
+    this.prevVy = 0;
+    env.normal(this.pos.x, this.pos.z, this.n);
+    this.prevRoll = this.n.x * Math.cos(this.heading) - this.n.z * Math.sin(this.heading);
+    this.longAir = false;
+    this.plan.on = false;
     this.compress = clamp(impact / 18, 0.15, 1);
     this.airJumps = 1;
     // align heading with landed spin (half spins land fakie -> flip heading)
@@ -1079,5 +1235,145 @@ export class Board {
     this.airTime = 0;
     this.launchSpin = false;
     this.spinLock = false;
+    // a bail at speed, or a flat slam out of a big air at speed, throws him off the board
+    if ((quality === 'bail' && spd0 > 8.5) || (impact > 27 && transition < 0.3 && spd0 > 9)) this.wipe(quality === 'bail' ? 'bail' : 'slam');
+  }
+
+  // ---------------------------------------------------------------- balance
+  private balance(dt: number, inp: BoardInput, spd: number, turnS: number) {
+    const B = BALANCE;
+    const sk = smooth01((spd - B.calm) / (B.wild - B.calm));
+    const dis = this.balanceAssist;
+    // counter-steer: the change in steer counts (a tap against the tip), a held carve fades out
+    this.fxSlow += (inp.fx - this.fxSlow) * (1 - Math.exp(-B.ctrlFollow * dt));
+    const ctl = inp.fx - this.fxSlow;
+    // easing off (S, the heel brake) settles the board
+    const ease = Math.max(0, -inp.throttle);
+    const kR = B.rightLow + (B.rightHigh - B.rightLow) * sk + ease * 10;
+    let a = (B.tip * sk * (1 - 0.6 * ease) - kR) * this.bal - (B.damp + ease * 3) * this.balV + ctl * B.ctrl;
+    // speed wobble: a wandering shove that grows with speed
+    this.balT += dt;
+    const bt = this.balT;
+    const nz = Math.sin(bt * 1.7 + 0.3) * 0.55 + Math.sin(bt * 4.1 + 1.9) * 0.3 + Math.sin(bt * 7.3) * 0.15;
+    a += B.wobble * sk * sk * nz * dis;
+    // the deck rolling under you (side slopes, dune lips) and bumps
+    const roll = this.n.x * Math.cos(this.heading) - this.n.z * Math.sin(this.heading);
+    const dRoll = roll - this.prevRoll;
+    this.prevRoll = roll;
+    if (Math.abs(dRoll) < 0.5) this.balV += dRoll * B.rollKick * (spd / 10) * dis;
+    a += roll * B.slopePull * sk * dis;
+    const dvy = this.vel.y - this.prevVy;
+    this.prevVy = this.vel.y;
+    if (Math.abs(dvy) > 0.4) this.balV += (Math.sign(this.bal) || Math.sign(nz) || 1) * Math.min(4, Math.abs(dvy) - 0.4) * B.bumpKick * (0.3 + sk) * dis;
+    // yanking the board round at speed throws you to the outside of the turn (turning right = +turnS, outside = left)
+    const latG = spd * turnS;
+    const ex = Math.abs(latG) - B.carveG;
+    if (ex > 0 && spd > 5) a -= Math.sign(latG) * ex * B.carveKick * (0.4 + sk) * dis;
+    this.balV += a * dt;
+    this.bal += this.balV * dt;
+    const ab = Math.abs(this.bal);
+    if (!this.wobbling && ab > B.stumbleAt) {
+      this.wobbling = true;
+      this.onStumble?.(Math.sign(this.bal));
+    } else if (this.wobbling && ab < B.stumbleAt * 0.6) this.wobbling = false;
+    const w = clamp((ab - B.stumbleAt * 0.8) / (B.wipeAt - B.stumbleAt * 0.8), 0, 1);
+    this.wobble += (w - this.wobble) * (1 - Math.exp(-(w > this.wobble ? 14 : 5) * dt));
+    if (ab >= B.wipeAt) {
+      this.bal = Math.sign(this.bal) * B.wipeAt;
+      this.wipe('balance');
+    }
+  }
+
+  // ---------------------------------------------------------------- long jump
+  private longJump(env: BoardEnv) {
+    void env;
+    const t = this.t, L = LONG_JUMP, mob = this.mobilityMul;
+    const c = this.longCharge;
+    const f = this.forward;
+    const jv = t.jump * (L.pop0 + L.pop * c) * (0.9 + 0.1 * mob);
+    const fwd = (L.fwd0 + L.fwd * c) * (0.85 + 0.15 * mob);
+    this.vel.y = Math.max(this.vel.y, 0) + jv * (0.8 + 0.2 * this.n.y);
+    this.vel.x += f.x * fwd;
+    this.vel.z += f.z * fwd;
+    this.capBonus = Math.max(this.capBonus, L.capBonus * (0.35 + 0.65 * c));
+    this.grounded = false;
+    this.pos.y += 0.05;
+    this.airTime = 0;
+    this.airJumps = 1;
+    this.trickYaw = this.trickPitch = 0;
+    this.spinYaw = this.spinPitch = 0;
+    this.jumpCharge = 0;
+    this.longCharging = false;
+    this.longAir = true;
+    this.tucked = false;
+    this.drifting = false;
+    this.driftCharge = 0;
+    this.launchSpin = false;
+    this.plan.on = false;
+    this.onLongJump?.(c);
+    this.onJump?.(c, false);
+    this.longCharge = 0;
+  }
+
+  // ---------------------------------------------------------------- air tricks
+  /** seconds until the board meets the ground (ballistic, re-sampled at the predicted landing spot) */
+  private airLeft(env: BoardEnv) {
+    const g = this.t.gravity;
+    let h = env.surface(this.pos.x, this.pos.z, this.surf).h, tt = 0;
+    for (let i = 0; i < 2; i++) {
+      const vy = this.vel.y;
+      tt = (vy + Math.sqrt(Math.max(0, vy * vy + 2 * g * Math.max(0, this.pos.y - h)))) / g;
+      h = env.surface(this.pos.x + this.vel.x * tt, this.pos.z + this.vel.z * tt, this.surf).h;
+    }
+    return Math.max(0, tt);
+  }
+
+  private planTrick(inp: BoardInput, env: BoardEnv) {
+    const T = this.airLeft(env) - 0.08, P = this.plan, R = TRICK;
+    P.on = true;
+    P.t = 0;
+    P.yaw = this.trickYaw;
+    P.pitch = this.trickPitch;
+    const kx = Math.abs(inp.fx) > 0.1 ? Math.sign(inp.fx) : 0, kz = Math.abs(inp.fz) > 0.1 ? Math.sign(inp.fz) : 0;
+    P.keyless = !kx && !kz;
+    if (T < R.grabOnly) return;
+    const halfs = Math.min(4, Math.floor((T * R.yawRate * 0.9) / Math.PI));
+    const flips = Math.min(2, Math.floor((T * R.pitchRate * 0.9) / (Math.PI * 2)));
+    if (kx || kz) {
+      // the keys choose: A / D spin that way, W / S flip front / back (both: a corked flip)
+      if (kx && halfs > 0) P.yaw += -kx * Math.min(kz ? 1 : 2, halfs) * Math.PI;
+      if (kz && flips > 0) P.pitch += kz * Math.PI * 2;
+      return;
+    }
+    // no keys: the takeoff chooses. A big air flips (forward at speed, back off a steep pop),
+    // a carve spins the way it was turning, anything smaller is a clean 180
+    const dir = Math.abs(this.lean) > 0.08 ? -Math.sign(this.lean) : (this.landSeq & 1 ? 1 : -1);
+    if (flips > 0 && this.speed > 6) {
+      P.pitch += (this.vel.y > 6.5 && !this.longAir ? -1 : 1) * Math.PI * 2;
+      if (halfs >= 3) P.yaw += dir * Math.PI;
+    } else if (halfs > 0) P.yaw += dir * Math.min(2, halfs) * Math.PI;
+  }
+
+  private driveTrick(dt: number, inp: BoardInput, env: BoardEnv) {
+    const P = this.plan, R = TRICK;
+    const tl = this.airLeft(env) - 0.08;
+    const left = Math.max(0.06, tl);
+    const kx = this.spinLock || Math.abs(inp.fx) < 0.1 ? 0 : Math.sign(inp.fx), kz = Math.abs(inp.fz) < 0.1 ? 0 : Math.sign(inp.fz);
+    P.t += dt;
+    // keys pressed just after the takeoff choose the trick over the auto pick
+    if (P.keyless && (kx || kz) && P.t < 0.3 && Math.abs(this.trickYaw) < 0.7 && Math.abs(this.trickPitch) < 0.7 && !this.launchSpin) {
+      this.planTrick(inp, env);
+      return;
+    }
+    // a key still held once its rotation is done, with air to spare: one more
+    if (kx && Math.abs(P.yaw - this.trickYaw) < 0.35 && tl * R.yawRate * 0.9 > Math.PI) P.yaw += -kx * Math.PI;
+    if (kz && Math.abs(P.pitch - this.trickPitch) < 0.35 && tl * R.pitchRate * 0.9 > Math.PI * 2) P.pitch += kz * Math.PI * 2;
+    const wy = clamp((P.yaw - this.trickYaw) / left, -R.yawRate, R.yawRate);
+    const wp = clamp((P.pitch - this.trickPitch) / left, -R.pitchRate, R.pitchRate);
+    const k = 1 - Math.exp(-14 * dt);
+    this.spinYaw += (wy - this.spinYaw) * k;
+    this.spinPitch += (wp - this.spinPitch) * k;
+    this.grabbing = Math.abs(P.yaw - this.trickYaw) < 0.2 && Math.abs(P.pitch - this.trickPitch) < 0.2;
+    if (this.grabbing) this.grabTime += dt;
   }
 }

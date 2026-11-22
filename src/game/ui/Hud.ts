@@ -11,7 +11,9 @@ import { STATUS_INFO, StatusId } from '../combat/Status';
 import { UI, FONT, woodPanel, ironPlate, slot, parchment, ribbon, barFrame, drawBarFill, keycap, starBadge, chain, text, measure, px } from './PixelUI';
 import type { PaperQuest } from './MissionPaper';
 import type { WeaponHud } from '../player/Weapons';
-import type { SoulAnchor } from './SoulBar';
+import type { BulletRowAnchor } from './HudBullets';
+import { BossBar, type BossBarState } from './BossBar';
+import { pixelText, pixelTextWidth } from './HudSprites';
 import { WATCH_DROP, type OutlawAnchors } from './OutlawHud';
 import { isTouchDevice } from './TouchControls';
 import { SLOT, type ArsenalAnchors } from './ArsenalHud';
@@ -52,8 +54,12 @@ export interface HudState {
   wave: number;
   waveTime: number;
   waveLabel: string;
-  boss: { name: string; frac: number; title?: string } | null;
+  /** the boss on the field (its themed bar, ui/BossBar): phases and theme from Boss.phase / phases / barTheme */
+  boss: BossBarState | null;
+  /** ultimate charge 0..1 (the XIII card follows it unless `ultCard` is given) */
   ult: number;
+  /** the ultimate as a tarot card with its own cooldown (COMBAT); absent: the card follows `ult` */
+  ultCard?: { cd: number; max: number; ready?: boolean };
   skills: { key: string; icon: string; cd: number; max: number; charges?: number }[];
   items: { key: string; icon: string; count: number; model?: string }[];
   status: { id: StatusId; stacks: number }[];
@@ -88,6 +94,18 @@ export interface HudState {
   heroWorld?: { x: number; y: number; z: number } | null;
 }
 
+/** a place in the layout another module draws into (Hud.reserveSlot): centre and size, HUD px */
+export interface HudSlot {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** the HUD's size factor on small screens */
+  k: number;
+  visible: boolean;
+}
+
 /** where the 3D HUD layer (Hud3D) should place its models, in HUD pixels */
 export interface HudAnchors {
   cyl: { x: number; y: number; R: number; rot: number; angVel: number; open: number; recoil: number; shown: number; n: number; venom: number; phase: string; active: boolean; hidden?: boolean };
@@ -96,8 +114,8 @@ export interface HudAnchors {
   ult: { x: number; y: number; frac: number; ready: boolean };
   heart: { x: number; y: number; frac: number };
   slide: number;
-  /** the soul jar (3D layer) */
-  soul: SoulAnchor | null;
+  /** the big 3D rounds standing on the tarot pile (HudBullets) */
+  bullets: BulletRowAnchor | null;
   /** tin star, tally board, wave plaque, stopwatch (3D layer) */
   outlaw: OutlawAnchors | null;
   /** long-gun magazines, the carried-guns strip and treasure markers (3D layer) */
@@ -170,6 +188,8 @@ export class Hud {
   private waveDrop = 1;
   /** 3D layer draws the cylinder, coin, item models and Pinch idol; 2D skips those */
   use3D = false;
+  /** the day plaque and the hourglass (run/Days.ts) own the top centre: the old wave plaque and stopwatch stand down */
+  timeHud = false;
   /** last frame's state (read by the 3D layer) */
   last: HudState | null = null;
   /** where the 3D tarot cards sit (HUD px): keycaps + cooldown numbers are drawn under them */
@@ -183,7 +203,7 @@ export class Hud {
     ult: { x: 0, y: 0, frac: 0, ready: false },
     heart: { x: 0, y: 0, frac: 1 },
     slide: 0,
-    soul: null,
+    bullets: null,
     outlaw: null,
     paper: { right: 0, y: 0, k: 1, compact: false, speed: 0 },
     arsenal: null,
@@ -200,6 +220,32 @@ export class Hud {
   painters: HudPainter[] = [];
   /** type and markers that sit on top of the pictures, flushed after the painters */
   private late: (() => void)[] = [];
+  /** the boss's themed health bar */
+  private bossBar = new BossBar();
+  private bossBottom = 0;
+  private promptKey = '';
+  private promptT = 9;
+  /** the magazine's spot on top of the tarot pile (HUD px) and the pile's size factor */
+  private magX = 0;
+  private magY = 0;
+  private pileK = 1;
+  private slots = new Map<string, HudSlot>();
+  /**
+   * Keep a clean place in the layout for a piece another module draws (TIME's hourglass:
+   * `hud.reserveSlot('hourglass')`). The HUD keeps the spot free, updates its centre and size
+   * factor every frame (HUD px; css px = HUD px * hud.scale) and, for the hourglass, retires
+   * the break stopwatch and its bell hint.
+   */
+  reserveSlot(id: 'hourglass' | string, w = 44, h = 60): HudSlot {
+    let sl = this.slots.get(id);
+    if (!sl) this.slots.set(id, (sl = { id, x: 0, y: 0, w, h, k: 1, visible: false }));
+    sl.w = w;
+    sl.h = h;
+    return sl;
+  }
+  releaseSlot(id: string) {
+    this.slots.delete(id);
+  }
   /** world -> screen (css px) projector, set by RunScene */
   project: ((p: { x: number; y: number; z: number }) => { x: number; y: number; visible: boolean; behind?: boolean }) | null = null;
 
@@ -389,12 +435,15 @@ export class Hud {
         this.tl(c, `/${w.mag}`, cx - 25, cy + 7 + lift, UI.textDim, 16, 'right');
       } else if (!this.use3D) this.tl(c, `${w.ammo}/${w.mag}`, cx, cy - 8, UI.text, 16, 'center');
       if (w.reloading) this.tl(c, 'RELOADING', cx, cy - 46, UI.brass.h, 16, 'center');
-      this.tl(c, `${Math.round(s.speed)}`, cx + 38, cy - 6, s.speed > 20 ? UI.brass.h : UI.textDim, 16, 'left');
-      this.tl(c, 'm/s', cx + 38, cy + 6, UI.textDim, 16, 'left');
+      if (!this.use3D) {
+        this.tl(c, `${Math.round(s.speed)}`, cx + 38, cy - 6, s.speed > 20 ? UI.brass.h : UI.textDim, 16, 'left');
+        this.tl(c, 'm/s', cx + 38, cy + 6, UI.textDim, 16, 'left');
+      }
+      if (this.anchors.bullets) this.anchors.bullets.hidden = true;
       return;
     }
     this.anchors.cyl.hidden = false;
-    const R = 19;
+    const R = this.use3D ? 17 : 19;
     const n = Math.min(9, Math.max(6, s.maxAmmo));
     const rel = s.reload;
     // shot rotation: when ammo drops, rotate one chamber
@@ -428,6 +477,11 @@ export class Hud {
     // motion blur ghosts
     const signedVel = (this.cylRot - prev) / Math.max(dt, 1e-3);
     this.anchors.cyl = { x: ox, y: oy, R, rot: this.cylRot, angVel: signedVel, open: this.cylOpen, recoil: this.recoil, shown: showAmmo, n, venom: s.venom, phase: rel.active ? rel.phase : '', active: rel.active };
+    // the big rounds stand in a row beside the cylinder, on the card pile
+    if (this.use3D) {
+      const pk = this.pileK;
+      this.anchors.bullets = { x: cx + R + 12 * pk, y: cy + R + 2, h: 26 * pk, gap: Math.min(12, 66 / Math.max(1, n - 1)) * pk, n, shown: showAmmo, venom: s.venom, reloading: rel.active, hidden: false };
+    } else this.anchors.bullets = null;
     const ghosts = this.use3D ? 0 : Math.min(4, Math.floor(angVel / 4));
     for (let g = ghosts; g >= 1; g--) {
       c.save();
@@ -478,9 +532,11 @@ export class Hud {
       // casings eject at start of eject phase
       if (!this.use3D && rel.phase === 'eject' && Math.random() < dt * 30) this.parts.push({ kind: 'casing', x: ox + (Math.random() - 0.5) * 10, y: oy, vx: (Math.random() - 0.5) * 50, vy: -30 - Math.random() * 30, t: 0, life: 1.2, rot: Math.random() * 6 });
     }
-    // speed plaque
-    this.tl(c, `${Math.round(s.speed)}`, cx + 38, cy - 6, s.speed > 20 ? UI.brass.h : UI.textDim, 16, 'left');
-    this.tl(c, 'm/s', cx + 38, cy + 6, UI.textDim, 16, 'left');
+    // speed plaque (the 3D HUD sets it by the boost bar)
+    if (!this.use3D) {
+      this.tl(c, `${Math.round(s.speed)}`, cx + 38, cy - 6, s.speed > 20 ? UI.brass.h : UI.textDim, 16, 'left');
+      this.tl(c, 'm/s', cx + 38, cy + 6, UI.textDim, 16, 'left');
+    }
   }
 
   // ------------------------------------------------------------------ frame
@@ -524,13 +580,20 @@ export class Hud {
       }
     }
 
-    // ---------------------------------------------------------- cylinder (bottom center)
-    this.drawCylinder(dt, s, cx, H - 32 + slide * 70);
+    // ---------------------------------------------------------- cylinder + rounds
+    // the 3D HUD stands the revolver and its rounds on top of the tarot pile (TarotBar's fan,
+    // bottom right), keeping the middle of the screen clear for the fight
+    const pk = (this.pileK = Math.max(0.48, Math.min(1, W / 620, H / 340)));
+    if (this.use3D) {
+      this.magX = Math.round(W - 205 * pk + 21) + slide * 200;
+      this.magY = Math.round(H - 92 * pk - 19);
+      this.drawCylinder(dt, s, this.magX, this.magY);
+    } else this.drawCylinder(dt, s, cx, H - 32 + slide * 70);
 
     // ---------------------------------------------------------- health (bottom left)
     {
       // the 3D beating heart sits left of the bar, so the bar moves over for it
-      const x = (this.use3D ? 34 : 8) - slide * 200, y = H - 28;
+      const x = (this.use3D ? 40 : 8) - slide * 200, y = H - 28;
       if (this.lastHp >= 0 && s.hp < this.lastHp - 0.5) this.onHurt(this.lastHp - s.hp);
       this.lastHp = s.hp;
       const frac = Math.max(0, s.hp / s.maxHp);
@@ -543,43 +606,20 @@ export class Hud {
       const low = frac < 0.3;
       drawBarFill(c, x + 18 + sx, y + sy, bw, bh, frac, this.hpFlash > 0.5 ? { o: '#fff', d: '#fff', m: '#ffe0d0', l: '#fff', h: '#fff' } : low && Math.sin(this.t * 9) > 0 ? { ...UI.blood, m: '#ff5a3a' } : UI.blood, this.hpTrail);
       if (s.shield > 0) drawBarFill(c, x + 18 + sx, y - 6 + sy, bw, 9, Math.min(1, s.shield / s.maxHp), UI.sky);
-      this.anchors.heart = { x: x - 12, y: y + 4, frac };
-      if (this.use3D) {
-        // Serket's soul jar stands on the heart's shoulder; the streak and the unleash call sit beside it
-        let hx = W / 2, hy = H * 0.6;
-        if (s.heroWorld && this.project) {
-          const hp = this.project(s.heroWorld);
-          if (hp.visible) {
-            hx = hp.x / this.scale;
-            hy = hp.y / this.scale;
-          }
-        }
-        const jx = x - 11, jy = y - 15;
-        const ready = s.ult >= 1;
-        this.anchors.soul = { x: jx, y: jy, k, frac: s.ult, ready, heroX: hx, heroY: hy };
-        // beside the jar's shoulder, but always clear of the consumables' key caps below
-        const tx = Math.round(jx + 22 * k), ty0 = Math.round(Math.min(jy - 68 * k, y - 74));
-        if (ready) {
-          const pulse = Math.round(Math.sin(this.t * 6) * 1.5);
-          const col = Math.sin(this.t * 6) > 0 ? '#c8ffe0' : UI.venom.l;
-          if (this.touch) this.tl(c, 'TAP THE JAR', tx, ty0 + pulse, col, 16);
-          else {
-            const kc = keycap('Z');
-            this.lt(() => this.blit(kc, tx, ty0 - 2 + pulse));
-            this.tl(c, 'UNLEASH', tx + kc.width + 4, ty0 + pulse, col, 16);
-          }
-        }
-        if (s.combo > 1) {
-          const hot = Math.min(1, s.combo / 40);
-          const col = s.combo >= 25 ? '#eafff2' : s.combo >= 10 ? UI.venom.h : UI.venom.l;
-          const bump = Math.round(this.streakPop * 3);
-          this.tl(c, `x${s.combo}`, tx, ty0 + 16 - bump, col, 16);
-          this.tl(c, 'STREAK', tx + measure(c, `x${s.combo}`) + 4, ty0 + 16, `rgba(201,169,124,${0.6 + hot * 0.4})`, 16);
-        }
-        if (s.combo > this.lastCombo) this.streakPop = 1;
-        this.lastCombo = s.combo;
-        this.streakPop = Math.max(0, this.streakPop - dt * 5);
-      } else this.anchors.soul = null;
+      this.anchors.heart = { x: x - (this.use3D ? 16 : 12), y: y + (this.use3D ? 3 : 4), frac };
+      if (this.use3D && s.combo > 1) {
+        // the kill streak sits above the consumables, crisp and quiet until it climbs
+        const col = s.combo >= 25 ? '#ffffff' : s.combo >= 10 ? UI.brass.h : UI.parch.l;
+        const bump = Math.round(this.streakPop * 3);
+        const sx0 = x + 18, sy0 = y - 60;
+        this.lt(() => {
+          const w0 = pixelText(c, `x${s.combo}`, sx0, sy0 - bump, { size: 16, color: col, outline: UI.shadow });
+          pixelText(c, 'STREAK', sx0 + w0 + 4, sy0, { size: 16, color: UI.textDim, outline: UI.shadow });
+        });
+      }
+      if (s.combo > this.lastCombo) this.streakPop = 1;
+      this.lastCombo = s.combo;
+      this.streakPop = Math.max(0, this.streakPop - dt * 5);
       if (!this.use3D) this.spr('skullIcon', x - 2 + sx, y - 1 + sy + (low ? Math.round(Math.sin(this.t * 9)) : 0));
       this.tl(c, `${Math.ceil(s.hp)}`, x + 26 + sx, y + 1 + sy, UI.text, 16);
       this.tl(c, `/${Math.round(s.maxHp)}`, x + 26 + measure(c, `${Math.ceil(s.hp)}`) + sx, y + 1 + sy, UI.textDim, 16);
@@ -588,6 +628,7 @@ export class Hud {
       this.blit(barFrame(110, 10), x + 18, by);
       drawBarFill(c, x + 18, by, 110, 10, s.boost, UI.sky);
       this.spr('scorp', x + 130, by + 1);
+      if (this.use3D) this.tl(c, `${Math.round(s.speed)} m/s`, x + 146, by - 3, s.speed > 20 ? UI.brass.h : UI.textDim, 16, 'left');
       // statuses
       let stx = x + 182;
       for (const st of s.status) {
@@ -624,7 +665,7 @@ export class Hud {
         // the tin star and the nailed tally board (3D layer) — this side only lays them out
         const bt = Math.round(s.bountyTotal ?? 0);
         this.outlawBase.star = { x: x + 16 * k, y: y + 16 * k, rank: s.rank };
-        this.outlawBase.tally = { x: x + (37 + BOARD_HALF) * k, y: y + 15 * k, amount: bt };
+        this.outlawBase.tally = { x: x + (37 + BOARD_HALF) * k, y: y + 15 * k, amount: bt, frac: Math.max(0, Math.min(1, s.bountyFrac || 0)) };
       } else {
         const star = starBadge(15);
         const bounce = Math.round(Math.sin(this.rankPop * Math.PI) * 4);
@@ -662,7 +703,9 @@ export class Hud {
       this.outlawBase.plaque = null;
       this.outlawBase.watch = null;
     }
-    if (!s.boss && this.use3D) {
+    if (!s.boss && this.use3D && this.timeHud) {
+      // the day plaque (DayPlaque) and the hourglass (HourglassHud) are painted by run/Days.ts
+    } else if (!s.boss && this.use3D) {
       // the branded leather plaque on its chains (3D layer); the stopwatch hangs under it in the break
       if (s.wave !== this.lastWave) {
         this.lastWave = s.wave;
@@ -674,8 +717,15 @@ export class Hud {
       const brk = s.intermission !== undefined && s.intermission > 0;
       const py = 8 + 15 * k;
       this.outlawBase.plaque = { x: cx, y: py, label: s.waveLabel, time: tl < 900 ? `${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}` : null, drop };
-      this.outlawBase.watch = brk ? { left: s.intermission!, total: s.intermissionTotal ?? 30, bell: s.bell ?? 0 } : null;
-      if (brk) {
+      const glass = this.slots.get('hourglass');
+      if (glass) {
+        glass.x = cx;
+        glass.y = Math.round(py + 14 * k + 8 * k + (glass.h / 2) * k) - drop;
+        glass.k = k;
+        glass.visible = true;
+      }
+      this.outlawBase.watch = brk && !glass ? { left: s.intermission!, total: s.intermissionTotal ?? 30, bell: s.bell ?? 0 } : null;
+      if (brk && !glass) {
         // beside the watch: how to cut the break short
         const wy = Math.round(py + 14 * k + WATCH_DROP * k) - drop;
         const ringing = (s.bell ?? 0) > 0.02;
@@ -691,7 +741,7 @@ export class Hud {
         }
         this.tl(c, l1, ex, wy - 13, col, 16, 'right');
         if (l2) this.tl(c, l2, ex, wy + 1, col, 16, 'right');
-      } else this.tl(c, s.zone, cx, Math.round(py + 15 * k + (tl < 900 ? 14 : 3) * k) + 4 - drop, 'rgba(240,220,180,0.85)', 16, 'center');
+      } else if (!glass) this.tl(c, s.zone, cx, Math.round(py + 15 * k + (tl < 900 ? 14 : 3) * k) + 4 - drop, 'rgba(240,220,180,0.85)', 16, 'center');
     } else if (!s.boss) {
       if (s.wave !== this.lastWave) {
         this.lastWave = s.wave;
@@ -716,22 +766,39 @@ export class Hud {
       }
       this.tl(c, s.zone, cx, sy + sgH + 20, 'rgba(240,220,180,0.85)', 16, 'center');
     } else {
-      const bw = Math.min(300, Math.round(W * 0.55));
-      const bx = cx - bw / 2, by = 4 - slide * 60;
-      this.blit(parchment(bw, 44, 9), bx, by);
-      this.tl(c, 'WANTED', cx, by + 3, UI.blood.d, 16, 'center', false);
-      this.tl(c, s.boss.name.toUpperCase(), cx, by + 16, UI.wood.o, 16, 'center', false);
-      this.blit(barFrame(bw - 24, 12), bx + 12, by + 31);
-      drawBarFill(c, bx + 12, by + 31, bw - 24, 12, s.boss.frac, UI.blood);
+      // the boss's own themed bar (ui/BossBar): segments that crack, phase gems, hit jolts
+      this.bossBottom = this.bossBar.paint(c, dt, s.boss, cx, 4 - slide * 60, W);
+      const glass = this.slots.get('hourglass');
+      if (glass) {
+        glass.x = cx;
+        glass.y = Math.round(this.bossBottom + 6 + (glass.h / 2) * k);
+        glass.k = k;
+        glass.visible = true;
+      }
     }
+    for (const sl of this.slots.values())
+      if (sl.id !== 'hourglass') {
+        // other reservations stack under the purse on the left
+        sl.x = Math.round(8 + sl.w / 2);
+        sl.y = Math.round(6 + 60 * k + sl.h / 2);
+        sl.k = k;
+        sl.visible = true;
+      }
 
     // ---------------------------------------------------------- skills + ultimate (bottom right)
     if (this.use3D) {
       // key caps under the 3D tarot cards and their cooldown figures (cards: TarotBar)
+      const ultReady = s.ultCard ? (s.ultCard.ready ?? s.ultCard.cd <= 0) : s.ult >= 1;
       for (const a of this.cardAnchors) {
         if (!this.touch) {
           const kc = keycap(a.key);
           this.lt(() => this.blit(kc, a.x - kc.width / 2, a.y + a.h / 2 + 2, 1));
+        }
+        if (a.key === 'Z' && ultReady) {
+          const bob = Math.round(Math.sin(this.t * 5) * 1.5);
+          const col = Math.sin(this.t * 6) > 0 ? '#ffffff' : UI.venom.h;
+          const lab = this.touch ? 'TAP' : 'UNLEASH';
+          this.lt(() => pixelText(c, lab, a.x, a.y - a.h / 2 - 16 + bob, { size: 16, color: col, align: 'center', outline: UI.shadow }));
         }
         if (a.cd > 0.05 && a.cd < 99) this.tl(c, a.cd < 1 ? a.cd.toFixed(1) : String(Math.ceil(a.cd)), a.x, a.y - 8, UI.text, 16, 'center');
       }
@@ -780,12 +847,12 @@ export class Hud {
     // ---------------------------------------------------------- objective + marker
     // ---------------------------------------------------------- arsenal: carried guns + treasure (3D layer)
     if (this.use3D) {
-      const ar: ArsenalAnchors = { k: 1, x: cx, y: H - 32 + slide * 70, weapon: s.weapon ?? null, strip: null, markers: [] };
+      const ar: ArsenalAnchors = { k: 1, x: this.magX, y: this.magY, weapon: s.weapon ?? null, strip: null, markers: [] };
       const car = s.weapon?.carried ?? [];
       if (car.length > 1) {
-        const sy = H - 60 + slide * 70;
-        const slots = car.map((g, i) => ({ x: cx + 32 + i * SLOT, id: g.id, active: g.id === s.weapon!.id }));
-        ar.strip = { x: cx + 32 + ((car.length - 1) * SLOT) / 2, y: sy, slots };
+        const sy = this.magY - 40;
+        const slots = car.map((g, i) => ({ x: this.magX + i * SLOT, id: g.id, active: g.id === s.weapon!.id }));
+        ar.strip = { x: this.magX + ((car.length - 1) * SLOT) / 2, y: sy, slots };
         if (!this.touch)
           this.lt(() =>
             car.forEach((g, i) => {
@@ -883,19 +950,29 @@ export class Hud {
       const p = this.project(s.prompt.world);
       if (p.visible) {
         const x = Math.round(p.x / this.scale), y = Math.round(p.y / this.scale) + Math.round(Math.sin(this.t * 4) * 2);
+        // a new prompt pops in with a sweep of light; then it sits still and readable
+        const pk = s.prompt.key + s.prompt.text;
+        if (pk !== this.promptKey) {
+          this.promptKey = pk;
+          this.promptT = 0;
+        }
+        this.promptT += dt;
+        const pop = Math.round((1 - Math.min(1, this.promptT / 0.18)) * 4);
         if (this.touch) {
           // touch: no key, just the verb (the thing itself is what you touch)
           const label = s.prompt.text || 'TOUCH IT';
-          const bw = Math.ceil(measure(c, label, 16)) + 16;
-          this.blit(nine(ART.nine_toast, bw + 4, 22, 6), x - bw / 2 - 2, y - 11, 3);
-          text(c, label, x, y - 7, UI.wood.o, 16, 'center', false);
+          const bw = Math.ceil(pixelTextWidth(label, 16)) + 16;
+          this.blit(toastPlate(bw + 4, 20, UI.brass.l), x - bw / 2 - 2, y - 10 - pop, 3);
+          pixelText(c, label, x, y - 6 - pop, { size: 16, color: UI.text, align: 'center', outline: UI.shadow });
+          sweep(c, x - bw / 2, y - 9 - pop, bw, 18, this.promptT / 0.45);
         } else {
           const kc = keycap(s.prompt.key);
-          const tw = Math.ceil(measure(c, s.prompt.text, 16)) + 14;
+          const tw = Math.ceil(pixelTextWidth(s.prompt.text, 16)) + 14;
           const bw = tw + kc.width + 6;
-          this.blit(nine(ART.nine_toast, bw + 4, 22, 6), x - bw / 2 - 2, y - 11, 3);
-          this.blit(kc, x - bw / 2 + 4, y - 7, 1);
-          text(c, s.prompt.text, x - bw / 2 + kc.width + 9, y - 7, UI.wood.o, 16, 'left', false);
+          this.blit(toastPlate(bw + 4, 20, UI.brass.l), x - bw / 2 - 2, y - 10 - pop, 3);
+          this.blit(kc, x - bw / 2 + 5, y - 7 - pop, 1);
+          pixelText(c, s.prompt.text, x - bw / 2 + kc.width + 10, y - 6 - pop, { size: 16, color: UI.text, outline: UI.shadow });
+          sweep(c, x - bw / 2, y - 9 - pop, bw, 18, this.promptT / 0.45);
         }
       }
     }
@@ -928,31 +1005,35 @@ export class Hud {
         continue;
       }
       if (tt.big) {
-        // big title: drops in center with bounce, unfurls
+        // big title: drops in centre with a bounce on its red banner, crisp type, a sweep of light when new
         const k = Math.min(1, tt.t / 0.5);
         const out = tt.t > life - 0.4 ? (life - tt.t) / 0.4 : 1;
-        const tw = Math.ceil(measure(c, tt.text, 32)) + 24;
-        const yy = Math.round(H * 0.34 + (1 - easeOutBounce(k)) * -50);
+        const tw = Math.ceil(pixelTextWidth(tt.text, 32)) + 24;
+        const yy = Math.round(H * 0.3 + (1 - easeOutBounce(k)) * -50);
         c.globalAlpha = out;
-        // a red title banner with forked tails, unfurling from the middle
         const rb = strip3(ART.ribbon_end, ART.ribbon_mid, RIBBON_R, Math.round((tw + 24) * Math.min(1, k * 1.5)), 'ribbon');
         this.blit(rb, cx - rb.width / 2, yy - 8, 3);
-        if (k > 0.4) text(c, tt.text, cx, yy - 10, tt.color, 32, 'center');
-        if (tt.sub && k > 0.6) text(c, tt.sub, cx, yy + 22, UI.textDim, 16, 'center');
+        if (k > 0.4) {
+          pixelText(c, tt.text, cx, yy - 6, { size: 32, color: '#fff6e0', align: 'center', outline: '#2a0604' });
+          sweep(c, cx - tw / 2, yy - 6, tw, 22, (tt.t - 0.35) / 0.55);
+        }
+        if (tt.sub && k > 0.6) pixelText(c, tt.sub, cx, yy + 24, { size: 16, color: '#f0dcb4', align: 'center', outline: UI.shadow });
         c.globalAlpha = 1;
         continue;
       }
       const inK = Math.min(1, tt.t / 0.25);
       const out = tt.t > life - 0.3 ? (life - tt.t) / 0.3 : 1;
-      const tw = Math.ceil(Math.max(measure(c, tt.text, 16), tt.sub ? measure(c, tt.sub, 16) : 0)) + 14;
+      const tw = Math.ceil(Math.max(pixelTextWidth(tt.text, 16), tt.sub ? pixelTextWidth(tt.sub, 16) : 0)) + 16;
       const xx = W - 10 - tw - Math.round((1 - easeOutBack(inK)) * -120);
+      const th = tt.sub ? 34 : 20;
       c.globalAlpha = out;
-      // a clean parchment slip with a brass rule and rivets
-      this.blit(nine(ART.nine_toast, tw + 12, tt.sub ? 36 : 22, 6), xx - 6, ty - 3, 3);
-      text(c, tt.text, xx + 4, ty + 1, darken(tt.color), 16, 'left', false);
-      if (tt.sub) text(c, tt.sub, xx + 4, ty + 15, UI.wood.d, 16, 'left', false);
+      // a dark riveted plate with a brass rule and the toast's colour as its edge stripe
+      this.blit(toastPlate(tw + 10, th, tt.color), xx - 6, ty - 3, 3);
+      pixelText(c, tt.text, xx + 3, ty + 1, { size: 16, color: inkFor(tt.color), outline: UI.shadow });
+      if (tt.sub) pixelText(c, tt.sub, xx + 3, ty + 15, { size: 16, color: '#d8c8a8', outline: UI.shadow });
+      sweep(c, xx - 4, ty - 2, tw + 6, th - 2, tt.t / 0.5);
       c.globalAlpha = 1;
-      ty += tt.sub ? 36 : 22;
+      ty += th + 2;
     }
     this.outlawBase.k = k;
     this.anchors.outlaw = this.use3D ? this.outlawBase : null;
@@ -974,10 +1055,60 @@ function easeOutBounce(t: number) {
   if (t < 2.5 / d1) return n1 * (t -= 2.25 / d1) * t + 0.9375;
   return n1 * (t -= 2.625 / d1) * t + 0.984375;
 }
-/** toast text sits on parchment: use darker ink variants of bright colors */
-function darken(css: string) {
-  if (!css.startsWith('#')) return UI.wood.o;
-  const n = parseInt(css.slice(1), 16);
-  const r = ((n >> 16) & 255) * 0.42, g = ((n >> 8) & 255) * 0.42, b = (n & 255) * 0.42;
-  return `rgb(${r | 0},${g | 0},${b | 0})`;
+/** a band of light sweeping across a fresh line of type (p 0..1) */
+function sweep(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, p: number) {
+  if (p <= 0 || p >= 1) return;
+  const a = c.globalAlpha;
+  const hx = Math.round(x + p * (w + h));
+  for (let r = 0; r < h; r++) {
+    const sx = hx - r;
+    if (sx < x || sx >= x + w) continue;
+    c.globalAlpha = a * 0.55 * (1 - p * 0.6);
+    px(c, sx, y + r, 2, 1, '#ffffff');
+  }
+  c.globalAlpha = a;
 }
+/** a toast's plate: dark leather in an ink outline, brass top rule, rivets, a colour stripe at the left */
+const plateCache = new Map<string, HTMLCanvasElement>();
+function toastPlate(w: number, h: number, col: string) {
+  const key = `${w}x${h}${col}`;
+  let cv = plateCache.get(key);
+  if (cv) return cv;
+  cv = document.createElement('canvas');
+  cv.width = w;
+  cv.height = h;
+  const g = cv.getContext('2d')!;
+  const stripe = col.startsWith('#') ? col : UI.brass.l;
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const edge = x === 0 || y === 0 || x === w - 1 || y === h - 1;
+      const corner = (x === 0 || x === w - 1) && (y === 0 || y === h - 1);
+      if (corner) continue;
+      let cc = '#2a1a10';
+      if (edge) cc = '#120a06';
+      else if (y === 1) cc = UI.brass.l;
+      else if (y === 2) cc = UI.brass.d;
+      else if (y === h - 2) cc = '#1a100a';
+      else if (x <= 2) cc = x === 1 ? stripe : '#120a06';
+      else if ((x * 7 + y * 3) % 23 === 0) cc = '#332014';
+      px(g, x, y, 1, 1, cc);
+    }
+  for (const rx of [5, w - 6]) {
+    px(g, rx, 1, 2, 2, UI.brass.d);
+    px(g, rx, 1, 1, 1, UI.brass.h);
+  }
+  plateCache.set(key, cv);
+  if (plateCache.size > 60) plateCache.delete(plateCache.keys().next().value!);
+  return cv;
+}
+/** toast type on the dark plate: the toast's own colour, lifted a little if it is too dark to read */
+function inkFor(css: string) {
+  if (!css.startsWith('#') || css.length < 7) return UI.text;
+  const n = parseInt(css.slice(1, 7), 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const l = 0.299 * r + 0.587 * g + 0.114 * b;
+  if (l > 120) return css;
+  const k = 150 / Math.max(1, l);
+  return `rgb(${Math.min(255, r * k) | 0},${Math.min(255, g * k) | 0},${Math.min(255, b * k) | 0})`;
+}
+

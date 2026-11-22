@@ -30,7 +30,9 @@ export interface Interactable {
 export class Interactions {
   list: Interactable[] = [];
   current: Interactable | null = null;
-  constructor(private player: Player) {}
+  constructor(private player: Player) {
+    player.interactions = this; // the board auto-brakes and the camera frames what you ride at (player/AutoBrake)
+  }
   add(i: Interactable) {
     this.list.push(i);
     return i;

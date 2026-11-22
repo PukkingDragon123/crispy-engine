@@ -19,6 +19,7 @@ import type { World } from './World';
 import { globalUniforms } from '../../engine/render/VoxelMaterial';
 import { papyrusClump, cropTuft } from '../models/props/nile';
 import { BURN, BURN_GLSL } from './NileBurn';
+import { Trees } from './Trees';
 
 const LS = 128; // layer size (texels)
 const PXM = 64; // texels per metre (the fine flora voxels keep their twigs)
@@ -389,6 +390,8 @@ interface Ctx {
 
 export class Foliage {
   mesh: THREE.Mesh;
+  /** pixel-art impostor trees and bushes (palms, acacias, tamarisks, scrub, oasis shrubs) */
+  trees: Trees;
   private geo: THREE.InstancedBufferGeometry;
   private buf: THREE.InstancedInterleavedBuffer;
   private cap = 26000;
@@ -410,6 +413,7 @@ export class Foliage {
   constructor(private world: World) {
     const at = spriteAtlas();
     this.size = at.size;
+    this.trees = new Trees(world);
     this.geo = crossQuads();
     this.buf = new THREE.InstancedInterleavedBuffer(new Float32Array(this.cap * STRIDE), STRIDE, 1);
     this.buf.setUsage(THREE.DynamicDrawUsage);
@@ -570,6 +574,7 @@ export class Foliage {
   }
 
   update(focus: THREE.Vector3) {
+    this.trees.update();
     this.uFocus.value.copy(focus);
     const moved = Math.hypot(focus.x - this.last.x, focus.z - this.last.z);
     if (!this.dirty && moved < 4) return;
@@ -629,6 +634,7 @@ export class Foliage {
   }
 
   dispose() {
+    this.trees.dispose();
     this.geo.dispose();
     (this.mesh.material as THREE.Material).dispose();
     this.mesh.removeFromParent();

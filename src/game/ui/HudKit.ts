@@ -1,4 +1,4 @@
-// Shared kit for the HUD pieces (SoulBar, MissionPaper, OutlawHud, ArsenalHud):
+// Shared kit for the HUD pieces (HudBullets, MissionPaper, OutlawHud, ArsenalHud):
 //  • sculpt()      a dense SDF voxeliser: every cell whose centre is inside the
 //                  shape is filled, and its colour is painted from the surface
 //                  normal, how exposed the voxel is (edges rub bright, crevices

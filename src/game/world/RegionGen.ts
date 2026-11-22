@@ -621,7 +621,8 @@ function woodScatter(ctx: ThemeCtx, zn: ZoneDef) {
   const { rng } = ctx;
   const R = zn.r;
   const K = areaK(zn);
-  for (const k of WOOD_SINGLES) if (rng.chance(0.75)) scatter(ctx, zn, k, Math.round(rng.int(1, 3) * K * 0.6), 8, R - 4, 7);
+  // sparse: a few weathered singles, not a junk yard of crates (less to bump into on the ground)
+  for (const k of WOOD_SINGLES) if (rng.chance(0.38)) scatter(ctx, zn, k, Math.max(1, Math.round(rng.int(1, 2) * K * 0.35)), 8, R - 4, 12);
   // fence runs
   for (let f = 0; f < Math.round(3 * Math.sqrt(K)); f++) {
     const a = rng.range(0, Math.PI * 2), r0 = rng.range(R * 0.3, R * 0.85);
@@ -645,7 +646,7 @@ function outlawCamp(ctx: ThemeCtx, zn: ZoneDef, x: number, z: number) {
     const a = (i / n) * Math.PI * 2 + rng.range(-0.3, 0.3);
     zn.anchors.push({ kind: 'tent', x: x + Math.cos(a) * 6.5, z: z + Math.sin(a) * 6.5, rot: a + Math.PI });
   }
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 2; i++) {
     const a = rng.range(0, Math.PI * 2), rr = rng.range(3, 9);
     zn.anchors.push({ kind: rng.pick(['crate', 'barrel', 'tntCrate', 'whiskeyBarrel']), x: x + Math.cos(a) * rr, z: z + Math.sin(a) * rr, rot: rng.range(0, 6.28) });
   }
@@ -670,7 +671,10 @@ function applyTheme(ctx: ThemeCtx, zn: ZoneDef) {
   const commonProps = (cact = 10, rocks = 8) => {
     scatter(ctx, zn, 'cactus', N(cact + 4), 10, R - 4, 7);
     scatter(ctx, zn, 'rock', N(Math.max(2, rocks - 3)), 8, R - 2, 8);
-    scatter(ctx, zn, 'bush', N(6), 6, R - 2, 5);
+    scatter(ctx, zn, 'bush', N(12), 6, R - 2, 5);
+    // lone desert trees: flat-topped acacias and feathery tamarisks
+    scatter(ctx, zn, 'acacia', N(4), 12, R - 6, 18);
+    scatter(ctx, zn, 'tamarisk', N(2), 12, R - 6, 16);
     // the desert is full of dead brush and dry grass
     scatter(ctx, zn, 'deadBush', N(34), 4, R + 6, 3.2);
     scatter(ctx, zn, 'dryGrass', N(46), 3, R + 6, 2.2);
@@ -1145,10 +1149,13 @@ function applyTheme(ctx: ThemeCtx, zn: ZoneDef) {
   // a lush oasis in the zones that can hold one (water, reeds, palms, flowers, a resting spot)
   const OASIS: Partial<Record<ThemeId, number>> = { flats: 10, glassdunes: 12, mesas: 11, palmshore: 11, hollows: 9, sphinxavenue: 10 };
   if (OASIS[zn.theme]) placeOasis(ctx, zn, OASIS[zn.theme]!);
+  // procedural rock formations: hoodoos, balanced rocks and sandstone ledges in the zone,
+  // mesas and buttes standing round its rim
+  rockFormations(ctx, zn);
   // treasure, ore and secrets in every zone
   scatter(ctx, zn, 'ore', Math.round(3 * AK * 0.6), 10, R - 6, 18, (a) => (a.data = { type: rng.pick(['copper', 'silver', 'gold', 'turquoise', 'amethyst']) }));
   scatter(ctx, zn, 'chest', 3, R * 0.25, R - 6, 12);
-  scatter(ctx, zn, 'pot', Math.round(4 * AK * 0.6), 6, R - 6, 8);
+  scatter(ctx, zn, 'pot', Math.round(2 * AK * 0.6), 6, R - 6, 14);
   // one big landmark encounter per zone (tall wooden building, walk-in cinematic + mission)
   const lmTypes: LandmarkType[] = ['tradingPost', 'outlawFort', 'mineHeadframe', 'ranchBarn', 'sheriffOffice', 'saloon'];
   const lt = zn.index === 0 ? 'tradingPost' : lmTypes[(zn.index * 7 + ctx.spec.key.charCodeAt(0)) % lmTypes.length];
@@ -1190,11 +1197,12 @@ function rampUp(field: Heightfield, a: number, cx: number, cz: number, r: number
 // ---------------------------------------------------------------------------
 // Footprints: how much room an anchor takes (m). Small scatter can be cleared away by a
 // set piece; foliage never blocks anything.
-const FOLIAGE = new Set(['deadBush', 'dryGrass', 'bush', 'tumbleweed', 'reeds', 'oasisReeds', 'oasisFlowers', 'lilyPads']);
+const FOLIAGE = new Set(['shrub', 'deadBush', 'dryGrass', 'bush', 'tumbleweed', 'reeds', 'oasisReeds', 'oasisFlowers', 'lilyPads']);
 const FOOT: Record<string, number> = {
   outpost: 6, shack: 5.5, saloonFacade: 6.5, sheriffFacade: 6.5, storeFacade: 6.5, tent: 3.4, wagon: 3.8, windmill: 4.5, waterTower: 4.5, watchtower: 4.5, outhouse: 2, gallows: 3.6,
   mineEntrance: 3.5, well: 1.8, campfire: 1.5, rug: 1.6, wantedBoard: 1.5, oasisMark: 3.5, rockArch: 13, colossusLegs: 6.5, colossusHead: 6, shipwreck: 11, shrine: 5.5, cairn: 1.6,
   ribArch: 6, giantSkull: 4.5, sphinx: 6, statue: 2.2, column: 1.2, obelisk: 1.4, obeliskBroken: 1.4, hieroglyphWall: 4, sarcophagus: 2.2, totem: 1.2, capstone: 0, stoneGate: 7,
+  hoodoo: 3.2, mesaButte: 15, balancedRock: 3, sandstoneLedge: 7.5, acacia: 1.4, tamarisk: 1.3,
   boneGate: 7, ruinWall: 3.5, palm: 1, cactus: 1, rock: 1.4, boulder: 1.6, chest: 1.2, ore: 1, pot: 0.8, crate: 0.9, barrel: 0.9, whiskeyBarrel: 0.9, tntCrate: 0.9,
 };
 /** kinds whose footprint radius is carried in data.r */
@@ -1671,7 +1679,7 @@ function buildPoi(ctx: ThemeCtx, zn: ZoneDef, p: Poi) {
 }
 
 /** scatter that a set piece may clear away from its footprint */
-const SMALL_SCATTER = new Set(['cactus', 'bush', 'tumbleweed', 'deadBush', 'dryGrass', 'rock', 'boulder', 'ore', 'pot', 'boneScatter', 'skull', 'palm', 'reeds', 'obeliskBroken', 'mineCart', 'tntCrate', 'ruinWall', 'chest', 'crate', 'barrel', 'whiskeyBarrel', 'fence', 'fenceBroken', 'signpost', 'hitchingPost', 'wagonWheel', 'cattleSkullPost']);
+const SMALL_SCATTER = new Set(['acacia', 'tamarisk', 'shrub', 'cactus', 'bush', 'tumbleweed', 'deadBush', 'dryGrass', 'rock', 'boulder', 'ore', 'pot', 'boneScatter', 'skull', 'palm', 'reeds', 'obeliskBroken', 'mineCart', 'tntCrate', 'ruinWall', 'chest', 'crate', 'barrel', 'whiskeyBarrel', 'fence', 'fenceBroken', 'signpost', 'hitchingPost', 'wagonWheel', 'cattleSkullPost']);
 
 /** corridor mouths of a zone (keep set pieces off the way in and out) */
 function mouths(ctx: ThemeCtx, zn: ZoneDef) {
@@ -1688,6 +1696,31 @@ function mouths(ctx: ThemeCtx, zn: ZoneDef) {
  * green bank and damp dark sand, reeds and cattails at the waterline, lily pads,
  * palms and flowering shrubs on the bank, and a resting spot with a drinking place.
  */
+function rockFormations(ctx: ThemeCtx, zn: ZoneDef) {
+  if (zn.theme === 'arena' || zn.theme === 'apex' || zn.theme === 'oasisheart') return;
+  const { rng } = ctx;
+  const mo = mouths(ctx, zn);
+  const startZ = zn.cz - zn.r * 0.45;
+  const place = (kind: string, n: number, r0: number, r1: number, foot: number) => {
+    for (let k = 0, got = 0; k < n * 14 && got < n; k++) {
+      const a = rng.range(0, Math.PI * 2), r = rng.range(r0, r1);
+      const x = zn.cx + Math.cos(a) * r, z = zn.cz + Math.sin(a) * r;
+      if (mo.some((m) => Math.hypot(m.x - x, m.z - z) < foot + 16)) continue;
+      if (zn.index === 0 && Math.hypot(x - zn.cx, z - startZ) < foot + 14) continue;
+      if (blocked(zn, x, z, foot, 3)) continue;
+      if (!ctx.field.inBounds(x, z, foot + 4)) continue;
+      zn.anchors = zn.anchors.filter((o) => !SMALL_SCATTER.has(o.kind) || Math.hypot(o.x - x, o.z - z) > foot + 1);
+      zn.anchors.push({ kind, x, z, rot: rng.range(0, Math.PI * 2), scale: rng.range(0.85, 1.2) });
+      got++;
+    }
+  };
+  const K = Math.max(1, zn.r / 70);
+  place('hoodoo', Math.round(rng.int(1, 3) * K), zn.r * 0.3, zn.r * 0.85, 3.5);
+  place('balancedRock', rng.int(0, 2), zn.r * 0.3, zn.r * 0.8, 3.5);
+  place('sandstoneLedge', Math.round(rng.int(1, 2) * K), zn.r * 0.35, zn.r * 0.85, 8);
+  place('mesaButte', Math.round(rng.int(1, 3) * K), zn.r * 0.9, zn.r + 14, 15);
+}
+
 function placeOasis(ctx: ThemeCtx, zn: ZoneDef, R: number) {
   const { rng, field, noise } = ctx;
   const half = R * 1.6;
@@ -1758,6 +1791,8 @@ function placeOasis(ctx: ThemeCtx, zn: ZoneDef, R: number) {
   ring('palm', 7 + rng.int(0, 2), 1.08, 1.45, (a) => (a.scale = rng.range(0.95, 1.35)));
   ring('oasisReeds', 13, 0.84, 1.04);
   ring('oasisFlowers', 8, 1.16, 1.55);
+  ring('shrub', 9, 1.12, 1.6, (a) => (a.scale = rng.range(0.8, 1.25)));
+  ring('tamarisk', 2, 1.5, 1.75, (a) => (a.scale = rng.range(0.85, 1.1)));
   ring('lilyPads', 4, 0.25, 0.7, (a) => (a.data = { y: level - 0.02 }));
   ring('rock', 3, 1.0, 1.15, (a) => (a.scale = rng.range(0.5, 0.8)));
 }

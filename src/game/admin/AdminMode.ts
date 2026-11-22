@@ -31,6 +31,7 @@ import { nine, sprite, ironPlate, SWAP_LIT, type PixelSprite } from '../ui/Pixel
 import { HUD_ART as ART } from '../ui/HudArt';
 import { pixelText, pixelTextWidth } from '../ui/HudSprites';
 import { CHEATS } from './Cheats';
+import { forgetAdmin } from './AdminGate';
 import { AdminPanel, INK } from './AdminPanel';
 import { AdminMap } from './AdminMap';
 import { areaFor, prewarmBoss, moveTitle, type BossEntry } from './AdminData';
@@ -198,7 +199,8 @@ export class AdminMode {
       e.preventDefault();
       e.stopImmediatePropagation();
     };
-    if (e.code === 'F1' || e.code === 'Backquote') {
+    // F1 / ` / F10 / Ctrl+Shift+A (laptops without F-keys, keyboards without a backquote key)
+    if (e.code === 'F1' || e.code === 'Backquote' || e.code === 'F10' || (e.code === 'KeyA' && e.ctrlKey && e.shiftKey)) {
       stop();
       if (!e.repeat) this.toggle();
       return;
@@ -818,11 +820,16 @@ export class AdminMode {
   }
   resetSave() {
     try {
-      for (const k of Object.keys(localStorage)) if (k.startsWith('dustup') || k.startsWith('sundown-')) localStorage.removeItem(k);
+      for (const k of Object.keys(localStorage)) if ((k.startsWith('dustup') || k.startsWith('sundown-')) && k !== 'dustup-admin') localStorage.removeItem(k);
     } catch {
       /* storage blocked */
     }
     location.reload();
+  }
+  /** stop remembering the typed ADMIN code on this device (from the next load) */
+  forget() {
+    forgetAdmin();
+    this.say('Admin forgotten on this device: gone after a reload (unless the address or the build turns it on)');
   }
   /** what the save holds: [label, value, good?] */
   saveStatus(): [string, string, boolean?][] {

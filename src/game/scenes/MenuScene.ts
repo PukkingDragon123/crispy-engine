@@ -34,6 +34,9 @@ import { hideoutOpen, hideoutRevealPending, markHideoutRevealed, hallOpen, hallR
 import { ThothHall } from './ThothHall';
 import { resetTutor } from '../ui/TouchTutor';
 import { StageFork } from './menu/StageFork';
+import { MenuRuin } from './menu/MenuRuin';
+import { GunCleaning } from './menu/GunCleaning';
+import { PauseGazette } from '../ui/PauseGazette';
 
 type Pivot = [number, number, number] | 'bottom' | 'center';
 function vmesh(model: VoxelModel, vs: number, pivot: Pivot = 'bottom', mat: THREE.Material = sharedVoxelMaterial, shadow = true) {
@@ -51,6 +54,10 @@ const SUN_DIR = new THREE.Vector3(-0.39, 0.07, -0.918).normalize();
 const MOON_DIR = new THREE.Vector3(-0.43, 0.19, -0.88).normalize();
 const FIRE = new THREE.Vector3(-1.25, 0, 0.75);
 const SEAT = { x: 0.05, z: -0.5, yaw: -0.42 };
+/** where he stands cleaning his iron (in front of the log, turned three-quarters toward the ruin) */
+const STAND = { x: -0.2, z: 0.3, yaw: 0.35 };
+/** the ruined cantina behind the camp, right of the gate (menu/MenuRuin) */
+const RUIN = { x: 4.6, z: -6.2, yaw: -0.32 };
 const BOARD = { x: 1.0, z: -1.05, yaw: -0.25 };
 const GATE = { x: -0.45, z: -2.75, yaw: 0.05 };
 const POST = { x: 2.45, z: 0.95, yaw: -0.24 };
@@ -217,6 +224,9 @@ export class MenuScene implements GameScene {
   private kb = false;
   private lastNdc = new THREE.Vector2(9, 9);
   private hero: RigInstance | null = null;
+  private gunRig: RigInstance | null = null;
+  private clean: GunCleaning | null = null;
+  private ruin: MenuRuin | null = null;
   private gunSpin = new THREE.Group();
   private heroBase = new THREE.Vector3();
   private head = { yaw: 0, pitch: 0 };
@@ -282,6 +292,12 @@ export class MenuScene implements GameScene {
       this.buildLife();
     } catch (e) {
       console.warn('[menu] life failed', e);
+    }
+    try {
+      this.ruin = new MenuRuin({ gy: this.gy, ...RUIN });
+      this.scene.add(this.ruin.group);
+    } catch (e) {
+      console.warn('[menu] ruin failed', e);
     }
     // camera
     this.camera.aspect = eng.width / eng.height;
@@ -498,8 +514,8 @@ export class MenuScene implements GameScene {
     };
     for (const [k, h] of gt.lanternHooks.entries()) hang(gate, h, k * 2.1);
     hang(post, sp.lanternHook, 4.2);
-    // ---- THOTH'S HALL: the mysterious door in the dune, far left
-    try {
+    // ---- THOTH'S HALL: the mysterious door in the dune, far left (not there at all before Serket's tutorial is done)
+    if (loadSave().tutorialDone) try {
       // shut and sealed until the first ride is over; the first menu after it shows the door waking
       const ks = new KnowledgeSign(this.particles, { sealed: !hallOpen() || hallRevealPending() });
       // hard by the left edge of the frame; on narrower screens it steps in so the doorway stays in view
@@ -663,24 +679,17 @@ export class MenuScene implements GameScene {
     gunSpec = gunSpec ?? this.rigOf(['revolver_standard']);
     if (gunSpec) {
       const gun = new RigInstance(buildRigGeo(gunSpec, gunSpec.name + ':player'), { material: hero.material });
+      this.gunRig = gun;
       const holder = new THREE.Group();
       holder.rotation.x = Math.PI / 2;
       holder.add(this.gunSpin);
       this.gunSpin.add(gun.root);
       if (!hero.attach('hand_r', holder)) hero.nodes['fore_r']?.add(holder);
     }
-    // seat him: pose, then rest the lowest of pelvis/thighs on the blanket
-    this.poseSeated(0, 0);
-    hero.root.position.set(0, 0, 0);
-    hero.root.rotation.set(0, 0, 0);
-    hero.root.updateMatrixWorld(true);
-    const box = new THREE.Box3();
-    for (const n of ['pelvis', 'thigh_l', 'thigh_r']) if (hero.meshes[n]) box.union(new THREE.Box3().setFromObject(hero.meshes[n]));
-    const under = isFinite(box.min.y) ? box.min.y : (spec.meta?.hipY ?? 0.66) - 0.1;
-    const lf = this.logFrame;
-    this.heroBase.set(lf.x + Math.sin(lf.yaw) * 0.02, lf.top - under - 0.015, lf.z + Math.cos(lf.yaw) * 0.02);
+    // he stands in front of the log by the fire, cleaning his iron (menu/GunCleaning)
+    this.heroBase.set(STAND.x, this.gy(STAND.x, STAND.z), STAND.z);
     hero.root.position.copy(this.heroBase);
-    hero.root.rotation.y = lf.yaw;
+    hero.root.rotation.y = STAND.yaw;
     // board: on his back when the rig has the socket, else planted upright in the sand
     let be: { model: VoxelModel; voxelSize: number; meta?: any } | undefined;
     try {
@@ -733,7 +742,8 @@ export class MenuScene implements GameScene {
     } catch {}
     // duster tails + scarf: engine cloth in the wind, resting on the log and the sand
     this.garments = new Garments(hero, this.cloth, (x, z) => this.clothGround(x, z));
-    this.poseSeated(0, 0);
+    this.clean = new GunCleaning(hero, this.gunRig, this.gunSpin, this.particles, this.engine.audio, this.cloth);
+    this.clean.update(1 / 60, 0, new THREE.Vector3());
     hero.root.updateMatrixWorld(true);
     for (let i = 0; i < 90; i++) {
       this.garments.update(MS.MENU_WIND.x * 2.4, MS.MENU_WIND.z * 2.4, new THREE.Vector3());
@@ -789,6 +799,9 @@ export class MenuScene implements GameScene {
     this.fork?.dispose();
     this.msg.remove();
     this.panel?.remove();
+    PauseGazette.get().show(false);
+    this.clean?.dispose(this.cloth);
+    this.ruin?.dispose();
     this.wind?.stop(0.5);
     this.crickets?.stop(0.5);
     document.body.style.cursor = 'default';
@@ -904,69 +917,15 @@ export class MenuScene implements GameScene {
     void hall.open();
   }
 
+  /** SETTINGS: THE DUST GAZETTE drops onto the camp (ui/PauseGazette), its settings column and classifieds
+   *  are the controls; clipping the coupon (or Esc, or a click off the sheet) folds it away */
   private openSettings() {
-    if (this.panel) {
-      this.panel.remove();
-      this.panel = null;
+    const gz = PauseGazette.get();
+    if (gz.shown) {
+      gz.show(false);
       return;
     }
-    const eng = this.engine;
-    const p = document.createElement('div');
-    p.style.cssText = "position:absolute;left:6vw;top:50%;transform:translateY(-50%);z-index:8;padding:18px 22px;background:#e8d4a4;border:4px solid #5a3418;box-shadow:0 6px 0 #2a1408;font-family:'Alagard';color:#2a1a10;font-size:18px;min-width:260px;pointer-events:auto";
-    const row = (label: string, input: HTMLElement) => {
-      const r = document.createElement('div');
-      r.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:14px;margin:10px 0';
-      const l = document.createElement('span');
-      l.textContent = label;
-      r.append(l, input);
-      p.appendChild(r);
-    };
-    const title = document.createElement('div');
-    title.textContent = 'SETTINGS';
-    title.style.cssText = 'font-size:28px;color:#8a2a18;text-align:center;margin-bottom:6px';
-    p.appendChild(title);
-    const vol = document.createElement('input');
-    vol.type = 'range';
-    vol.min = '0';
-    vol.max = '100';
-    vol.value = String(Math.round(((eng.audio as any).master?.gain?.value ?? 1) * 100));
-    vol.oninput = () => (eng.audio as any).setMaster?.(+vol.value / 100);
-    row('Volume', vol);
-    const q = document.createElement('select');
-    for (const [v, t] of [['high', 'High'], ['low', 'Low (fast)']]) {
-      const o = document.createElement('option');
-      o.value = v;
-      o.textContent = t;
-      q.appendChild(o);
-    }
-    q.value = eng.quality.bloom ? 'high' : 'low';
-    q.onchange = () => eng.applyQuality(q.value === 'low' ? { shadows: false, pixelRatio: 0.6, bloom: false, shadowSize: 512 } : { shadows: true, pixelRatio: Math.min(window.devicePixelRatio, 1.5), bloom: true, shadowSize: 4096 });
-    row('Quality', q);
-    const sens = document.createElement('input');
-    sens.type = 'range';
-    sens.min = '20';
-    sens.max = '300';
-    sens.value = String(Math.round(((eng.input as any).sensitivity ?? 1) * 100));
-    sens.oninput = () => ((eng.input as any).sensitivity = +sens.value / 100);
-    const touch = eng.input.touchDevice;
-    row(touch ? 'Aim speed' : 'Mouse', sens);
-    if (touch) {
-      // the board always kicks along by itself on a touch screen; the lesson can be shown again
-      const tl = document.createElement('input');
-      tl.type = 'checkbox';
-      tl.checked = false;
-      tl.onchange = () => tl.checked && resetTutor();
-      row('Touch lesson again', tl);
-    } else {
-      const ap = document.createElement('input');
-      ap.type = 'checkbox';
-      ap.checked = eng.input.autoPushDesktop;
-      ap.onchange = () => eng.input.setAutoPushDesktop(ap.checked);
-      row('Auto push', ap);
-    }
-    p.querySelectorAll('input,select').forEach((el) => ((el as HTMLElement).style.cssText = 'font-family:Alagard;font-size:16px;accent-color:#8a2a18'));
-    eng.overlay.appendChild(p);
-    this.panel = p;
+    gz.show(true, [{ label: 'BACK TO CAMP', fn: () => gz.show(false) }], 'menu');
   }
 
   // ================================================================ per frame
@@ -988,6 +947,7 @@ export class MenuScene implements GameScene {
     this.updateFire(dt);
     this.updateSand(dt);
     this.updateWorldLife(dt);
+    this.ruin?.update(dt, t, this.gust);
     if (this.garments && this.hero) {
       this.hero.root.updateMatrixWorld(true);
       this.garments.update(MS.MENU_WIND.x * 2.6 * this.gust, MS.MENU_WIND.z * 2.6 * this.gust, new THREE.Vector3());
@@ -1029,8 +989,12 @@ export class MenuScene implements GameScene {
     const eng = this.engine;
     const inp = eng.input;
     const n = this.planks.length;
-    // the settings card closes with Esc (on a touch screen: two fingers)
-    if (this.panel && inp.wasPressed('Escape')) this.openSettings();
+    // the newspaper owns the screen while it is down; Esc folds it away
+    if (PauseGazette.get().shown) {
+      if (inp.wasPressed('Escape')) PauseGazette.get().show(false);
+      document.body.style.cursor = 'default';
+      return;
+    }
     // keyboard
     const up = inp.wasPressed('ArrowUp') || inp.wasPressed('KeyW');
     const down = inp.wasPressed('ArrowDown') || inp.wasPressed('KeyS');
@@ -1113,140 +1077,31 @@ export class MenuScene implements GameScene {
   }
 
   // ---------------------------------------------------------------- hero
-  private poseSeated(t: number, dt: number) {
-    const h = this.hero;
-    if (!h) return;
-    const n = h.nodes;
-    const breathe = Math.sin(t * 1.55) * 0.018;
-    const set = (k: string, x: number, y = 0, z = 0) => n[k]?.rotation.set(x, y, z);
-    set('pelvis', -0.04, 0, 0);
-    set('thigh_l', -1.66, 0, 0.2);
-    set('thigh_r', -1.62, 0, -0.16);
-    set('shin_l', 1.5, 0, -0.06);
-    set('shin_r', 1.42, 0, 0.08);
-    if (n['coat']) n['coat'].rotation.set(1.05, 0, 0);
-    if (n['torso']) n['torso'].rotation.set(0.27 + breathe, 0, 0);
-    set('arm_l', -0.62, 0, 0.16);
-    set('fore_l', -0.72, 0, 0);
-    set('arm_r', -0.64, 0, -0.14);
-    set('fore_r', -0.66, 0, 0);
-    void dt;
-  }
-
-  private startAct() {
-    const opts: ActKind[] = (['coin', 'spin', 'glance'] as ActKind[]).filter((k) => k !== this.lastAct);
-    const kind = opts[Math.floor(Math.random() * opts.length)];
-    this.act = { kind, t: 0, flag: 0 };
-    this.lastAct = kind;
-  }
-
+  /** the hero's loop: standing, cleaning the revolver (menu/GunCleaning); the head follows its focus,
+   *  a sign under the cursor, or now and then the camera and the corpse */
   private updateHero(dt: number) {
     const h = this.hero;
     if (!h) return;
     const t = this.t;
     const n = h.nodes;
-    this.poseSeated(t, dt);
-    // idle actions
-    if (!this.act && t > this.nextAct && !this.leaving) this.startAct();
-    let lookAt: THREE.Vector3 = new THREE.Vector3(FIRE.x, FIRE.y + 0.3, FIRE.z);
-    if (Math.sin(t * 0.23) > 0.55) lookAt = new THREE.Vector3(-30, 6, -120); // gazes at the sunset now and then
-    const a = this.act;
-    if (a) {
-      a.t += dt;
-      const k = a.t;
-      if (a.kind === 'coin') this.actCoin(k, a, dt);
-      else if (a.kind === 'spin') {
-        const w = smooth01(k / 0.4) * (1 - smooth01((k - 1.6) / 0.6));
-        if (n['arm_r']) n['arm_r'].rotation.x -= 0.32 * w;
-        if (n['fore_r']) n['fore_r'].rotation.x -= 0.62 * w;
-        if (k > 0.35 && a.flag === 0) {
-          a.flag = 1;
-          this.engine.audio.play('rev_spin', { volume: 0.4 });
-        }
-        this.gunSpin.rotation.x = -Ease.outCubic(clamp((k - 0.35) / 1.15, 0, 1)) * Math.PI * 6;
-        if (k > 1.6 && a.flag === 1) {
-          a.flag = 2;
-          this.engine.audio.play('rev_hammer', { volume: 0.25 });
-        }
-        lookAt = this.gunSpin.getWorldPosition(new THREE.Vector3());
-        if (k > 2.3) this.endAct();
-      } else {
-        // glance at the camera, a wink
-        lookAt = this.camera.position.clone();
-        if (k > 0.9 && a.flag === 0) {
-          a.flag = 1;
-          h.setExpression('wink');
-        }
-        if (k > 1.5 && a.flag === 1) {
-          a.flag = 2;
-          h.setExpression('smug');
-        }
-        if (k > 3) this.endAct();
-      }
-      if (this.coin?.fly) lookAt = this.coin.p;
-    }
-    if (this.hot && !(a && a.kind === 'coin')) lookAt = this.hot.proxy.getWorldPosition(new THREE.Vector3());
-    // head + torso follow the look target
+    const wind = new THREE.Vector3(MS.MENU_WIND.x * 2.4 * this.gust, 0, MS.MENU_WIND.z * 2.4 * this.gust);
+    this.clean?.update(dt, t, wind);
+    const c = this.clean;
+    let lookAt: THREE.Vector3 = c?.focus ?? this.camera.position.clone();
+    // the look between passes: the camera, or the husk by the ruin
+    if (c && !c.focus && this.ruin?.corpse && Math.sin(t * 0.31) > 0.2) lookAt = this.ruin.corpseAt;
+    if (this.hot) lookAt = this.hot.proxy.getWorldPosition(new THREE.Vector3());
+    const working = !!c?.focus && !this.hot;
     h.root.updateMatrixWorld(true);
     const local = h.root.worldToLocal(lookAt.clone());
-    const hy = (this.hero!.geo.spec.meta?.shoulderY ?? 1.18) + 0.12;
-    const yaw = clamp(Math.atan2(local.x, local.z), -1.15, 1.15);
-    const pitch = clamp(-Math.atan2(local.y - hy, Math.hypot(local.x, local.z)), -0.55, 0.65);
-    this.head.yaw = damp(this.head.yaw, yaw, 4.5, dt);
-    this.head.pitch = damp(this.head.pitch, pitch, 4.5, dt);
-    if (n['torso']) n['torso'].rotation.y = this.head.yaw * 0.25;
-    if (n['head']) n['head'].rotation.set(-0.22 + this.head.pitch + Math.sin(t * 0.7) * 0.015, this.head.yaw * 0.75, Math.sin(t * 0.4) * 0.03);
+    const hy = (h.geo.spec.meta?.shoulderY ?? 1.18) + 0.12;
+    const yaw = clamp(Math.atan2(local.x, local.z), -1.0, 1.0);
+    const pitch = clamp(-Math.atan2(local.y - hy, Math.hypot(local.x, local.z)), -0.5, 0.7);
+    this.head.yaw = damp(this.head.yaw, yaw, 4, dt);
+    this.head.pitch = damp(this.head.pitch, working ? Math.max(pitch, (c?.headPitch ?? 0.3) - 0.1) : pitch, 4, dt);
+    if (n['head']) n['head'].rotation.set(-0.12 + this.head.pitch + Math.sin(t * 0.7) * 0.012, this.head.yaw * 0.7, Math.sin(t * 0.4) * 0.025);
     // the hat brim catches the gusts
     if (n['hat']) n['hat'].rotation.z = Math.sin(t * 5.3) * 0.008 * this.gust;
-  }
-
-  private endAct() {
-    this.act = null;
-    this.nextAct = this.t + 4.5 + Math.random() * 4;
-    this.gunSpin.rotation.x = 0;
-    this.hero?.setExpression('smug');
-  }
-
-  private actCoin(k: number, a: { flag: number }, dt: number) {
-    const h = this.hero!;
-    const n = h.nodes;
-    const c = this.coin;
-    const raise = smooth01(k / 0.45) * (1 - smooth01((k - 2.1) / 0.5));
-    if (n['arm_l']) n['arm_l'].rotation.x -= 0.25 * raise;
-    if (n['fore_l']) n['fore_l'].rotation.x -= 0.85 * raise;
-    const hand = (h.sockets['hand_l'] ?? n['fore_l'])?.getWorldPosition(new THREE.Vector3()) ?? new THREE.Vector3();
-    if (!c) {
-      if (k > 2.6) this.endAct();
-      return;
-    }
-    // flick
-    if (a.flag === 0 && k > 0.55) {
-      a.flag = 1;
-      c.fly = true;
-      c.p.copy(hand).add(new THREE.Vector3(0, 0.04, 0));
-      c.v.set(0.05, 2.7, 0.02);
-      this.engine.audio.play('pickup_gold', { volume: 0.16, pitch: 1.6 });
-      if (n['fore_l']) n['fore_l'].rotation.x -= 0.25;
-    }
-    if (c.fly) {
-      c.v.y -= 9.8 * dt;
-      c.p.addScaledVector(c.v, dt);
-      c.m.rotation.x += 33 * dt;
-      if (c.v.y > -0.2 && c.v.y < 0.3) this.particles.emit({ pos: c.p, count: 1, life: [0.12, 0.16], size: [0.08, 0.02], sprite: 'star4', color: 0xfff0b0, additive: true });
-      if (c.v.y < 0 && c.p.y <= hand.y + 0.03) {
-        c.fly = false;
-        a.flag = 2;
-        this.engine.audio.play('pickup_gold', { volume: 0.22, pitch: 1.25 });
-        h.setExpression('smug');
-      }
-    } else c.p.copy(hand).add(new THREE.Vector3(0, 0.03, 0));
-    c.m.visible = k < 2.45;
-    c.m.position.copy(c.p);
-    if (a.flag === 2 && n['fore_l']) n['fore_l'].rotation.x += 0.12 * Math.max(0, 1 - (k - 1.1) * 4);
-    if (k > 2.7) {
-      c.m.visible = false;
-      this.endAct();
-    }
   }
 
   // ---------------------------------------------------------------- Pinch + fireflies

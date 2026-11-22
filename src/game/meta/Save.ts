@@ -13,6 +13,8 @@ export interface SaveData {
   bank: number;
   runs: number;
   bestWave: number;
+  /** the furthest day reached (run/Days.ts: WAVES_PER_DAY waves a day); absent on old saves */
+  bestDay?: number;
   kills: number;
   unlocked: string[]; // 'hat:duck', 'outfit:poncho', 'board:cyber', 'gun:barrel:long' ...
   look: { hat: string; outfit: string; board: string };
@@ -27,11 +29,15 @@ export interface SaveData {
   /** the treasure-hunt collection: relic ids dug up so far (any region) */
   relics: string[];
   seenIntro: boolean;
+  /** Serket's domain (the forced tutorial) is finished: the menu flow from now on, and Thoth may appear (run/NewGame.ts) */
+  tutorialDone?: boolean;
   /** the stage and hero picked for the next ride (absent = desert / Sundown) */
   stage?: import('./Stage').StageId;
   hero?: import('./Stage').HeroId;
   /** the slow-reveal progression (meta/Unlocks.ts): Anubis' tally, unlocks granted, news, lessons; absent on old saves */
   prog?: ProgSave;
+  /** what Mama Toad remembers of him (meta/ToadMemory.ts); absent until she first nurses him */
+  toad?: import('./ToadMemory').ToadSave;
 }
 
 /** meta/Unlocks.ts state (additive: an old save gets one on first use, its past milestones granted quietly) */
@@ -182,6 +188,7 @@ export function awardRun(r: { wave: number; kills: number; totalGold: number; to
   d.runs++;
   d.kills += r.kills;
   d.bestWave = Math.max(d.bestWave, r.wave);
+  d.bestDay = Math.max(d.bestDay ?? 0, Math.floor((Math.max(1, r.wave) - 1) / 5) + 1);
   for (const [k, v] of Object.entries(codex)) d.codex[k] = (d.codex[k] ?? 0) + v;
   writeSave(d);
   return cut;

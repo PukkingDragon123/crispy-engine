@@ -1,8 +1,8 @@
 // Bullet-hell projectile system: enemy bullets, venom globs, arrows, dung,
-// needles, dynamite. Readable pixel sprites (no glow), grazing near-misses
+// needles, dynamite. Small sculpted voxel models (VoxelShots, instanced), grazing near-misses
 // reward the player, melee parries reflect them back as player shots.
 import * as THREE from 'three';
-import { SpriteBatch } from '../fx/SpriteBatch';
+import { VoxelShots } from '../fx/VoxelShots';
 import type { ProjKind } from './EnemyDefs';
 import type { Ctx } from '../Ctx';
 import type { StatusApply } from '../combat/Damage';
@@ -41,6 +41,8 @@ const LOOK: Record<ProjKind, { sprite: string; size: number; color: number; stre
   // Nile cannon balls: a dark iron shot trailing powder smoke (solved arcs, explode on landing)
   cannon: { sprite: 'pebble', size: 0.85, color: 0x4a4a52, stretch: 0, grav: 14, trail: 0x9a9288 },
 };
+/** voxel model scale per kind (the models are sculpted at real size; bullet-hell shots read a little big) */
+const SHOT_SCALE: Partial<Record<ProjKind, number>> = { venom: 1.6, curse: 1.3, dung: 1.4, sand: 1.2, blood: 1.1 };
 /** red pixel trail of a blood squirt (bright arterial + dark clot), acid blood adds sickly green */
 const BLOOD_TRAIL = [0xc81e1e, 0x9a1010, 0x6e0a0a, 0xe03a2a];
 const ACID_TRAIL = [0xb8f05c, 0x9dff3a, 0x9a1010, 0x6ec02a];
@@ -49,13 +51,13 @@ const _v = new THREE.Vector3();
 
 export class Projectiles {
   list: Proj[] = [];
-  batch = new SpriteBatch(2400);
+  private shots: VoxelShots;
   onDeflect?: (p: Proj) => void;
   /** an acid splash landed (the enemy manager may leave a small fizzing pool) */
   onAcid?: (x: number, y: number, z: number, dmg: number, sourceId: number) => void;
 
   constructor(private ctx: Ctx, private getPlayer: () => { center(out: THREE.Vector3): THREE.Vector3; takeHit: (h: any, from?: THREE.Vector3) => number; status: any; alive: boolean; pos: THREE.Vector3 }) {
-    ctx.scene.add(this.batch.mesh);
+    this.shots = VoxelShots.of(ctx.particles);
   }
 
   /**
@@ -177,7 +179,6 @@ export class Projectiles {
     const pc = pl.center(_v.clone());
     const field = ctx.world.field;
     const colRes = { t: -1, c: null as any, nx: 0, nz: 0 };
-    this.batch.begin();
     for (let i = this.list.length - 1; i >= 0; i--) {
       const q = this.list[i];
       q.life -= dt;
@@ -242,8 +243,9 @@ export class Projectiles {
         continue;
       }
       const L = LOOK[q.kind];
-      const col = q.owner === 'player' ? 0x9dff3a : L.color;
-      this.batch.push(q.x, q.y, q.z, L.sprite, L.size, L.size, q.kind === 'dynamite' || q.kind === 'dung' || q.kind === 'bone' || q.kind === 'cannon' ? q.spin : 0, col, 1, { x: q.vx, y: q.vy, z: q.vz }, L.stretch);
+      // reflected shots turn venom green and glow so the hunter can read them as his
+      const own = q.owner === 'player';
+      this.shots.push(q.kind, q.x, q.y, q.z, q.vx, q.vy, q.vz, q.spin * 0.6, SHOT_SCALE[q.kind] ?? 1, own ? 0x9dff3a : undefined, own ? 0.8 : 0);
       if (q.kind === 'blood') {
         // a red pixel trail that drips: every drop sheds droplets, some fall away as they cool
         if (rnd.chance(0.85)) ctx.particles.emit({ pos: { x: q.x, y: q.y, z: q.z }, count: 1, vel: { x: q.vx * 0.12, y: q.vy * 0.1, z: q.vz * 0.12 }, life: [0.25, 0.55], size: [0.1, 0.035], sprite: ['dot3', 'dot4', 'blood0'], color: q.acid ? ACID_TRAIL : BLOOD_TRAIL, gravity: 7, drag: 1.6, jitter: 0.03 });
@@ -253,7 +255,6 @@ export class Projectiles {
         if (rnd.chance(0.4)) ctx.particles.emit({ pos: { x: q.x, y: q.y, z: q.z }, count: 1, life: [0.15, 0.3], size: [0.1, 0.03], sprite: 'spark', color: 0xffb040, additive: true, drag: 2 });
       } else if (L.trail && rnd.chance(0.5)) ctx.particles.emit({ pos: { x: q.x, y: q.y, z: q.z }, count: 1, life: [0.2, 0.4], size: [0.12, 0.04], sprite: q.kind === 'dynamite' ? 'spark' : 'dot3', color: L.trail, additive: q.kind === 'dynamite', drag: 2 });
     }
-    this.batch.end(ctx.world.env.fog);
   }
 
   private impact(q: Proj, x: number, y: number, z: number, onPlayer = false) {

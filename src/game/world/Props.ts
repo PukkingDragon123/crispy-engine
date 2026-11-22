@@ -11,6 +11,7 @@ import type { VoxelModel } from '../../engine/voxel/VoxelModel';
 import { buildVoxelGeometry } from '../../engine/voxel/Mesher';
 import { sharedFoliageMaterial, sharedVoxelMaterial, makeVoxelMaterial } from '../../engine/render/VoxelMaterial';
 import { Foliage } from './Foliage';
+import { TREE_KINDS } from './Trees';
 import { buildSkinGeometry, type SkinHint } from './BlockSkin';
 import { pixelAtlas, PIXEL_GLSL } from './PixelTex';
 import type { World } from './World';
@@ -23,6 +24,8 @@ import { globalUniforms, atmoFogUniforms } from '../../engine/render/VoxelMateri
 import { PRESETS } from './Env';
 import { rockArch, colossusLegs, colossusHead, shipwreck, shrine, cairn } from '../models/props/wilds';
 import * as NM from '../models/props/nile';
+import { hoodoo, mesaButte, balancedRock, sandstoneLedge } from './RockFormations';
+import { POOL_VERT, POOL_FRAG, waterUniforms } from './WaterFx';
 
 type SM = {
   model: VoxelModel;
@@ -263,6 +266,11 @@ const KINDS: Record<string, KindDef> = {
   cairn: { variants: 2, build: (v) => cairn(v), solid: 'circle', radius: 0.6 },
   rimStone: { variants: 6, build: (v) => rimStone(v), solid: 'circle', radius: 0.7 },
   rimGate: { variants: 2, build: (v) => rimStone(6 + v), solid: 'circle', radius: 0.7 },
+  // procedural rock formations (RockFormations): big pixel-textured blocks
+  hoodoo: { variants: 4, build: (v) => hoodoo(v), solid: 'voxel', unique: true },
+  mesaButte: { variants: 3, build: (v) => mesaButte(v), solid: 'voxel', unique: true },
+  balancedRock: { variants: 3, build: (v) => balancedRock(v), solid: 'voxel', unique: true },
+  sandstoneLedge: { variants: 3, build: (v) => sandstoneLedge(v), solid: 'voxel', unique: true },
   // the Nile (world/NileGen.ts): seated kings, landing stages, water levers, the burnt valley
   papyrus: { variants: 4, build: (v) => NM.papyrusClump(v), solid: 'none', foliage: true },
   nileColossus: { variants: 2, build: (v) => NM.seatedColossus(v), solid: 'voxel', unique: true },
@@ -289,7 +297,7 @@ const SKIN: Record<string, SkinHint | ((v: number) => SkinHint)> = {
   tent: 'cloth',
   ruinWall: 'adobe',
   hieroglyphWall: 'stone', stoneGate: 'stone', sphinx: 'stone', obelisk: 'stone', obeliskBroken: 'stone', column: 'stone', shrine: 'stone',
-  rockArch: 'rock', colossusLegs: 'rock', colossusHead: 'rock', rimStone: 'rock', rimGate: 'rock', boulder: 'rock',
+  rockArch: 'rock', hoodoo: 'rock', mesaButte: 'rock', balancedRock: 'rock', sandstoneLedge: 'rock', colossusLegs: 'rock', colossusHead: 'rock', rimStone: 'rock', rimGate: 'rock', boulder: 'rock',
   cactus: 'cactus', palm: 'bark',
   nileColossus: 'stone', nileDock: 'wood', nileShaduf: 'adobe',
 };
@@ -306,7 +314,7 @@ function quantize(m: VoxelModel, step = 12): VoxelModel {
   for (const [k, v] of m.map) m.map.set(k, ((v & 0xff000000) | (q((v >> 16) & 255) << 16) | (q((v >> 8) & 255) << 8) | q(v & 255)) | 0);
   return m;
 }
-const SIGHT_KINDS = new Set(['rockArch', 'colossusLegs', 'colossusHead', 'shipwreck', 'shrine', 'cairn']);
+const SIGHT_KINDS = new Set(['hoodoo', 'mesaButte', 'balancedRock', 'sandstoneLedge', 'rockArch', 'colossusLegs', 'colossusHead', 'shipwreck', 'shrine', 'cairn']);
 
 const LANDMARKS: Record<string, () => SM> = {
   // the trading post is a giant travelling tortoise now (Ozymandias, spawned by
@@ -363,41 +371,6 @@ export interface PropInst {
 }
 
 // oasis pool water (same look as the sub-area sea: pixel ripples, depth tint, shoreline foam, glints, sky sheen)
-const POOL_VERT = /* glsl */ `
-attribute float aDepth;
-varying vec3 vW;
-varying float vD;
-#include <fog_pars_vertex>
-void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz; vD = aDepth; vec4 mvPosition = viewMatrix * w; gl_Position = projectionMatrix * mvPosition;
-#include <fog_vertex>
-}`;
-const POOL_FRAG = /* glsl */ `
-uniform float uTime; uniform vec3 uDeep, uShallow, uSky;
-varying vec3 vW;
-varying float vD;
-#include <fog_pars_fragment>
-float h12(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
-void main(){
-  if (vD < 0.0) discard;
-  vec2 px = floor(vW.xz * 4.0) / 4.0;
-  float w1 = sin(px.x * 0.9 + uTime * 1.1) * cos(px.y * 0.8 - uTime * 0.9);
-  float w2 = sin(px.x * 2.1 - px.y * 1.5 + uTime * 1.7);
-  float depth = clamp(vD, 0.0, 1.6) / 1.6;
-  vec3 col = mix(uShallow, uDeep, smoothstep(0.0, 1.0, depth));
-  col += (w1 * 0.035 + w2 * 0.025);
-  float glint = step(0.986, h12(px + floor(uTime * 3.0))) * 0.55;
-  // pixel shoreline: a crisp, ragged two-band foam rim at the terrain's 16 texels / m
-  float fn = h12(floor(vW.xz * 16.0));
-  float foam = vD < 0.035 + fn * 0.05 ? 1.0 : (vD < 0.1 + fn * 0.05 && fract(w2 * 2.0) > 0.5 ? 0.5 : 0.0);
-  col = mix(col, vec3(0.93, 0.96, 0.9), foam);
-  col += glint;
-  float fr = pow(1.0 - clamp(normalize(cameraPosition - vW).y, 0.0, 1.0), 4.0);
-  col = mix(col, uSky, 0.12 + 0.45 * fr);
-  gl_FragColor = vec4(col, mix(0.82, 0.55, foam));
-  #include <fog_fragment>
-  #include <colorspace_fragment>
-}`;
-
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -460,7 +433,7 @@ export class Props {
     this.group.name = 'props';
     world.group.add(this.group);
     this.foliage = new Foliage(world);
-    this.group.add(this.foliage.mesh);
+    this.group.add(this.foliage.mesh, this.foliage.trees.mesh);
   }
 
   private variant(kind: string, v: number, a: Anchor): Variant | null {
@@ -537,6 +510,11 @@ export class Props {
       }
       if (a.kind === 'oasisPool') {
         this.addPool(a);
+        continue;
+      }
+      if (TREE_KINDS.has(a.kind)) {
+        // trees and bushes are pixel-art impostors (sprite clumps with 3D volume, one draw)
+        this.foliage.trees.add(a.kind, hash2i(Math.round(a.x * 10), Math.round(a.z * 10)), a.x, a.z, a.rot ?? this.rng.range(0, Math.PI * 2), a.scale ?? 1);
         continue;
       }
       if (SPRITE_KINDS.has(a.kind) && KINDS[a.kind]) {
@@ -968,10 +946,7 @@ export class Props {
       fog: true,
       uniforms: {
         ...atmoFogUniforms(),
-        uTime: globalUniforms.uTime,
-        uDeep: { value: new THREE.Color(0x1f6a6e) },
-        uShallow: { value: new THREE.Color(0x63c4b0) },
-        uSky: { value: new THREE.Color(env.zenith).lerp(new THREE.Color(env.fog), 0.45) },
+        ...waterUniforms(new THREE.Color(env.zenith).lerp(new THREE.Color(env.fog), 0.45)),
       },
     });
     const mesh = new THREE.Mesh(geo, mat);

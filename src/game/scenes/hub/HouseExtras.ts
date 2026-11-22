@@ -98,7 +98,9 @@ export class HouseExtras {
     this.range = new ShootingRange(h, this.bubble);
     this.cards = new TwentyOne(h, this.bubble);
     this.juke = new Jukebox(h);
-    installBountyBoard(this, h);
+    // (the Long Ride quest board is gone: the user asked for the weird quest board to be removed; quests themselves
+    // run on in the field through run/Progression. hub/BountyBoard stays in the tree, unused, for the NPC rework.)
+    void installBountyBoard;
     resetJobs();
     this.tip.style.cssText = HUD_CSS + ';display:none;font-size:17px;z-index:9';
     this.hintEl.style.cssText = HUD_CSS + ';left:50%;bottom:24px;transform:translateX(-50%);font-size:16px;opacity:0;transition:opacity .4s';

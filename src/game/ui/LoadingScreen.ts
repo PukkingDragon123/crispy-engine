@@ -9,6 +9,9 @@ import type { LoadingCover } from '../../engine/Engine';
 import type { HourglassView, ProgressMode } from './loading/HourglassView';
 import { px, text, measure, UI } from './PixelUI';
 import { LOADING_LORE } from '../meta/Lore';
+import type { MemoryEvent } from './loading/MemoryShards';
+
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
 
 const PLAY_TIPS = [
   'Six chambers, no more. Count your bullets.',
@@ -184,8 +187,14 @@ export class LoadingScreen implements LoadingCover {
   private last: { mode: ProgressMode; v: number }[] = [];
   private gen = 0;
   private fontReady = false;
+  /** first boot: "collecting pieces of memory" (the shards round the glass, see loading/MemoryShards) */
+  private memory = false;
+  private frag: { line: string; t: number; hold: number } | null = null;
+  private taken = 0;
 
-  constructor(private el: HTMLElement, private quality: { dpr?: number } = {}) {
+  constructor(private el: HTMLElement, private quality: { dpr?: number; memory?: boolean } = {}) {
+    this.memory = !!quality.memory;
+    if (this.memory) this.label = 'Collecting pieces of memory';
     el.querySelector('.boot-title')?.remove();
     this.gl = document.createElement('canvas');
     this.gl.id = 'boot-gl';
@@ -194,6 +203,16 @@ export class LoadingScreen implements LoadingCover {
     this.ui.id = 'boot-ui';
     el.append(this.ui);
     if (!this.startWorker()) void this.fallback();
+    // the shards answer the pointer (hover draws a memory out, a click takes it)
+    const ptr = (e: PointerEvent, down?: boolean) => {
+      if (!this.memory || !this.shown) return;
+      const d = down ?? (e.buttons & 1) === 1;
+      this.worker?.postMessage({ type: 'pointer', x: e.clientX, y: e.clientY, down: d });
+      this.local?.pointer(e.clientX, e.clientY, d);
+    };
+    el.addEventListener('pointermove', (e) => ptr(e));
+    el.addEventListener('pointerdown', (e) => ptr(e, true));
+    el.addEventListener('pointerup', (e) => ptr(e, false));
     window.addEventListener('resize', () => this.resize());
     setInterval(() => {
       if (!this.shown) return;
@@ -241,6 +260,7 @@ export class LoadingScreen implements LoadingCover {
         void this.fallback();
       };
       w.postMessage({ type: 'init', canvas: off, ...this.size() }, [off]);
+      if (this.memory) w.postMessage({ type: 'memory', on: true });
       // no WebGL in workers here: the worker answers with an error and the hourglass draws on this thread
       this.worker = w;
       return true;
@@ -250,8 +270,9 @@ export class LoadingScreen implements LoadingCover {
     }
   }
 
-  private onMessage(m: { type: string; v?: number; msg?: string }) {
+  private onMessage(m: { type: string; v?: number; msg?: string } & Partial<MemoryEvent>) {
     if (m.type === 'ready') this.onReady();
+    else if (m.type === 'shard') this.onShard(m as MemoryEvent);
     else if (m.type === 'p') {
       this.value = m.v ?? 0;
       if (this.shown) this.drawUi();
@@ -281,6 +302,7 @@ export class LoadingScreen implements LoadingCover {
       const { HourglassView } = await import('./loading/HourglassView');
       const s = this.size();
       this.local = new HourglassView(fresh, s.w, s.h, s.dpr);
+      if (this.memory) this.local.setMemory(true);
       for (const p of this.last) this.local.progress(p.mode, p.v);
       if (this.running) this.runLocal();
     } catch (e) {
@@ -298,6 +320,7 @@ export class LoadingScreen implements LoadingCover {
         return;
       }
       this.value = this.local.tick(Math.max(0, now - last) / 1000);
+      for (const ev of this.local.drain()) this.onShard(ev);
       last = Math.max(last, now);
       this.onReady();
       this.drawUi();
@@ -327,6 +350,39 @@ export class LoadingScreen implements LoadingCover {
     this.drawUi();
   }
 
+  /** a piece of memory came back: its line is written under the glass */
+  private onShard(ev: MemoryEvent) {
+    this.taken++;
+    this.frag = { line: ev.line, t: performance.now() / 1000, hold: ev.hold };
+    this.drawUi();
+  }
+
+  /** first boot is over: later loads show the plain glass */
+  endMemory() {
+    if (!this.memory) return;
+    this.memory = false;
+    this.frag = null;
+    this.worker?.postMessage({ type: 'memory', on: false });
+    this.local?.setMemory(false);
+  }
+
+  /** first boot: run the glass on by itself and wait for the memories (resolves with the cover still up) */
+  async gather(min = 6, max = 15) {
+    if (!this.memory) return;
+    this.send('pace');
+    const t0 = performance.now();
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 200));
+      const s = (performance.now() - t0) / 1000;
+      if (!this.memory || s >= max || (s >= min && this.taken >= ROMAN.length)) break;
+    }
+  }
+
+  /** the memories are being collected (first boot) */
+  get collecting() {
+    return this.memory;
+  }
+
   // ------------------------------------------------------------------ the cover
   /** a known fraction of the boot load (assets) */
   setProgress(f: number) {
@@ -334,7 +390,7 @@ export class LoadingScreen implements LoadingCover {
   }
 
   show(label = 'Turning the glass'): Promise<void> {
-    this.label = label;
+    this.label = this.memory ? 'Collecting pieces of memory' : label;
     ++this.gen;
     if (this.shown) {
       // already up (the boot): carry on from where the sand is
@@ -364,8 +420,9 @@ export class LoadingScreen implements LoadingCover {
     this.shown = false;
     const gen = ++this.gen;
     this.send('finish');
+    const mem = this.memory;
     return new Promise((res) => {
-      // let the last grains fall, then fade away
+      // let the last grains fall (on first boot: the last shards come home and the glass flares), then fade away
       setTimeout(() => {
         if (gen !== this.gen) return res();
         this.value = 1;
@@ -375,10 +432,11 @@ export class LoadingScreen implements LoadingCover {
           if (gen === this.gen && !this.shown) {
             this.el.style.display = 'none';
             this.run(false);
+            if (mem) this.endMemory();
           }
           res();
         }, 470);
-      }, 280);
+      }, mem ? 2300 : 280);
     });
   }
 
@@ -404,7 +462,26 @@ export class LoadingScreen implements LoadingCover {
     c.clearRect(0, 0, W, H);
     if (!this.fontReady) return;
     const cx = Math.floor(W / 2);
-    text(c, this.label, cx, 2, JD.l, 16, 'center');
+    text(c, this.label, cx, 2, this.memory ? '#ffd9a0' : JD.l, 16, 'center');
+    if (this.memory) {
+      // the pieces taken so far, as numerals beside the label; the newest fragment written in place of the tip
+      text(c, this.taken ? `${ROMAN[Math.min(6, this.taken - 1)]} of VII` : 'touch the light', cx, 64, UI.textDim, 16, 'center');
+      const f = this.frag;
+      if (f) {
+        const age = t - f.t;
+        const n = Math.min(f.line.length, Math.floor(age * 30));
+        const a = age < f.hold + 0.8 ? 1 : Math.max(0, 1 - (age - f.hold - 0.8) * 1.5);
+        if (a > 0) {
+          c.globalAlpha = a;
+          c.clearRect(0, 62, W, 20);
+          text(c, f.line.slice(0, n), cx, 64, '#ffe8c0', 16, 'center');
+          c.globalAlpha = 1;
+        }
+      }
+      const bw = Math.min(300, W - 16);
+      this.drawTrack(c, cx - Math.floor(bw / 2), 24, bw, t, dt);
+      return;
+    }
     const bw = Math.min(300, W - 16);
     this.drawTrack(c, cx - Math.floor(bw / 2), 24, bw, t, dt);
     // a tip that fits the width

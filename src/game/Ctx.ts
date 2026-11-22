@@ -52,6 +52,8 @@ export interface RunState {
   time: number;
   ultCharge: number;
   revived: boolean;
+  /** weighings at Anubis' scales this ride (the heart grows heavier with each; see AnubisTrial) */
+  deaths?: number;
   combo: number;
   comboTimer: number;
   style: number;

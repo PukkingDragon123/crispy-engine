@@ -682,6 +682,8 @@ export class AdminPanel {
       if (armed) a.resetSave();
       else this.resetArm = this.t;
     }, { w: BW, tone: 'blood', tip: 'Wipes every saved thing and reloads the game' });
+    y += 20;
+    this.btn(X, y, 'FORGET ADMIN HERE', () => a.forget(), { w: BW, tip: 'Typed ADMIN is remembered on this device: this turns that off (the address and admin builds still work)' });
     // what the save holds now
     const st = a.saveStatus();
     let sy = 46;

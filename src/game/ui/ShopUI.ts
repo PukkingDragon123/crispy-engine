@@ -17,6 +17,8 @@ import type { Input } from '../../engine/Input';
 import { nine, SWAP_LIT } from './PixelUI';
 import { HUD_ART as ART } from './HudArt';
 import { pixelText, pixelTextWidth } from './HudSprites';
+import { sprite } from './PixelUI';
+import { wareIcon, COIN_ICON } from './ShopIcons';
 
 export interface TagText {
   price: number;
@@ -103,6 +105,8 @@ export interface CardState {
   note: { text: string; good?: boolean; bad?: boolean } | null;
   price: string;
   dear: boolean;
+  /** the ware's id (its pixel-art icon, ShopIcons) */
+  id?: string;
 }
 export interface HintState {
   gold?: number;
@@ -134,6 +138,12 @@ export class ShopUI {
   hint: HintState | null = null;
   /** a sound when the pointer lands on a new row */
   onHover: (() => void) | null = null;
+  /** the purse (null: not shown); Shop keeps it current the whole visit */
+  gold: number | null = null;
+  private goldShown = 0;
+  private goldBump = 0;
+  /** wares just out of the basket: icon pops over them with their name, sparkles turning round */
+  private reveals: { id: string; name: string; at: THREE.Vector3; t: number }[] = [];
 
   constructor(parent: HTMLElement, private input: Input, private camera: THREE.Camera) {
     this.c = this.cv.getContext('2d')!;
@@ -170,7 +180,9 @@ export class ShopUI {
     c.clearRect(0, 0, this.w, this.h);
     this.tags = this.tags.filter((t) => !t.dead);
     for (const t of this.tags) this.drawTag(t);
+    this.drawReveals(dt);
     this.drawCard(dt);
+    this.drawPurse(dt);
     this.drawTalk(dt);
     this.drawHint();
   }
@@ -236,8 +248,10 @@ export class ShopUI {
     for (const l of this.wrap(C.desc, maxW)) lines.push([l, INK]);
     if (C.note) for (const l of this.wrap(C.note.text, maxW)) lines.push([l, C.note.good ? GREEN : C.note.bad ? RED : SOFT]);
     lines.push([C.price, C.dear ? RED : '#7a5214']);
-    const W = Math.min(maxW, Math.max(...lines.map(([l]) => pixelTextWidth(l, 16)))) + 18;
-    const H = lines.length * 12 + 12;
+    const ic = C.id ? wareIcon(C.id) : null;
+    const IW = ic ? 22 : 0;
+    const W = Math.min(maxW, Math.max(...lines.map(([l]) => pixelTextWidth(l, 16)))) + 18 + IW;
+    const H = Math.max(lines.length * 12 + 12, ic ? 28 : 0);
     const px = C.x / this.s, py = C.y / this.s;
     // on the open side of the ware, kept on screen
     let x = px > this.w * 0.55 ? px - 24 - W : px + 24;
@@ -251,8 +265,89 @@ export class ShopUI {
     c.fillStyle = 'rgba(26,14,6,0.45)';
     c.fillRect(Math.round(x) + 3, y + 3 + slide, W, H);
     c.drawImage(nine(ART.nine_parch, W, H, 8), Math.round(x), y + slide);
-    lines.forEach(([l, col], i) => pixelText(c, l, Math.round(x) + 9, y + 5 + slide + i * 12, { size: 16, color: col, lip: i === 0 ? '#f6e8c4' : null }));
+    if (ic) {
+      // the product icon in a little inked frame
+      c.fillStyle = '#e6d2a4';
+      c.fillRect(Math.round(x) + 5, y + 5 + slide, 18, 18);
+      c.fillStyle = '#6a4a28';
+      c.fillRect(Math.round(x) + 5, y + 22 + slide, 18, 1);
+      c.fillRect(Math.round(x) + 22, y + 5 + slide, 1, 18);
+      c.drawImage(sprite(ic.def, ic.swap, ic.key), Math.round(x) + 6, y + 6 + slide);
+    }
+    lines.forEach(([l, col], i) => pixelText(c, l, Math.round(x) + 9 + IW, y + 5 + slide + i * 12, { size: 16, color: col, lip: i === 0 ? '#f6e8c4' : null }));
     c.globalAlpha = 1;
+  }
+
+  // ---------------------------------------------------------------- the reveal and the purse
+  /** a ware is out of the basket (Shop calls it as each one lands, one by one) */
+  reveal(id: string, name: string, at: THREE.Vector3) {
+    this.reveals.push({ id, name, at: at.clone(), t: 0 });
+  }
+  private drawReveals(dt: number) {
+    const c = this.c;
+    this.reveals = this.reveals.filter((r) => (r.t += dt) < 2.4);
+    for (const r of this.reveals) {
+      const p = this.screen(r.at);
+      if (!p) continue;
+      const ic = wareIcon(r.id);
+      const t = r.t;
+      // a pop with one soft overshoot, a slow rise, then up and away
+      const pop = t < 0.18 ? (t / 0.18) * 1.25 : t < 0.36 ? 1.25 - ((t - 0.18) / 0.18) * 0.25 : 1;
+      const out = Math.max(0, (t - 1.8) / 0.6);
+      const sc = Math.max(1, Math.round(2 * pop)) * (out > 0.5 ? 1 : 1);
+      const x = Math.round(p.x), y = Math.round(p.y - 30 - t * 6 - out * 18);
+      c.globalAlpha = Math.min(1, t * 6) * (1 - out);
+      // the sparkles: eight brass pixels turning in, then out
+      const rad = 22 - Math.min(1, t / 0.5) * 8 + out * 10;
+      for (let i = 0; i < 8; i++) {
+        const a = t * 2.6 + (i / 8) * Math.PI * 2;
+        const sx = Math.round(x + Math.cos(a) * rad), sy = Math.round(y + Math.sin(a) * rad * 0.75);
+        c.fillStyle = i % 2 ? '#fff0a6' : '#e2b24a';
+        c.fillRect(sx, sy, 1, 1);
+        if (i % 2 === 0) {
+          c.fillStyle = 'rgba(226,178,74,0.55)';
+          c.fillRect(sx - 1, sy, 1, 1);
+          c.fillRect(sx + 1, sy, 1, 1);
+          c.fillRect(sx, sy - 1, 1, 1);
+          c.fillRect(sx, sy + 1, 1, 1);
+        }
+      }
+      if (ic) {
+        const cv = sprite(ic.def, ic.swap, ic.key);
+        const w = cv.width * sc, h = cv.height * sc;
+        c.fillStyle = 'rgba(26,14,6,0.35)';
+        c.fillRect(x - w / 2 + 2, y - h / 2 + 2, w, h * 0.15);
+        c.drawImage(cv, Math.round(x - w / 2), Math.round(y - h / 2), w, h);
+      }
+      if (t > 0.25) {
+        c.globalAlpha *= Math.min(1, (t - 0.25) * 5);
+        pixelText(c, r.name, x, y + 18, { size: 16, color: INK, align: 'center', lip: '#f6e8c4' });
+      }
+      c.globalAlpha = 1;
+    }
+  }
+  private drawPurse(dt: number) {
+    const on = this.gold !== null;
+    this.goldShown += ((on ? 1 : 0) - this.goldShown) * Math.min(1, dt * 8);
+    if (this.goldShown < 0.03) return;
+    const g = this.gold ?? 0;
+    if (on && (this as unknown as { lastGold?: number }).lastGold !== g) {
+      if ((this as unknown as { lastGold?: number }).lastGold !== undefined) this.goldBump = 1;
+      (this as unknown as { lastGold?: number }).lastGold = g;
+    }
+    this.goldBump = Math.max(0, this.goldBump - dt * 3);
+    const c = this.c;
+    const label = String(g);
+    const tw = Math.ceil(pixelTextWidth(label, 16));
+    const W = tw + 34, H = 20;
+    const x = Math.round(8 - (1 - this.goldShown) * (W + 10)), y = 8;
+    c.fillStyle = 'rgba(26,14,6,0.45)';
+    c.fillRect(x + 3, y + 3, W, H);
+    c.drawImage(nine(ART.nine_parch, W, H, 8), x, y);
+    const bob = Math.round(-this.goldBump * 3);
+    c.drawImage(sprite(COIN_ICON), x + 7, y + 5 + bob);
+    pixelText(c, label, x + 21, y + 1, { size: 16, color: '#7a5214', lip: '#f6e8c4' });
+    pixelText(c, 'PURSE', x + W / 2, y + H + 1, { size: 16, color: '#fff3d6', align: 'center', outline: '#2a1408' });
   }
 
   // ---------------------------------------------------------------- the porch choices
@@ -297,7 +392,7 @@ export class ShopUI {
     if (!H0) return;
     const c = this.c;
     const parts: { cap?: HTMLCanvasElement; text: string; col: string }[] = [];
-    if (H0.gold !== undefined) parts.push({ text: `${H0.gold} gold`, col: '#7a5214' });
+    if (H0.gold !== undefined && this.gold === null) parts.push({ text: `${H0.gold} gold`, col: '#7a5214' });
     if (H0.extra) parts.push({ text: H0.extra, col: GREEN });
     for (const [k, l] of H0.keys) parts.push({ cap: cap(k), text: l, col: INK });
     const gap = 10;

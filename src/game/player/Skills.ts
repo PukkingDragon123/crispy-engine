@@ -37,6 +37,9 @@ import { Qte } from '../ui/Qte';
 import type { HeroSpells } from './heroes/HeroKit';
 import { PinchPerch } from './PinchPerch';
 import { pinchBroodRig } from '../models/characters/pinch';
+import { GunsNRoses } from './GunsNRoses';
+import { CD, cdStep, hitRefund, killRefund } from '../run/Balance';
+import { Ultimate } from './Ultimate';
 
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
@@ -51,12 +54,13 @@ const UP = new THREE.Vector3(0, 1, 0);
 const AX = new THREE.Vector3(1, 0, 0);
 const TAU = Math.PI * 2;
 
-export type SkillKey = 'E' | 'C' | 'G';
-/** the three tarot skills: card title and skill name */
+export type SkillKey = 'E' | 'C' | 'G' | 'X';
+/** the four tarot skills: card title and skill name */
 export const SKILL_INFO: Record<SkillKey, { card: string; name: string }> = {
   E: { card: 'THE MAGICIAN', name: 'Scorpion Toss' },
   C: { card: 'THE TOWER', name: 'Scarab Swarm' },
   G: { card: 'THE SUN', name: 'Dung Bomb' },
+  X: { card: 'THE LOVERS', name: "Guns N' Roses" },
 };
 /** has the running hunt learned this tarot skill? (keys that aren't sealable, like Z, always are) */
 export function isSkillLearned(key: string) {
@@ -210,7 +214,25 @@ export class Skills {
   private pinchPos = new THREE.Vector3();
   /** where Pinch lives on Sundown between errands (hat, eye sockets, shoulder) */
   perch: PinchPerch | null = null;
-  constants = { scorpCd: 7, swarmCd: 15, bombRecharge: 7 };
+  constants: { scorpCd: number; swarmCd: number; bombRecharge: number; rosesCd?: number } = { scorpCd: CD.scorp, swarmCd: CD.swarm, bombRecharge: CD.bomb, rosesCd: CD.roses };
+  /** X: Guns N' Roses */
+  roses: GunsNRoses;
+  rosesCd = 0;
+  /**
+   * Cooldown model (run/Balance.CD): time runs every cooldown down, and so does
+   * attacking: hits refund a little (capped per second), kills refund more.
+   * Cards scale it: refundMul (all refunds), killBonus (extra s per kill).
+   */
+  refundMul = 1;
+  killBonus = 0;
+  private refundSpent = 0;
+  private refundWin = 0;
+  /** casting with a hot streak (run.combo) empowers the cast for free (no prompt) */
+  hotStreak = 8;
+  /** skill aiming: G (hold to aim the dung bomb, arc + landing ring) and C (choose the deploy area), confirmed on release / click */
+  aiming: { k: 'G' | 'C'; t: number; rmb: boolean; at: THREE.Vector3 } | null = null;
+  private aimMarks: THREE.Mesh[] = [];
+  private aimMat: VoxelMaterial | null = null;
 
   constructor(private ctx: Ctx, private player: Player, private input: Input) {
     Skills.current = this;
@@ -243,6 +265,48 @@ export class Skills {
       this.perch = new PinchPerch(this.pinch, player.rig, this.pinchRoot, { start: 'hat', events: ctx.events });
     }
     ctx.scene.add(this.pinchRoot);
+    this.roses = new GunsNRoses(ctx, player);
+    Ultimate.pinchHost = this;
+    // the cooldown model: attacking earns cooldowns back
+    ctx.events.on('enemyHit', (e: EnemyLike, hit: { source?: string; tags?: string[] }) => {
+      if (this.hero || !hit) return;
+      const r = hitRefund(hit.source ?? '', this.refundSpent, this.refundMul, !!e?.isBoss);
+      if (r > 0) {
+        this.refundSpent += r;
+        this.refund(r);
+      }
+    });
+    ctx.events.on('enemyKilled', (e: EnemyLike & { alpha?: boolean }) => {
+      if (!this.hero) this.refund(killRefund(!!e?.alpha, this.refundMul, this.killBonus), true);
+    });
+  }
+
+  /** take `sec` seconds off every running cooldown; a skill finished by it chimes ready */
+  refund(sec: number, kill = false) {
+    if (sec <= 0) return;
+    const ready: SkillKey[] = [];
+    const cut = (cd: number, k: SkillKey) => {
+      if (cd <= 0) return cd;
+      const n = cdStep(cd, 0, sec);
+      if (n <= 0 && this.learned.has(k)) ready.push(k);
+      return n;
+    };
+    this.scorpCd = cut(this.scorpCd, 'E');
+    this.swarmCd = cut(this.swarmCd, 'C');
+    this.rosesCd = cut(this.rosesCd, 'X');
+    if (this.bombCharges < 2 && this.bombRecharge > 0) {
+      this.bombRecharge -= sec;
+      if (this.bombRecharge <= 0) {
+        this.bombCharges++;
+        this.bombRecharge = this.bombCharges < 2 ? this.constants.bombRecharge * (1 - this.stats.get('cdr')) : 0;
+        if (this.learned.has('G')) ready.push('G');
+      }
+    }
+    this.ctx.events.emit('cdRefund', sec, kill);
+    for (const k of ready) {
+      this.ctx.events.emit('skillReady', k, true);
+      this.ctx.sfx('divine_chime', null, 0.28, 1.6);
+    }
   }
 
   get stats() {
@@ -280,24 +344,41 @@ export class Skills {
       }
     }
     this.updateCine();
-    this.scorpCd -= dt;
-    this.swarmCd -= dt;
+    Ultimate.current?.tickTime(dt);
+    this.refundWin += dt;
+    if (this.refundWin >= 1) {
+      this.refundWin = 0;
+      this.refundSpent = 0;
+    }
+    const was = [this.scorpCd, this.swarmCd, this.rosesCd];
+    this.scorpCd = cdStep(this.scorpCd, dt);
+    this.swarmCd = cdStep(this.swarmCd, dt);
+    this.rosesCd = cdStep(this.rosesCd, dt);
+    (['E', 'C', 'X'] as SkillKey[]).forEach((k, i) => {
+      if (was[i] > 0 && [this.scorpCd, this.swarmCd, this.rosesCd][i] <= 0 && this.learned.has(k)) this.ctx.events.emit('skillReady', k, false);
+    });
     if (this.bombCharges < 2) {
       this.bombRecharge -= dt;
       if (this.bombRecharge <= 0) {
         this.bombCharges++;
         this.bombRecharge = this.constants.bombRecharge * cdr;
+        if (this.learned.has('G')) this.ctx.events.emit('skillReady', 'G', false);
       }
     }
     this.sealedNag -= dt;
+    this.player.skillAimLock = Math.max(0, this.player.skillAimLock - dt);
     if (this.player.alive) {
-      // a press that answered the empower ring is not a new cast
       const q = Qte.current;
       const eaten = (a: Action) => !!q && (q.quickWants(a) || q.ate(a));
-      if (inp.hit('skill1') && !eaten('skill1')) this.tryCast('E');
-      if (inp.hit('skill2') && !eaten('skill2')) this.tryCast('C');
-      if (inp.hit('grenade') && !eaten('grenade')) this.tryCast('G');
-    }
+      if (this.aiming) this.updateAim(dt);
+      else {
+        if (inp.hit('skill1') && !eaten('skill1')) this.tryCast('E');
+        if (inp.hit('skill2') && !eaten('skill2')) this.tryCast('C');
+        if (inp.hit('grenade') && !eaten('grenade')) this.tryCast('G');
+        if (inp.hit('skill3') && !eaten('skill3')) this.tryCast('X');
+      }
+    } else if (this.aiming) this.endAim();
+    this.roses.update(dt);
     this.updateBrood(dt);
     this.updateBombs(dt);
     this.updateClouds(dt);
@@ -332,23 +413,145 @@ export class Skills {
       return;
     }
     if (this.hero) {
-      if (!this.hero.cast(k)) return;
+      if (k === 'X' || !this.hero.cast(k)) return;
     } else if (k === 'E' && this.scorpCd <= 0) this.tossScorpions();
-    else if (k === 'C' && this.swarmCd <= 0) this.summonSwarm();
-    else if (k === 'G' && this.bombCharges > 0) this.throwBomb();
+    else if (k === 'C' && this.swarmCd <= 0) return this.beginAim('C');
+    else if (k === 'G' && this.bombCharges > 0) return this.beginAim('G');
+    else if (k === 'X' && this.rosesCd <= 0) this.castRoses();
     else return;
-    this.offerEmpower(k);
+    this.afterCast(k);
+  }
+
+  /** after a cast lands: a hot streak empowers it (no prompt), the echo repeats it */
+  private afterCast(k: SkillKey, aim?: THREE.Vector3) {
+    const combo = this.ctx.run.combo ?? 0;
+    if (k !== 'X' && combo >= this.hotStreak) {
+      this.empower(k, combo >= this.hotStreak * 2.5, aim ?? this.player.aimPoint.clone());
+      this.ctx.events.emit('hotCast', k, combo);
+    }
+    this.ctx.events.emit('skillCast', k);
     if (this.echo) this.ctx.engine.tweens.after(0.3, () => this.echoCast(k));
+  }
+
+  /** a free extra cast of a skill (cards: Wish You Were Here) */
+  recast(k: SkillKey) {
+    if (this.learned.has(k)) this.echoCast(k);
+  }
+
+  private castRoses() {
+    this.rosesCd = (this.constants.rosesCd ?? CD.roses) * (1 - this.stats.get('cdr'));
+    this.roses.cast();
+    this.castKick(-0.01, 0.012, 1.4);
+  }
+
+  // ----------------------------------------------------------- aiming (G: arc + landing ring; C: deploy area)
+  private beginAim(k: 'G' | 'C') {
+    this.aiming = { k, t: 0, rmb: this.input.held('aim'), at: this.player.aimPoint.clone() };
+    this.player.skillAimLock = 0.3;
+    this.ctx.sfx(k === 'G' ? 'dung_kick' : 'scorpion_chitter', this.player.pos, 0.25, 1.3);
+  }
+
+  /** the aim point, clamped to the skill's reach */
+  private aimTarget(k: 'G' | 'C', out: THREE.Vector3) {
+    const pl = this.player;
+    out.copy(pl.aimPoint);
+    const max = k === 'G' ? 30 : SKILL_TUNE.swarm.reach;
+    const dx = out.x - pl.pos.x, dz = out.z - pl.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > max) out.set(pl.pos.x + (dx / d) * max, 0, pl.pos.z + (dz / d) * max);
+    out.y = this.ctx.world.groundAt(out.x, out.z);
+    return out;
+  }
+
+  private updateAim(dt: number) {
+    const a = this.aiming!;
+    const inp = this.input;
+    a.t += dt;
+    this.player.skillAimLock = 0.3;
+    this.aimTarget(a.k, a.at);
+    const act: Action = a.k === 'G' ? 'grenade' : 'skill2';
+    if (inp.held('aim')) a.rmb = true;
+    // confirm: release right-click, click, release the key after holding it, or tap the key again
+    const go = (a.rmb && inp.up('aim')) || inp.hit('fire') || (!a.rmb && inp.up(act) && a.t > 0.22) || (a.t > 0.08 && inp.hit(act));
+    this.drawAim(a);
+    if (go) {
+      const at = a.at.clone();
+      const k = a.k;
+      this.endAim();
+      if (k === 'G' && this.bombCharges > 0) this.throwBomb(false, at);
+      else if (k === 'C' && this.swarmCd <= 0) this.summonSwarm(false, at);
+      else return;
+      this.afterCast(k, at);
+    } else if (a.t > 8) this.endAim();
+  }
+
+  private endAim() {
+    this.aiming = null;
+    for (const m of this.aimMarks) m.visible = false;
+  }
+
+  /** the preview: dung pellets strung along the throw arc and ringing the blast (G), or ringing the deploy area (C) */
+  private drawAim(a: { k: 'G' | 'C'; t: number; at: THREE.Vector3 }) {
+    if (!this.aimMat) {
+      this.aimMat = makeVoxelMaterial();
+      (this.aimMat.userData as { noShadow?: boolean }).noShadow = true;
+    }
+    const need = 40;
+    while (this.aimMarks.length < need) {
+      const m = new THREE.Mesh(this.bombGeo, this.aimMat);
+      m.frustumCulled = false;
+      this.ctx.scene.add(m);
+      this.aimMarks.push(m);
+    }
+    const tint = this.aimMat.userData.tint?.value as THREE.Color | undefined;
+    tint?.setRGB(a.k === 'G' ? 0.75 : 0.55, 1.1, a.k === 'G' ? 0.45 : 0.6);
+    const fx = this.aimMat.userData.fx?.value as THREE.Vector4 | undefined;
+    if (fx) fx.z = 1.6 + Math.sin(this.time * 8) * 0.4;
+    let used = 0;
+    const put = (x: number, y: number, z: number, s: number) => {
+      const m = this.aimMarks[used++];
+      m.visible = true;
+      m.position.set(x, y, z);
+      m.scale.setScalar(s);
+      m.rotation.set(this.time * 2 + used, used * 0.7, 0);
+    };
+    const R = a.k === 'G' ? SKILL_TUNE.bomb.radius * this.stats.get('explosionRadius') : SKILL_TUNE.swarm.aimRadius;
+    if (a.k === 'G') {
+      // the arc, sampled like the throw itself
+      const o = this.handPoint('hand_l', _v);
+      const dx = a.at.x - o.x, dz = a.at.z - o.z;
+      const d = Math.hypot(dx, dz);
+      const T = 0.55 + d / 34;
+      const g = SKILL_TUNE.bomb.gravity;
+      const ty = a.at.y + this.bombR;
+      const vy = (ty - o.y + 0.5 * g * T * T) / T;
+      const N = 16;
+      const sh = (this.time * 1.5) % 1;
+      for (let i = 1; i <= N; i++) {
+        const u = (i - 1 + sh) / N;
+        const t = u * T;
+        put(o.x + dx * u, o.y + vy * t - 0.5 * g * t * t, o.z + dz * u, 0.5 - u * 0.15);
+      }
+    }
+    const n = a.k === 'G' ? 18 : 24;
+    for (let i = 0; i < n; i++) {
+      const ang = (i / n) * TAU + this.time * 0.6;
+      const x = a.at.x + Math.cos(ang) * R, z = a.at.z + Math.sin(ang) * R;
+      put(x, this.ctx.world.groundAt(x, z) + 0.12 + Math.sin(this.time * 5 + i) * 0.05, z, a.k === 'G' ? 0.7 : 0.85);
+    }
+    for (let i = used; i < this.aimMarks.length; i++) this.aimMarks[i].visible = false;
   }
 
   // ----------------------------------------------------------- empowered casts (optional timing ring)
   private nextBombPower = 1;
+  private aimedThrow = false;
   /**
    * Every cast offers a quick timing ring over Sundown's head: press the same key
    * again as it meets the sight for an empowered cast. Ignoring it costs nothing,
    * it never blocks a dodge or any other prompt, and it is offered once per cast.
    */
-  private offerEmpower(k: SkillKey) {
+  /** (retired: the empower prompt was a QTE on every cast; hot streaks empower now) */
+  protected offerEmpower(k: SkillKey) {
     const q = Qte.current;
     if (!q || q.active || !this.player.alive) return;
     const action: Action = k === 'E' ? 'skill1' : k === 'C' ? 'skill2' : 'grenade';
@@ -361,7 +564,8 @@ export class Skills {
 
   /** the payoff: a second wave from the same cast (scorpions, scarabs) or a heavier blast (dung bomb) */
   private empower(k: SkillKey, perfect: boolean, aim: THREE.Vector3) {
-    if (this.hero) return this.hero.empower(k, perfect, aim);
+    if (this.hero) return k === 'X' ? undefined : this.hero.empower(k, perfect, aim);
+    if (k === 'X') return;
     const pl = this.player;
     const ctx = this.ctx;
     const c = pl.center(new THREE.Vector3()).add(_v3.set(0, 0.3, 0));
@@ -388,12 +592,13 @@ export class Skills {
   /** the echo: the same skill again, free, with a jade shimmer */
   private echoCast(k: SkillKey) {
     if (!this.player.alive) return;
-    if (this.hero) return this.hero.echo(k);
+    if (this.hero) return k === 'X' ? undefined : this.hero.echo(k);
     const c = this.player.center(new THREE.Vector3());
     this.ctx.fx.sparkle(c, 0x9dff3a, 10, 0.7);
     this.ctx.sfx('divine_chime', c, 0.35, 1.4);
     if (k === 'E') this.tossScorpions(true);
     else if (k === 'C') this.summonSwarm(true);
+    else if (k === 'X') this.roses.cast();
     else this.throwBomb(true);
   }
 
@@ -774,11 +979,11 @@ export class Skills {
    * thrash, gear and cloth are gnawed off, the eaten fall apart picked pale).
    * Then the scarabs dive back under the sand.
    */
-  summonSwarm(echo = false) {
+  summonSwarm(echo = false, at?: THREE.Vector3) {
     const pl = this.player;
     const S = SKILL_TUNE.swarm;
     const count = Math.min(S.maxScarabs, Math.round(S.scarabs * this.stats.get('swarmSize')));
-    const aim = pl.aimPoint.clone();
+    const aim = at ? at.clone() : pl.aimPoint.clone();
     if (echo) {
       // the echo: a second wave boils up behind the first
       this.ctx.engine.tweens.after(0.2, () => this.erupt(aim, Math.round(count * 0.5), true));
@@ -1359,13 +1564,14 @@ export class Skills {
   }
 
   // ===================================================================== DUNG BOMB
-  throwBomb(echo = false) {
+  throwBomb(echo = false, at?: THREE.Vector3) {
     if (!echo) {
       this.bombCharges--;
       if (this.bombRecharge <= 0) this.bombRecharge = this.constants.bombRecharge * (1 - this.stats.get('cdr'));
     }
     const pl = this.player;
-    const aim = pl.aimPoint.clone();
+    const aim = at ? at.clone() : pl.aimPoint.clone();
+    this.aimedThrow = !!at && !echo;
     if (!echo) {
       pl.castAim = aim;
       pl.playAction('grenade', CAST_POSE.grenade.dur);
@@ -1395,7 +1601,9 @@ export class Skills {
     to.y = ctx.world.groundAt(to.x, to.z) + this.bombR;
     const T = 0.55 + d / 34;
     const v = this.lob(o, to, T, Bt.gravity, new THREE.Vector3());
-    v.addScaledVector(pl.board.vel, 0.5).setY(v.y + pl.board.vel.y * 0.3);
+    // an aimed throw lands on its ring; a quick one carries the board's momentum
+    if (!this.aimedThrow) v.addScaledVector(pl.board.vel, 0.5).setY(v.y + pl.board.vel.y * 0.3);
+    this.aimedThrow = false;
     this.bombs.push({ pos: o.clone(), vel: v, fuse: Bt.fuse, q: new THREE.Quaternion().setFromAxisAngle(UP, rnd.next() * TAU), bounces: 0, sq: 0, sqV: 0, sputter: 0, born: this.time, power: echo || this.nextBombPower === 1 ? undefined : this.nextBombPower });
     if (!echo) this.nextBombPower = 1;
     ctx.sfx('whoosh', o, 0.7, 0.85);
@@ -1718,12 +1926,15 @@ export class Skills {
   }
 
   cooldowns() {
-    if (this.hero) return this.hero.cooldowns();
+    if (this.hero) return { roses: 0, aiming: null, ...this.hero.cooldowns() };
     return {
       scorp: Math.max(0, this.scorpCd),
       swarm: Math.max(0, this.swarmCd),
       bomb: this.bombCharges > 0 ? 0 : Math.max(0, this.bombRecharge),
       bombCharges: this.bombCharges,
+      roses: Math.max(0, this.rosesCd),
+      /** a skill being aimed right now (HUD: lift its card) */
+      aiming: this.aiming?.k ?? null,
     };
   }
 }

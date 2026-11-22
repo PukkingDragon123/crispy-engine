@@ -7,6 +7,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { Pass, FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import { ATMO } from './VoxelMaterial';
+import { MotionBlurPass } from './MotionBlur';
 
 const GradeShader = {
   uniforms: {
@@ -197,7 +198,8 @@ export class OutlinePass extends Pass {
           // far silhouettes melt into the haze instead of carrying hard ink
           e *= 1.0 - smoothstep(30.0, 115.0, d0) * mix(0.8, 0.95, t0);
           vec3 ink = mix(uColor * c.rgb * 0.25 + uColor, c.rgb * 0.6, smoothstep(25.0, 140.0, d0));
-          gl_FragColor = vec4(mix(c.rgb, ink, e * uStrength), 1.0);
+          // alpha passes through (the motion blur reads it: models 1, terrain and plants 0)
+          gl_FragColor = vec4(mix(c.rgb, ink, e * uStrength), c.a);
         }`,
       depthTest: false,
       depthWrite: false,
@@ -298,6 +300,8 @@ export class PostStack {
   bloom: UnrealBloomPass;
   outline: OutlinePass;
   shafts: SunShaftPass;
+  /** camera / velocity motion blur (see MotionBlur.MOTION for its strength) */
+  motion: MotionBlurPass;
   output: OutputPass;
   grade: ShaderPass;
   enabled = true;
@@ -324,6 +328,10 @@ export class PostStack {
     this.outline = new OutlinePass();
     this.outline.camera = camera as THREE.PerspectiveCamera;
     this.composer.addPass(this.outline);
+    this.motion = new MotionBlurPass();
+    this.motion.camera = camera as THREE.PerspectiveCamera;
+    this.motion.depthTexture = rt.depthTexture;
+    this.composer.addPass(this.motion);
     this.shafts = new SunShaftPass();
     this.shafts.depthTexture = rt.depthTexture;
     this.shafts.enabled = false;
@@ -345,6 +353,7 @@ export class PostStack {
     this.renderPass.scene = scene;
     this.renderPass.camera = camera;
     this.outline.camera = camera as THREE.PerspectiveCamera;
+    this.motion.camera = camera as THREE.PerspectiveCamera;
   }
 
   /** MSAA samples of the scene target (the adaptive resolution trades 4x for 2x under load) */
@@ -390,6 +399,10 @@ export class PostStack {
 
   render(dt: number) {
     this.updateLook(dt);
+    this.motion.dt = dt;
+    // the blur writes into the scene target while sampling its depth: only safe while that
+    // target is multisampled (its depth texture is the resolve target, not the draw buffer)
+    this.motion.enabled = this.composer.renderTarget1.samples > 0;
     // The scene must land in the composer's first target every frame: the sun shafts read that
     // target's depth. The composer flips read / write once per swapping pass and never resets,
     // so with an odd number of them enabled (the intro's lens pass + the shafts, or ThothPop's

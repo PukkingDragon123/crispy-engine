@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { Particles } from './Particles';
 import { rnd } from '../../engine/math/rand';
 import { P } from '../../engine/voxel/palette';
+import { CoinRender } from './Coins3D';
+import { VoxelShots } from './VoxelShots';
 
 type V = { x: number; y: number; z: number };
 
@@ -129,6 +131,8 @@ export class Fx {
     // the streak sprite is 1:8, so its drawn width is size / 8: grows with range to stay ~2 px wide
     const sw = Math.min(1, 0.3 + d * 0.012);
     P.emit({ pos: { x: from.x + ux * s0, y: from.y + uy * s0, z: from.z + uz * s0 }, count: 1, vel: { x: ux * speed, y: uy * speed, z: uz * speed }, life: [(d - s0) / speed, (d - s0) / speed], size: [0.3, sw], sprite: 'streak', additive: true, color: 0xfffbe8, stretch: 0.012, sizeJitter: 0 });
+    // the slug itself: a brass-jacketed voxel round riding the head of the streak
+    VoxelShots.of(P).fly('slug', { x: from.x + ux * s0, y: from.y + uy * s0, z: from.z + uz * s0 }, { x: ux * speed, y: uy * speed, z: uz * speed }, (d - s0) / speed, 1.4);
     const seg = Math.min(4, Math.max(1.4, d / 14));
     const n = Math.min(18, Math.floor((d - 1.2) / seg));
     // stretched sprites take their length from velocity × stretch, and the particle shader reads
@@ -259,9 +263,29 @@ export class Fx {
     this.p.emit({ pos, count: 1, life: [life, life], size: [size * 0.2, size], sprite: 'ring', additive: true, color, sizeJitter: 0 });
   }
 
+  /** a shower of real 3D voxel coins (visual: they bounce, roll flat and sink) with glints */
   coins(pos: V, n = 8) {
-    this.p.emit({ pos, count: n, spread: 3, up: 6, life: [0.9, 1.4], size: [0.16, 0.16], sprite: ['coinspin0', 'coinspin1', 'coinspin2', 'coinspin3'], color: 0xffffff, gravity: 18, ground: true, bounce: 0.45, sizeJitter: 0.1 });
-    this.p.emit({ pos, count: n, spread: 2.5, up: 3, life: [0.3, 0.7], size: [0.12, 0.02], sprite: 'star4', additive: true, color: P.gold0 });
+    CoinRender.of(this.p).burst(pos, n);
+    this.p.emit({ pos, count: Math.min(n, 14), spread: 2.5, up: 3, life: [0.3, 0.7], size: [0.22, 0.03], sprite: 'star4', additive: true, color: [P.gold0, 0xfff2c0] });
+  }
+
+  /**
+   * Water: a crown of drops thrown up and out, a mist veil, a few bubbles and, for big
+   * entries, a tall plume. `k` 0.3 (a footstep) .. 3 (a body slamming in).
+   */
+  waterSplash(pos: V, k = 1, vel: V = { x: 0, y: 0, z: 0 }, tint = 0xdff4f2) {
+    const P = this.p;
+    P.emit({ pos, count: Math.ceil(10 * k), vel: { x: vel.x * 0.35, y: 3 + k * 2.2, z: vel.z * 0.35 }, spread: 1.6 + k * 1.2, jitter: 0.25 * k, gravity: 14, drag: 0.3, life: [0.45, 0.9], size: [0.07, 0.04], sprite: 'drop', color: [tint, 0xffffff, 0xbfe6e2], ground: true, bounce: 0 });
+    P.emit({ pos: { x: pos.x, y: pos.y + 0.15, z: pos.z }, count: Math.ceil(3 * k), vel: { x: vel.x * 0.2, y: 0.9, z: vel.z * 0.2 }, spread: 0.9 * k, jitter: 0.3 * k, life: [0.6, 1.2], size: [0.35 * k, 1.1 * k], sprite: 'mist', color: [0xf4fbff, 0xe2f2f2], alpha: 0.5, drag: 2.2, rot: 6, rotSpeed: 0.6 });
+    if (k > 1.4) P.emit({ pos, count: Math.ceil(6 * k), vel: { x: 0, y: 6 + k * 1.5, z: 0 }, spread: 0.8, jitter: 0.2, gravity: 13, life: [0.6, 1.0], size: [0.09, 0.05], sprite: 'drop', color: [0xffffff, tint], stretch: 0.03 });
+  }
+
+  /** spray thrown off a hull / board / legs moving through water at `speed` m/s */
+  waterSpray(pos: V, vel: V, speed: number) {
+    if (speed < 1.2) return;
+    const k = Math.min(1.6, speed / 8);
+    this.p.emit({ pos, count: Math.ceil(k * 3), vel: { x: vel.x * 0.25, y: 1.4 + k * 1.6, z: vel.z * 0.25 }, spread: 1.2 + k, jitter: 0.2, gravity: 12, drag: 0.6, life: [0.3, 0.6], size: [0.05, 0.03], sprite: 'drop', color: [0xe8f8f6, 0xffffff], ground: true, bounce: 0 });
+    if (rnd.chance(k * 0.35)) this.p.emit({ pos, count: 1, vel: { x: vel.x * 0.15, y: 0.5, z: vel.z * 0.15 }, spread: 0.4, life: [0.5, 0.9], size: [0.3, 0.9 * k], sprite: 'mist', color: 0xf0fafa, alpha: 0.35, drag: 2, rot: 6, rotSpeed: 0.5 });
   }
 
   sparkle(pos: V, color: number, n = 6, r = 0.6) {

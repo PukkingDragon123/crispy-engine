@@ -35,7 +35,8 @@ const HALL_KEY = 'dustup-hall-awake';
 
 /** the hall opens on the same "first ride is over" as the hideout */
 export function hallOpen() {
-  return hideoutOpen();
+  // (and never before Serket's tutorial is finished: Thoth does not show himself until then)
+  return hideoutOpen() && !!loadSave().tutorialDone;
 }
 
 /** open, but the menu has not yet shown the door waking */

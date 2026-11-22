@@ -579,19 +579,13 @@ export const Codex = {
       const n = Codex.kills(id) + (runKills?.()[id] ?? 0);
       Codex.discover('bounty', id, n >= MASTER_KILLS ? 'master' : 'kill');
     });
-    on('alphaSpawn', (en: any) => en?.def?.id && Codex.discover('bounty', en.def.id, 'sight'));
-    on('enemySkill', (s: any) => {
-      const en = s?.enemy;
-      if (en?.def?.id) Codex.discover('bounty', en.def.id, 'sight');
-    });
+    // a creature is discovered only by killing it (no sightings from alphas, skills or arrivals)
     on('bossIntro', (b: any) => {
-      const id = b && Codex.bossId(b.name, b.title);
-      if (id) Codex.discover('boss', id, 'sight');
       if (b?.name) Codex.loreBoss(b.name, false);
     });
     on('bossDefeated', (b: any, escaped: boolean) => {
       const id = b && Codex.bossId(b.name, b.title);
-      if (id) Codex.discover('boss', id, escaped ? 'sight' : 'kill');
+      if (id && !escaped) Codex.discover('boss', id, 'kill');
       if (b?.name && !escaped) Codex.loreBoss(b.name, true);
       Codex.loreCheck();
     });

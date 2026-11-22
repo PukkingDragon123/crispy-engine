@@ -8,7 +8,8 @@
 //   C swarm     XVI  THE TOWER      — the struck watchtower, falling headfirst
 //   G dung      XIX  THE SUN        — the dung-sun held overhead like Khepri
 //   F kick      VIII STRENGTH       — a roundhouse kick before Sekhmet
-//   Z ult       XIII DEATH          — riding the pale camel with the black banner
+//   X roses     VI   THE LOVERS     — Guns N' Roses (placeholder: the Magician's diorama)
+//   Z ult       XIII DEATH          — Stairway to Serket (the card of transformation): riding the pale camel with the black banner
 import * as THREE from 'three';
 import { buildRigGeo, clearRigCache, RigGeo, RigInstance, RigSpec } from '../../engine/voxel/Rig';
 import { makeVoxelMaterial, VoxelMaterial } from '../../engine/render/VoxelMaterial';
@@ -721,12 +722,14 @@ export const TAROT: TarotDef[] = [
   { key: 'C', num: 'XVI', title: 'THE TOWER', fx: 'storm', burst: [0xffffff, 0xbfe0ff, 0xffb040, 0x2a2030], scene: tower },
   { key: 'G', num: 'XIX', title: 'THE SUN', fx: 'sun', burst: [0xffe08a, 0xffc63c, 0xfff6d0, 0x7a5530], scene: sun },
   { key: 'F', num: 'VIII', title: 'STRENGTH', fx: 'kick', burst: [0xf6dcac, 0xe9c48c, 0xffd36b, 0xfff3d6], scene: strength },
+  // X: GUNS N' ROSES. Art hook for the models worker: this borrows the Magician's revolver-to-the-sky diorama until THE LOVERS gets its own (Sundown and the thorned rose, back to back)
+  { key: 'X', num: 'VI', title: 'THE LOVERS', fx: 'kick', burst: [0xc8243a, 0xe8586a, 0x3f6f2a, 0xfff3d6], scene: magician },
   { key: 'Z', num: 'XIII', title: 'DEATH', fx: 'death', burst: [0x9dff3a, 0xfff3d6, 0x1a1418, 0xd8ccb0], scene: death },
   { key: 'neck_slicer', num: '0', title: 'THE NECK SLICER', fx: 'kick', burst: [0xfff6d0, 0xffd36b, 0xe9c48c, 0xd8ccb0], scene: (k) => neckSlicerShot(k) },
 ];
 
 const byKey = (k: string) => TAROT.find((d) => d.key === k)!;
-/** the HUD ability bar: the three active skills (Magician, Tower, Sun), then the big Death ultimate */
-export const TAROT_BAR: TarotDef[] = ['E', 'C', 'G', 'Z'].map(byKey);
+/** the HUD ability bar: the four active skills (Magician, Tower, Sun, Lovers), then the big Death ultimate (Stairway to Serket, player/Ultimate ULT_CARD) */
+export const TAROT_BAR: TarotDef[] = ['E', 'C', 'G', 'X', 'Z'].map(byKey);
 /** plain moves (grapple XII, kick VIII, the Neck Slicer): their cards live on the hideout skills book's Moves page */
 export const TAROT_MOVES: TarotDef[] = ['Q', 'F', 'neck_slicer'].map(byKey);

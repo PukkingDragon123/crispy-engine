@@ -17,6 +17,7 @@ import { NileWater, FlatWater, NILE_LOOKS, type WaterSurface, type WaterSample }
 import { BURN, resetBurn } from './NileBurn';
 import { RigInstance } from '../../engine/voxel/Rig';
 import type { Collider } from './Colliders';
+import { RIPPLE_GLSL, RIPPLES } from './WaterFx';
 
 const waterVert = /* glsl */ `
 varying vec3 vW;
@@ -29,6 +30,7 @@ uniform float uTime; uniform vec3 uDeep, uShallow, uSky;
 uniform sampler2D uHeight; uniform vec2 uSize; uniform float uLevel;
 varying vec3 vW;
 #include <fog_pars_fragment>
+${RIPPLE_GLSL}
 float h12(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
 void main(){
   vec2 px = floor(vW.xz * 4.0) / 4.0;
@@ -38,7 +40,11 @@ void main(){
   float depth = clamp(uLevel - g, 0.0, 4.0) / 4.0;
   vec3 col = mix(uShallow, uDeep, smoothstep(0.0, 1.0, depth));
   col += (w1 * 0.04 + w2 * 0.03);
-  float glint = step(0.985, h12(px + floor(uTime * 3.0))) * 0.6;
+  // ripples from wading bodies and splashes; sun caustics over the shallows
+  vec3 rp = ripples(floor(vW.xz * 16.0) / 16.0, uTime);
+  col += rp.y * 0.012 + rp.z * 0.008;
+  col += vec3(1.0, 0.95, 0.8) * floor(caustic(vW.xz * 1.5 + rp.yz * 0.05, uTime * 0.8) * 4.0 + 0.5) / 4.0 * (1.0 - depth) * 0.45;
+  float glint = step(0.985, h12(px + floor(uTime * 3.0))) * 0.6 + step(0.18, rp.x) * 0.5;
   // pixel shoreline: a crisp, ragged two-band foam rim at the terrain's 16 texels / m
   float fn = h12(floor(vW.xz * 16.0));
   float foam = depth < 0.012 + fn * 0.014 ? 1.0 : (depth < 0.03 + fn * 0.014 && fract(w2 * 2.0) > 0.5 ? 0.55 : 0.0);
@@ -104,6 +110,8 @@ export class World {
   /** storm closing behind the hunter: corridor retreats queued after the old zone is swallowed */
   private closing: { id: string; at: number; speed: number }[] = [];
   private lastTime = -1;
+  /** the oasis pools (local still water above the sub-area's sea level) */
+  pools: { x: number; z: number; r: number; level: number }[] = [];
   private murkOn = false;
   private _murk = new THREE.Color();
 
@@ -130,6 +138,7 @@ export class World {
     scene.add(this.group);
     if (this.sa.nile) this.makeRiver();
     else if (this.sa.waterLevel > -100) this.makeWater();
+    for (const z of this.sa.zones) for (const p of z.pois) if (p.kind === 'oasis' && typeof p.data?.level === 'number' && p.data.level > this.sa.waterLevel + 0.05) this.pools.push({ x: p.x, z: p.z, r: p.r, level: p.data.level });
     console.log(`[world] ${key}: ${this.sa.size} m square, ${this.sa.zones.length} zones (r ${this.sa.zones.map((z) => z.r).join('/')}), ${this.sa.zones.reduce((n, z) => n + z.pois.length, 0)} sights; generate ${(t1 - t0).toFixed(0)} ms, terrain+storm ${(performance.now() - t1).toFixed(0)} ms`);
     // storm: zone 0 open, every other zone + corridor closed
     for (const z of this.sa.zones) {
@@ -311,6 +320,7 @@ export class World {
         uHeight: { value: tex },
         uSize: { value: new THREE.Vector2(f.size, f.size) },
         uLevel: { value: this.sa.waterLevel },
+        uRipples: RIPPLES,
       },
     });
     const wm = (this.waterMesh = new THREE.Mesh(new THREE.PlaneGeometry(f.size, f.size), mat));
@@ -355,7 +365,16 @@ export class World {
       out.speedMul = 0.8;
       out.kind = 'water';
       return out;
-    }
+    } else
+      for (const p of this.pools)
+        if (h < p.level - 0.06 && (x - p.x) ** 2 + (z - p.z) ** 2 < p.r * p.r) {
+          // an oasis pool: the board planes on the water instead of scraping the bed
+          out.h = p.level;
+          out.drag = 0.03;
+          out.speedMul = 0.86;
+          out.kind = 'water';
+          return out;
+        }
     out.h = h;
     const m = f.matAt(x, z);
     switch (m) {
@@ -393,6 +412,19 @@ export class World {
     }
     return out;
   };
+
+  /** the still or running water surface height at (x, z), or null on dry ground */
+  waterAt(x: number, z: number): number | null {
+    const g = this.sa.field.heightSmooth(x, z);
+    if (this.river) {
+      if (g > this.sa.waterLevel + 1.2) return null;
+      const s = this.river.sample(x, z, this._ws);
+      return s.h > g + 0.02 ? s.h : null;
+    }
+    if (g < this.sa.waterLevel - 0.02) return this.sa.waterLevel;
+    for (const p of this.pools) if (g < p.level - 0.02 && (x - p.x) ** 2 + (z - p.z) ** 2 < p.r * p.r) return p.level;
+    return null;
+  }
 
   groundAt = (x: number, z: number) => Math.max(this.sa.field.heightAt(x, z) + (this.sand.n ? this.sand.offset(x, z) : 0), this.sa.waterLevel);
   groundSmooth = (x: number, z: number) => Math.max(this.sa.field.heightSmooth(x, z) + (this.sand.n ? this.sand.offset(x, z) : 0), this.sa.waterLevel);

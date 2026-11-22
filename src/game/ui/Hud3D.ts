@@ -7,8 +7,8 @@
 // this class paints the purse coin, the mission notes and the outlaw readouts. cutIn() no longer draws anything on
 // screen: it hands every big moment to the in-world cutscene director
 // (cine/Cinema.ts: boss arrivals, area titles, voxel title stamps).
-// Also hosts: the SOUL BAR (Serket's 3D soul jar above the heart, Pinch guarding
-// its lid — SoulBar.ts), the long-gun magazines, gun belt and treasure (3D,
+// Also hosts: the BULLET ROW (big 3D rounds standing on the tarot pile, HudBullets.ts),
+// the heart's living light (HudHeartFx.ts), the long-gun magazines, gun belt and treasure (3D,
 // ArsenalHud.ts), the 3D tarot cards (TarotBar.ts), the MISSION PAPER notes (2D,
 // MissionPaper.ts) and the outlaw readouts — tin star, tally plank, wave plaque,
 // break stopwatch (2D, OutlawHud.ts) — and the pause poster (rendered at HUD
@@ -25,7 +25,9 @@ import { FaceQuads, RigEyes, EyeStyle } from '../fx/FaceFx';
 import { TarotBar } from './TarotBar';
 import { hudCylinder, hudRound, hudHeartRig } from '../models/props/hud';
 import { PausePoster } from './PausePoster';
-import { SoulBar } from './SoulBar';
+import { PauseGazette } from './PauseGazette';
+import { HudBullets } from './HudBullets';
+import { HeartFx } from './HudHeartFx';
 import { MissionPaper, questFromObjective } from './MissionPaper';
 import { OutlawHud } from './OutlawHud';
 import { Cinema, type BossLike } from '../cine/Cinema';
@@ -49,6 +51,8 @@ export interface CutInOpts {
   at?: THREE.Vector3;
 }
 
+/** the beating heart's height on screen, HUD px */
+const HEART_PX = 46;
 const CR = 14; // cylinder radius in voxels
 const CL = 10; // cylinder length in voxels
 const CH = 8.4; // chamber distance from axis
@@ -187,8 +191,9 @@ export class Hud3D implements HudPainter {
   private itemGeo = new Map<string, { geo: THREE.BufferGeometry; size: number } | null>();
   private itemPop: number[] = [];
   private lastCounts: number[] = [];
-  // soul jar, mission paper, outlaw furniture
-  private soul: SoulBar;
+  // bullet row, heart light, mission paper, outlaw furniture
+  private bullets: HudBullets;
+  private heartFx: HeartFx | null = null;
   private paper: MissionPaper;
   private outlaw: OutlawHud;
   private arsenal: ArsenalHud;
@@ -249,12 +254,13 @@ export class Hud3D implements HudPainter {
       const spec = hudHeartRig();
       this.heart = new RigInstance(buildRigGeo(spec, 'hud_heart'), { material: this.heartMat, castShadow: false });
       this.scene.add(this.heart.root);
+      this.heartFx = new HeartFx(this.heart, (spec.meta?.height as number) ?? 0.14, this.scene);
     } catch (e) {
       console.warn('[hud] heart failed', e);
     }
     this.scene.add(this.faces.mesh);
 
-    this.soul = new SoulBar(this.scene, hud);
+    this.bullets = new HudBullets(this.scene);
     this.paper = new MissionPaper(this.scene);
     this.outlaw = new OutlawHud(this.scene);
     this.arsenal = new ArsenalHud(this.scene, () => this.gunSpec);
@@ -278,6 +284,8 @@ export class Hud3D implements HudPainter {
   private bustKey = '';
   /** the pause screen: a wanted poster blows in and flutters; DOM buttons ride on it */
   showPause(open: boolean, actions?: { label: string; fn: () => void }[]) {
+    // the pause screen is THE DUST GAZETTE now (ui/PauseGazette): the buttons and settings are the paper
+    if (PauseGazette.get().show(open, actions)) return;
     this.posterOpen = open;
     if (!this.pp) {
       this.pp = new PausePoster(this.posterScene);
@@ -562,7 +570,7 @@ export class Hud3D implements HudPainter {
       const ph = this.beat;
       const lub = Math.exp(-(((ph - 0.02) / 0.06) ** 2)) + 0.6 * Math.exp(-(((ph - 0.27) / 0.07) ** 2));
       const height = (hr.geo.spec.meta?.height as number) ?? 0.14;
-      const sz = (36 * s) / height;
+      const sz = (HEART_PX * s) / height;
       const sq = 1 + lub * 0.085 - this.heartHurt * 0.12;
       hr.root.scale.setScalar(sz);
       const n = hr.nodes;
@@ -583,6 +591,7 @@ export class Hud3D implements HudPainter {
       const tint = this.heartMat.userData.tint.value;
       const low = frac < 0.3 ? 0.5 + 0.5 * Math.sin(this.t * 10) : 0;
       tint.setRGB(1 + this.heartHurt * 0.4 + low * 0.25, 1 - this.heartHurt * 0.2, 1 - this.heartHurt * 0.2);
+      this.heartFx?.update(dt, Math.min(1, lub), frac, this.heartHurt, this.t, hh.x, hh.y, HEART_PX * 0.45, s, visible);
     }
 
     // ------------------------------------------------ items
@@ -609,8 +618,8 @@ export class Hud3D implements HudPainter {
     });
     for (let i = A.items.length; i < this.itemMeshes.length; i++) if (this.itemMeshes[i]) this.itemMeshes[i]!.visible = false;
 
-    // ------------------------------------------------ soul jar, outlaw readouts, mission paper
-    this.soul.update(dt, A.soul, visible, s);
+    // ------------------------------------------------ bullet row, outlaw readouts, mission paper
+    this.bullets.update(dt, A.bullets, visible, s);
     this.outlaw.fx(dt, s, visible);
     this.paper.fx(dt, s, visible);
     this.glints.points.visible = visible;
@@ -687,7 +696,8 @@ export class Hud3D implements HudPainter {
     const pi = this.hud.painters.indexOf(this);
     if (pi >= 0) this.hud.painters.splice(pi, 1);
     this.tarot.dispose();
-    this.soul.dispose();
+    this.bullets.dispose();
+    this.heartFx?.dispose();
     this.paper.dispose();
     this.outlaw.dispose();
     this.arsenal.dispose();

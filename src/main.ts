@@ -9,8 +9,13 @@ import { nav } from './game/Nav';
 import { loadSave, writeSave } from './game/meta/Save';
 import { SOUNDS } from './game/audio/manifest';
 import { Music } from './game/audio/Music';
+import { voice } from './game/audio/BattleVoice';
 import { LoadingScreen } from './game/ui/LoadingScreen';
 import { hideoutOpen } from './game/meta/HideoutGate';
+import { newGameStart, playPreRun, type NewGameStep } from './game/run/NewGame';
+import { applySettings } from './game/ui/Settings';
+import { gateAdmin } from './game/admin/AdminGate';
+import { firstWaveOfDay } from './game/run/Days';
 
 const params = new URLSearchParams(location.search);
 const engine = new Engine(document.getElementById('app')!);
@@ -22,16 +27,18 @@ else if (matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)
 window.addEventListener('unhandledrejection', (e) => console.error('[dustUP] unhandled rejection', e.reason));
 window.addEventListener('error', (e) => console.error('[dustUP] uncaught', e.error ?? e.message));
 // the hourglass takes over the plain dark boot cover from index.html and stays up until the first scene is built
-const loading = new LoadingScreen(document.getElementById('boot')!, { dpr: params.get('q') === 'low' ? 0.75 : 1.25 });
+const loading = new LoadingScreen(document.getElementById('boot')!, { dpr: params.get('q') === 'low' ? 0.75 : 1.25, memory: newGameStart(params) === 'memory' || params.get('debug') === 'memory' });
 engine.loader = loading;
 (window as any).__loading = loading;
 export const music = new Music(engine.audio, 'audio/');
 (window as any).__music = music;
+voice.attach(engine.audio, 'audio/');
 engine.onAfterUpdate.push((dt, rdt) => music.update(rdt));
 engine.start();
-// the admin testing mode (a VITE_ADMIN=1 build, ?admin=1, the desktop app's --admin): its own chunk, never loaded otherwise
-if (import.meta.env.VITE_ADMIN === '1' || params.get('admin') === '1')
-  void import('./game/admin/AdminMode').then((m) => m.installAdmin(engine)).catch((e) => console.warn('[admin] failed to load', e));
+applySettings(engine);
+// the admin testing mode: its own chunk, never loaded otherwise (game/admin/AdminGate: a VITE_ADMIN=1 build,
+// ?admin=1 or #admin, the desktop app's --admin, or typing ADMIN anywhere, which also works inside an artifact frame)
+gateAdmin(engine, params);
 
 async function bootAssets() {
   // the pixel atlas renders onomatopoeia with Alagard: make sure it is decoded first
@@ -41,6 +48,7 @@ async function bootAssets() {
   if (!noAudio) {
     await engine.audio.loadManifest(SOUNDS, 'audio/', (f) => loading.setProgress(0.05 + f * 0.6));
     await music.load().catch((e) => console.warn('music load failed', e));
+    void voice.load();
   }
   // the rest of the glass runs while the first scene builds (Engine.setScene keeps the cover up)
   loading.setProgress(0.7);
@@ -58,13 +66,15 @@ async function main() {
     }
     return;
   }
+  // STORY-A: ?debug=memory holds the first-boot memory cover; ?debug=backstory plays the backstory (&bt=seconds, &contact=1)
+  if (debug === 'memory') return void loading.show();
   if (debug === 'terrain') {
     await engine.setScene(new DebugTerrainScene(engine, params), 0, '#000', { loading: false });
     void loading.hide();
     return;
   }
   await bootAssets();
-  nav.ride = (intro = false) => {
+  const ride = (intro = false, newGame?: NewGameStep) => {
     const d = loadSave();
     if (intro) {
       d.seenIntro = true;
@@ -74,29 +84,37 @@ async function main() {
       new RunScene(engine, {
         area: (params.get('area') as 'A' | 'B' | 'C') ?? 'A',
         seed: params.get('seed') ? +params.get('seed')! : Math.floor(Math.random() * 99999),
-        startWave: +(params.get('wave') ?? 1),
+        // ?day=N starts at the first wave of day N (WAVES_PER_DAY waves a day); ?wave=N still works
+        startWave: params.get('day') ? firstWaveOfDay(+params.get('day')!) : +(params.get('wave') ?? 1),
         stage: (params.get('stage') as StageId) ?? d.stage ?? 'desert',
         hero: (params.get('hero') as HeroId) ?? d.hero ?? 'sundown',
         intro,
+        newGame,
         look: d.look,
         gun: d.gun,
       }),
       0.6,
       // the menu zooms up into a blinding sky; the intro comes back down out of it
       intro ? '#fff4e0' : '#000',
-      { loading: 'Riding into the dunes' }
+      { loading: newGame ? 'The Weeping Wall' : 'Riding into the dunes' }
     );
   };
+  nav.ride = ride;
   nav.menu = () => void engine.setScene(new MenuScene(engine, () => nav.ride(true)), 0.6, '#000', { loading: engine.current ? 'Back to camp' : 'Gathering souls' });
   nav.hub = () => {
     // the hideout is found on the first ride: until a run has ended, the way home leads out into the dunes
     if (!hideoutOpen() && debug !== 'hub') return nav.ride(false);
     void engine.setScene(new HubScene(engine, () => nav.ride(false), () => nav.menu()), 0.6, '#000', { loading: 'Back to the hideout' });
   };
-  if (debug === 'run') {
+  // a save that has not finished Serket's tutorial starts the new game (STORY-B, run/NewGame.ts); ?newgame=<step> jumps in
+  const ng = newGameStart(params);
+  if (ng) void playPreRun(engine, ng).then((s) => ride(false, s));
+  else if (debug === 'run') {
     music.setMood('explore');
     nav.ride(params.get('intro') === '1');
   } else if (debug === 'hub') nav.hub();
+  else if (debug === 'backstory') void import('./game/cine/Backstory').then((m) => m.playBackstory(engine, { contact: params.get('contact') === '1' })).then(() => nav.menu());
+  else if (debug === 'death') void import('./game/scenes/DeathCine').then((m) => m.debugDeath(engine, params));
   else if (debug === 'cave') void import('./game/scenes/CaveScene').then((m) => m.debugCave(engine, { skipIntro: params.get('intro') === '0', olmNow: params.has('olm') }));
   else nav.menu();
   // ready once the first scene has finished building

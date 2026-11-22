@@ -1,17 +1,18 @@
-// The end of the hunt. When a run truly ends (a second death, or a failed Weighing
-// of the Heart) this cinematic plays before the hideout:
-//   1. the killing blow, again, in slow motion from a low dramatic angle: the killer
-//      winds up and strikes, Sundown is thrown back, his hat tumbles off, the gun
-//      spins out of his hand and drops into the sand, the board skids away, and he
-//      crumples to his knees and onto his back;
-//   2. the killer gloats over the body (enemies dance), the camera cranes up and
-//      away, then tilts up into the SKY;
-//   3. a time-lapse: the sun arcs and sets, the stars wheel round the pole, the moon
-//      passes, dawn breaks, again and again; the sand drifts over the body, and a big
-//      Alagard "N DAYS PASSED…" counts the sunrises;
-//   4. the last sunrise blooms to white and dissolves into the hideout, where he wakes
-//      up on the couch (HubScene's wake arrival) and his WANTED poster gets nailed up.
-// Space / Enter / Esc / click skips straight to the hideout.
+// DEATH, in two halves.
+//
+// 1. IN PLACE (every death, played by SoulReaping in the run's own world): `pickKiller` finds what
+//    laid him out (bosses first) and `Ragdoll` throws his real body off the board in slow motion:
+//    a rigid body with contact points, bounce and friction on the live terrain, and limp, lagging
+//    joints that flail in the air and flop on every impact; the hat tumbles away on its own.
+//    The camera orbits the body while the killer stands framed behind it, then the soul leaves.
+//
+// 2. THE WAY HOME (a lost ride: the heart was too heavy, or would not balance): this scene.
+//      a. the soul, a jade spectre of him, streaks low over the dunes, the camera chasing it;
+//      b. the time-lapse: the sun arcs and sets, the stars wheel, the soul drifts on across the
+//         sand toward a far window, and a floating "N DAYS PASSED..." counts the sunrises;
+//      c. the hideout: the soul slips in at the lamp-lit window, a warm bloom, and he wakes on
+//         Mama Toad's couch (HubScene's wake: she nursed him, and she remembers; meta/ToadMemory).
+//    Space / Enter / Esc / click skips straight to the hideout.
 import { say3D } from '../fx/WorldSpeech';
 import * as THREE from 'three';
 import type { Engine, GameScene } from '../../engine/Engine';
@@ -24,11 +25,12 @@ import { Noise, hash3 } from '../../engine/math/rand';
 import { Particles } from '../fx/Particles';
 import { modelEntry } from '../models/lookup';
 import type { EnemyDef } from '../enemies/EnemyDefs';
-import { Puppet } from '../ui/codex/Puppet';
 import { HubScene } from './HubScene';
 import { nav } from '../Nav';
 import { loadSave } from '../meta/Save';
 import { DEATH_LORE } from '../meta/Lore';
+import { toadMemory } from '../meta/ToadMemory';
+import { spiritMaterial, soulShellGeos, type SpiritMat } from './AnubisTrial';
 import type { PosterData, RunResult } from './ResultsScene';
 
 export interface DeathCineKiller {
@@ -53,13 +55,21 @@ export interface DeathCineOpts {
   result: PosterData;
 }
 
-/**
- * Gather what the cinematic needs from a run (duck-typed RunScene): the hunter's rig, gun and board,
- * and his killer (the nearest attacker, bosses first).
- */
-export function deathCineFromRun(run: any, result: RunResult): DeathCineOpts {
-  const p = run.player;
-  const pos: THREE.Vector3 = p?.pos ?? new THREE.Vector3();
+// ======================================================================= the killer
+/** what laid him out: the live enemy (its position keeps moving), its name, boss or not, its height */
+export interface KillerInfo {
+  enemy: any;
+  pos: THREE.Vector3;
+  name: string;
+  boss: boolean;
+  height: number;
+  at: number;
+}
+let lastPick: KillerInfo | null = null;
+
+/** the nearest attacker (bosses and enemies mid-attack first); remembered for the way home */
+export function pickKiller(run: any): KillerInfo | null {
+  const pos: THREE.Vector3 = run.player?.pos ?? new THREE.Vector3();
   let best: any = null, bs = Infinity;
   for (const e of (run.enemies?.list ?? []) as any[]) {
     if (!e?.alive || !e.pos) continue;
@@ -72,11 +82,40 @@ export function deathCineFromRun(run: any, result: RunResult): DeathCineOpts {
       best = e;
     }
   }
+  if (!best) return (lastPick = null);
+  const sc = best.scale ?? best.def?.scale ?? 1;
+  const height = Math.max(1.2, Math.min(9, (best.height ?? best.def?.height ?? (best.isBoss ? 3.6 : 1.8)) * (best.def?.height ? sc : 1)));
+  lastPick = { enemy: best, pos: best.pos, name: String(best.name ?? best.def?.name ?? 'the desert'), boss: !!best.isBoss, height, at: performance.now() };
+  return lastPick;
+}
+
+/** the ride's day (the days system), when it reports one */
+function dayOf(run: any): number | null {
+  const d = run?.run?.day ?? run?.days?.day ?? run?.day ?? run?.dayCycle?.day ?? null;
+  return typeof d === 'number' && d > 0 ? Math.floor(d) : null;
+}
+
+/**
+ * Gather what the way home needs from a run (duck-typed RunScene): the hunter's rig, gun and board,
+ * and his killer (the one picked at the moment of death, else the nearest attacker). Mama Toad
+ * writes the death down here (meta/ToadMemory).
+ */
+export function deathCineFromRun(run: any, result: RunResult): DeathCineOpts {
+  const p = run.player;
+  const pk = lastPick && performance.now() - lastPick.at < 240000 ? lastPick : pickKiller(run);
+  const best = pk?.enemy;
   let killer: DeathCineKiller | null = null;
-  if (best?.def) killer = { name: best.name, def: best.def, rigKey: best.rigKey, alpha: !!best.alpha };
-  else if (best?.rig?.geo?.spec) killer = { name: best.name, spec: best.rig.geo.spec, scale: best.scale ?? 1 };
+  if (best?.def) killer = { name: pk!.name, def: best.def, rigKey: best.rigKey, alpha: !!best.alpha };
+  else if (best?.rig?.geo?.spec) killer = { name: pk!.name, spec: best.rig.geo.spec, scale: best.scale ?? 1 };
   const r = result.run;
   const seed = ((run.opts?.seed ?? 1) * 131 + r.kills * 7 + r.wave * 13) >>> 0;
+  const days = 2 + (seed % 5);
+  try {
+    toadMemory.recordDeath({ killer: pk?.name ?? null, boss: !!pk?.boss, wave: r.wave, day: dayOf(run), kills: r.kills, deaths: (r as any).deaths ?? 1, nights: days });
+  } catch (e) {
+    console.warn('[death] toad memory', e);
+  }
+  lastPick = null;
   return {
     hero: p?.rig?.geo?.spec ?? result.hero ?? null,
     gun: p?.gun?.geo?.spec ?? null,
@@ -84,9 +123,284 @@ export function deathCineFromRun(run: any, result: RunResult): DeathCineOpts {
     killer,
     area: run.opts?.area ?? 'A',
     seed,
-    days: 2 + (seed % 5),
+    days,
     result: { run: { ...r }, won: false, bosses: [...result.bosses], hero: result.hero ?? p?.rig?.geo?.spec ?? null, banked: result.banked },
   };
+}
+
+// ======================================================================= the ragdoll
+type J3 = [number, number, number];
+/** thrown: arms flung up and out, back arched, head snapped back */
+const FLY: Record<string, J3> = { arm_r: [-2.4, 0, -0.8], fore_r: [-0.4, 0, 0], arm_l: [-1.6, 0, 1.1], fore_l: [-0.8, 0, 0], torso: [-0.45, 0.2, 0.05], head: [-0.7, -0.2, 0.1], jaw: [0.4, 0, 0], thigh_l: [-0.5, 0, 0.12], shin_l: [0.7, 0, 0], thigh_r: [0.3, 0, -0.1], shin_r: [0.3, 0, 0] };
+/** gone limp on his back in the sand */
+const LIMP: Record<string, J3> = { arm_r: [-2.75, 0, -0.45], fore_r: [-0.35, 0, 0], arm_l: [-0.35, 0, 1.3], fore_l: [-0.55, 0, 0], torso: [-0.08, 0.1, 0.05], head: [-0.12, 0.72, 0.12], jaw: [0.42, 0, 0], thigh_l: [-0.95, 0, 0.28], shin_l: [1.35, 0, 0], thigh_r: [-0.22, 0, -0.16], shin_r: [0.42, 0, 0] };
+const UP = new THREE.Vector3(0, 1, 0);
+
+interface Joint {
+  node: THREE.Object3D;
+  rest: THREE.Euler;
+  name: string;
+  /** offset angles (x, z) and their velocities; a soft spring toward the pose, lagging behind the body */
+  o: THREE.Vector2;
+  w: THREE.Vector2;
+  fly: J3;
+  limp: J3;
+  /** how floppy (unknown parts: tails, pincers, hair) */
+  k: number;
+}
+
+export interface RagdollOpts {
+  ground: (x: number, z: number) => number;
+  /** horizontal direction he is thrown (away from the killer) */
+  push: THREE.Vector3;
+  power?: number;
+  onImpact?: (p: THREE.Vector3, k: number, what: 'body' | 'hat') => void;
+}
+
+/**
+ * Sundown's real body, thrown and fallen: the rig root leaves the player and becomes a rigid body
+ * (eight contact points round the skeleton, restitution and friction against the live height field,
+ * a gentle roll onto his back once he slows), and every joint is a damped spring that lags behind the
+ * body's turning and is kicked by each impact. `restore()` hands the rig back exactly as it was.
+ */
+export class Ragdoll {
+  c = new THREE.Vector3();
+  v = new THREE.Vector3();
+  q = new THREE.Quaternion();
+  w = new THREE.Vector3();
+  landed = -1;
+  asleep = false;
+  private rest = 0;
+  private comY = 0.8;
+  private H = 1.6;
+  private Iinv = 4;
+  private pts: THREE.Vector3[] = [];
+  private parent: THREE.Object3D | null;
+  private saved: { p: THREE.Vector3; q: THREE.Quaternion; s: THREE.Vector3 };
+  private joints: Joint[] = [];
+  private wPrev = new THREE.Vector3();
+  private grounded = 0;
+  private hat: { obj: THREE.Object3D; src: THREE.Object3D; v: THREE.Vector3; spin: THREE.Vector3; landed: number } | null = null;
+  private t = 0;
+  private r1 = new THREE.Vector3();
+  private r2 = new THREE.Vector3();
+  private r3 = new THREE.Vector3();
+  private qa = new THREE.Quaternion();
+
+  constructor(private rig: RigInstance, private o: RagdollOpts) {
+    const root = rig.root;
+    root.updateMatrixWorld(true);
+    this.parent = root.parent;
+    this.saved = { p: root.position.clone(), q: root.quaternion.clone(), s: root.scale.clone() };
+    const box = new THREE.Box3().setFromObject(root);
+    const rp = root.getWorldPosition(new THREE.Vector3());
+    this.H = THREE.MathUtils.clamp(box.max.y - box.min.y, 0.8, 3);
+    const foot = Math.min(rp.y, box.min.y);
+    this.comY = THREE.MathUtils.clamp(box.getCenter(this.r1).y - rp.y, this.H * 0.3, this.H * 0.65);
+    let top: THREE.Object3D = root;
+    while (top.parent) top = top.parent;
+    top.attach(root);
+    this.q.copy(root.quaternion);
+    this.c.copy(root.position).addScaledVector(UP.clone().applyQuaternion(this.q), this.comY);
+    if (rp.y - foot > 0.02) this.c.y += 0; // (stands on its feet: the root is at the soles)
+    const H = this.H, cy = this.comY;
+    const P = (x: number, y: number, z: number) => this.pts.push(new THREE.Vector3(x, y - cy, z));
+    P(0, H - 0.1, 0); // crown
+    P(0, 0.05, 0.08); // toes
+    P(0, 0.05, -0.06); // heels
+    P(0.21, H * 0.8, -0.05); // shoulders
+    P(-0.21, H * 0.8, -0.05);
+    P(0, H * 0.66, 0.15); // chest
+    P(0, H * 0.6, -0.17); // back
+    P(0.17, H * 0.48, 0); // hips
+    P(-0.17, H * 0.48, 0);
+    this.Iinv = 1 / (0.1 * H * H);
+    // thrown away from the killer, the top going over backward, a little twist
+    const pw = o.power ?? 1;
+    const push = o.push.clone().setY(0);
+    if (push.lengthSq() < 1e-4) push.set(0, 0, -1).applyQuaternion(this.q).setY(0);
+    push.normalize();
+    this.v.copy(push).multiplyScalar(4.6 * pw).setY(3.3 * pw);
+    this.w.crossVectors(UP, push).normalize().multiplyScalar(4.2 * pw).addScaledVector(UP, (Math.random() - 0.5) * 2.4);
+    for (const p of rig.geo.parts) {
+      const n = rig.nodes[p.name];
+      if (!n || n === root || p.name === 'hat' || p.name === 'root') continue;
+      const known = p.name in LIMP || p.name in FLY;
+      const floppy = /tail|pinc|claw|hair|lock|curl|chel|stinger/.test(p.name);
+      if (!known && !floppy) continue;
+      this.joints.push({ node: n, rest: p.rest.clone(), name: p.name, o: new THREE.Vector2(), w: new THREE.Vector2(), fly: FLY[p.name] ?? [0, 0, 0], limp: LIMP[p.name] ?? [0, 0, 0], k: known ? 1 : 0.55 });
+    }
+  }
+
+  /** the hat pops off and tumbles on its own (a copy: the rig's own hat hides until restore) */
+  flingHat(scene: THREE.Object3D) {
+    const src = this.rig.meshes['hat'] as THREE.Mesh | undefined;
+    if (!src || this.hat) return;
+    src.updateWorldMatrix(true, false);
+    src.geometry.computeBoundingBox();
+    const ctr = src.geometry.boundingBox!.getCenter(new THREE.Vector3());
+    const wrap = new THREE.Group();
+    wrap.position.copy(ctr).applyMatrix4(src.matrixWorld);
+    src.matrixWorld.decompose(this.r1, wrap.quaternion, this.r2);
+    const m = new THREE.Mesh(src.geometry, src.material);
+    m.castShadow = true;
+    m.scale.copy(this.r2);
+    m.position.copy(ctr).multiply(this.r2).multiplyScalar(-1);
+    wrap.add(m);
+    scene.add(wrap);
+    src.visible = false;
+    const v = this.v.clone().multiplyScalar(0.55).add(new THREE.Vector3((Math.random() - 0.5) * 1.6, 2.6, (Math.random() - 0.5) * 1.6));
+    this.hat = { obj: wrap, src, v, spin: new THREE.Vector3(-7 + Math.random() * 3, 3, 4), landed: -1 };
+  }
+
+  /** advance the body (call with the slow-motion clock) */
+  step(dt: number) {
+    if (dt <= 0) return;
+    const n = Math.min(8, Math.ceil(dt / (1 / 120)));
+    const h = dt / n;
+    for (let i = 0; i < n; i++) this.sub(h);
+    this.stepJoints(dt);
+    this.stepHat(dt);
+  }
+
+  private sub(dt: number) {
+    this.t += dt;
+    if (this.asleep) return;
+    const g = this.o.ground;
+    this.v.y -= 9.8 * dt;
+    this.c.addScaledVector(this.v, dt);
+    const wl = this.w.length();
+    if (wl > 1e-5) {
+      this.qa.setFromAxisAngle(this.r1.copy(this.w).divideScalar(wl), wl * dt);
+      this.q.premultiply(this.qa).normalize();
+    }
+    let pen = 0, hits = 0, hard = 0;
+    const rad = 0.06;
+    for (const lp of this.pts) {
+      const r = this.r1.copy(lp).applyQuaternion(this.q);
+      const px = this.c.x + r.x, py = this.c.y + r.y, pz = this.c.z + r.z;
+      const d = g(px, pz) + rad - py;
+      if (d <= 0) continue;
+      hits++;
+      pen = Math.max(pen, d);
+      // velocity of the contact point
+      const vp = this.r2.crossVectors(this.w, r).add(this.v);
+      if (vp.y < 0) {
+        const rn = this.r3.set(-r.z, 0, r.x); // r × up
+        const j = (-(1 + 0.22) * vp.y) / (1 + this.Iinv * rn.lengthSq());
+        this.v.y += j;
+        this.w.addScaledVector(this.r3.set(-r.z, 0, r.x), this.Iinv * j);
+        hard = Math.max(hard, -vp.y);
+        // friction against the slide
+        const tl = Math.hypot(vp.x, vp.z);
+        if (tl > 1e-4) {
+          const jt = Math.min(0.65 * j, tl * 0.6);
+          const tx = (-vp.x / tl) * jt, tz = (-vp.z / tl) * jt;
+          this.v.x += tx;
+          this.v.z += tz;
+          // r × (tx, 0, tz)
+          this.w.x += this.Iinv * (r.y * tz);
+          this.w.y += this.Iinv * (r.z * tx - r.x * tz);
+          this.w.z += this.Iinv * (-r.y * tx);
+        }
+      }
+    }
+    if (hits) {
+      this.c.y += pen * 0.85;
+      const k = Math.exp(-1.6 * dt);
+      this.v.x *= k;
+      this.v.z *= k;
+      this.w.multiplyScalar(Math.exp(-2.4 * dt));
+      // a slow roll onto his back once he is down (face to the sky)
+      const f = this.r1.set(0, 0, 1).applyQuaternion(this.q);
+      if (this.landed >= 0) this.w.addScaledVector(this.r2.crossVectors(f, UP), 2.2 * dt);
+      if (hard > 0.6) {
+        if (this.landed < 0) this.landed = this.t;
+        this.kick(Math.min(1.5, hard / 3));
+        this.o.onImpact?.(this.c.clone().setY(g(this.c.x, this.c.z)), Math.min(1.5, hard / 3), 'body');
+      }
+      this.grounded = 0.25;
+      if (this.v.length() < 0.12 && this.w.length() < 0.22) this.rest += dt;
+      else this.rest = 0;
+      if (this.rest > 0.5) this.asleep = true;
+    } else this.grounded = Math.max(0, this.grounded - dt);
+  }
+
+  private kick(k: number) {
+    for (const j of this.joints) {
+      j.w.x += (Math.random() - 0.5) * 14 * k * j.k + (j.name.startsWith('arm') || j.name.startsWith('fore') ? -4 * k : 0);
+      j.w.y += (Math.random() - 0.5) * 12 * k * j.k;
+    }
+  }
+
+  private stepJoints(dt: number) {
+    // the limbs lag behind the body's turning: angular acceleration in the body's frame
+    const acc = this.r1.subVectors(this.w, this.wPrev).divideScalar(Math.max(1e-4, dt)).applyQuaternion(this.qa.copy(this.q).invert());
+    this.wPrev.copy(this.w);
+    const limp = this.landed >= 0 ? Math.min(1, (this.t - this.landed) * 2.5) : 0;
+    const K = 70, C = 7;
+    for (const j of this.joints) {
+      const tx = j.fly[0] + (j.limp[0] - j.fly[0]) * limp, tz = j.fly[2] + (j.limp[2] - j.fly[2]) * limp;
+      j.w.x += (-K * (j.o.x - tx) - C * j.w.x - acc.x * 0.05 * j.k) * dt;
+      j.w.y += (-K * (j.o.y - tz) - C * j.w.y - acc.z * 0.05 * j.k) * dt;
+      j.o.x = THREE.MathUtils.clamp(j.o.x + j.w.x * dt, -3.2, 3.2);
+      j.o.y = THREE.MathUtils.clamp(j.o.y + j.w.y * dt, -2, 2);
+    }
+  }
+
+  private stepHat(dt: number) {
+    const h = this.hat;
+    if (!h) return;
+    const o = h.obj;
+    const gy = this.o.ground(o.position.x, o.position.z) + 0.06;
+    if (h.landed >= 0) {
+      o.position.y += (gy - o.position.y) * (1 - Math.exp(-dt * 6));
+      o.quaternion.slerp(this.qa.setFromEuler(new THREE.Euler(0.12, o.rotation.y, -0.1)), 1 - Math.exp(-dt * 5));
+      return;
+    }
+    h.v.y -= 9.8 * dt;
+    h.v.multiplyScalar(Math.exp(-0.9 * dt)); // the brim catches the air
+    o.position.addScaledVector(h.v, dt);
+    const s = h.spin.length();
+    if (s > 1e-4) o.quaternion.premultiply(this.qa.setFromAxisAngle(this.r2.copy(h.spin).divideScalar(s), s * dt));
+    if (o.position.y < gy) {
+      o.position.y = gy;
+      const hard = -h.v.y;
+      this.o.onImpact?.(o.position.clone(), Math.min(1, hard / 6), 'hat');
+      if (hard > 1.6) {
+        h.v.set(h.v.x * 0.5, hard * 0.3, h.v.z * 0.5);
+        h.spin.multiplyScalar(0.4);
+      } else h.landed = 0;
+    }
+  }
+
+  /** write the body onto the rig (after the player's own animation each frame) */
+  apply() {
+    const root = this.rig.root;
+    root.quaternion.copy(this.q);
+    root.position.copy(this.c).addScaledVector(this.r1.copy(UP).applyQuaternion(this.q), -this.comY);
+    for (const j of this.joints) j.node.rotation.set(j.rest.x + j.o.x, j.rest.y + (j.fly[1] + (j.limp[1] - j.fly[1]) * (this.landed >= 0 ? 1 : 0)), j.rest.z + j.o.y);
+  }
+
+  /** the body's centre on the ground (for staging) */
+  rested(out: THREE.Vector3) {
+    return out.copy(this.c).setY(this.o.ground(this.c.x, this.c.z));
+  }
+
+  /** give the rig back to the player as it was */
+  restore() {
+    const root = this.rig.root;
+    if (this.parent) this.parent.add(root);
+    root.position.copy(this.saved.p);
+    root.quaternion.copy(this.saved.q);
+    root.scale.copy(this.saved.s);
+    for (const j of this.joints) j.node.rotation.copy(j.rest);
+    if (this.hat) {
+      this.hat.src.visible = true;
+      this.hat.obj.removeFromParent();
+      this.hat = null;
+    }
+  }
 }
 
 // ======================================================================= the land
@@ -263,46 +577,20 @@ function mixPreset(a: EnvPreset, b: EnvPreset, k: number): EnvPreset {
 const _c1 = new THREE.Color();
 const _c2 = new THREE.Color();
 
-// ======================================================================= the fall
-type J = [number, number, number];
-interface PoseKey {
-  t: number;
-  /** root offset (x, y, z) and rotation (x, y, z) */
-  r: [number, number, number, number, number, number];
-  j: Record<string, J>;
-}
-const AIM: Record<string, J> = { arm_r: [-1.35, 0, -0.1], fore_r: [-0.12, 0, 0], arm_l: [-0.3, 0, 0.2], fore_l: [-0.55, 0, 0], torso: [0.06, 0, 0], head: [0.04, 0, 0], thigh_l: [-0.18, 0, 0.06], shin_l: [0.3, 0, 0], thigh_r: [0.12, 0, -0.05], shin_r: [0.12, 0, 0] };
-const DOWN: Record<string, J> = { arm_r: [-2.75, 0, -0.45], fore_r: [-0.35, 0, 0], arm_l: [-0.35, 0, 1.3], fore_l: [-0.55, 0, 0], torso: [-0.08, 0.1, 0.05], head: [-0.12, 0.72, 0.12], jaw: [0.42, 0, 0], thigh_l: [-0.95, 0, 0.28], shin_l: [1.35, 0, 0], thigh_r: [-0.22, 0, -0.16], shin_r: [0.42, 0, 0] };
-const FALL: PoseKey[] = [
-  { t: 0, r: [0, 0.1, 0, 0, 0, 0], j: AIM },
-  { t: 0.2, r: [0, 0.14, -0.2, -0.17, 0.12, 0.05], j: { arm_r: [-2.6, 0, -0.75], fore_r: [-0.4, 0, 0], arm_l: [-1.45, 0, 1.1], fore_l: [-0.85, 0, 0], torso: [-0.52, 0.22, 0.08], head: [-0.78, -0.32, 0.1], jaw: [0.38, 0, 0], thigh_l: [-0.38, 0, 0.1], shin_l: [0.5, 0, 0], thigh_r: [0.28, 0, -0.08], shin_r: [0.2, 0, 0] } },
-  { t: 0.55, r: [0, -0.06, -0.34, -0.08, 0.2, 0.08], j: { arm_r: [-1.15, 0, -0.95], fore_r: [-0.65, 0, 0], arm_l: [-0.6, 0, 0.95], fore_l: [-0.9, 0, 0], torso: [-0.18, 0.26, 0.1], head: [-0.28, -0.2, 0.16], jaw: [0.32, 0, 0], thigh_l: [-0.62, 0, 0.12], shin_l: [1.05, 0, 0], thigh_r: [-0.12, 0, -0.1], shin_r: [0.75, 0, 0] } },
-  { t: 0.95, r: [0.05, -0.31, -0.4, 0.05, 0.26, 0.1], j: { arm_r: [0.18, 0, -0.35], fore_r: [-0.2, 0, 0], arm_l: [0.12, 0, 0.4], fore_l: [-0.3, 0, 0], torso: [0.46, 0.15, 0.16], head: [0.62, 0.2, 0.2], jaw: [0.42, 0, 0], thigh_l: [0.06, 0, 0.12], shin_l: [1.55, 0, 0], thigh_r: [0.1, 0, -0.1], shin_r: [1.6, 0, 0] } },
-  { t: 1.22, r: [0.1, -0.2, -0.44, -0.55, 0.3, 0.22], j: { arm_r: [-0.9, 0, -0.5], fore_r: [-0.3, 0, 0], arm_l: [-0.4, 0, 0.9], fore_l: [-0.4, 0, 0], torso: [-0.25, 0.12, 0.1], head: [-0.35, 0.4, 0.15], jaw: [0.45, 0, 0], thigh_l: [-0.4, 0, 0.2], shin_l: [1.45, 0, 0], thigh_r: [-0.05, 0, -0.12], shin_r: [1.2, 0, 0] } },
-  { t: 1.55, r: [0.15, 0.1, -0.5, -1.47, 0.34, 0.22], j: DOWN },
-  { t: 1.68, r: [0.15, 0.16, -0.5, -1.4, 0.34, 0.2], j: DOWN },
-  { t: 1.9, r: [0.15, 0.1, -0.5, -1.47, 0.34, 0.22], j: DOWN },
-];
+// ======================================================================= the way home
 const ss = (x: number) => x * x * (3 - 2 * x);
-/** the time-lapse camera: east of the body, looking west-south-west over it into the sunset sky */
-const TL_POS = new THREE.Vector3(12, 4.6, 5.4);
-const TL_DIR = new THREE.Vector3(-0.92, 0.17, -0.36).normalize();
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const sstep = (a: number, b: number, v: number) => ss(clamp01((v - a) / (b - a)));
+/** the time-lapse camera: east of the dunes, looking west-south-west into the sunset, toward home */
+const TL_POS = new THREE.Vector3(12, 4.6, 5.4);
+const TL_DIR = new THREE.Vector3(-0.92, 0.17, -0.36).normalize();
+/** the hideout on the horizon, and the soul's road to its lit window */
+const HOME = new THREE.Vector3(-46, 0, -18);
+const ROAD = [new THREE.Vector3(22, 1.5, 11), new THREE.Vector3(8, 1.1, 3.5), new THREE.Vector3(-6, 1.4, -2.5), new THREE.Vector3(-22, 1.9, -9), new THREE.Vector3(-36, 2.0, -14.5), new THREE.Vector3(-44.2, 1.35, -17.2)];
+const JADE = [0x7ff0e0, 0xc8fff4, 0x4fd8c0];
+/** the soul in flight: arms swept back, legs trailing, head up toward home */
+const SOAR: Record<string, J3> = { arm_l: [0.55, 0, 0.5], arm_r: [0.55, 0, -0.5], fore_l: [-0.3, 0, 0], fore_r: [-0.3, 0, 0], torso: [-0.15, 0, 0], head: [-0.35, 0, 0], thigh_l: [0.25, 0, 0.05], thigh_r: [0.42, 0, -0.05], shin_l: [0.55, 0, 0], shin_r: [0.8, 0, 0] };
 
-interface Body {
-  obj: THREE.Object3D;
-  vel: THREE.Vector3;
-  spin: THREE.Vector3;
-  r: number;
-  rest: THREE.Quaternion;
-  sink: number;
-  landed: number;
-  bounces: number;
-  sfx: string;
-}
-
-// ======================================================================= the scene
 export class DeathCine implements GameScene {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(40, 1, 0.05, 1400);
@@ -312,37 +600,28 @@ export class DeathCine implements GameScene {
   private skyU: Record<string, THREE.IUniform> = {};
   private h!: (x: number, z: number) => number;
   private particles = new Particles();
-  private hero: RigInstance | null = null;
-  private heroHolder = new THREE.Group();
-  private heroRest = new Map<string, THREE.Euler>();
-  private killer: Puppet | null = null;
-  private killerGone = false;
-  private bodies: Body[] = [];
-  private drift: THREE.Mesh | null = null;
-  private hat: THREE.Mesh | null = null;
-  private gunRoot: THREE.Object3D | null = null;
-  private boardMesh: THREE.Mesh | null = null;
+  private soul: RigInstance | null = null;
+  private soulShell: SpiritMat | null = null;
+  private soulCore: THREE.Material | null = null;
+  private soulLight = new THREE.PointLight(0x7ff0e0, 0, 7, 1.6);
+  private homeLight = new THREE.PointLight(0xffb060, 0, 16, 1.4);
+  private road!: THREE.CatmullRomCurve3;
+  private u = 0;
   private t = 0;
-  /** the hunter's clock (slow motion runs here) */
-  private hc = -1;
-  private strikeAt = -1;
-  private rate = 1;
-  private fallDone = -1;
   /** time-lapse: day fraction (0 midnight, .25 sunrise, .5 noon, .75 sunset) */
-  private tau = 0.66;
+  private tau = 0.7;
   private tlStart = -1;
   private tlOn = false;
   private tlDur = 8;
   private sunrises = 0;
+  private arriveAt = -1;
   private endAt = -1;
   private leaving = false;
-  private ui = document.createElement('div');
-  private title = document.createElement('div');
-  private skipEl = document.createElement('div');
   private loops: { stop(t?: number): void }[] = [];
   private nightLoop: { stop(t?: number): void } | null = null;
   private v1 = new THREE.Vector3();
   private v2 = new THREE.Vector3();
+  private v3 = new THREE.Vector3();
   private sunDir = new THREE.Vector3();
   private moonDir = new THREE.Vector3();
   private lightDir = new THREE.Vector3();
@@ -356,6 +635,7 @@ export class DeathCine implements GameScene {
   private fovNow = 40;
   private sand: number[];
   private geos: THREE.BufferGeometry[] = [];
+  private mats: THREE.Material[] = [];
   private own(g: THREE.BufferGeometry) {
     this.geos.push(g);
     return g;
@@ -374,7 +654,7 @@ export class DeathCine implements GameScene {
     this.base = { ...PRESETS[o.area === 'B' ? 'oasis' : o.area === 'C' ? 'pyramid' : 'dunes'] };
     this.env = new Env(s, o.area === 'B' ? 'oasis' : o.area === 'C' ? 'pyramid' : 'dunes', o.seed % 1000);
     this.env.sky.visible = false;
-    this.env.shadowExtent = 9;
+    this.env.shadowExtent = 14;
     this.env.sun.shadow.mapSize.set(2048, 2048);
     this.skyU = {
       uZenith: { value: new THREE.Color() }, uGround: { value: new THREE.Color() }, fogColor: { value: this.env.fog.color },
@@ -385,7 +665,7 @@ export class DeathCine implements GameScene {
     this.sky.renderOrder = -10;
     this.sky.frustumCulled = false;
     s.add(this.sky);
-    this.applySky(0);
+    this.applySky(this.tau);
     try {
       this.envRT = this.env.applyEnvMap(eng.renderer);
     } catch (e) {
@@ -393,247 +673,124 @@ export class DeathCine implements GameScene {
     }
     // ---- the ground
     const near = new THREE.Mesh(this.own(nearGround(this.h, o.area, o.seed)), sharedVoxelMaterial);
-    near.receiveShadow = true;
-    near.castShadow = true;
+    near.receiveShadow = near.castShadow = true;
     s.add(near);
     const far = new THREE.Mesh(this.own(farGround(this.h, o.area)), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 }));
     far.receiveShadow = true;
     s.add(far);
-    // set dressing: a bleached skull, a broken cactus, a rib arch on the ridge
+    // set dressing along the road home: a bleached skull, a broken cactus, a rib arch, a cattle-skull post
     const prop = (key: string, x: number, z: number, ry: number, sc = 1, sink = 0.05) => {
       try {
         const r = modelEntry(key)?.() as any;
-        if (!r?.model) return;
+        if (!r?.model) return null;
         const m = new THREE.Mesh(this.own(buildVoxelGeometry(r.model, { voxelSize: r.voxelSize, pivot: 'bottom' })), sharedVoxelMaterial);
         m.castShadow = m.receiveShadow = true;
         m.position.set(x, this.h(x, z) - sink, z);
         m.rotation.y = ry;
         m.scale.setScalar(sc);
         s.add(m);
+        return m;
       } catch (e) {
         console.warn('[death] prop', key, e);
+        return null;
       }
     };
-    prop('skull_cow', -1.9, 1.6, 2.4, 0.8);
-    prop('cactus_saguaro_dmg2', 4.6, -5.2, 0.7);
-    prop(o.area === 'C' ? 'obelisk_broken' : o.area === 'B' ? 'column_broken' : 'rib_arch', -13, -16, 0.5, 1, 0.4);
-    prop('cattle_skull_post', 6.5, 4.2, -0.8);
+    prop('skull_cow', 5.2, 1.6, 2.4, 0.8);
+    prop('cactus_saguaro_dmg2', -2.6, -6.2, 0.7);
+    prop(o.area === 'C' ? 'obelisk_broken' : o.area === 'B' ? 'column_broken' : 'rib_arch', -17, -14, 0.5, 1.2, 0.4);
+    prop('cattle_skull_post', -30, -10.5, -0.8);
+    // the hideout on the horizon: walls, roof, and a lamp in the window
+    const hy = this.h(HOME.x, HOME.z);
+    HOME.y = hy;
+    const walls = prop('cabin_walls', HOME.x - 1.6, HOME.z - 1.2, 0.9, 1, 0.1);
+    if (walls) {
+      const top = new THREE.Box3().setFromObject(walls).max.y;
+      const roof = prop('cabin_roof', HOME.x - 1.6, HOME.z - 1.2, 0.9, 1, 0);
+      if (roof) roof.position.y = top - 0.15;
+    } else prop('rib_arch', HOME.x - 1.6, HOME.z - 1.2, 0.9, 1.4, 0.3);
+    this.homeLight.position.set(HOME.x + 0.6, hy + 1.6, HOME.z + 0.5);
+    s.add(this.homeLight);
     s.add(this.particles.group);
     this.particles.groundAt = this.h;
-    // ---- the hunter
+    // ---- the road home, hugging the dunes
+    this.road = new THREE.CatmullRomCurve3(ROAD.map((p) => p.clone().setY(this.h(p.x, p.z) + p.y)), false, 'centripetal');
+    // ---- the soul: a jade spectre of his own bones
     if (o.hero?.parts) {
-      this.hero = new RigInstance(buildRigGeo(o.hero, o.hero.name + ':death'), { material: makeVoxelMaterial(), castShadow: true });
-      for (const p of this.hero.geo.parts) this.heroRest.set(p.name, p.rest.clone());
-      this.heroHolder.add(this.hero.root);
-      this.hero.setExpression('angry');
-      if (o.gun?.parts) {
-        const g = new RigInstance(buildRigGeo(o.gun, o.gun.name + ':death'), { material: this.hero.material });
-        const holder = new THREE.Group();
-        holder.rotation.x = Math.PI / 2;
-        holder.add(g.root);
-        if (!this.hero.attach('hand_r', holder)) this.hero.nodes['fore_r']?.add(holder);
-        this.gunRoot = g.root;
+      try {
+        const geo = buildRigGeo(o.hero, o.hero.name + ':death');
+        const core = makeVoxelMaterial({ transparent: true, opacity: 0.34 });
+        core.userData.tint.value.setRGB(0.55, 1.25, 1.3);
+        core.depthWrite = false;
+        const shell = spiritMaterial(0x0f6a5a, 0xb8fff0, { inflate: 0.012, power: 2.2, core: 0.55, lumRim: 1, gain: 1.2, vein: 0.6 });
+        shell.uniforms.uFogNear.value = 80;
+        shell.uniforms.uFogFar.value = 500;
+        this.mats.push(core, shell);
+        const r = new RigInstance(geo, { material: core, castShadow: false });
+        const shells = soulShellGeos(geo);
+        geo.parts.forEach((p, i) => {
+          const m = new THREE.Mesh(shells[i], shell);
+          m.renderOrder = 5;
+          r.nodes[p.name].add(m);
+        });
+        r.root.traverse((q) => {
+          if ((q as THREE.Mesh).isMesh && (q as THREE.Mesh).material === core) q.renderOrder = 4;
+        });
+        s.add(r.root);
+        this.soul = r;
+        this.soulShell = shell;
+        this.soulCore = core;
+      } catch (e) {
+        console.warn('[death] soul', e);
       }
-      this.hat = this.hero.meshes['hat'] ?? null;
     }
-    s.add(this.heroHolder);
-    this.heroHolder.position.set(0, this.h(0, 0), 0);
-    if (o.board) {
-      this.boardMesh = new THREE.Mesh(o.board, makeVoxelMaterial());
-      this.boardMesh.castShadow = this.boardMesh.receiveShadow = true;
-      this.boardMesh.position.set(0, 0.07, 0);
-      this.boardMesh.rotation.y = Math.PI / 2;
-      s.add(this.boardMesh);
-    }
-    this.pose(0);
-    // ---- the killer, facing him
-    const k = o.killer;
-    try {
-      if (k?.def) this.killer = Puppet.enemy(k.def, { alpha: k.alpha, rigKey: k.rigKey, material: makeVoxelMaterial() });
-      else if (k?.spec) this.killer = Puppet.rig(k.spec, { key: 'death:' + k.spec.name, material: makeVoxelMaterial() });
-    } catch (e) {
-      console.warn('[death] killer', e);
-      this.killer = null;
-    }
-    if (this.killer) {
-      const kp = this.killer;
-      const reach = k?.def ? (k.def.attacks.find((a) => a.kind === 'melee') ? 1.15 + kp.radius : Math.min(7, 2.6 + kp.radius * 2)) : 1.6 + kp.radius * 1.2;
-      const kx = 0.25, kz = reach;
-      kp.root.position.set(kx, this.h(kx, kz), kz);
-      kp.root.rotation.y = Math.PI;
-      if (k?.scale && !k.def) kp.root.scale.setScalar(k.scale);
-      kp.onStrike = () => this.onStrike();
-      s.add(kp.root);
-    }
-    // ---- the overlay: letterbox, the big title, a skip hint
-    this.ui.style.cssText = 'position:absolute;inset:0;z-index:9;pointer-events:none';
-    this.title.style.cssText = "position:absolute;left:0;right:0;top:30%;text-align:center;font-family:'Alagard';font-size:clamp(40px,9vw,120px);letter-spacing:.08em;color:#fff1d2;opacity:0;transform:translateY(14px) scale(.96);transition:opacity 1.4s ease,transform 2.2s cubic-bezier(.2,.7,.2,1);text-shadow:0 4px 0 #2a1408,0 0 26px rgba(255,190,110,.55),0 0 80px rgba(255,140,60,.35);white-space:nowrap";
-    this.skipEl.style.cssText = "position:absolute;right:28px;bottom:calc(11vh + 14px);font-family:'Alagard';font-size:15px;color:#fff3d6;opacity:0;transition:opacity 1s;text-shadow:0 2px 0 #2a1408,0 0 8px #000";
-    this.skipEl.textContent = this.engine.input.touchDevice ? 'tap to skip' : 'Space · Esc · click — skip';
-    this.ui.append(this.title, this.skipEl);
-    eng.overlay.appendChild(this.ui);
+    s.add(this.soulLight);
     eng.letterbox(true, 0.4);
     eng.input.setWantLock(false);
-    (window as any).__music?.setMood('tension', 0.6);
+    (window as any).__music?.setMood('underworld', 1.2);
     const w = eng.audio.loop('wind_loop', 0.5);
     if (w) this.loops.push(w);
+    eng.audio.play('soul_leave', { volume: 0.7, pitch: 0.8 });
+    eng.audio.play('whoosh_big', { volume: 0.6, pitch: 0.6 });
     this.tlDur = THREE.MathUtils.clamp(2.1 * o.days + 1.6, 6, 13);
-    // camera: low and close, dutch angle, looking up past the killer at the hunter
     this.camera.aspect = eng.width / eng.height;
-    this.shotA(0, true);
-    setTimeout(() => (this.skipEl.style.opacity = '0.7'), 1500);
+    this.placeSoul(0, 0);
+    this.shotChase(0, true);
     this.ready = true;
     (window as any).__death = this;
   }
 
-  // ---------------------------------------------------------------- the hunter's pose
-  private pose(hc: number) {
-    const h = this.hero;
-    if (!h) return;
-    let i = 0;
-    while (i < FALL.length - 2 && hc > FALL[i + 1].t) i++;
-    const a = FALL[i], b = FALL[Math.min(FALL.length - 1, i + 1)];
-    const k = b.t > a.t ? ss(clamp01((hc - a.t) / (b.t - a.t))) : 1;
-    const R = this.heroHolder;
-    const g = this.h(0, 0);
-    R.position.set(a.r[0] + (b.r[0] - a.r[0]) * k, g + a.r[1] + (b.r[1] - a.r[1]) * k, a.r[2] + (b.r[2] - a.r[2]) * k);
-    R.rotation.set(a.r[3] + (b.r[3] - a.r[3]) * k, a.r[4] + (b.r[4] - a.r[4]) * k, a.r[5] + (b.r[5] - a.r[5]) * k, 'YXZ');
-    // breathing out the last of it, then still
-    const life = hc < 0 ? 1 : 1 - sstep(1.4, 2.2, hc);
-    const br = Math.sin(this.t * 2.2) * 0.02 * life;
-    for (const [name, rest] of this.heroRest) {
-      const n = h.nodes[name];
-      if (!n) continue;
-      const ja = a.j[name] ?? [0, 0, 0], jb = b.j[name] ?? [0, 0, 0];
-      n.rotation.set(rest.x + ja[0] + (jb[0] - ja[0]) * k, rest.y + ja[1] + (jb[1] - ja[1]) * k, rest.z + ja[2] + (jb[2] - ja[2]) * k);
-    }
-    if (h.nodes['torso']) h.nodes['torso'].rotation.x += br;
-    if (h.nodes['jaw']) h.nodes['jaw'].rotation.x += h.exprJaw;
-    // the aim trembles before the blow
-    if (hc < 0 && h.nodes['arm_r']) h.nodes['arm_r'].rotation.x += Math.sin(this.t * 13) * 0.012;
-  }
-
-  // ---------------------------------------------------------------- the blow
-  private onStrike() {
-    if (this.strikeAt >= 0) return;
-    const eng = this.engine;
-    this.strikeAt = this.t;
-    this.hc = 0;
-    eng.flash(0xfff0d0, 0.35, 0.2);
-    eng.audio.play('hit_bone', { volume: 1, pitch: 0.7 });
-    eng.audio.play('skeleton_rattle', { volume: 0.9, pitch: 0.8 });
-    eng.audio.play('time_slow', { volume: 0.8 });
-    eng.audio.play('sting_negative', { volume: 0.7 });
-    this.hero?.setExpression('hurt');
-    const chest = this.v1.set(0, this.h(0, 0) + 1.15, 0);
-    const k = this.o.killer?.def;
-    if (k && !k.attacks.some((a) => a.kind === 'melee')) {
-      // a shot: muzzle smoke at the killer, a spray of bone chips off the hunter
-      const kp = this.killer!.root.position;
-      this.particles.emit({ pos: { x: kp.x, y: kp.y + 1.3, z: kp.z - 0.4 }, count: 6, spread: 0.4, up: 0.4, life: [0.8, 1.4], size: [0.2, 0.6], sprite: ['puff0', 'puff1'], color: 0xe8e0d0, alpha: 0.6, drag: 2 });
-    }
-    this.particles.emit({ pos: chest, count: 16, spread: 2.2, up: 1.6, vel: { x: 0, y: 0.6, z: -1.8 }, life: [0.6, 1.4], size: [0.024, 0.014], sprite: ['twig', 'dot3'], color: [0xf2dcb4, 0xd6b78a, 0xfff1d6], gravity: 6, ground: true, drag: 0.4 });
-    this.particles.emit({ pos: chest, count: 3, spread: 0.5, up: 0.3, life: [0.7, 1.2], size: [0.18, 0.5], sprite: ['puff0', 'puff1'], color: 0xe6cf9f, alpha: 0.35, drag: 1.6 });
-  }
-
-  /** a thing flies off him: the hat, the gun, the board */
-  private launch(obj: THREE.Object3D, vel: THREE.Vector3, spin: THREE.Vector3, r: number, rest: THREE.Quaternion, sink: number, sfx: string) {
-    this.scene.attach(obj);
-    this.bodies.push({ obj, vel, spin, r, rest, sink, landed: -1, bounces: 0, sfx });
-  }
-
-  private stepBodies(dt: number) {
-    const q = new THREE.Quaternion();
-    for (const b of this.bodies) {
-      const o = b.obj;
-      if (b.landed >= 0) {
-        b.landed += dt;
-        o.quaternion.slerp(b.rest, 1 - Math.exp(-dt * 7));
-        const g = this.h(o.position.x, o.position.z);
-        o.position.y += (g + b.r - b.sink - o.position.y) * (1 - Math.exp(-dt * 6));
-        continue;
+  // ---------------------------------------------------------------- the soul
+  private placeSoul(dt: number, t: number) {
+    const u = Math.min(0.999, this.u);
+    const p = this.road.getPointAt(u, this.v1);
+    const tan = this.road.getTangentAt(u, this.v2);
+    const r = this.soul?.root;
+    const bob = Math.sin(t * 1.7) * 0.12;
+    this.soulLight.position.copy(p).setY(p.y + 0.6 + bob);
+    this.soulLight.intensity = 6 + Math.sin(t * 3.1) * 0.8;
+    if (r) {
+      // flying: tipped forward along the road, banking a little into the curve
+      r.position.copy(p).setY(p.y + bob);
+      const yaw = Math.atan2(tan.x, tan.z);
+      r.rotation.set(1.05 + Math.sin(t * 0.9) * 0.06, yaw, Math.sin(t * 0.6) * 0.12, 'YXZ');
+      for (const part of this.soul!.geo.parts) {
+        const n = this.soul!.nodes[part.name];
+        const j = SOAR[part.name];
+        if (!n || !j) continue;
+        const ph = t * 2.3 + part.name.length;
+        n.rotation.set(part.rest.x + j[0] + Math.sin(ph) * 0.06, part.rest.y + j[1], part.rest.z + j[2] + Math.sin(ph * 0.7) * 0.05);
       }
-      b.vel.y -= 9.8 * dt;
-      o.position.addScaledVector(b.vel, dt);
-      const w = b.spin.length();
-      if (w > 1e-4) {
-        q.setFromAxisAngle(this.v2.copy(b.spin).divideScalar(w), w * dt);
-        o.quaternion.premultiply(q);
-      }
-      const g = this.h(o.position.x, o.position.z) + b.r;
-      if (o.position.y < g) {
-        o.position.y = g;
-        const p = { x: o.position.x, y: g - b.r, z: o.position.z };
-        const hard = -b.vel.y;
-        this.particles.emit({ pos: p, count: 3 + Math.round(hard), spread: 0.5, up: 0.4, life: [0.6, 1.2], size: [0.14, 0.4], sprite: ['puff0', 'puff1'], color: [0xe6cf9f, 0xd8b98a], alpha: 0.5, drag: 2.2 });
-        this.particles.emit({ pos: p, count: 8 + Math.round(hard * 3), spread: 1.2, up: 1.6, life: [0.4, 0.9], size: [0.03, 0.02], sprite: ['dot3', 'dot4'], color: this.sand, gravity: 10, ground: true, jitter: 0.3 });
-        this.engine.audio.play(b.sfx, { volume: Math.min(1, 0.3 + hard * 0.12) });
-        if (hard > 1.4 && b.bounces < 2) {
-          b.bounces++;
-          b.vel.set(b.vel.x * 0.45, hard * 0.3, b.vel.z * 0.45);
-          b.spin.multiplyScalar(0.45);
-        } else b.landed = 0;
-      }
+      if (this.soulShell) this.soulShell.uniforms.uGain.value = 1.15 + Math.sin(t * 3.1) * 0.1 + Math.sin(t * 17) * 0.05;
     }
-  }
-
-  private updateHero(dt: number) {
-    const h = this.hero;
-    if (this.hc < 0) {
-      this.pose(-1);
-      return;
+    // a wake of motes, and sand lifting under him when he flies low
+    if (dt > 0 && Math.random() < dt * 70) {
+      const back = this.v3.copy(tan).multiplyScalar(-0.6);
+      this.particles.emit({ pos: { x: p.x + back.x, y: p.y + 0.5 + bob, z: p.z + back.z }, vel: { x: -tan.x * 1.5, y: 0.35, z: -tan.z * 1.5 }, count: 1, spread: 0.45, life: [0.8, 1.8], size: [0.06, 0.012], sprite: Math.random() < 0.3 ? 'glow8' : 'dot3', color: JADE, additive: true, drag: 0.8, gravity: -0.3 });
     }
-    this.hc += dt;
-    this.pose(this.hc);
-    if (!h) return;
-    // the hat pops off, the gun flies out of his hand, the board skids away
-    if (this.hat && this.hc > 0.06) {
-      const hat = this.hat;
-      this.hat = null;
-      const m = new THREE.Mesh(hat.geometry, hat.material);
-      m.castShadow = true;
-      hat.updateWorldMatrix(true, false);
-      hat.matrixWorld.decompose(m.position, m.quaternion, m.scale);
-      // pivot the tumble round the crown's centre
-      hat.geometry.computeBoundingBox();
-      const c = hat.geometry.boundingBox!.getCenter(new THREE.Vector3());
-      const wrap = new THREE.Group();
-      wrap.position.copy(c).applyMatrix4(hat.matrixWorld);
-      wrap.quaternion.copy(m.quaternion);
-      m.position.copy(c).multiplyScalar(-1).multiply(m.scale);
-      m.quaternion.identity();
-      wrap.add(m);
-      this.scene.add(wrap);
-      hat.visible = false;
-      const rest = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.22, 2.2, -0.15, 'YXZ'));
-      this.launch(wrap, new THREE.Vector3(-0.9, 3.4, -2.3), new THREE.Vector3(-7, 2.5, 3), 0.07, rest, 0, 'board_land');
+    if (dt > 0 && Math.random() < dt * 10) {
+      const g = this.h(p.x, p.z);
+      if (p.y - g < 1.8) this.particles.emit({ pos: { x: p.x, y: g + 0.05, z: p.z }, vel: { x: -tan.x * 2, y: 0.5, z: -tan.z * 2 }, count: 2, spread: 0.6, life: [1.0, 2.0], size: [0.25, 0.8], sprite: ['puff0', 'puff1'], color: this.sand, alpha: 0.3, drag: 1.6, rot: 3, rotSpeed: 0.3 });
     }
-    if (this.gunRoot && this.hc > 0.1) {
-      const g = this.gunRoot;
-      this.gunRoot = null;
-      const rest = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.25, -0.9, Math.PI / 2, 'YXZ'));
-      this.launch(g, new THREE.Vector3(-2.2, 3.0, 0.4), new THREE.Vector3(2, 14, -4), 0.03, rest, 0.025, 'rev_dry');
-      this.engine.audio.play('rev_spin', { volume: 0.6, pitch: 0.7 });
-    }
-    if (this.boardMesh && this.hc > 0.14 && !this.bodies.some((b) => b.obj === this.boardMesh)) {
-      const rest = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.55, Math.PI / 2 + 0.6, 0.12, 'YXZ'));
-      this.launch(this.boardMesh, new THREE.Vector3(1.6, 1.2, -2.6), new THREE.Vector3(0, 2.2, 3.5), 0.04, rest, 0.12, 'board_land');
-    }
-    // knees, then the back, hit the sand
-    if (this.hc > 0.95 && this.hc - dt <= 0.95) this.thump(0.4, -0.4, 0.7);
-    if (this.hc > 1.55 && this.hc - dt <= 1.55) {
-      this.thump(0.15, -1.2, 1.3);
-      this.engine.audio.play('skeleton_rattle', { volume: 0.7, pitch: 0.6 });
-      h.setExpression('dead');
-      this.fallDone = this.t;
-    }
-  }
-
-  private thump(x: number, z: number, k: number) {
-    const p = { x, y: this.h(x, z), z };
-    this.particles.emit({ pos: p, count: Math.round(6 * k), spread: 1.1, up: 0.5, life: [0.8, 1.6], size: [0.22, 0.7], sprite: ['puff0', 'puff1'], color: [0xe6cf9f, 0xd8b98a, 0xc9a77a], alpha: 0.45, drag: 2, rot: 3, rotSpeed: 0.4 });
-    this.particles.emit({ pos: p, count: Math.round(22 * k), spread: 2, up: 2.2, life: [0.4, 0.9], size: [0.03, 0.02], sprite: ['dot3', 'dot4'], color: this.sand, gravity: 11, ground: true, jitter: 0.6 });
-    this.engine.audio.play('sand_burst', { volume: 0.5 * k });
   }
 
   // ---------------------------------------------------------------- sky and light
@@ -655,7 +812,6 @@ export class DeathCine implements GameScene {
     else if (alt > -16) p = mixPreset(PRESETS.night, eve, (alt + 16) / 9);
     else p = { ...PRESETS.night };
     const night = clamp01((-alt + 2) / 14);
-    // the light: the sun by day, the moon by night (both faint at the hand-over, so no pop)
     const sunI = sstep(-0.05, 0.14, this.sunDir.y);
     const moonI = sstep(-0.04, 0.2, this.moonDir.y) * night;
     this.lightDir.copy(sunI >= moonI * 0.35 ? this.sunDir : this.moonDir);
@@ -679,7 +835,8 @@ export class DeathCine implements GameScene {
     u.uStars.value = Math.max(p.stars, night);
     u.uMoon.value = sstep(-0.02, 0.03, this.moonDir.y) * (0.35 + 0.65 * night);
     u.uNight.value = night;
-    // a night and a dawn to remember
+    // the lamp in the hideout window burns brighter as the dark comes on
+    this.homeLight.intensity = 3 + 22 * night;
     return night;
   }
 
@@ -692,6 +849,9 @@ export class DeathCine implements GameScene {
       this.camPos.copy(pos);
       this.camLook.copy(look);
     }
+    // never inside a dune
+    const g = this.h(this.camPos.x, this.camPos.z) + 0.35;
+    if (this.camPos.y < g) this.camPos.y = g;
     this.fovNow += (fov - this.fovNow) * (snap ? 1 : k);
     this.camRoll += (roll - this.camRoll) * (snap ? 1 : k);
     const c = this.camera;
@@ -703,16 +863,15 @@ export class DeathCine implements GameScene {
     c.updateProjectionMatrix();
   }
 
-  /** the duel, side-on and a little low: the hunter on one third, his killer on the other, a dutch tilt */
-  private shotA(rdt: number, snap = false) {
-    const g = this.h(0, 0);
-    const kz = this.killer ? this.killer.root.position.z : 1.5;
-    const kh = this.killer ? Math.min(3, this.killer.height * (this.killer.root.scale.y || 1)) : 1.7;
-    const push = Math.min(1, this.t / 5) * 0.3;
-    const d = 2.2 + kz * 0.55 + kh * 0.35 - push;
-    const pos = this.v1.set(d, g + 0.62, kz * 0.5 + 0.35);
-    const look = this.v2.set(0.1, g + 0.95 + kh * 0.08, kz * 0.48);
-    this.setCam(pos, look, 40, 0.07, rdt, snap);
+  /** low and close beside the soul as it streaks over the sand, a little dutch, leading it */
+  private shotChase(rdt: number, snap = false) {
+    const u = Math.min(0.999, this.u);
+    const p = this.road.getPointAt(u, this.v1).clone();
+    const tan = this.road.getTangentAt(u, this.v2).clone();
+    const side = this.v3.set(tan.z, 0, -tan.x).normalize();
+    const pos = p.clone().addScaledVector(tan, -2.4).addScaledVector(side, 1.35).add(new THREE.Vector3(0, 0.35, 0));
+    const look = p.clone().addScaledVector(tan, 2.2).add(new THREE.Vector3(0, 0.45, 0));
+    this.setCam(pos, look, 54, 0.06, rdt * 1.6, snap);
   }
 
   // ---------------------------------------------------------------- frame
@@ -726,97 +885,60 @@ export class DeathCine implements GameScene {
       this.finish(true);
       return;
     }
-    // slow motion from the blow, easing back to speed as he goes down
-    const sinceHit = this.strikeAt >= 0 ? t - this.strikeAt : -1;
-    this.rate = sinceHit < 0 ? 1 : sinceHit < 1.0 ? 0.24 : sinceHit < 1.8 ? 0.24 + (sinceHit - 1.0) / 0.8 * 0.76 : 1;
-    const dt = rdt * this.rate;
-    // the killer strikes (or, with no killer, he just goes down)
-    if (this.strikeAt < 0) {
-      if (this.killer && t > 0.35 && !this.killer.busy) this.killer.attack();
-      if (!this.killer && t > 0.9) this.onStrike();
-      if (t > 4) this.onStrike();
-    }
-    const kp = this.killer;
-    if (kp && !this.killerGone) {
-      kp.viewerAlive = this.fallDone < 0;
-      kp.update(dt, this.v1.copy(this.heroHolder.position).setY(this.heroHolder.position.y + 1.2));
-    }
-    this.updateHero(dt);
-    this.stepBodies(dt);
-    // drifting pixel sand, always
-    const w = { x: -0.9, z: 0.42 };
-    const tl = this.tlOn ? clamp01((t - this.tlStart) / this.tlDur) : 0;
-    if (Math.random() < rdt * (16 + tl * 30)) {
-      const x = (Math.random() - 0.5) * 14 + 4, z = (Math.random() - 0.5) * 14;
-      this.particles.emit({ pos: { x, y: this.h(x, z) + 0.05 + Math.random() * 0.2, z }, count: 3, vel: { x: w.x * (6 + Math.random() * 4), y: 0.25, z: w.z * (6 + Math.random() * 4) }, spread: 0.6, jitter: 1, gravity: 1.2, drag: 0.25, life: [1.4, 2.8], size: [0.04, 0.07], sprite: 'dot3', color: this.sand, ground: true });
-    }
-    // ---- the shots
-    const fd = this.fallDone >= 0 ? t - this.fallDone : -1;
     const g = this.h(0, 0);
-    if (fd < 0) {
-      if (sinceHit < 0.6) this.shotA(rdt);
-      else {
-        // drift round as he goes down, settling above him
-        const k = ss(clamp01((sinceHit - 0.6) / 2.6));
-        const a = 0.15 + k * 1.2;
-        this.setCam(this.v1.set(Math.cos(a) * (2.6 - k * 0.8), g + 0.62 + k * 0.85, Math.sin(a) * (2.6 - k * 0.8) * 0.6 + 0.4 - k * 0.6), this.v2.set(0.1, g + 0.95 - k * 0.7, -0.35 * k), 40 + k * 4, 0.07 * (1 - k), rdt);
-      }
-    } else if (fd < 2.4) {
-      // past his skull, down the length of him, to the killer gloating over the body
-      this.setCam(this.v1.set(-0.6, g + 1.2 - fd * 0.05, -3.05 - fd * 0.08), this.v2.set(0.1, g + 0.6, 0.25), 42, 0.03, rdt);
-    } else if (!this.tlOn) {
-      // crane straight up over the body, then out and away, tilting up into the sky
-      const k = ss(clamp01((fd - 2.4) / 5.2));
-      const P0 = new THREE.Vector3(-0.6, g + 1.08, -3.24), P1 = new THREE.Vector3(0.35, g + 8.5, -0.9), P2 = TL_POS.clone().setY(g + TL_POS.y);
-      const pos = this.v1.set(0, 0, 0).addScaledVector(P0, (1 - k) * (1 - k)).addScaledVector(P1, 2 * k * (1 - k)).addScaledVector(P2, k * k);
-      const tilt = ss(clamp01((k - 0.45) / 0.55));
-      const body = this.v2.set(0.0, g + 0.3, -1.1);
-      const sky = TL_DIR.clone().multiplyScalar(40).add(pos);
-      this.setCam(pos, body.lerp(sky, tilt), 42 + ss(clamp01(k / 0.6)) * 26, 0, rdt * 2.2);
-      if (k >= 1) {
+    const CHASE = 2.8;
+    let night = 0;
+    if (t < CHASE) {
+      // a. the soul streaks low over the dunes at dusk
+      this.u = 0.2 * ss(clamp01(t / CHASE)) * 0.9 + 0.02;
+      this.placeSoul(rdt, t);
+      this.shotChase(rdt);
+      night = this.applySky(this.tau);
+    } else if (this.arriveAt < 0) {
+      // b. the time-lapse: a slow pan across the western sky, the soul drifting on toward the window
+      if (!this.tlOn) {
         this.tlOn = true;
         this.tlStart = t;
         (window as any).__music?.setMood('off', 2);
         this.nightLoop = eng.audio.loop('night_loop', 0.0);
       }
-    } else {
-      // the time-lapse: a slow pan across the western sky
-      const pos = this.v1.copy(TL_POS).setY(g + TL_POS.y);
-      const dir = new THREE.Vector3(TL_DIR.x, TL_DIR.y - tl * 0.02, TL_DIR.z - tl * 0.22).normalize();
-      this.setCam(pos, this.v2.copy(pos).addScaledVector(dir, 40), 68, 0, rdt * 2);
-    }
-    // ---- the time-lapse
-    let night = 0;
-    if (this.tlOn) {
+      const tl = clamp01((t - this.tlStart) / this.tlDur);
       const ease = tl < 0.5 ? 2 * tl * tl : 1 - Math.pow(-2 * tl + 2, 2) / 2;
-      const span = this.o.days + (0.3 - 0.66);
-      this.tau = 0.66 + span * ease;
-      // count the sunrises (from the clock itself, so a jump never loses one)
+      this.tau = 0.7 + this.o.days * ease;
       const n = Math.max(0, Math.floor(this.tau - 0.27));
       if (n > this.sunrises) this.onSunrise(n);
       night = this.applySky(this.tau);
       (this.env as any).cloudSpeed = 2.2 + Math.sin(tl * Math.PI) * 140;
-      this.nightLoopVol(night);
-      // the killer is gone by the first night; the sand creeps over him
-      if (!this.killerGone && night > 0.6 && this.killer) {
-        this.killerGone = true;
-        this.killer.root.visible = false;
-      }
-      if (!this.drift) {
-        this.drift = new THREE.Mesh(this.own(driftModel(this.o.seed, this.o.area)), sharedVoxelMaterial);
-        this.drift.receiveShadow = this.drift.castShadow = true;
-        this.drift.position.set(0.15, g - 0.33, -0.55);
-        this.drift.rotation.y = 0.34;
-        this.scene.add(this.drift);
-      }
-      this.drift.position.y = g - 0.33 + ss(tl) * 0.26;
-      this.heroHolder.position.y -= ss(tl) * 0.06;
-      if (tl >= 1 && this.endAt < 0) this.endAt = t + 1.1;
-    } else this.applySky(0.66);
+      this.u = 0.2 + 0.66 * ease;
+      this.placeSoul(rdt, t);
+      const pos = this.v1.copy(TL_POS).setY(g + TL_POS.y);
+      const dir = this.v2.set(TL_DIR.x, TL_DIR.y - tl * 0.04, TL_DIR.z - tl * 0.12).normalize();
+      this.setCam(pos, this.v3.copy(pos).addScaledVector(dir, 40), 62 - tl * 8, 0, rdt * (t - this.tlStart < 1.5 ? 1.2 : 2));
+      if (tl >= 1) this.arriveAt = t;
+    } else {
+      // c. home: push in on the lamp-lit window as the soul slips inside
+      const k = clamp01((t - this.arriveAt) / 2.6);
+      this.u = 0.86 + 0.14 * ss(k);
+      this.placeSoul(rdt, t);
+      night = this.applySky(this.tau);
+      const hy = HOME.y;
+      const pos = this.v1.set(HOME.x + 9 - 4.5 * ss(k), hy + 2.6 - 0.8 * ss(k), HOME.z + 6.5 - 3 * ss(k));
+      this.setCam(pos, this.v2.set(HOME.x - 0.6, hy + 1.3, HOME.z - 0.6), 46 - 8 * k, 0, rdt * 1.4);
+      this.homeLight.intensity += 30 * sstep(0.55, 1, k);
+      if (this.soul) this.soul.root.visible = k < 0.92;
+      if (k >= 1 && this.endAt < 0) this.endAt = t + 0.2;
+    }
+    this.nightLoopVol(night);
+    // drifting pixel sand, always
+    if (Math.random() < rdt * 18) {
+      const c = this.camera.position;
+      const x = c.x + (Math.random() - 0.5) * 16 - 4, z = c.z + (Math.random() - 0.5) * 16 - 3;
+      this.particles.emit({ pos: { x, y: this.h(x, z) + 0.05 + Math.random() * 0.2, z }, count: 3, vel: { x: -0.9 * (6 + Math.random() * 4), y: 0.25, z: 0.42 * (6 + Math.random() * 4) }, spread: 0.6, jitter: 1, gravity: 1.2, drag: 0.25, life: [1.4, 2.8], size: [0.04, 0.07], sprite: 'dot3', color: this.sand, ground: true });
+    }
     this.skyU.uTime.value = t;
-    this.env.update(this.v1.set(0, g, 0), rdt * (this.tlOn ? 1 : this.rate), t);
+    this.env.update(this.v1.copy(this.camera.position).setY(g), rdt, t);
     this.sky.position.copy(this.camera.position);
-    this.particles.update(dt, this.scene.fog as THREE.Fog);
+    this.particles.update(rdt, this.scene.fog as THREE.Fog);
     if (this.endAt >= 0 && t >= this.endAt) this.finish(false);
   }
 
@@ -827,7 +949,7 @@ export class DeathCine implements GameScene {
 
   /** "N DAYS PASSED": the count of sunrises hangs in the air in front of the camera (floating 3D type) */
   private daysLine(text: string, instant = false) {
-    say3D(this.engine, text, null, { key: 'death:days', screen: [0, 0.3], depth: 2.6, fit: false, size: 0.19, px: 72, wrap: 40, cps: instant ? 0 : 40, color: '#fff1d2', glow: '#ffbe6e', hdr: 1.7, hold: 30 });
+    say3D(this.engine, text, null, { key: 'death:days', screen: [0, 0.3], depth: 2.6, fit: false, size: 0.17, px: 72, wrap: 40, cps: instant ? 0 : 40, color: '#fff1d2', glow: '#6a3a18', hdr: 1.15, hold: 30 });
   }
 
   private onSunrise(n: number) {
@@ -836,7 +958,7 @@ export class DeathCine implements GameScene {
     this.engine.audio.play('divine_chime', { volume: 0.35, pitch: 0.7 + n * 0.05 });
   }
 
-  /** dissolve into the hideout: he wakes up at home */
+  /** the window blooms warm: he wakes up at home */
   private finish(skipped: boolean) {
     if (this.leaving) return;
     this.leaving = true;
@@ -845,13 +967,12 @@ export class DeathCine implements GameScene {
     if (skipped) this.daysLine(`${days} DAYS PASSED...`, true);
     // after the first ride, waking at home is how the hideout is found
     const first = loadSave().runs === 1;
-    // after that, a line of the story: where the jar went, who paid for the nights (meta/Lore)
     const lore = !first && !skipped ? DEATH_LORE[Math.floor(Math.random() * DEATH_LORE.length)] : null;
-    if (first || lore) say3D(eng, lore ?? 'and the way home is found', null, { key: 'death:home', screen: [0, 0.12], depth: 2.6, fit: false, size: 0.075, px: 56, wrap: 40, cps: 22, color: '#ffe2a0', glow: '#ffae5a', hdr: 1.4, hold: 30 });
+    if (first || lore) say3D(eng, lore ?? 'and the way home is found', null, { key: 'death:home', screen: [0, 0.12], depth: 2.6, fit: false, size: 0.07, px: 56, wrap: 40, cps: 22, color: '#ffe2a0', glow: '#5a3010', hdr: 1.1, hold: 30 });
+    eng.audio.play('divine_chime', { volume: 0.4, pitch: 0.6 });
     void (async () => {
       if (first || lore) await eng.tweens.wait(lore ? 1.8 : 1.3, true);
-      await eng.fadeOut(skipped ? 0.5 : 1.5, '#fff3dc');
-      this.title.style.opacity = '0';
+      await eng.fadeOut(skipped ? 0.5 : 1.4, '#fff3dc');
       await eng.setScene(new HubScene(eng, () => nav.ride(false), () => nav.menu(), { wake: { days, result: this.o.result } }), 0.9, '#fff3dc');
     })();
   }
@@ -859,14 +980,39 @@ export class DeathCine implements GameScene {
   exit() {
     for (const l of this.loops) l.stop(0.8);
     this.nightLoop?.stop(0.8);
-    this.ui.remove();
     this.engine.letterbox(false, 0.4);
     this.env?.dispose();
     this.envRT?.dispose();
-    this.killer?.dispose();
     this.sky?.geometry.dispose();
     (this.sky?.material as THREE.Material | undefined)?.dispose();
     for (const g of this.geos) g.dispose();
+    for (const m of this.mats) m.dispose();
     if ((window as any).__death === this) (window as any).__death = null;
   }
+}
+
+// ======================================================================= debug
+/**
+ * ?debug=death           ride out, then die where you stand (the fall, the reaping, the weighing)
+ * ?debug=death&deaths=3  ...as the 3rd death of the ride (a heavier heart; 4 = too heavy, the scale slams)
+ * ?debug=death&stage=home  straight to the way home and Mama Toad's bedside
+ */
+export async function debugDeath(eng: Engine, p: URLSearchParams) {
+  nav.ride(false);
+  let run: any = null;
+  for (let i = 0; i < 1200 && !run; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    const c = eng.current as any;
+    if (c?.ready && c.player?.rig && c.run && c.enemies) run = c;
+  }
+  if (!run) return;
+  await new Promise((r) => setTimeout(r, Number(p.get('wait') ?? 2500)));
+  run.run.deaths = Math.max(0, Math.min(4, Number(p.get('deaths') ?? 1)) - 1);
+  if (p.get('stage') === 'home') {
+    run.run.deaths++;
+    const res = { run: { ...run.run }, won: false, bosses: [], hero: run.player.rig.geo.spec, banked: 0 } as unknown as RunResult;
+    void eng.setScene(new DeathCine(eng, deathCineFromRun(run, res)), 0.35, '#fff3dc', { loading: false });
+    return;
+  }
+  run.player.applyDamage(1e6, 'debug', false);
 }

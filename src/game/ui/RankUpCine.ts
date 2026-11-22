@@ -1902,11 +1902,12 @@ class GodSigil {
 
 // ------------------------------------------------------------------ learning a tarot skill: its own short cinematic
 
-type SkillKey3 = 'E' | 'C' | 'G';
+type SkillKey3 = 'E' | 'C' | 'G' | 'X';
 const SKILL_LOOK: Record<SkillKey3, { name: string; god: string; pose: CastPose; slow: number; light: number }> = {
   E: { name: 'SCORPION TOSS', god: 'Serket', pose: 'flick', slow: 1.8, light: 0x9dffc8 },
   C: { name: 'SCARAB SWARM', god: 'Khepri', pose: 'whistle', slow: 1.25, light: 0xffd36b },
   G: { name: 'DUNG BOMB', god: 'Khepri', pose: 'grenade', slow: 1.7, light: 0xffc040 },
+  X: { name: "GUNS N' ROSES", god: 'Hathor', pose: 'flick', slow: 1.5, light: 0xff6a7a },
 };
 
 /**

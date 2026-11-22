@@ -21,6 +21,7 @@ import type { Modifier } from '../combat/Stats';
 import { UPGRADES, UPGRADE_BY_ID, UpgradeDef, UpgradeManager, Offer, Rarity, GambleKind, RARITY, RARITY_ORDER, TIER_MULT, cnt, rd, tierMult, tierDown, dealtRarity } from './Upgrades';
 import { rnd } from '../../engine/math/rand';
 import { zap, shockwave } from '../player/Equipment';
+import { BUILD_UPGRADES, BUILD_ART_FAMILY, BuildEffects } from './UpgradesBuilds';
 
 type M = Omit<Modifier, 'source'>;
 const f1 = (v: number) => v.toFixed(1);
@@ -393,6 +394,7 @@ export function resolveGamble(o: Offer, up: UpgradeManager, ctx: Ctx, player: an
 
 /** suggested SkillArt vignette families for the new cards (SkillArt falls back by category otherwise) */
 export const EXTRA_ART_FAMILY: Record<string, string> = {
+  ...BUILD_ART_FAMILY,
   bankShot: 'bottles', sixthChamber: 'dynamite', thunderhead: 'gunstorm', deadCalm: 'horus', trickShot: 'board',
   venomPuddles: 'venom', mirrorBrood: 'brood', scorpionWhip: 'pinch',
   hellfireTrail: 'fire', bulletBallet: 'board', grappleSlam: 'tumbleweed', lodestone: 'coins', comboFever: 'blood',
@@ -404,7 +406,7 @@ export const EXTRA_ART_FAMILY: Record<string, string> = {
 
 /** add the extra cards to the shared pool (idempotent; call once before the first roll) */
 export function registerExtraUpgrades() {
-  for (const u of [...EXTRA_UPGRADES, ...RISK_UPGRADES]) {
+  for (const u of [...EXTRA_UPGRADES, ...RISK_UPGRADES, ...BUILD_UPGRADES]) {
     if (UPGRADE_BY_ID[u.id]) continue;
     UPGRADES.push(u);
     UPGRADE_BY_ID[u.id] = u;
@@ -438,12 +440,15 @@ export class ExtraUpgradeEffects {
   private fever = -1;
   private air = false;
   private keys = new Set<string>();
+  /** the build cards (run/UpgradesBuilds) */
+  builds: BuildEffects;
   /** curses' bite throttles (real hunt seconds) */
   private blackT = 0;
   private singeT = 0;
 
   constructor(private ctx: Ctx, private up: UpgradeManager, private player: any, private skills: any) {
     const ev = ctx.events;
+    this.builds = new BuildEffects(ctx, up, player, skills);
     this.lastGold = ctx.run.gold;
     this.offs.push(
       ev.on('shot', (hit: any) => this.onShot(hit)),
@@ -682,6 +687,7 @@ export class ExtraUpgradeEffects {
   // ------------------------------------------------------------------ per frame
   update(dt: number) {
     if (dt <= 0) return;
+    this.builds.update(dt);
     const ctx = this.ctx;
     const pl = this.player;
     const run = ctx.run;
@@ -777,6 +783,7 @@ export class ExtraUpgradeEffects {
   dispose() {
     for (const o of this.offs) o();
     this.offs = [];
+    this.builds.dispose();
     for (const k of this.keys) this.player.stats.removeSource(k);
     this.puddles = [];
     this.fire = [];

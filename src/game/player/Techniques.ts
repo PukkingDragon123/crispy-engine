@@ -54,7 +54,7 @@ export const TECHNIQUES: Technique[] = [
     id: 'neck_slicer',
     name: 'The Neck Slicer',
     how: 'Hold JUMP to charge the board near an enemy. When the gold ring snaps shut on its neck, FIRE.',
-    unlockHint: 'Defeat the Avatar of Khonsu (wave 5).',
+    unlockHint: 'Defeat the Avatar of Khonsu (wave 25).',
     base: false,
     art: 'neck_slicer',
   },

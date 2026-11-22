@@ -2,8 +2,8 @@
 // (authored sprites, HudArt.ts), with Alagard type on top:
 //  • TIN STAR: a pressed-tin six-point star with ball tips and a raised boss carrying
 //    the rank; spins (a 2D turn) and rings on rank-up
-//  • TALLY PLANK: two weathered, nailed planks (grain, a knot, a crack, a bent nail)
-//    with the bounty painted on; it jolts and the figure counts up as money comes in
+//  • BOUNTY BAR: a riveted brass rail whose gold fill climbs toward the next rank, the
+//    running bounty over it; it jolts, flashes a lead and counts up as money comes in
 //  • WAVE PLAQUE: a stitched leather plaque with brass tacks hanging on two chains
 //    from the top of the screen (laid link by link, leaning as it swings), the wave
 //    burnt into it; a riveted brass tag under it carries the wave clock
@@ -31,7 +31,8 @@ export interface OutlawAnchors {
   /** size factor (small screens) */
   k: number;
   star: { x: number; y: number; rank: number };
-  tally: { x: number; y: number; amount: number };
+  /** the bounty bar: the running total and the share of the way to the next rank */
+  tally: { x: number; y: number; amount: number; frac?: number };
   /** null while the boss banner owns the top centre */
   plaque: { x: number; y: number; label: string; time: string | null; drop: number } | null;
   /** the break between waves */
@@ -66,6 +67,9 @@ export class OutlawHud {
   private shown = -1;
   private boardKick: Swing = { a: 0, v: 0 };
   private chalkAcc = 0;
+  private barShown = 0;
+  private barLead = 0;
+  private barFlash = 0;
   // plaque
   private sw: Swing = { a: 0, v: 0 };
   private lastLabel = '';
@@ -206,17 +210,46 @@ export class OutlawHud {
         this.chalkAcc -= 1;
         this.dust.emit({ x: tb.x + (Math.random() - 0.3) * 50 * k, y: tb.y + 4 * k, vx: (Math.random() - 0.5) * 20, vy: -10 - Math.random() * 20, ay: 60, drag: 1.5, life: 0.4 + Math.random() * 0.4, size: 1, c0: 0xfff3d6, c1: 0xc9a97c, alpha: 0.8 });
       }
-      const sp = this.pick(ART.plank, ART.plank_s, k);
       {
-        const jx = Math.round(this.boardKick.a * 2), jy = Math.round(-Math.abs(this.boardKick.a) * 2);
-        const x = tb.x + jx, y = tb.y + jy;
-        // nailed planks a hair off the screen; they rock on their nails when money comes in
-        blitObj(c, sp, x, y, 2 + Math.abs(jy));
+        // THE BOUNTY BAR: a riveted brass rail with a gold fill that climbs to the next rank
+        const jx = Math.round(this.boardKick.a * 2), jy = Math.round(-Math.abs(this.boardKick.a) * 1.5);
+        const bw = Math.round(124 * k) & ~1, bh = small ? 9 : 11;
+        const x0 = Math.round(tb.x - 48 * k) + jx, top = Math.round(tb.y - 2 * k) + jy;
+        const f = clamp01(tb.frac ?? 0);
+        // a full rail rolls over on a rank-up: flash, then fill again from empty
+        if (f < this.barShown - 0.3) {
+          this.barFlash = 1;
+          this.barShown = 0;
+        }
+        const was = this.barShown;
+        this.barShown += (f - this.barShown) * Math.min(1, dt * 4);
+        if (Math.abs(f - this.barShown) < 0.002) this.barShown = f;
+        this.barLead = Math.max(this.barShown, f > was ? f : this.barLead - dt * 0.8);
+        this.barFlash = Math.max(0, this.barFlash - dt * 2.5);
+        c.drawImage(bountyRail(bw, bh), x0 - 3, top - 1);
+        const ix = x0 + 1, iy = top + 2, iw = bw - 2, ih = bh - 4;
+        const fw = Math.round(iw * this.barShown), lw = Math.round(iw * this.barLead);
+        const G = [HUD_PAL.j, HUD_PAL.i, HUD_PAL.h, HUD_PAL.h, HUD_PAL.g, HUD_PAL.f];
+        if (lw > fw) px(c, ix + fw, iy, lw - fw, ih, '#fff6d0');
+        for (let xx = 0; xx < fw; xx++)
+          for (let r = 0; r < ih; r++) {
+            let col = G[Math.min(G.length - 1, Math.floor((r / ih) * G.length))];
+            // stacked coins: a darker rim every few pixels
+            if (xx % 5 === 4 && r > 0) col = HUD_PAL.g;
+            if (this.barFlash > 0.4) col = '#fffbe8';
+            px(c, ix + xx, iy + r, 1, 1, col);
+          }
+        if (fw > 1) {
+          px(c, ix + fw - 1, iy, 1, ih, '#fffbe8');
+          if (Math.random() < dt * 6) this.glow.emit({ x: ix + fw - 1, y: iy + Math.random() * ih, vx: 10 + Math.random() * 15, vy: -12 - Math.random() * 12, drag: 2, life: 0.35 + Math.random() * 0.3, size: 1, c0: 0xffffff, c1: 0xffd36b, alpha: 1, flick: 0.4 });
+        }
+        // rank ticks along the rail
+        for (let q = 1; q < 4; q++) px(c, ix + Math.round((iw * q) / 4), iy + ih - 2, 1, 2, '#1a0e06');
         const amt = '$' + now.toLocaleString('en-US');
         const fs = small ? Math.max(10, Math.round(16 * k * 1.15)) : 16;
-        // painted on the planks, in the HUD's own outlined type
-        pixelText(c, 'BOUNTY', x - 1, y - 14 * k + (small ? 0 : 1), { size: fs, color: '#e2c48c', align: 'center', outline: '#1a0e06' });
-        pixelText(c, amt, x + 1, y + (small ? 0 : 0.5) * k, { size: fs, color: '#fff2cc', align: 'center', outline: '#1a0e06' });
+        // crisp outlined type over the rail: the label left, the running figure right
+        pixelText(c, 'BOUNTY', x0, top - fs + 1, { size: fs, color: '#e2c48c', align: 'left', outline: '#1a0e06' });
+        pixelText(c, amt, x0 + bw, top - fs + 1 - Math.round(Math.abs(this.boardKick.a) * 2), { size: fs, color: this.barLead > this.barShown + 0.01 ? '#ffffff' : '#fff2cc', align: 'right', outline: '#1a0e06' });
       }
     }
 
@@ -322,4 +355,38 @@ export class OutlawHud {
     this.glow.dispose();
     void this.scene;
   }
+}
+
+/** the bounty bar's rail: ink outline, brass bevel, rivets at both ends, a dark wooden channel (cached) */
+const railCache = new Map<string, HTMLCanvasElement>();
+function bountyRail(bw: number, bh: number) {
+  const key = bw + 'x' + bh;
+  let cv = railCache.get(key);
+  if (cv) return cv;
+  cv = document.createElement('canvas');
+  cv.width = bw + 6;
+  cv.height = bh + 2;
+  const g = cv.getContext('2d')!;
+  const P = HUD_PAL;
+  for (let y = 0; y < bh + 2; y++)
+    for (let x = 0; x < bw + 6; x++) {
+      const capL = x < 4, capR = x > bw + 1;
+      const ry = y - 1;
+      if ((capL || capR) && (y === 0 || y === bh + 1)) continue;
+      let col: string;
+      if (x === 0 || x === bw + 5 || y === 0 || y === bh + 1) col = P.k;
+      else if (capL || capR) col = ry <= 1 ? P.j : ry >= bh - 2 ? P.g : P.i;
+      else if (ry === 0) col = P.j;
+      else if (ry === bh - 1) col = P.f;
+      else if (ry === 1 || ry === bh - 2) col = ry === 1 ? P.k : P.h;
+      else col = (x * 3 + ry * 7) % 11 === 0 ? P.w : P.v;
+      px(g, x, y, 1, 1, col);
+    }
+  for (const rx of [1, bw + 3]) {
+    px(g, rx, Math.round(bh / 2) - 1, 2, 2, P.g);
+    px(g, rx, Math.round(bh / 2) - 1, 1, 1, P.j);
+  }
+  railCache.set(key, cv);
+  if (railCache.size > 8) railCache.delete(railCache.keys().next().value!);
+  return cv;
 }

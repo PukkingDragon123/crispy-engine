@@ -1007,6 +1007,7 @@ export class CaveScene implements GameScene {
           { key: 'E', icon: 'scorp', cd: cd.scorp, max: this.skills.constants.scorpCd },
           { key: 'C', icon: 'scarab', cd: cd.swarm, max: this.skills.constants.swarmCd },
           { key: 'G', icon: 'dung', cd: cd.bomb, max: this.skills.constants.bombRecharge, charges: cd.bombCharges },
+          { key: 'X', icon: 'spark', cd: cd.roses, max: this.skills.constants.rosesCd ?? 16 },
           { key: 'F', icon: 'bone', cd: Math.max(0, p.meleeCd), max: 0.55 },
         ];
       })(),

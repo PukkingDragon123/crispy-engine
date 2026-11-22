@@ -18,6 +18,8 @@ export interface DodgeHunter {
 }
 
 export const DODGE_QTE = {
+  /** fewer QTEs: in the hunt the prompt is no longer offered (real movement and the board-slide dodge do it); the tutorial (wave 0) and `force` still offer it */
+  enabled: false,
   /** ring time (real seconds) — generous */
   window: 1.35,
   /** world speed while the ring closes */
@@ -61,7 +63,8 @@ export class Dodge {
    * ground) instead of a side-step. The prompt floats over `at` (the attacker;
    * default: chest height over `from`).
    */
-  async offer(o: { from: { x: number; z: number }; label?: string; up?: boolean; window?: number; at?: QteAt }): Promise<DodgeResult> {
+  async offer(o: { from: { x: number; z: number }; label?: string; up?: boolean; window?: number; at?: QteAt; force?: boolean }): Promise<DodgeResult> {
+    if (!DODGE_QTE.enabled && !o.force && this.ctx.run.wave > 0) return 'none';
     if (!this.ready()) return 'none';
     const ctx = this.ctx;
     const eng = ctx.engine;

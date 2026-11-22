@@ -471,11 +471,14 @@ export class TarotBar {
     this.cards.forEach((c, i) => {
       const ult = c.def.key === 'Z';
       const sk = st.skills.find((k) => k.key === c.def.key);
-      const frac = ult ? 1 - Math.min(1, st.ult) : sk && sk.max > 0 ? Math.min(1, sk.cd / sk.max) : 0;
-      const cdNow = ult ? (st.ult >= 1 ? 0 : 99) : sk?.cd ?? 0;
+      // the ultimate card runs on its own cooldown when COMBAT provides one (HudState.ultCard), else on the charge
+      const uc = ult ? st.ultCard : undefined;
+      const ucReady = uc ? (uc.ready ?? uc.cd <= 0) : false;
+      const frac = ult ? (uc ? (ucReady ? 0 : uc.max > 0 ? Math.max(0.001, Math.min(1, uc.cd / uc.max)) : 1) : 1 - Math.min(1, st.ult)) : sk && sk.max > 0 ? Math.min(1, sk.cd / sk.max) : 0;
+      const cdNow = ult ? (uc ? (ucReady ? 0 : Math.max(0.06, uc.cd)) : st.ult >= 1 ? 0 : 99) : sk?.cd ?? 0;
       // used? cooldown jumped up, a charge was spent, or the ultimate fired
       const charges = sk?.charges ?? -1;
-      const used = ult ? this.lastUlt >= 1 && st.ult < 0.5 : cdNow > c.lastCd + 0.4 || (charges >= 0 && c.lastCharges >= 0 && charges < c.lastCharges);
+      const used = ult ? (uc ? cdNow > c.lastCd + 0.4 : this.lastUlt >= 1 && st.ult < 0.5) : cdNow > c.lastCd + 0.4 || (charges >= 0 && c.lastCharges >= 0 && charges < c.lastCharges);
       c.lastCd = cdNow;
       c.lastCharges = charges;
       // sealed until learned; learning it turns the card over with a flourish
@@ -545,7 +548,7 @@ export class TarotBar {
       c.sk = sc;
       if (used && visible) this.useFx(c);
       if (visible && !c.locked) this.ambientFx(c, dt, frac, readyNow, ult);
-      if (!c.locked) hud.cardAnchors.push({ key: c.def.key, x: x / s, y: y / s, h: (ch * big) / s, cd: ult ? 0 : cdNow });
+      if (!c.locked) hud.cardAnchors.push({ key: c.def.key, x: x / s, y: y / s, h: (ch * big) / s, cd: ult ? (uc && !ucReady ? cdNow : 0) : cdNow });
     });
     this.lastUlt = st.ult;
   }

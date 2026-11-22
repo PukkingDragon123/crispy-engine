@@ -2,6 +2,7 @@
 // cloth capes, weak-point hit spheres, multi-phase coroutine move scripts
 // that cancel safely on death/escape, telegraphed attack helpers, QTE hooks,
 // dramatic intros, escapes and deaths.
+import { BOSS, bossHp } from '../run/Balance';
 import type { StageId } from '../meta/Stage';
 import { speak3D } from '../fx/WorldSpeech';
 import * as THREE from 'three';
@@ -94,7 +95,8 @@ export abstract class Boss implements ExternalTarget {
   constructor(public d: BossDeps, rigKey: string, opts: { name: string; title: string; hp: number; scale?: number; eyes?: [EyeStyle, number] }) {
     this.name = opts.name;
     this.title = opts.title;
-    this.maxHp = this.hp = opts.hp;
+    // much tougher than before, and tougher each day (run/Balance)
+    this.maxHp = this.hp = bossHp(opts.hp);
     this.scale = opts.scale ?? 1;
     const e = modelEntry(rigKey);
     // a rig built before (an earlier fight, or warmed off-thread) skips re-sculpting its spec:
@@ -146,7 +148,13 @@ export abstract class Boss implements ExternalTarget {
   protected check() {
     if (!this.alive || this.escaped) throw new Cancelled();
   }
+  /** waits between moves run tighter (BOSS.tempo); telegraphs use waitRaw */
   async wait(s: number) {
+    this.check();
+    await this.ctx.engine.tweens.wait(s * BOSS.tempo);
+    this.check();
+  }
+  async waitRaw(s: number) {
     this.check();
     await this.ctx.engine.tweens.wait(s);
     this.check();
@@ -181,10 +189,13 @@ export abstract class Boss implements ExternalTarget {
     const y = ctx.world.groundAt(at.x, at.z);
     const p = { x: at.x, y: y + 0.15, z: at.z };
     const steps = Math.max(1, Math.round(warn / 0.25));
+    // one clear ground telegraph for the whole wind-up (the ring pulses below add the beat)
+    const wm = (this.d.enemies as unknown as { warn?: { circle(x: number, z: number, r: number, d: number, t?: 'tell' | 'heavy' | 'grab'): unknown } }).warn;
+    wm?.circle(at.x, at.z, r, warn, 'heavy');
     for (let i = 0; i < steps; i++) {
       ctx.fx.ring(p, kind === 'venom' ? 0x8fe03a : kind === 'curse' ? 0xb07ae0 : 0xff6a3a, r * 2, 0.3);
       ctx.particles.emit({ pos: p, count: 6, spread: r * 0.4, up: 1, life: [0.3, 0.6], size: [0.15, 0.3], sprite: ['puff0', 'puff1'], color: 0xe0c08a, alpha: 0.6, jitter: r * 0.7 });
-      await this.wait(warn / steps);
+      await this.waitRaw(warn / steps);
     }
     ctx.fx.sandBurst(p, r * 0.6);
     ctx.fx.dust(p, r * 0.5, 0xe6cf9f, 6);
@@ -217,6 +228,17 @@ export abstract class Boss implements ExternalTarget {
   }
   async qte(spec: Parameters<Qte['run']>[0]): Promise<QteResult> {
     this.check();
+    // fewer QTEs: grabs, mashes and minor rings resolve themselves after a short
+    // struggle beat; only the rare finisher (a 'bar' shot) is still played
+    if (spec.kind !== 'bar') {
+      const eng0 = this.ctx.engine;
+      eng0.slowMo(0.35, 20);
+      this.ctx.shake(0.25);
+      await eng0.tweens.wait(0.55, true);
+      eng0.slowMo(1, 6);
+      this.check();
+      return 'good';
+    }
     const eng = this.ctx.engine;
     eng.slowMo(0.15, 30);
     // the prompt floats over the boss unless the caller anchored it elsewhere

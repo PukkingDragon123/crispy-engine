@@ -1636,3 +1636,5 @@ export const Voice = new VoiceSystem();
 
 /** exposed for debugging / tests */
 export const VoiceDebug = { g2p, syllabify, makePlan, tokenize };
+/** the battle voice lines (Sundown's shouts, Serket's whispers): voice.play('ult' | 'skill:<id>' | 'trick' | 'hurt' | 'serket:<line>') */
+export { voice, type VoiceKey, type VoiceLine, type VoicePlayOpts } from './BattleVoice';

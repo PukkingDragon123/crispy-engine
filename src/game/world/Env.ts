@@ -43,6 +43,18 @@ export const PRESETS: Record<string, EnvPreset> = {
   nileDay: { zenith: 0x2a6fd0, horizon: 0xfff0d2, ground: 0xc9a46c, sunColor: 0xfff0d8, sunIntensity: 3.6, sunElev: 44, sunAzim: 215, hemiSky: 0x9cc0ee, hemiGround: 0xb8a070, hemiIntensity: 1.05, fog: 0xc6d6e2, fogNear: 50, fogFar: 560, exposure: 1.0, stars: 0, clouds: 0.5, cloudColor: 0xfffaf0 },
   nileDusk: { zenith: 0x3a3c86, horizon: 0xffa66e, ground: 0xa8784c, sunColor: 0xffb47a, sunIntensity: 3.0, sunElev: 11, sunAzim: 248, hemiSky: 0xb49cc8, hemiGround: 0xa87048, hemiIntensity: 1.0, fog: 0xc8a0a0, fogNear: 30, fogFar: 420, exposure: 1.04, stars: 0.12, clouds: 0.7, cloudColor: 0xffc2a0 },
   nileBurn: { zenith: 0x3a0e0a, horizon: 0xff6a24, ground: 0x5a2a1a, sunColor: 0xff7a3a, sunIntensity: 2.7, sunElev: 18, sunAzim: 235, hemiSky: 0xc0604a, hemiGround: 0x6a2a18, hemiIntensity: 1.0, fog: 0x8c3a26, fogNear: 22, fogFar: 330, exposure: 1.06, stars: 0, clouds: 0.92, cloudColor: 0x7a2a1e },
+  // ---- the day cycle (run/Days.ts keys these along each day): dawn haze, high noon, golden hour, the sunset,
+  // the blue hour and a blue moonlit night. Cel ramp + ink stay; colour and haze carry the hour.
+  todDawn: { zenith: 0x3c4e8a, horizon: 0xffc4a0, ground: 0xb48a6c, sunColor: 0xffb48c, sunIntensity: 2.5, sunElev: 5, sunAzim: 72, hemiSky: 0xaab4e0, hemiGround: 0xb27c5c, hemiIntensity: 1.08, fog: 0xdcc2c6, fogNear: 10, fogFar: 250, exposure: 1.03, stars: 0.18, clouds: 0.55, cloudColor: 0xffc8b2 },
+  todMorning: { zenith: 0x2f66be, horizon: 0xffe0bc, ground: 0xcfa070, sunColor: 0xffe2bc, sunIntensity: 3.1, sunElev: 21, sunAzim: 98, hemiSky: 0x9ab8e8, hemiGround: 0xcf9a62, hemiIntensity: 1.0, fog: 0xcacdd8, fogNear: 30, fogFar: 430, exposure: 1.0, stars: 0, clouds: 0.5, cloudColor: 0xfff0e2 },
+  todNoon: { zenith: 0x2262c6, horizon: 0xfff0d8, ground: 0xd8b07a, sunColor: 0xfff3de, sunIntensity: 3.7, sunElev: 58, sunAzim: 165, hemiSky: 0x9cc0f0, hemiGround: 0xd8aa6e, hemiIntensity: 1.05, fog: 0xc6d2e2, fogNear: 55, fogFar: 600, exposure: 0.98, stars: 0, clouds: 0.4, cloudColor: 0xffffff },
+  todAfternoon: { zenith: 0x2860b8, horizon: 0xffdfb4, ground: 0xd2a26a, sunColor: 0xffd8a8, sunIntensity: 3.4, sunElev: 28, sunAzim: 218, hemiSky: 0x93b0e6, hemiGround: 0xd9a46a, hemiIntensity: 1.0, fog: 0xc0c7d8, fogNear: 45, fogFar: 560, exposure: 1.0, stars: 0, clouds: 0.45, cloudColor: 0xfff2e2 },
+  todGolden: { zenith: 0x34548e, horizon: 0xffb266, ground: 0xc8864e, sunColor: 0xffb05e, sunIntensity: 3.45, sunElev: 10, sunAzim: 238, hemiSky: 0xb4a8cc, hemiGround: 0xc8804a, hemiIntensity: 1.0, fog: 0xe8b088, fogNear: 34, fogFar: 380, exposure: 1.04, stars: 0, clouds: 0.62, cloudColor: 0xffb888 },
+  todSunset: { zenith: 0x2c2c64, horizon: 0xff7a40, ground: 0x8c4c36, sunColor: 0xff7c3c, sunIntensity: 2.6, sunElev: 2, sunAzim: 248, hemiSky: 0x9a7ab2, hemiGround: 0x8a4a34, hemiIntensity: 0.95, fog: 0xb06c62, fogNear: 24, fogFar: 300, exposure: 1.06, stars: 0.2, clouds: 0.7, cloudColor: 0xff8a62 },
+  todDusk: { zenith: 0x141c46, horizon: 0x5a4c88, ground: 0x2e2a40, sunColor: 0x8a74c4, sunIntensity: 0.7, sunElev: 4, sunAzim: 252, hemiSky: 0x5a5a9a, hemiGround: 0x3a3048, hemiIntensity: 0.8, fog: 0x2e2c52, fogNear: 18, fogFar: 200, exposure: 1.1, stars: 0.6, clouds: 0.45, cloudColor: 0x6a5a92 },
+  todNight: { zenith: 0x081430, horizon: 0x22406c, ground: 0x1c2232, sunColor: 0x9cbcff, sunIntensity: 1.45, sunElev: 38, sunAzim: 118, hemiSky: 0x4a66aa, hemiGround: 0x2a2a3c, hemiIntensity: 0.78, fog: 0x15223e, fogNear: 12, fogFar: 150, exposure: 1.12, stars: 1, clouds: 0.3, cloudColor: 0x4a5a88 },
+  todDeep: { zenith: 0x050c22, horizon: 0x1a2c52, ground: 0x161a28, sunColor: 0x8eacf4, sunIntensity: 1.3, sunElev: 52, sunAzim: 150, hemiSky: 0x40589a, hemiGround: 0x241f30, hemiIntensity: 0.72, fog: 0x101a32, fogNear: 10, fogFar: 132, exposure: 1.14, stars: 1, clouds: 0.25, cloudColor: 0x3a4876 },
+  todPredawn: { zenith: 0x1a2252, horizon: 0x8a6a96, ground: 0x3a3040, sunColor: 0xc0a0d8, sunIntensity: 0.8, sunElev: 6, sunAzim: 76, hemiSky: 0x7070a8, hemiGround: 0x4a3a48, hemiIntensity: 0.9, fog: 0x5a5070, fogNear: 10, fogFar: 200, exposure: 1.08, stars: 0.55, clouds: 0.5, cloudColor: 0x9a7aa0 },
   underworld: { zenith: 0x02080f, horizon: 0x0d3a4a, ground: 0x061018, sunColor: 0x8ff0ff, sunIntensity: 1.6, sunElev: 60, sunAzim: 200, hemiSky: 0x3a8ab0, hemiGround: 0x101820, hemiIntensity: 0.8, fog: 0x07222e, fogNear: 20, fogFar: 140, exposure: 1.15, stars: 1, clouds: 0, cloudColor: 0x203040 },
 };
 
@@ -213,6 +225,9 @@ export class Env {
   private prevBefore: THREE.Scene['onBeforeRender'];
   private prevAfter: THREE.Scene['onAfterRender'];
   private dustDensity = 0.9;
+  /** applies made by anyone but the day cycle (run/Days.ts holds off while someone else owns the sky) */
+  extApplies = 0;
+  private todApplying = false;
 
   constructor(public scene: THREE.Scene, presetName: keyof typeof PRESETS = 'dunes', seed = 1) {
     this.preset = { ...PRESETS[presetName] };
@@ -273,9 +288,25 @@ export class Env {
     ATMO.u[9] = z / l;
   }
 
+  /** the day cycle's apply (not counted as someone else taking the sky) */
+  applyTod(p: EnvPreset) {
+    this.todApplying = true;
+    try {
+      this.apply(p);
+    } finally {
+      this.todApplying = false;
+    }
+  }
+
   apply(p: EnvPreset) {
+    if (!this.todApplying) this.extApplies++;
     this.preset = p;
     const day = p.stars < 0.5;
+    // day -> night factors blend over stars 0.35..0.65 (the day cycle's blue hour passes through it; every fixed
+    // preset sits outside that band, so they light exactly as before)
+    const nt = Math.min(1, Math.max(0, (p.stars - 0.35) / 0.3));
+    const nk = nt * nt * (3 - 2 * nt);
+    const dn = (d: number, n: number) => d + (n - d) * nk;
     this.skyU.uZenith.value.setHex(p.zenith);
     this.skyU.uGround.value.setHex(p.ground);
     this.skyU.uStars.value = p.stars;
@@ -284,40 +315,41 @@ export class Env {
     this.sunDir.set(Math.cos(el) * Math.cos(az), Math.sin(el), Math.cos(el) * Math.sin(az)).normalize();
     // a strong warm sun, cool sky fill from the hemisphere + IBL (cel shade tone stays bluish)
     this.sun.color.setHex(p.sunColor).lerp(new THREE.Color(0xffffff), 0.22);
-    this.sun.intensity = p.sunIntensity * (day ? 1.35 : 1);
+    this.sun.intensity = p.sunIntensity * dn(1.35, 1);
     this.hemi.color.setHex(p.hemiSky);
     this.hemi.groundColor.setHex(p.hemiGround);
-    this.hemi.intensity = p.hemiIntensity * (day ? 0.34 : 0.8);
+    this.hemi.intensity = p.hemiIntensity * dn(0.34, 0.8);
     this.fog.color.setHex(p.fog);
     this.fog.near = p.fogNear;
     this.fog.far = p.fogFar;
-    (this.skyU.uSunDisk.value as THREE.Color).setHex(p.sunColor).multiplyScalar(day ? 7 : 2.2);
+    (this.skyU.uSunDisk.value as THREE.Color).setHex(p.sunColor).multiplyScalar(dn(7, 2.2));
     this.skyU.uDisk.value = 1;
     // shared atmosphere
     const u = ATMO.u;
     u[0] = this.sunDir.x;
     u[1] = this.sunDir.y;
     u[2] = this.sunDir.z;
-    u[3] = day ? 0.8 : 0.25;
+    u[3] = dn(0.8, 0.25);
     const hz = new THREE.Color(p.horizon);
     u[4] = hz.r;
     u[5] = hz.g;
     u[6] = hz.b;
     u[7] = 0.034;
     u[10] = 3.2;
-    this.dustDensity = day ? (p.sunElev < 18 ? 0.65 : 0.5) : 0.22;
+    this.dustDensity = dn(p.sunElev < 18 ? 0.65 : 0.5, 0.22);
     u[11] = this.dustDensity;
     ATMO.sunDir.copy(this.sunDir);
     ATMO.sunColor.setHex(p.sunColor);
-    ATMO.shafts = day ? 0.5 : 0.18;
+    ATMO.shafts = dn(0.5, 0.18);
     // look uniforms for every voxel model
     const gu = globalUniforms;
     gu.uSunDirW.value.copy(this.sunDir);
     gu.uSunCol.value.copy(this.sun.color).multiplyScalar(this.sun.intensity);
     const sunOnGround = this.sun.intensity * Math.max(0, this.sunDir.y);
     gu.uBounceCol.value.setHex(p.hemiGround).multiplyScalar(0.26 * sunOnGround);
-    gu.uLook.value.set(gu.uLook.value.x, day ? 0.34 : 0.2, 1, day ? 0.22 : 0.35);
-    this.air?.setLight(gu.uSunCol.value, 0.36, day ? 0.3 : 0.12);
+    gu.uLook.value.set(gu.uLook.value.x, dn(0.34, 0.2), 1, dn(0.22, 0.35));
+    this.air?.setLight(gu.uSunCol.value, 0.36, dn(0.3, 0.12));
+    void day;
     this.clouds.visible = p.clouds > 0.01;
     this.clouds.children.forEach((c, i) => ((c as THREE.Mesh).visible = i / this.clouds.children.length < p.clouds));
     const cm = (this.clouds.children[0] as THREE.Mesh | undefined)?.material as THREE.MeshLambertMaterial | undefined;

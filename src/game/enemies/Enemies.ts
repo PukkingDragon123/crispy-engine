@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { Gore, fluidFor } from '../fx/Gore';
 import type { Ctx, EnemyApi, EnemyLike, RayHit } from '../Ctx';
 import { ENEMIES, EnemyDef, AttackDef, waveScale } from './EnemyDefs';
+import { fxGate, READ } from '../run/Balance';
 import { EnemyRender, RigBatch } from './EnemyRender';
 import { Projectiles } from './Projectiles';
 import { StatusSet, STATUS_INFO, COMBO_INFO } from '../combat/Status';
@@ -746,7 +747,8 @@ export class Enemies implements EnemyApi {
     const pp = point ?? new THREE.Vector3(e.pos.x, e.pos.y + e.height * 0.6, e.pos.z);
     const kind = hit.source === 'poison' ? 'poison' : hit.headshot && e.def.hitKind !== 'chitin' ? 'bone' : e.def.hitKind;
     if (hit.source !== 'poison' && hit.source !== 'bleed' && hit.source !== 'burn') {
-      ctx.fx.hit(pp, { x: -e.hitX, y: 0.4, z: -e.hitZ }, kind, res.crit ? 1.5 : 1);
+      // readability: hit sparks are budgeted (crits and headshots always show)
+      if (res.crit || hit.headshot || fxGate('hitFx', READ.hitFx)) ctx.fx.hit(pp, { x: -e.hitX, y: 0.4, z: -e.hitZ }, kind, res.crit ? 1.5 : 1);
       // a round goes through: the exit spray leaves out the back along the shot
       if (dir && (hit.source === 'gun' || hit.source === 'projectile') && !e.sandForm) {
         const ex = { x: pp.x + dir.x * e.radius * 0.8, y: pp.y + (dir.y ?? 0) * e.radius * 0.8, z: pp.z + dir.z * e.radius * 0.8 };
@@ -760,7 +762,8 @@ export class Enemies implements EnemyApi {
     }
     const venom = hit.source === 'scorpion';
     const col = res.superCrit ? 0xff4a2a : res.crit ? 0xffd040 : venom ? 0xb4ff52 : hit.source === 'swarm' ? 0xd8e070 : hit.source === 'poison' ? 0x9dff3a : hit.source === 'burn' ? 0xffa040 : hit.source === 'bleed' ? 0xe04040 : 0xffffff;
-    ctx.fx.number({ x: pp.x, y: pp.y + 0.3, z: pp.z }, amt, col, res.crit ? 1.3 : hit.headshot ? 1.2 : venom ? 1.1 : hit.source === 'poison' ? 0.75 : hit.source === 'swarm' ? 0.8 : 1);
+    const dotNum = hit.source === 'poison' || hit.source === 'bleed' || hit.source === 'burn' || hit.source === 'swarm';
+    if (res.crit || hit.headshot || (dotNum ? fxGate('dotNum', READ.dotNumbers) : fxGate('num', READ.numbers))) ctx.fx.number({ x: pp.x, y: pp.y + 0.3, z: pp.z }, amt, col, res.crit ? 1.3 : hit.headshot ? 1.2 : venom ? 1.1 : hit.source === 'poison' ? 0.75 : hit.source === 'swarm' ? 0.8 : 1);
     // venom: a sting froths green bubbles (more the deeper the poison), and every 5th stack pops the count
     if (venom && e.hp > 0) {
       const st = e.status.stacks('poison');

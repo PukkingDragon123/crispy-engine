@@ -7,10 +7,15 @@
 // is still standing slinks off (enemies.calm()), nothing spawns, wounds knit
 // slowly, and the hunter can relocate, shop, explore or heal. `timeLeft` is the
 // break countdown while it runs (the HUD's wave timer shows it as is),
-// `hudLabel` names what is next, `bell` is the hold progress of the early start:
-// hold the interact key (T) for BELL_HOLD s to ring the bell. RunScene's usual
+// `hudLabel` names what is next. DAYS (run/Days.ts): WAVES_PER_DAY waves make a
+// day (dawn, noon, golden hour, night, the witching hour); night waves send more
+// and tougher packs and more alphas (Balance.setDay / dayMul, `nightFactor`,
+// `dayFactor`). Each combat wave carries a bounty BUDGET of bodies: `remaining`
+// counts down as they fall, and clearing it ends the wave early. The hourglass
+// (ui/HourglassHud) hurries the break: while Sundown shakes it, `hurry` runs the
+// countdown HURRY times faster (the old bell is gone). RunScene's usual
 // `start(n + 1)` call after a clear just arms the break; the wave begins when the
-// countdown runs out (or the bell is rung). Each wave opens on a short beat: the
+// countdown runs out. Each wave opens on a short beat: the
 // next horde's dust rises on the horizon (and, with `cam` set, the camera looks
 // at it), and its first packs come from that side.
 import * as THREE from 'three';
@@ -20,11 +25,15 @@ import type { CameraRig } from '../player/CameraRig';
 import { ENEMIES, rosterFor, waveScale } from '../enemies/EnemyDefs';
 import { rnd, clamp } from '../../engine/math/rand';
 import { nileRoster, nileSpawnPoint, NILE_THEMES, type NileWhere } from './NileWaves';
+import { dayOf, nightOf, slotOf, PHASE_NAME, phaseOf } from './Days';
+import { setDay, dayMul } from './Balance';
 
 /** seconds of calm between two waves */
 export const INTERMISSION = 30;
-/** hold interact this long to ring the bell and start the next wave early */
-export const BELL_HOLD = 1.1;
+/** the break runs this many times faster while the hourglass is shaken */
+export const HURRY = 8;
+/** extra alpha chance on a full-night wave */
+export const NIGHT_ALPHA = 0.05;
 /** max hp knitted back per second during the break */
 export const BREAK_REGEN = 0.006;
 /** the Avatar of Khonsu's court: what the director sends on his waves */
@@ -93,16 +102,21 @@ export class WaveDirector {
   breakLeft = 0;
   breakTotal = INTERMISSION;
   nextWave = 0;
-  /** bell hold progress 0..1 (HUD: draw the fill while holding T) */
+  /** (the bell is gone: always 0, kept for old readers) */
   bell = 0;
+  /** the break countdown's speed: the hourglass sets HURRY while it is being shaken */
+  hurry = 1;
   /** RunScene asked for the next wave (it starts when the countdown ends) */
   private armed = false;
   private rung = false;
   private tick = 0;
-  private bellSfx = 0;
+  /** this wave's bounty budget: bodies the director sends, and those of them still standing */
+  budget = 0;
+  private sent = 0;
+  private mine: { alive: boolean; maxHp?: number }[] = [];
   /** optional: the camera rig, for the wave-start look at the coming horde */
   cam?: CameraRig;
-  /** optional: true while T means something else (an interact prompt, a shop) */
+  /** optional: true while T means something else (an interact prompt, a shop): the hourglass ignores T then */
   bellBlocked?: () => boolean;
   /** the side the next horde comes from (radians around the hunter) and how many opening packs use it */
   private bearing = 0;
@@ -115,11 +129,29 @@ export class WaveDirector {
   get inBreak() {
     return this.phase === 'break';
   }
+  /** the day of the current (or, in a break, the coming) wave */
+  get day() {
+    return dayOf(this.phase === 'break' ? this.nextWave : Math.max(1, this.wave));
+  }
+  /** 0 daylight .. 1 full night, for the wave being fought (COMBAT reads it) */
+  get nightFactor() {
+    return this.wave > 0 ? nightOf(this.wave) : 0;
+  }
+  /** the day ramp as a multiplier (1 on day 1; Balance.dayMul holds the full table) */
+  get dayFactor() {
+    return dayMul(dayOf(Math.max(1, this.wave)), false).count;
+  }
+  /** bodies of this wave's budget not yet put down (not yet sent + still standing) */
+  get remaining() {
+    if (this.phase !== 'combat' || !this.budget) return 0;
+    let up = 0;
+    for (const e of this.mine) if (e.alive) up++;
+    return Math.max(0, this.budget - this.sent) + up;
+  }
   /** what the HUD's wave sign should say */
   get hudLabel() {
-    if (this.phase !== 'break') return `WAVE ${this.wave}`;
-    if (this.rung) return 'THE BELL TOLLS';
-    return `NEXT: WAVE ${this.nextWave}`;
+    if (this.phase !== 'break') return `DAY ${this.day}  ${PHASE_NAME[phaseOf(this.wave || 1)]}`;
+    return `NEXT: DAY ${this.day} ${PHASE_NAME[phaseOf(this.nextWave)]}`;
   }
 
   /** the world is the Nile stage (its own roster, majors only at the gates) */
@@ -147,7 +179,7 @@ export class WaveDirector {
   start(n: number, now = false) {
     if (this.phase === 'break' && !now) {
       this.nextWave = n;
-      if (!this.armed && !this.rung && this.breakLeft > 3) this.ctx.toast('INTERMISSION', '#e0b373', `${Math.ceil(this.breakLeft)} s to wave ${n} — relocate, shop, heal. Hold T to ring the bell.`);
+      if (!this.armed && !this.rung && this.breakLeft > 3) this.ctx.toast('INTERMISSION', '#e0b373', `${Math.ceil(this.breakLeft)} s of calm. Relocate, shop, heal. Hold H to shake the hourglass.`);
       this.armed = true;
       return;
     }
@@ -163,6 +195,14 @@ export class WaveDirector {
     this.alphaDone = false;
     this.groups = 0;
     this.ctx.run.wave = n;
+    // the day and the night: COMBAT's difficulty ramp reads it (Balance.dayMul)
+    setDay(dayOf(n), nightOf(n) >= 1);
+    this.hurry = 1;
+    this.sent = 0;
+    this.mine = [];
+    this.budget = this.spec.boss === 'none' ? Math.round((16 + n * 1.9) * (this.spec.theme?.mult ?? 1) * dayMul().count) : 0;
+    if (slotOf(n) === 0 && n > 1) this.ctx.events.emit('dayBreak', dayOf(n));
+    if (slotOf(n) === 3) this.ctx.events.emit('nightfall', dayOf(n));
     this.waveBeat(this.spec, fromBreak);
     this.onWaveStart?.(this.spec);
   }
@@ -185,48 +225,25 @@ export class WaveDirector {
   private updateBreak(dt: number) {
     const ctx = this.ctx;
     const pl = this.getPlayer();
-    this.breakLeft = Math.max(0, this.breakLeft - dt);
+    this.breakLeft = Math.max(0, this.breakLeft - dt * this.hurry);
     // wounds knit while the sand is quiet
     if (pl.alive !== false && pl.hp !== undefined && pl.maxHp && pl.hp < pl.maxHp) (pl as { hp: number }).hp = Math.min(pl.maxHp, pl.hp + pl.maxHp * BREAK_REGEN * dt);
     // the last seconds count down out loud
     const sec = Math.ceil(this.breakLeft);
     if (sec !== this.tick) {
       this.tick = sec;
-      if (sec === 10 && !this.rung) ctx.toast('THE SANDS STIR', '#e0b373', `Wave ${this.nextWave} in 10 s`);
+      if (sec === 10 && !this.rung && this.hurry <= 1) ctx.toast('THE SANDS STIR', '#e0b373', `${PHASE_NAME[phaseOf(this.nextWave)]} in 10 s`);
       if (sec <= 5 && sec > 0) ctx.sfx('rev_hammer', null, 0.35 + (5 - sec) * 0.08, 0.7 + (5 - sec) * 0.06);
     }
-    // ring the bell: hold interact
-    const inp = ctx.engine.input;
-    const blocked = this.rung || !!this.bellBlocked?.();
-    if (!blocked && inp.held('interact') && pl.alive !== false) {
-      this.bell = Math.min(1, this.bell + dt / BELL_HOLD);
-      this.bellSfx -= dt;
-      if (this.bellSfx <= 0) {
-        this.bellSfx = 0.18;
-        ctx.sfx('ui_click', null, 0.3, 0.8 + this.bell * 0.7);
-      }
-      if (this.bell >= 1) this.ringBell();
-    } else if (!this.rung) this.bell = Math.max(0, this.bell - dt * 2.5);
     if (this.breakLeft <= 0 && this.armed) this.start(this.nextWave, true);
   }
 
-  /** start the next wave early */
+  /** end the break now (admin; the hourglass hurries it instead) */
   ringBell() {
     if (this.phase !== 'break' || this.rung) return;
-    const ctx = this.ctx;
     this.rung = true;
-    this.bell = 1;
     this.breakLeft = Math.min(this.breakLeft, 1.6);
-    const p = this.getPlayer().pos;
-    const at = { x: p.x, y: p.y + 0.3, z: p.z };
-    ctx.sfx('counter_clang', null, 1, 0.42);
-    ctx.sfx('divine_chime', null, 0.8, 0.5);
-    ctx.engine.tweens.after(0.5, () => ctx.sfx('counter_clang', null, 0.6, 0.42));
-    ctx.fx.ring(at, 0xffd36b, 18, 0.7);
-    ctx.fx.ring(at, 0xfff2c0, 9, 0.45);
-    ctx.shake(0.2);
-    ctx.toast('THE BELL TOLLS', '#ffd36b', `Wave ${this.nextWave} — here they come`, true);
-    ctx.events.emit('bellRung', this.nextWave);
+    this.ctx.events.emit('bellRung', this.nextWave);
   }
 
   // ------------------------------------------------------------------ the wave-start beat
@@ -319,12 +336,16 @@ export class WaveDirector {
     const ph = (this.timer % PULSE) / PULSE;
     const pulse = bossWave ? 0.5 : ph < 0.45 ? Math.sin((ph / 0.45) * Math.PI * 0.5) : 1 - smooth01((ph - 0.45) / 0.55);
     // a gentle ramp (easier fights): fewer bodies alive at once and a slower trickle
-    const target = Math.min(this.cap, Math.round((8 + n * 1.35) * (this.spec.theme?.mult ?? 1) * (bossWave ? 0.45 : 1) * (0.78 + 0.34 * pulse)));
-    const rate = (0.75 + n * 0.07) * (bossWave ? 0.4 : 1) * (0.45 + 1.1 * pulse);
-    if (this.enemies.alive < target) this.spawnAcc += rate * dt;
+    // the day ramp and the night: more bodies, sent faster, more alphas
+    const night = nightOf(n);
+    const dm = dayMul();
+    const target = Math.min(this.cap, Math.round((8 + n * 1.35) * (this.spec.theme?.mult ?? 1) * (bossWave ? 0.45 : 1) * (0.78 + 0.34 * pulse) * dm.count));
+    const rate = (0.75 + n * 0.07) * (bossWave ? 0.4 : 1) * (0.45 + 1.1 * pulse) * (1 + 0.25 * night);
+    const spent = !bossWave && this.budget > 0 && this.sent >= this.budget;
+    if (this.enemies.alive < target && !spent) this.spawnAcc += rate * dt;
     while (this.spawnAcc >= 1) {
       this.spawnAcc -= 1;
-      this.spawnGroup(sc.alphaChance);
+      this.spawnGroup(sc.alphaChance + NIGHT_ALPHA * night);
     }
     // guaranteed alpha mid-wave
     if (this.spec.alphaGuaranteed && !this.alphaDone && this.timer > 10) {
@@ -333,7 +354,7 @@ export class WaveDirector {
       const d = rnd.pick(roster);
       const p = this.nile ? this.nilePoint('land', 30, 44) : this.spawnPoint(30, 44);
       if (p) {
-        this.enemies.spawn(d.id, p.x, p.z, { alpha: true });
+        this.track(this.enemies.spawn(d.id, p.x, p.z, { alpha: true }));
         this.ctx.toast(`ALPHA ${d.name.toUpperCase()}`, '#ff8a4a', 'A mutated elite has appeared');
       }
     }
@@ -349,6 +370,11 @@ export class WaveDirector {
     }
     // end conditions
     if (this.phase === 'combat' && this.timer >= this.spec.duration) this.endWave();
+    // the whole budget put down: the field is clear, the wave ends early
+    else if (this.phase === 'combat' && this.budget > 0 && this.sent >= this.budget && this.timer > 4 && this.remaining === 0) {
+      this.ctx.toast('FIELD CLEARED', '#9dff3a', 'Every bounty on this wave is down');
+      this.endWave();
+    }
     if (this.phase === 'boss' && this.boss && !this.boss.alive && this.timer > 2) this.endWave();
   }
 
@@ -358,6 +384,14 @@ export class WaveDirector {
     // the intermission opens at once (RunScene's start(n + 1) arms it; travel / the run's end never do)
     this.beginBreak(this.spec.n + 1);
     this.onWaveEnd?.(this.spec);
+  }
+
+  /** count a body the director sent against this wave's budget */
+  private track(e: { alive: boolean } | null | undefined) {
+    if (!e || this.phase !== 'combat') return;
+    this.sent++;
+    this.mine.push(e);
+    if (this.mine.length > 400) this.mine = this.mine.filter((x) => x.alive);
   }
 
   spawnPoint(minR: number, maxR: number) {
@@ -402,7 +436,7 @@ export class WaveDirector {
     for (let i = 0; i < count; i++) {
       if (this.enemies.alive >= this.cap) break;
       const a = rnd.next() * Math.PI * 2, r = hull ? 0 : rnd.next() * (1.5 + count * 0.35);
-      this.enemies.spawn(def.id, p.x + Math.cos(a) * r, p.z + Math.sin(a) * r, { alpha: alphaRoll && i === 0 });
+      this.track(this.enemies.spawn(def.id, p.x + Math.cos(a) * r, p.z + Math.sin(a) * r, { alpha: alphaRoll && i === 0 }));
     }
   }
 
@@ -433,7 +467,7 @@ export class WaveDirector {
     for (let i = 0; i < count; i++) {
       if (this.enemies.alive >= this.cap) break;
       const a = rnd.next() * Math.PI * 2, r = rnd.next() * (1.5 + count * 0.35);
-      this.enemies.spawn(def.id, p.x + Math.cos(a) * r, p.z + Math.sin(a) * r, { alpha: alphaRoll && i === 0 });
+      this.track(this.enemies.spawn(def.id, p.x + Math.cos(a) * r, p.z + Math.sin(a) * r, { alpha: alphaRoll && i === 0 }));
     }
     void ENEMIES;
   }

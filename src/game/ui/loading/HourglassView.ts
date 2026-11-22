@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { buildVoxelGeometry } from '../../../engine/voxel/Mesher';
 import { makeVoxelMaterial, globalUniforms } from '../../../engine/render/VoxelMaterial';
 import { HG, glassR, hourglassFrame, glyphModel, FLOAT_GLYPHS } from '../../models/props/hourglass';
+import { MemoryShards, type MemoryEvent } from './MemoryShards';
 
 export type ProgressMode = 'set' | 'pace' | 'finish' | 'reset';
 
@@ -270,6 +271,8 @@ export class HourglassView {
   private blurM: THREE.ShaderMaterial;
   private compM: THREE.ShaderMaterial;
   private fsScene = new THREE.Scene();
+  /** first boot: the memory shards drifting round the glass (see MemoryShards) */
+  private memory: MemoryShards | null = null;
 
   constructor(canvas: HTMLCanvasElement | OffscreenCanvas, w: number, h: number, dpr: number) {
     const r = (this.renderer = new THREE.WebGLRenderer({ canvas: canvas as HTMLCanvasElement, antialias: false, alpha: false, powerPreference: 'low-power', stencil: false }));
@@ -563,6 +566,7 @@ export class HourglassView {
     (this.compM.uniforms.uAspect.value as THREE.Vector2).set(aspect, 1);
     (this.compM.uniforms.uTexel.value as THREE.Vector2).set(Math.max(1, Math.round(dpr)) / W, Math.max(1, Math.round(dpr)) / H);
     this.ptU.uPx.value = dpr * Math.max(1, Math.min(2, Math.round(this.h / 540)));
+    this.memory?.setPx(this.ptU.uPx.value);
   }
 
   /** drive the sand: 'set' a known fraction, 'pace' on its own toward the end, 'finish', 'reset' to a full top */
@@ -577,8 +581,33 @@ export class HourglassView {
       this.paceFrom = Math.max(this.shown, this.target);
       this.paceT = 0;
     }
-    if (mode === 'finish') this.target = 1;
+    if (mode === 'finish') {
+      this.target = 1;
+      this.memory?.end();
+    }
     this.mode = mode;
+  }
+
+  /** first boot: collecting pieces of memory (on), or the plain glass (off) */
+  setMemory(on: boolean) {
+    if (on && !this.memory) {
+      this.memory = new MemoryShards();
+      this.memory.setPx(this.ptU.uPx.value);
+      this.scene.add(this.memory.group);
+    } else if (!on && this.memory) {
+      this.memory.group.removeFromParent();
+      this.memory = null;
+      this.renderer.toneMappingExposure = 0.95;
+    }
+  }
+  /** the pointer over the cover (CSS px of the view) */
+  pointer(x: number, y: number, down: boolean) {
+    this.memory?.pointer((x / this.w) * 2 - 1, 1 - (y / this.h) * 2, down);
+  }
+  /** memory fragments taken since the last call */
+  drain(): MemoryEvent[] {
+    if (!this.memory?.events.length) return [];
+    return this.memory.events.splice(0);
   }
 
   /** the displayed fraction (sand that has fallen) */
@@ -653,6 +682,10 @@ export class HourglassView {
     (this.sandU.uKeyDir.value as THREE.Vector3).copy(this.key.position).normalize().transformDirection(vm);
     (this.sandU.uRimDir.value as THREE.Vector3).copy(this.rim.position).normalize().transformDirection(vm);
 
+    if (this.memory) {
+      this.memory.update(dt, this.cam, p);
+      this.renderer.toneMappingExposure = 0.95 + this.memory.flare * 2.2;
+    }
     this.render();
     return p;
   }

@@ -2184,7 +2184,7 @@ export class Shop {
     }
     const cam = this.ctx.camera;
     const dist = her.headPos(_v).distanceTo(cam.position);
-    const ft = new FloatText3D(text, { size: clamp(dist * 0.034, 0.07, 0.17), px: 48, cps: 40, wrap: 28, hdr: 1.3 });
+    const ft = new FloatText3D(text, { size: clamp(dist * 0.034, 0.07, 0.17), px: 48, cps: 40, wrap: 28, hdr: 1.0, glow: 'rgba(36,18,8,0.85)' }); // crisp, no bloom halo (user: much less glow)
     ft.anchor.copy(_v);
     this.ctx.scene.add(ft.mesh);
     this.speech = ft;
@@ -2969,7 +2969,8 @@ export class Shop {
       const b: Body = {
         ware: w, obj, he, invI: new THREE.Vector3(1 / I.x, 1 / I.y, 1 / I.z), rad: Math.max(he.x, he.y, he.z) * 0.8,
         p: new THREE.Vector3(), v: new THREE.Vector3(), q: new THREE.Quaternion(), w: new THREE.Vector3(),
-        state: 'wait' as BodyState, t: 0, launch: this.tumbleAt + 0.14 + order * 0.16, slot, rest: slot.clone(),
+        // one by one (user note): each ware gets its own moment and its own reveal (ShopUI.reveal)
+        state: 'wait' as BodyState, t: 0, launch: this.tumbleAt + 0.14 + order * 0.85, slot, rest: slot.clone(),
         still: 0, asleep: false, spin: rnd.next() * 6, landed: false, clack: 0, arc0: new THREE.Vector3(), sound,
         lit: 0, spot, gaze: 0,
         onShelf: false, flyT: 0.7, q0: new THREE.Quaternion().setFromAxisAngle(UP, Math.PI + (rnd.next() - 0.5) * 0.7), land: 0,
@@ -3377,6 +3378,8 @@ export class Shop {
 
   // ---------------------------------------------------------------- per frame
   update(rdt: number) {
+    // the purse stays on screen the whole visit
+    this.ui.gold = this.active ? Math.floor(this.ctx.run.gold) : null;
     this.ui.draw(Math.min(rdt, 0.05)); // (last frame's state; empty when the shop is shut)
     if (!this.active && !this.arrival) return;
     const h = Math.min(rdt, 0.05);
@@ -3692,7 +3695,7 @@ export class Shop {
     let pl = `${price} gold`;
     if (price !== w.price) pl += w.id === this.book.deal ? ` (deal, was ${w.price})` : ` (was ${w.price})`;
     if (gold < price) pl += ` · you have ${gold}`;
-    this.ui.card = { x: (p.x * 0.5 + 0.5) * this.ctx.engine.width, y: (-p.y * 0.5 + 0.5) * this.ctx.engine.height, name: w.name, desc: w.desc, note: this.noteOf(w), price: pl, dear: gold < price };
+    this.ui.card = { x: (p.x * 0.5 + 0.5) * this.ctx.engine.width, y: (-p.y * 0.5 + 0.5) * this.ctx.engine.height, name: w.name, desc: w.desc, note: this.noteOf(w), price: pl, dear: gold < price, id: w.id };
   }
 
   // ---------------------------------------------------------------- rigid bodies
@@ -3842,6 +3845,16 @@ export class Shop {
     }
   }
 
+  /** a ware is out: its pixel-art icon pops over it with its name, sparkles turning round it (ShopUI) */
+  private revealed = new WeakSet<Body>();
+  private revealWare(b: Body) {
+    if (this.revealed.has(b)) return;
+    this.revealed.add(b);
+    const at = this.group.localToWorld(new THREE.Vector3(b.p.x, b.p.y + b.he.y + 0.06, b.p.z));
+    this.ui.reveal(b.ware.id, b.ware.name, at);
+    this.ctx.sfx('loot_reveal', at, 0.22, 1.25 + b.idx * 0.06);
+  }
+
   /** a ware lands on its slot on the stall: a clack, a puff of dust, its tag drops down and swings */
   private land(b: Body) {
     b.state = 'shelf';
@@ -3857,6 +3870,7 @@ export class Shop {
       b.tag.want = 1;
       b.tag.kick(1);
     }
+    this.revealWare(b);
     const wp = this.group.localToWorld(_v.set(b.rest.x, b.rest.y - b.he.y, b.rest.z));
     if (b.sound === 'metal') this.ctx.sfx('shell_casing', wp, 0.32, 0.8);
     else if (b.sound === 'glass') this.ctx.sfx('shell_casing', wp, 0.26, 1.3);
@@ -3925,6 +3939,7 @@ export class Shop {
         else this.ctx.sfx('board_land', wp, vol * 0.6, 1.6);
         if (!b.landed || impact > 2.4) this.ctx.fx.dust({ x: wp.x, y: wp.y + 0.03, z: wp.z }, 0.2 + Math.min(0.2, impact * 0.04), P.sand0, 2);
       }
+      if (!b.landed) this.revealWare(b);
       b.landed = true;
       if (flat && b.v.lengthSq() < 0.01 && b.w.lengthSq() < 0.3) {
         b.still += h;

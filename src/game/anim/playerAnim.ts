@@ -672,7 +672,8 @@ export class PlayerAnim {
     this.lean.step(b.lean, dt);
     this.lag.step(this.lean.x, dt);
     // the board banks INTO the carve (positive lean = left turn = heel side for this stance)
-    const roll = -this.lean.x * 0.42 * (1 - this.airW * 0.7) - b.driftDir * this.driftW * 0.1;
+    // (+ the balance at speed: the deck tips with it and chatters while he stumbles)
+    const roll = -this.lean.x * 0.42 * (1 - this.airW * 0.7) - b.driftDir * this.driftW * 0.1 + b.bal * 0.22 * (1 - this.airW) + b.wobble * Math.sin(t * 13) * 0.07;
     I.tilt.rotation.set(0, 0, 0);
     I.tilt.rotateY(b.trickYaw + this.yawOff.x);
     I.tilt.rotateZ(-(b.trickPitch + this.pitchOff.x) + roll);
@@ -784,7 +785,8 @@ export class PlayerAnim {
     const ext = Math.max(0, land) * 0.08 * sc;
     const hz = (-0.015 - crouch * 0.06 - heel * 0.06 + toe * 0.035 + this.pushBody * 0.06 - this.deadW * 0.04 + ab.hipZ) * sc;
     const hx = (-this.accX.x * 0.08 + fbm(t * 0.35, 1) * 0.03 * this.idleW + this.pushBody * 0.07 + this.manualW * (0.08 + clamp(b.manualBal, -1, 1) * 0.03) + ab.hipX + shift * 0.055) * sc;
-    const stw = b.stumble > 0 ? Math.sin(t * 19) * Math.min(1, b.stumble * 2.5) : 0;
+    // stumble wobble: a hard knock, or the balance going (the free arm windmills, the hips chatter)
+    const stw = (b.stumble > 0 ? Math.sin(t * 19) * Math.min(1, b.stumble * 2.5) : 0) + b.wobble * Math.sin(t * 13.5) * 0.9;
     const px = 0.05 + crouch * 0.3 + toe * 0.1 - heel * 0.03 + this.deadW * 0.3 + ab.px;
     const py = 0.16 + (this.yaw.x - 0.38) * 0.28 + this.pushBody * 0.14;
     const pz = -hx * 1.6 + this.ollie.x * 0.85 + stw * 0.12 - shift * 0.05;
@@ -805,7 +807,7 @@ export class PlayerAnim {
     this.flinch.step(0, dt);
     this.recBody.step(0, dt);
     const breathe = Math.sin(t * (1.5 + this.lowW * 1.6)) * (0.016 + this.lowW * 0.03 + this.idleW * (0.012 + 0.014 * tn));
-    const tx = crouch * 0.2 + heel * 0.28 + toe * 0.05 - this.recBody.x * 0.1 + this.flinch.x * 0.12 + breathe - this.accZ.x * 0.15 + this.deadW * 0.75 + this.boostW * 0.2 + this.lowW * 0.12 - aimPitch * 0.14 * this.aimW + ab.tx + this.airW * this.grabW * 0.55 + (this.lag.x - this.lean.x) * 0.25 + this.pushBody * 0.16 + charge * 0.14 + this.manualW * 0.06 + this.wallW * 0.15;
+    const tx = crouch * 0.2 + heel * 0.28 + toe * 0.05 - this.recBody.x * 0.1 + this.flinch.x * 0.12 + breathe - this.accZ.x * 0.15 + this.deadW * 0.75 + this.boostW * 0.2 + this.lowW * 0.12 - aimPitch * 0.14 * this.aimW + ab.tx + this.airW * this.grabW * 0.55 + (this.lag.x - this.lean.x) * 0.25 + this.pushBody * 0.16 + charge * 0.14 + this.manualW * 0.06 + this.wallW * 0.15 + b.bal * 0.35 * (1 - this.airW) + b.longCharge * 0.22;
     const ty = this.yaw.x - py;
     const tz = this.accX.x * 0.14 - pz * 0.55 + stw * 0.25 + this.stunW * Math.sin(t * 1.7) * 0.1 + ab.tz + this.recBody.x * 0.04 + shift * 0.07;
     const torso = n['torso'];

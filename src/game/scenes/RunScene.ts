@@ -13,8 +13,10 @@ import { Player, PlayerVisuals } from '../player/Player';
 import { CameraRig } from '../player/CameraRig';
 import { Enemies } from '../enemies/Enemies';
 import { NileFleet } from '../enemies/NileFleet';
+import { WorldLife } from '../world/WorldLife';
 import { Pickups } from '../run/Pickups';
 import { WaveDirector, WaveSpec } from '../run/WaveDirector';
+import { Days, dayLabel } from '../run/Days';
 import { Hud, HudState, HudQuest } from '../ui/Hud';
 import { questFromObjective } from '../ui/MissionPaper';
 import { Ctx, EventBus, RunState } from '../Ctx';
@@ -67,6 +69,7 @@ import { WagonRepair } from '../run/WagonRepair';
 import { NeckSlicer } from '../player/NeckSlicer';
 import { ZoneCine } from './ZoneCine';
 import { Tutorial } from '../run/Tutorial';
+import { playInRun, tutorialDone } from '../run/NewGame';
 import { RuinNests } from '../run/RuinNests';
 import { Wildlife } from '../run/Wildlife';
 import { TreasureHunt } from '../run/TreasureHunt';
@@ -75,7 +78,7 @@ import { SoulReaping, prewarmReaping } from './SoulReaping';
 import { BountyRip } from '../run/BountyRip';
 import { OasisHeart } from '../run/OasisHeart';
 import { Barks } from '../audio/Barks';
-import { DeathCine, deathCineFromRun } from './DeathCine';
+import { DeathCine, deathCineFromRun, pickKiller } from './DeathCine';
 import { CodexRun } from '../ui/codex/CodexRun';
 import { ThothErrand } from '../run/ThothErrand';
 import { Progression } from '../run/Progression';
@@ -99,6 +102,8 @@ export interface RunOptions {
   look?: { hat: string; outfit: string; board: string };
   /** play the Serket opening cinematic */
   intro?: boolean;
+  /** the new-game flow from this step: the lore title, the tomb, Serket's domain tutorial (run/NewGame.ts) */
+  newGame?: import('../run/NewGame').NewGameStep;
   gun?: GunLoadout;
   /** state carried across sub-area travel (waves 50 → 51, 75 → 76) */
   carry?: RunCarry;
@@ -179,6 +184,7 @@ export class RunScene implements GameScene {
   fleet: NileFleet | null = null;
   pickups!: Pickups;
   director!: WaveDirector;
+  days: Days | null = null;
   hud!: Hud;
   hud3d!: Hud3D;
   faces = new FaceQuads();
@@ -461,9 +467,12 @@ export class RunScene implements GameScene {
     };
     this.pickups = new Pickups(this.ctx, () => this.player);
     this.pickups.onBounty = (v) => this.addBounty(v);
+    new WorldLife(this.ctx, () => this.player); // angry trees + water physics (self-ticking, see world/WorldLife)
     this.director = new WaveDirector(this.ctx, this.enemies, () => this.player);
     this.wireEvents();
     this.progress = new ProgressLadder({ engine: e, ctx: this.ctx, hud: this.hud, director: this.director, world: this.world, shop: this.shop, camera: this.camera });
+    // days: the day clock and sky, night light, the day plaque and the hourglass
+    this.days = new Days(this as unknown as ConstructorParameters<typeof Days>[0]);
     // Sundown's voiced quips; tears itself down with the scene (Mark, the mummy cat, keeps his silence)
     if (this.opts.hero !== 'mark') new Barks(this.ctx, this.player);
     this.codexRun = new CodexRun(this.ctx, this);
@@ -484,7 +493,15 @@ export class RunScene implements GameScene {
     this.stormLoop = e.audio.loop('storm_loop', 0);
     e.input.setWantLock(true);
     this.ready = true;
-    if (this.opts.intro) {
+    if (this.opts.newGame) {
+      // the new game: the title and the tomb, then Serket's domain; the first desert day after it
+      this.introOn = true;
+      void playInRun(this as any, this.opts.newGame).then(() => {
+        this.introOn = false;
+        this.hud.visible = true;
+        this.director.start(this.opts.startWave ?? 1);
+      });
+    } else if (this.opts.intro) {
       // the HUD stays hidden for the whole cinematic
       this.hud.visible = false;
       this.introOn = true;
@@ -492,7 +509,7 @@ export class RunScene implements GameScene {
         this.introOn = false;
         this.hud.visible = true;
         // Serket stays to teach the ropes (skipping the intro skips the lesson)
-        if (r.skipped) this.director.start(this.opts.startWave ?? 1);
+        if (r.skipped || tutorialDone()) this.director.start(this.opts.startWave ?? 1);
         else this.tutorial = new Tutorial({ ctx: this.ctx, player: this.player, cam: this.camRig });
       });
     } else this.director.start(this.opts.startWave ?? 1);
@@ -502,6 +519,7 @@ export class RunScene implements GameScene {
     this.windLoop?.stop(0.5);
     this.slideLoop?.stop(0.5);
     this.stormLoop?.stop(0.5);
+    this.days?.dispose();
     this.hud3d.dispose();
     this.hud.dispose();
     this.choice?.dispose();
@@ -562,7 +580,9 @@ export class RunScene implements GameScene {
     });
     // a bell snake coils around the board: mash to break free
     ev.on('snakeWrap', async (sn: any) => {
-      const r = await this.qte.run({ kind: 'mash', key: 'KeyE', label: 'BREAK FREE', duration: 2.2, target: 12, at: () => this.player.center(this.hudHero) });
+      // fewer QTEs: Sundown wrestles free on his own after a squeeze (no mash prompt)
+      await this.engine.tweens.wait(1.1);
+      const r = 'good' as 'good' | 'fail' | 'perfect';
       if (this.enemies.wrapping !== sn) return;
       ev.emit(r === 'fail' ? 'snakeWrapCrush' : 'snakeWrapBreak', sn, r === 'perfect' ? 1.8 : 1);
     });
@@ -862,7 +882,7 @@ export class RunScene implements GameScene {
     this.waveIntroT = 0;
     // the Nile's gate bosses are carved off-thread a few waves ahead
     if (this.opts.stage === 'nile') nilePrewarm(this.ctx, s.n);
-    const label = s.boss === 'major' ? 'THE RECKONING' : s.boss === 'mini' ? 'WANTED' : s.theme ? s.theme.name : `WAVE ${s.n}`;
+    const label = s.boss === 'major' ? 'THE RECKONING' : s.boss === 'mini' ? 'WANTED' : dayLabel(s.n) ?? (s.theme ? s.theme.name : `WAVE ${s.n}`);
     // the wave title is cast in voxel letters in the world, not a flat banner
     this.hud3d.cutIn(label, s.boss !== 'none' ? '#ff8a4a' : '#ffd36b', 'determined');
     this.ctx.sfx('wave_start', null, 0.7);
@@ -942,8 +962,12 @@ export class RunScene implements GameScene {
     // every death: the heart stops, the soul tears loose, Anubis' arm drags it down through the sand
     // into the Duat. The first death is weighed (worthy: back to the hunt); after that the resurrection
     // is spent and the god only gives his final word before the desert takes the body (DeathCine).
-    const final = this.run.revived;
+    // the heart grows heavier with every weighing this ride: three can still balance, the 4th slams the scale
+    const deaths = (this.run.deaths ?? 0) + 1;
+    this.run.deaths = deaths;
+    const final = deaths > 3;
     this.run.revived = true;
+    const killer = pickKiller(this);
     this.dying = true;
     this.progression?.death(final);
     this.ctx.sfx('sting_negative', null, 0.8);
@@ -954,14 +978,14 @@ export class RunScene implements GameScene {
     // the realm builds below while the reaping plays above; the camera dives through the sand into it
     const trial = new AnubisTrial(eng, this.qte, this.player.rig.geo);
     const realm = trial.prepare().catch((e) => console.warn('[death] realm', e));
-    await new SoulReaping({ ctx: this.ctx, player: this.player, qte: this.qte, hud: (on) => this.hud.setVisible(on), handoff: true, ready: realm }).run();
+    await new SoulReaping({ ctx: this.ctx, player: this.player, qte: this.qte, hud: (on) => this.hud.setVisible(on), handoff: true, ready: realm, killer }).run();
     this.trial = trial;
     eng.post.setSceneCamera(trial.scene, trial.camera);
     (window as any).__music?.setMood('underworld');
     eng.slowMo(1, 50);
     eng.paused = true;
     this.hud.setVisible(false);
-    const ok = await trial.run({ kills: this.run.kills, wave: this.run.wave, final, fromReaping: true });
+    const ok = await trial.run({ kills: this.run.kills, wave: this.run.wave, final, fromReaping: true, deaths });
     eng.post.setSceneCamera(this.scene, this.camera);
     this.trial = null;
     this.dying = false;
@@ -976,7 +1000,7 @@ export class RunScene implements GameScene {
     // resurrection: rise out of the sand in a shockwave
     (window as any).__music?.setMood('combat');
     this.player.revive();
-    this.player.hp = this.player.maxHp * 0.6;
+    this.player.hp = this.player.maxHp * (deaths >= 3 ? 0.35 : deaths === 2 ? 0.48 : 0.6);
     this.player.invuln = 4;
     const p = this.player.pos.clone();
     eng.fadeIn(0.5);
@@ -1191,6 +1215,7 @@ export class RunScene implements GameScene {
     this.enemies.update(dt, this.run.time);
     this.pickups.update(dt);
     this.director.update(dt);
+    this.days?.update(dt, rdt);
     this.trailT -= dt;
     if (this.trailT <= 0) {
       this.trailT = 1.5;
@@ -1386,7 +1411,7 @@ export class RunScene implements GameScene {
       quests: this.progression?.quests(this.questList()) ?? this.questList(),
       boss: (() => {
         const b = this.bosses.find((x) => x.alive && !x.escaped);
-        return b ? { name: b.name, frac: Math.max(0, b.frac), title: b.title } : null;
+        return b ? { name: b.name, frac: Math.max(0, b.frac), title: b.title, phase: b.phase, phases: b.phases, id: b.id, theme: (b as { barTheme?: string }).barTheme } : null;
       })(),
       ult: this.run.ultCharge,
       skills: (() => {
@@ -1396,6 +1421,7 @@ export class RunScene implements GameScene {
           { key: 'E', icon: 'scorp', cd: cd.scorp, max: this.skills.constants.scorpCd },
           { key: 'C', icon: 'scarab', cd: cd.swarm, max: this.skills.constants.swarmCd },
           { key: 'G', icon: 'dung', cd: cd.bomb, max: this.skills.constants.bombRecharge, charges: cd.bombCharges },
+          { key: 'X', icon: 'spark', cd: cd.roses, max: this.skills.constants.rosesCd ?? 16 },
           { key: 'F', icon: 'bone', cd: Math.max(0, p.meleeCd), max: 0.55 },
         ];
       })(),

@@ -1,7 +1,10 @@
 // Third-person over-the-shoulder camera with speed FOV, aim-down-sights zoom,
 // terrain collision, trauma shake, a sprung recoil punch (pitch / yaw / roll /
 // FOV) that kicks and recovers, aim-assist hooks (look friction + nudges) and
-// blendable cinematic overrides.
+// blendable cinematic overrides. Ride feel (kept subtle): an FOV kick when the
+// board surges, a little roll into carves, a pull-back through long airs, a dip
+// on hard landings, the balance wobble, a pull-back while the rider is off the
+// board, and a soft pan that frames an interactable while the board brakes by it.
 import * as THREE from 'three';
 import { clamp, damp, noise } from '../../engine/math/rand';
 
@@ -49,6 +52,22 @@ export class CameraRig {
   private fovKick = 0;
   sensitivity = 0.0022;
   shakeScale = 1;
+  // ---- ride feel (the player sets these each frame)
+  /** the board's balance (-1..1) and stumble wobble (0..1): a small roll and sway */
+  balance = 0;
+  wobble = 0;
+  /** 0..1 the rider is off the board (wipeout / recovery): the boom pulls back */
+  wipe = 0;
+  /** an interactable to frame (weight 0..1 eases the look toward it) */
+  focus = new THREE.Vector3();
+  focusW = 0;
+  private airT = 0;
+  private airK = 0;
+  private dip = 0;
+  private dipV = 0;
+  private prevSpeed = 0;
+  private surge = 0;
+  private wipeK = 0;
 
   constructor(public camera: THREE.PerspectiveCamera, public groundAt: (x: number, z: number) => number) {}
 
@@ -74,6 +93,10 @@ export class CameraRig {
     this.recYV += yaw * 44;
     this.recRV += roll * 40;
     this.fovKick = Math.min(4, this.fovKick + fov);
+  }
+  /** a landing: the view dips with the impact (m/s into the ground) and springs back */
+  land(impact: number) {
+    this.dipV -= clamp((impact - 6) * 0.09, 0, 1.6);
   }
   /** aim assist / snap: turn the view directly (radians) */
   nudge(dYaw: number, dPitch: number) {
@@ -126,14 +149,30 @@ export class CameraRig {
     const T = this.smoothTarget;
 
     this.springs(dt);
-    const pitch = this.pitch + this.recP;
+    // ride feel: air pull-back (builds through a long air), landing dip spring, surge (speed gained fast)
+    this.airT = airborne ? this.airT + dt : 0;
+    this.airK = damp(this.airK, airborne ? clamp((this.airT - 0.25) / 0.7, 0, 1) : 0, airborne ? 2.5 : 5, dt);
+    {
+      const n = Math.max(1, Math.ceil(dt / (1 / 120)));
+      const h = Math.min(dt, 0.1) / n;
+      for (let i = 0; i < n; i++) {
+        this.dipV += (-90 * this.dip - 13 * this.dipV) * h;
+        this.dip += this.dipV * h;
+      }
+    }
+    const accel = dt > 1e-4 ? (speed - this.prevSpeed) / dt : 0;
+    this.prevSpeed = speed;
+    this.surge = damp(this.surge, clamp((accel - 4) * 0.5, 0, 5), accel > 4 ? 8 : 2.5, dt);
+    this.wipeK = damp(this.wipeK, this.wipe, 4, dt);
+    const ride = 1 - this.aim * 0.8;
+    const pitch = this.pitch + this.recP - this.dip * 0.05 * ride - this.airK * 0.05 * ride - this.wipeK * 0.08;
     const yaw = this.yaw + this.recY;
-    const d = (this.dist + clamp(speed - 12, 0, 30) * 0.045) * (1 - this.aim * ADS.boom - this.scope * 0.25);
+    const d = (this.dist + clamp(speed - 12, 0, 30) * 0.045 + (this.airK * 0.75 + this.wipeK * 1.5 + this.focusW * 0.5) * ride) * (1 - this.aim * ADS.boom - this.scope * 0.25);
     const fx = Math.sin(yaw), fz = Math.cos(yaw);
     const rx = -Math.cos(yaw), rz = Math.sin(yaw);
     const cp = Math.cos(pitch), sp = Math.sin(pitch);
     const sh = this.shoulder * (1 + this.aim * 0.15);
-    const head = this.tmp.set(T.x + rx * sh, T.y + this.height - this.aim * 0.06, T.z + rz * sh);
+    const head = this.tmp.set(T.x + rx * sh, T.y + this.height - this.aim * 0.06 + (this.dip * 0.1 + this.airK * 0.22 + this.wipeK * 0.3) * ride, T.z + rz * sh);
     // desired camera position (behind, pitched)
     let cx = head.x - fx * cp * d, cy = head.y - sp * d, cz = head.z - fz * cp * d;
     // terrain collision along the boom
@@ -152,7 +191,17 @@ export class CameraRig {
     }
     cy = Math.max(cy, this.groundAt(cx, cz) + 0.45);
     // look target ahead along aim
-    const lx = head.x + fx * cp * 30, ly = head.y + sp * 30 + 0.2, lz = head.z + fz * cp * 30;
+    let lx = head.x + fx * cp * 30, ly = head.y + sp * 30 + 0.2, lz = head.z + fz * cp * 30;
+    // framing an interactable: the look eases toward it (the rider nudges the yaw round to it)
+    const fw = this.focusW * 0.45 * (1 - this.aim);
+    if (fw > 0.001) {
+      const F = this.focus;
+      const fd = Math.hypot(F.x - head.x, F.z - head.z);
+      const s30 = 30 / Math.max(3, fd);
+      lx += (head.x + (F.x - head.x) * s30 - lx) * fw;
+      ly += (head.y + (F.y - head.y) * s30 - ly) * fw;
+      lz += (head.z + (F.z - head.z) * s30 - lz) * fw;
+    }
 
     this.cineBlend = damp(this.cineBlend, this.cineTarget, 3.2, dt);
     if (this.cineBlend < 0.001 && this.cineTarget === 0) this.cine = null;
@@ -171,7 +220,10 @@ export class CameraRig {
     cam.position.copy(this.cur);
     cam.lookAt(this.look);
     // roll with carve lean (less while aiming) + recoil roll
-    this.roll = damp(this.roll, -lean * 0.06 * (1 - this.aim * 0.6), 4, dt);
+    const tw = performance.now() / 1000;
+    const sway = this.wobble * (Math.sin(tw * 9.5) * 0.6 + Math.sin(tw * 15.3) * 0.4) * 0.025;
+    this.roll = damp(this.roll, (-lean * (0.06 + clamp(speed / 14, 0, 1) * 0.035) + this.balance * 0.035) * (1 - this.aim * 0.6), 4, dt);
+    cam.rotateZ(sway * (1 - this.aim * 0.7));
     cam.rotateZ(this.roll + this.recR + (this.cine?.roll ?? 0) * cb);
     // shake
     this.trauma = Math.max(0, this.trauma - dt * 1.4);
@@ -183,7 +235,7 @@ export class CameraRig {
       cam.rotateZ(noise.n2(t * 19, 3.1) * 0.08 * s);
     }
     // FOV (ADS zooms; the shot punch pops it for a frame or two)
-    const targetFov = cb > 0.5 && this.cine ? this.cine.fov : 72 + clamp(speed - 10, 0, 34) * 0.42 - this.aim * ADS.fov - this.scope * 26 + (airborne ? 3 : 0);
+    const targetFov = cb > 0.5 && this.cine ? this.cine.fov : 72 + clamp(speed - 10, 0, 34) * 0.42 - this.aim * ADS.fov - this.scope * 26 + this.airK * 3 + this.surge * ride - this.focusW * 5 * ride;
     this.fov = damp(this.fov, targetFov, this.aim > 0.05 ? 11 : 6, dt);
     cam.fov = this.fov + this.fovKick * (1 - cb);
     cam.updateProjectionMatrix();

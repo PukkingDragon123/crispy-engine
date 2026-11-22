@@ -16,8 +16,8 @@
 //   - tap open sand: kick-push. Between two auto kicks is ON the beat: PERFECT
 //   - swipe up: throw the grapple. Swipe down: kick
 //  TAP THE WORLD / THE HUD
-//   - tarot cards: cast (Death: the ultimate); the soul jar or the heart: the
-//     ultimate; Pinch on the jar's stopper or on Sundown's shoulder: his
+//   - tarot cards: cast (Death: the ultimate); the heart: the
+//     ultimate; Pinch on Sundown's shoulder: his
 //     Scorpion Toss; the floating cylinder: reload (flick it sideways: next
 //     gun); a gun on the carried-guns strip: draw it; the HUD items: use them
 //   - the tin star or the tally board: the ledger; the wave plaque or a
@@ -34,7 +34,6 @@ import type { Qte } from './Qte';
 import type { Hud } from './Hud';
 import { PixelFx, TAU } from './HudKit';
 import { WATCH_DROP } from './OutlawHud';
-import { SOUL_JAR_HIT } from './SoulBar';
 import { PUSH } from '../player/Board';
 import { TouchTutor, tutorSeen } from './TouchTutor';
 
@@ -282,15 +281,7 @@ export class TouchControls {
     const ar = (A as any).arsenal as { k: number; x: number; y: number; strip: { y: number; slots: { x: number; id: string }[] } | null } | null | undefined;
     if (ar?.strip) for (const sl of ar.strip.slots) if (near(sl.x, ar.strip.y, 15 * ar.k + 3)) return { kind: 'gun', id: sl.id };
     if (near(A.cyl.x, A.cyl.y, A.cyl.R + 10) || (ar && near(ar.x, ar.y, 26 * ar.k))) return { kind: 'cyl' };
-    // the soul jar with Pinch on the stopper, and the heart under it
-    const so = A.soul;
-    if (so) {
-      // the 3D jar: its stopper with Pinch above the shoulder, the jar below
-      const J = SOUL_JAR_HIT;
-      const k = so.k * J.scale;
-      if (Math.abs(hx - so.x) < J.pinchHalfW * k + 3 && hy < so.y - J.body * k && hy > so.y - J.top * k) return { kind: 'pinch' };
-      if (Math.abs(hx - so.x) < J.halfW * k + 2 && hy <= so.y + 4 && hy >= so.y - J.body * k) return { kind: 'ult' };
-    }
+    // the heart (the ultimate is also its XIII tarot card above)
     if (near(A.heart.x, A.heart.y - 3, 19)) return { kind: 'ult' };
     for (let i = 0; i < A.items.length; i++) if (near(A.items[i].x, A.items[i].y, 15)) return { kind: 'item', i };
     // the outlaw readouts: tin star + tally board (the ledger), the wave plaque (pause), the break's stopwatch

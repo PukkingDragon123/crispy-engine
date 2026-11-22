@@ -13,17 +13,20 @@
 //   4. ANUBIS   a low hero angle on his soul avatar: obsidian under a luminous
 //               spirit shell, eyes igniting, the head lifting. He speaks in
 //               floating 3D words, gestures at the Scales of Ma'at.
-//   5. JUDGEMENT  timing only: the beam swings and its needle sweeps the gauge;
-//               stop it on the feather's mark. Then the feather falls: strike as
-//               the closing ring meets the sight, the moment the beam comes level
-//               (each good beat sends a sign flying from the soul to the feather).
+//   5. JUDGEMENT  no UI at all: his heart floats out of the soul's chest and the
+//               player drags it (mouse, touch, or WASD + Space) onto the empty pan.
+//               The heart is heavier with every death this ride: it sags under the
+//               pointer, lags and trembles; the beam tips, the pans swing. Hold the
+//               heart up so the beam rides level against the feather of Ma'at until
+//               the feather accepts it (gold sparks build round it). Deaths 1-3 can
+//               balance, each harder; the 4th heart is too heavy: the scale slams.
+//               The spirit fires gutter as the time runs out.
 //   6. VERDICT  worthy: he raises the was-sceptre and the soul rises in a blaze
 //               of light. Unworthy: the fires gutter, his eyes burn red, hands
 //               rise from the floor and his open hand takes the soul.
 //   0. THE FALL  (from the reaping) the god's fist drags the soul down a roaring tunnel of
 //               sand, darkness and spirit motes; it opens over the abyss and lets go.
-// Every death comes here. The first is weighed; after that (`final`) Anubis gives his last
-// word without a weighing and takes the soul.
+// Every death comes here; repeat visits in one ride skip the walk and open on the god.
 // HOLD SPACE / ESC / ENTER to skip the arrival (a tap never skips).
 // API (RunScene): const t = new AnubisTrial(engine, qte, playerGeo); t.prepare() builds it ahead;
 // await t.run({ kills, wave, final?, fromReaping? }) → worthy?
@@ -39,6 +42,7 @@ import { Voice } from '../audio/Voice';
 import { rnd } from '../../engine/math/rand';
 import { REALM_MODELS, StaticModel, spiritNormals } from '../models/anubis/realm';
 import { anubisArmRig } from '../models/anubis/arm';
+import { hudHeartRig } from '../models/props/hud';
 
 // ----------------------------------------------------------------------------- layout (metres)
 const GATE_Z = 28;
@@ -52,6 +56,19 @@ const BRAZ: [number, number, number][] = [[3.5, 14.5, 1], [-3.5, 14.5, 1], [3.5,
 const MOON_DIR = new THREE.Vector3(-0.3, -1, -0.32).normalize();
 const FOG = { color: 0x060c16, near: 8, far: 60 };
 const SLIT_X = 3.6;
+// ---- the weighing (kg-ish units): the heart's weight by deaths this ride, the feather, the beam
+const HEART_M = [0.95, 0.95, 1.32, 1.64, 2.9];
+const FEATHER_M = 0.85;
+const ARM_L = 1.52;
+const BEAM_I = 4.6;
+const BEAM_K = 10;
+/** the most a hand can lift the heart pan with (the 4th heart needs more) */
+const HAND_MAX = 9.4;
+const HAND_K = 7.5;
+/** seconds held level until the feather accepts, by deaths */
+const NEED = [1.1, 1.1, 1.6, 2.2, 99];
+const WEIGH_MAX = 34;
+const LEVEL = 0.055;
 
 const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 const damp = (a: number, b: number, l: number, dt: number) => a + (b - a) * (1 - Math.exp(-l * dt));
@@ -312,6 +329,34 @@ export class AnubisTrial {
   private glyphsDone = 0;
   /** the feather's fall (the second weighing beat) is running when >= 0 */
   private featherDrop = -1;
+  // ---- the weighing
+  private deaths = 1;
+  private heart: RigInstance | null = null;
+  private heartMat: VoxelMaterial | null = null;
+  private heartGlow: SpiritMat | null = null;
+  private heartSize = 1;
+  private hp = V(0, -40, 0);
+  private hv = V(0, 0, 0);
+  private seated = false;
+  private holding = false;
+  private weighOn = false;
+  private weighT = 0;
+  private weighRes: boolean | null = null;
+  private beamW = 0;
+  private beamA = 0;
+  private panSw = [0, 0];
+  private panW = [0, 0];
+  private bal = 0;
+  private slam = -1;
+  private squash = 0;
+  private hover = 0;
+  private chimeT = 0;
+  private warned = false;
+  private ptr = V(0, 0, 0);
+  private vp = { x: 0.2, y: 0.1, mx: 0, my: 0 };
+  private ray = new THREE.Raycaster();
+  private plane = new THREE.Plane();
+  private wantLock = false;
   private wallPulse = 0;
   private shake = 0;
   // camera
@@ -323,6 +368,7 @@ export class AnubisTrial {
   private lines: Line[] = [];
   private v1 = new THREE.Vector3();
   private v2 = new THREE.Vector3();
+  private v3 = new THREE.Vector3();
   private cf = new THREE.Vector3();
   private cr = new THREE.Vector3();
   private cu = new THREE.Vector3();
@@ -538,6 +584,31 @@ export class AnubisTrial {
     s.add(this.scales.root);
     this.scalesMirror = new RigInstance(scGeo, { material: this.scales.material });
     this.mirror.add(this.scalesMirror.root);
+    // the stock heart on the pan gives way to his own (the one the player lays there)
+    for (const r of [this.scales, this.scalesMirror]) if (r.meshes['heart']) r.meshes['heart'].visible = false;
+    try {
+      const hg = buildRigGeo(hudHeartRig(), 'hud_heart');
+      this.heartMat = makeVoxelMaterial({ emissiveStrength: 0.2 });
+      this.mats.push(this.heartMat);
+      const h = new RigInstance(hg, { material: this.heartMat, castShadow: true });
+      const box = new THREE.Box3().setFromObject(h.root);
+      const sz = box.getSize(this.v1);
+      this.heartSize = 0.46 / Math.max(0.01, sz.x, sz.y);
+      h.root.scale.setScalar(this.heartSize);
+      this.heartGlow = spiritMaterial(0x6a0a08, 0xff7a5a, { inflate: 0.0006, power: 2.4, core: 0.3, lumRim: 1, gain: 0.5, vein: 0.5 });
+      this.mats.push(this.heartGlow);
+      const shells = soulShellGeos(hg);
+      hg.parts.forEach((pp, i) => {
+        const m = new THREE.Mesh(shells[i], this.heartGlow!);
+        m.renderOrder = 6;
+        h.nodes[pp.name].add(m);
+      });
+      h.root.visible = false;
+      s.add(h.root);
+      this.heart = h;
+    } catch (e) {
+      console.warn('[trial] heart', e);
+    }
     await this.tick();
 
     // --- Anubis: obsidian core, luminous spirit shell, modelled eyes; and his reflection
@@ -726,9 +797,10 @@ export class AnubisTrial {
   }
 
   /** the whole trial; resolves true when the soul is judged worthy */
-  async run(stats: { kills: number; wave: number; final?: boolean; fromReaping?: boolean }): Promise<boolean> {
+  async run(stats: { kills: number; wave: number; final?: boolean; fromReaping?: boolean; deaths?: number }): Promise<boolean> {
     const eng = this.engine;
-    this.final = !!stats.final;
+    this.deaths = Math.max(1, Math.min(4, stats.deaths ?? (stats.final ? 4 : 1)));
+    this.final = this.deaths >= 4;
     await this.prepare();
     this.grade(true);
     this.loop = eng.audio.loop('underworld_loop', 0.7);
@@ -741,31 +813,244 @@ export class AnubisTrial {
       l.ft.show(false);
       l.dying = true;
     }
-    // weighed once already: no scales, only the god's last word
-    if (this.final) return this.verdict(false, '"No feather this time. Lie down, cowboy. The desert keeps you."');
-
-    // ---------------------------------------------------------------- the weighing
+    // ---------------------------------------------------------------- the weighing: drag the heart onto the scale
     this.setPhase('judge');
-    this.setShot(this.shotJudge, 1.4);
+    this.setShot(this.shotWeigh, 1.4);
     this.gwT = { present: 0, point: 1, reach: 0, grant: 0, raise: 0 };
     eng.audio.play('scales', { volume: 0.8 });
-    eng.audio.play('heartbeat', { volume: 0.6 });
-    await this.hold(1.0, false);
-    // 1) the beam swings; its needle sweeps the gauge: stop it on the feather's mark
-    const wave = stats.wave;
-    const a = await this.qte.run({ kind: 'bar', label: 'WEIGH THE HEART', speed: 0.8 + Math.min(0.55, wave * 0.011), width: 0.15 - Math.min(0.04, wave * 0.0008), duration: 5, phase: -Math.PI / 2, at: () => this.needlePoint(-3.1) });
-    if (a === 'fail') return this.verdict(false);
-    this.weighed(a);
-    this.gwT = { present: 1, point: 0, reach: 0, grant: 0, raise: 0 };
-    await this.say('"Level… for now. Once more, as the feather falls."', 'anubis', 0.8, false);
-    // 2) the feather drops its pan: strike as the beam comes level (the ring meets the sight)
-    this.gwT = { present: 0, point: 1, reach: 0, grant: 0, raise: 0 };
-    await this.hold(0.5, false);
-    this.featherDrop = 0;
-    const b = await this.qte.run({ kind: 'ring', key: 'Space', alt: ['Mouse0'], label: 'AS THE FEATHER FALLS', duration: 1.3 - Math.min(0.3, wave * 0.006), at: () => this.needlePoint() });
-    this.featherDrop = -1;
-    if (b !== 'fail') this.weighed(b);
-    return this.verdict(b !== 'fail');
+    eng.audio.play('heartbeat', { volume: 0.6, pitch: 1.05 - this.deaths * 0.08 });
+    this.startWeigh();
+    void this.say(this.deaths >= 4 ? '"Lift it, if you can."' : this.deaths > 1 ? '"Lay it on the scale. Hold it level against the feather."' : '"Lay your heart on the scale, cowboy. Hold it level against the feather."', 'anubis', 1.4, false);
+    while (this.weighRes === null) await this.hold(0.05, false);
+    const ok = this.weighRes;
+    this.endWeigh();
+    if (ok) this.weighed('perfect');
+    const heavy = this.slam >= 0 ? '"Too heavy. No feather in the world holds that heart up. The desert keeps you, cowboy."' : '"The fires are out. Heavy. So heavy. Ammit is hungry tonight."';
+    const light = this.deaths >= 3 ? '"It held. It will not hold a fourth time. Go back, cowboy."' : this.deaths === 2 ? '"Level. Barely. Go back, and mind your heart."' : undefined;
+    return this.verdict(ok, ok ? light : heavy);
+  }
+
+  // =========================================================================== the weighing
+  /** the heart rises out of the kneeling soul and hangs in the air before the scales */
+  private startWeigh() {
+    const eng = this.engine;
+    this.wantLock = !!(eng.input as any).wantLock;
+    eng.input.setWantLock(false);
+    this.weighOn = true;
+    this.weighT = 0;
+    this.weighRes = null;
+    this.seated = false;
+    this.holding = false;
+    this.bal = 0;
+    this.slam = -1;
+    this.beamW = 0;
+    this.vp.mx = eng.input.ndcX;
+    this.vp.my = eng.input.ndcY;
+    const h = this.heart;
+    if (!h) {
+      // no heart model: the old judgement by weight alone
+      this.weighRes = this.deaths < 4;
+      return;
+    }
+    const torso = this.soul?.nodes['torso'];
+    if (torso) torso.getWorldPosition(this.hp);
+    else this.hp.copy(KNEEL).setY(1.1);
+    this.hv.set(0, 1.2, -0.6);
+    h.root.visible = true;
+    h.root.position.copy(this.hp);
+    // heavier with every death: bigger, darker, the glow sickening toward a bruise
+    const d = this.deaths - 1;
+    h.root.scale.setScalar(this.heartSize * (1 + 0.1 * d));
+    this.heartMat!.userData.tint.value.setRGB(1 - 0.16 * d, 0.92 - 0.2 * d, 0.92 - 0.16 * d);
+    (this.heartGlow!.uniforms.uA.value as THREE.Color).setRGB(0.42 - 0.08 * d, 0.04, 0.03 + 0.06 * d);
+    (this.heartGlow!.uniforms.uB.value as THREE.Color).setRGB(1 - 0.18 * d, 0.48 - 0.12 * d, 0.36 + 0.04 * d);
+    this.fx.emit({ pos: this.hp, count: 40, spread: 1.6, life: [0.5, 1.1], size: [0.08, 0.015], sprite: ['dot3', 'glow8'], color: [0xff8a6a, 0xffd0a0], additive: true, drag: 2.2 });
+    this.sfx('soul_leave', 0.6, 1.2);
+  }
+
+  private endWeigh() {
+    this.weighOn = false;
+    this.holding = false;
+    this.engine.input.setWantLock(this.wantLock);
+    for (const b of this.braziers) b.target = 1;
+  }
+
+  /** the dish the heart sits in (the stock heart's place on the pan) */
+  private seatPoint(out: THREE.Vector3) {
+    const n = this.scales.nodes['heart'];
+    if (n) return n.getWorldPosition(out).add(this.v2.set(0, 0.08, 0));
+    return out.set(ARM_L, 2.4, SCALES_Z);
+  }
+
+  /** one frame of the weighing: the pointer, the heart, the beam and pans, the feather's patience */
+  private updateWeigh(dt: number, rdt: number) {
+    const h = this.heart;
+    if (!h || this.weighRes !== null) return;
+    const eng = this.engine;
+    const inp = eng.input;
+    const t = this.t;
+    this.weighT += dt;
+    const m = HEART_M[Math.min(4, this.deaths)];
+    // ---- the pointer: the mouse (or a finger), or WASD / arrows steering a spirit hand; held = button or Space
+    if (Math.abs(inp.ndcX - this.vp.mx) + Math.abs(inp.ndcY - this.vp.my) > 1e-4) {
+      this.vp.x = this.vp.mx = inp.ndcX;
+      this.vp.y = this.vp.my = inp.ndcY;
+    }
+    const kx = (inp.isDown('KeyD') || inp.isDown('ArrowRight') ? 1 : 0) - (inp.isDown('KeyA') || inp.isDown('ArrowLeft') ? 1 : 0);
+    const ky = (inp.isDown('KeyW') || inp.isDown('ArrowUp') ? 1 : 0) - (inp.isDown('KeyS') || inp.isDown('ArrowDown') ? 1 : 0);
+    this.vp.x = THREE.MathUtils.clamp(this.vp.x + kx * rdt * 0.9, -1, 1);
+    this.vp.y = THREE.MathUtils.clamp(this.vp.y + ky * rdt * 0.9, -1, 1);
+    const seat = this.seatPoint(this.v3);
+    const cam = this.camera;
+    const nrm = cam.getWorldDirection(this.cf).setY(0).normalize().negate();
+    this.plane.setFromNormalAndCoplanarPoint(nrm, seat);
+    this.ray.setFromCamera(new THREE.Vector2(this.vp.x, this.vp.y), cam);
+    if (!this.ray.ray.intersectPlane(this.plane, this.ptr)) this.ptr.copy(seat);
+    const down = inp.isDown('Mouse0') || inp.isDown('Space') || inp.touchHolding;
+    const near = this.ptr.distanceTo(this.hp) < 0.9 + (this.seated ? 0.6 : 0);
+    if (down && !this.holding && (near || this.seated || inp.wasPressed('Space') || inp.wasPressed('Mouse0'))) {
+      this.holding = true;
+      this.sfx('divine_whisper', 0.35, 1.3);
+    }
+    if (!down) this.holding = false;
+    this.hover = damp(this.hover, this.holding ? 1 : near ? 0.6 : 0, 8, dt);
+    // ---- the heart
+    const g = 9.8;
+    const tremor = (this.deaths - 1) * 2.4;
+    if (!this.seated) {
+      // the empty pan rides high: the feather outweighs nothing
+      this.tilt = damp(this.tilt, 0.14 + Math.sin(t * 0.8) * 0.01, 1.6, dt);
+      this.beamW = 0;
+      this.beamA = 0;
+      const F = this.v1.set(0, 0, 0);
+      if (this.holding) {
+        // a soft hand spring, capped: the heavier the heart, the lower it hangs and the slower it comes
+        F.subVectors(this.ptr, this.hp).multiplyScalar(44);
+        const cap = 27;
+        if (F.length() > cap) F.setLength(cap);
+        F.y -= m * g;
+        F.x += Math.sin(t * 13.1) * tremor + Math.sin(t * 7.7) * tremor * 0.6;
+        F.y += Math.sin(t * 11.3 + 1) * tremor;
+        F.addScaledVector(this.hv, -2 * 0.42 * Math.sqrt(44 * m));
+      } else {
+        // let go: a spirit heart drifts back to hang before the soul
+        const home = this.v2.set(0.3, 1.9 + Math.sin(t * 1.4) * 0.08, -9.2);
+        F.subVectors(home, this.hp).multiplyScalar(6 * m).addScaledVector(this.hv, -3.2 * m);
+      }
+      this.hv.addScaledVector(F, dt / m);
+      this.hp.addScaledVector(this.hv, dt);
+      if (this.hp.y < 0.3) {
+        this.hp.y = 0.3;
+        this.hv.y = Math.abs(this.hv.y) * 0.2;
+      }
+      // over the dish: it drops in
+      const dx = this.hp.x - seat.x, dz = this.hp.z - seat.z, dy = this.hp.y - seat.y;
+      if (Math.hypot(dx, dz) < 0.55 && dy > -0.25 && dy < 0.9) this.seat(m);
+    } else {
+      // seated: the hand still pulls up on it (capped); the beam carries the rest
+      const pull = this.holding ? THREE.MathUtils.clamp(HAND_K * (this.ptr.y - seat.y), -HAND_MAX, HAND_MAX) : 0;
+      const c = Math.cos(this.tilt);
+      const beat = Math.pow(Math.max(0, Math.sin(t * (6.2 + this.deaths * 0.4))), 14);
+      let tau = ARM_L * c * g * (FEATHER_M - m) + ARM_L * c * Math.max(0, pull) - BEAM_K * this.tilt - (4.6 - 0.8 * (this.deaths - 1)) * this.beamW;
+      tau += -beat * m * 2.2 + (Math.sin(t * 2.3) * 0.6 + Math.sin(t * 3.7 + 2) * 0.4) * (this.deaths - 1) * 1.1;
+      if (this.slam >= 0) tau = -60;
+      this.beamA = tau / (BEAM_I + m * ARM_L * ARM_L);
+      this.beamW += this.beamA * dt;
+      this.tilt += this.beamW * dt;
+      if (Math.abs(this.tilt) > 0.4) {
+        const hit = Math.abs(this.beamW);
+        this.tilt = Math.sign(this.tilt) * 0.4;
+        this.beamW *= -0.3;
+        if (hit > 0.6) this.clunk(Math.min(1.5, hit / 2));
+      }
+      this.hp.copy(seat).add(this.v1.set(0, Math.max(0, pull) / HAND_MAX * 0.07, 0));
+      this.hv.set(0, 0, 0);
+      // level: the feather begins to accept it; out of level it forgets (slowly)
+      const lvl = Math.abs(this.tilt) < LEVEL && this.slam < 0;
+      this.bal = lvl ? this.bal + dt : Math.max(0, this.bal - dt * 0.6);
+      const need = NEED[Math.min(4, this.deaths)];
+      const k = Math.min(1, this.bal / need);
+      if (lvl) {
+        this.chimeT -= dt;
+        if (this.chimeT <= 0) {
+          this.chimeT = 0.32;
+          this.sfx('divine_chime', 0.22 + 0.35 * k, 0.8 + 0.6 * k);
+        }
+        // gold gathering round the feather's pan
+        const fp = this.scales.nodes['pan_r']?.getWorldPosition(this.v2);
+        if (fp && rnd.next() < dt * (20 + 90 * k)) this.fx.emit({ pos: { x: fp.x + (rnd.next() - 0.5) * 0.9, y: fp.y - 0.9 + rnd.next() * 0.7, z: fp.z }, vel: { x: 0, y: 0.9, z: 0 }, count: 1, spread: 0.2, life: [0.6, 1.2], size: [0.06 + 0.06 * k, 0.012], sprite: rnd.next() < 0.3 ? 'star4' : 'glow8', color: [0xffe6a0, 0xfff4d0], additive: true, drag: 0.8, gravity: -0.6 });
+      }
+      this.scalesK = Math.max(this.scalesK, 0.6 + k * 1.4);
+      this.wallPulse = Math.max(this.wallPulse, k * 0.6);
+      if (this.bal >= need) {
+        this.weighRes = true;
+        this.tiltTarget = 0;
+        eng.flash(0xfff2c8, 0.3, 0.5);
+      }
+      if (this.slam >= 0 && t - this.slam > 1.7) this.weighRes = false;
+    }
+    // the 4th heart: too heavy to lift far; Anubis lays it on the pan himself if the player cannot
+    if (this.deaths >= 4 && !this.seated && this.weighT > 7) this.seat(m);
+    // the feather's patience: the spirit fires gutter one by one, then go out
+    const left = this.weighT / WEIGH_MAX;
+    for (let i = 0; i < this.braziers.length; i++) this.braziers[i].target = 1 - 0.8 * sstep(0.35 + i * 0.08, 0.75 + i * 0.05, left);
+    if (left > 0.68 && !this.warned) {
+      this.warned = true;
+      void this.say('"The fires burn low, cowboy."', 'anubis', 0.8, false);
+    }
+    if (left >= 1) this.weighRes = false;
+    // ---- the heart's look: a beat, a squash on landing, a glow when the hand is on it
+    const beat = Math.exp(-Math.pow(((t * 1.1) % 1) * 9 - 0.6, 2)) + 0.5 * Math.exp(-Math.pow(((t * 1.1) % 1) * 9 - 2.6, 2));
+    this.squash = damp(this.squash, 0, 7, dt);
+    const sc = this.heartSize * (1 + 0.1 * (this.deaths - 1));
+    h.root.position.copy(this.hp);
+    h.root.scale.set(sc * (1 + this.squash * 0.25 + beat * 0.05), sc * (1 - this.squash * 0.3 + beat * 0.07), sc * (1 + this.squash * 0.25 + beat * 0.05));
+    h.root.rotation.set(Math.sin(t * 1.3) * 0.15 + this.hv.y * 0.05, t * (this.seated ? 0 : 0.4) + 0.5, -this.hv.x * 0.08 + (this.seated ? -this.tilt : 0));
+    this.heartGlow!.uniforms.uGain.value = 0.35 + beat * 0.4 + this.hover * 0.55 + (this.seated ? this.bal * 0.3 : 0);
+    // the spirit hand: motes at the pointer, a thread from the soul's hands to the heart while held
+    if (rnd.next() < dt * 26) this.fx.emit({ pos: this.ptr, count: 1, spread: 0.12, life: [0.35, 0.6], size: [0.07, 0.01], sprite: 'glow8', color: [0x7ff0e0, 0xc8fff4], additive: true, drag: 2 });
+    if (this.holding && rnd.next() < dt * 60) {
+      const hand = this.soul?.nodes['fore_r']?.getWorldPosition(this.v2) ?? this.v2.copy(KNEEL).setY(1);
+      const u = rnd.next();
+      this.fx.emit({ pos: { x: hand.x + (this.hp.x - hand.x) * u, y: hand.y + (this.hp.y - hand.y) * u + Math.sin(u * Math.PI) * 0.4, z: hand.z + (this.hp.z - hand.z) * u }, count: 1, spread: 0.05, life: [0.3, 0.5], size: [0.05, 0.01], sprite: 'dot3', color: [0x7ff0e0, 0xc8fff4], additive: true, drag: 3 });
+    }
+    // the pans hang on their chains: they swing with the beam's kicks
+    for (let i = 0; i < 2; i++) {
+      this.panW[i] += (-9.3 * this.panSw[i] - 0.9 * this.panW[i] - this.beamA * 0.55 * (i ? -1 : 1)) * dt;
+      this.panSw[i] = THREE.MathUtils.clamp(this.panSw[i] + this.panW[i] * dt, -0.5, 0.5);
+    }
+  }
+
+  /** the heart lands in the dish: the beam tips, the pans swing; the 4th heart slams it down */
+  private seat(m: number) {
+    this.seated = true;
+    this.squash = 1;
+    const hit = Math.max(0.6, -this.hv.y);
+    this.beamW -= hit * m * 0.22;
+    this.panW[0] += this.hv.x * 0.6 + 0.8;
+    this.panW[1] -= 0.4;
+    this.sfx('scales', 0.9, 0.9 - this.deaths * 0.06);
+    this.sfx('heartbeat', 0.8, 0.9 - this.deaths * 0.08);
+    this.sfx('hit_bone', 0.4, 0.6);
+    if (this.deaths >= 4) {
+      this.slam = this.t;
+      this.anger = 1;
+      this.gwT = { present: 0, point: 1, reach: 0, grant: 0, raise: 0 };
+      this.sfx('anubis_roar', 0.7, 0.7);
+      this.sfx('quake_rumble', 1, 0.7);
+    }
+  }
+
+  /** the beam hits its stop */
+  private clunk(k: number) {
+    this.sfx('hit_armor', 0.4 + 0.4 * k, 0.55);
+    this.sfx('rock_crumble', 0.3 * k, 0.7);
+    this.shake = Math.max(this.shake, 0.25 * k + (this.slam >= 0 ? 0.6 : 0));
+    this.panW[0] += 1.4 * k;
+    this.panW[1] -= 1.2 * k;
+    const pp = this.scales.nodes['pan_l']?.getWorldPosition(this.v2);
+    if (pp) this.fx.emit({ pos: { x: pp.x, y: pp.y - 1.1, z: pp.z }, count: Math.round(10 * k) + 4, spread: 1.4, up: 0.8, life: [0.6, 1.4], size: [0.2, 0.6], sprite: ['puff0', 'puff1'], color: 0x5a6a78, alpha: 0.4, drag: 2 });
+    if (this.slam >= 0) this.engine.flash(0xff4a2a, 0.25, 0.4);
   }
 
   /** where the timing prompts float: on the needle of the scales (the gauge sits lower, under the beam it drives) */
@@ -789,7 +1074,7 @@ export class AnubisTrial {
     this.fx.emit({ pos: from, count: r === 'perfect' ? 30 : 16, spread: 1.6, life: [0.4, 0.8], size: [0.12, 0.02], sprite: 'glow8', color: [0xffe6a0, 0x9ff8ff], additive: true, drag: 2 });
   }
 
-  private async arrival(stats: { kills: number; wave: number; fromReaping?: boolean }) {
+  private async arrival(stats: { kills: number; wave: number; fromReaping?: boolean; deaths?: number }) {
     const eng = this.engine;
     // ---------------------------------------------------------------- 0. the fall through the sand
     if (stats.fromReaping && this.arm) {
@@ -813,6 +1098,21 @@ export class AnubisTrial {
       this.tunnelLoop = null;
       this.sfx('thunder', 0.55, 0.55);
       this.rack = 0.8;
+    }
+    // ---------------------------------------------------------------- again, this ride: straight to the god
+    if (this.deaths > 1) {
+      this.snapToJudgement();
+      this.setPhase('throne');
+      this.setShot(this.shotSpeech, 0);
+      eng.flash(0x9fe8ff, 0.5, 0.7);
+      this.sfx('thunder', 0.5, 0.6);
+      this.sfx('anubis_roar', 0.5, 0.85);
+      this.shake = 0.3;
+      this.gwT.present = 1;
+      const again = ['', '', '"Back so soon, cowboy? Your heart is heavier than it was."', '"Three times in one ride. Feel how heavy it has grown."', '"Four. Bones of the West, you have worn your heart to lead."'];
+      await this.say(again[this.deaths], 'anubis', 1.0);
+      this.gwT.present = 0;
+      return;
     }
     // ---------------------------------------------------------------- 1. descent
     this.setPhase('descent');
@@ -896,7 +1196,7 @@ export class AnubisTrial {
     if (this.skipping) return;
     this.gwT.present = 0;
     this.gwT.point = 1;
-    await this.say(`"${stats.kills} souls sent ahead of you. Let us weigh your heart against the feather."`, 'anubis', 1.4);
+    await this.say(`"${stats.kills} souls sent ahead of you. Let us weigh your heart against the feather."`, 'anubis', 1.2);
   }
 
   /** a spirit fire flares awake: a pillar of cold sparks, a flash on its light, a rising whoosh */
@@ -1151,6 +1451,11 @@ export class AnubisTrial {
     const u = sstep(0, 1, t / 8);
     return { p: V(2.0, 2.1, -3.4).lerp(V(1.6, 2.3, -4.2), u), l: V(0.2, 6.6, -18), fov: 44 };
   };
+  /** over the kneeling soul's shoulder onto the scales: both pans, the beam and the god behind them */
+  private shotWeigh: ShotFn = (t) => {
+    const u = sstep(0, 1, t / 6);
+    return { p: V(2.3 - 0.2 * u + Math.sin(t * 0.3) * 0.08, 2.45 + this.tilt * 0.4, -3.6 - 0.5 * u), l: V(0.35 + this.tilt * 0.4, 2.95, -12.4), fov: 50 };
+  };
   private shotJudge: ShotFn = (t) => {
     return { p: V(Math.sin(t * 0.3) * 0.25 + this.tilt * 1.5, 2.7, -1.6), l: V(this.tilt * 0.8, 4.5, -14), fov: 56 };
   };
@@ -1210,6 +1515,7 @@ export class AnubisTrial {
     this.updateFire(dt, t);
     this.updateSoul(dt, t);
     this.updateAnubis(dt, t);
+    if (this.weighOn) this.updateWeigh(dt, rdt);
     this.updateScales(dt, t);
     this.updateSpirits(dt, t);
     this.updateAtmos(dt, t);
@@ -1521,17 +1827,25 @@ export class AnubisTrial {
       this.tiltTarget = 0.34 * (1 - k / Qte.RING_PERFECT);
     } else if (this.phase !== 'take' && this.phase !== 'judge') this.tiltTarget = Math.sin(t * 0.7) * 0.05;
     const swing = live && (a.spec.kind === 'bar' || a.spec.kind === 'ring');
-    this.tilt = swing ? damp(this.tilt, this.tiltTarget, 14, dt) : damp(this.tilt, this.tiltTarget, this.phase === 'take' ? 1.2 : 5, dt);
+    if (this.weighOn && this.heart) {
+      /* the weighing drives the beam (updateWeigh) */
+    } else this.tilt = swing ? damp(this.tilt, this.tiltTarget, 14, dt) : damp(this.tilt, this.tiltTarget, this.phase === 'take' ? (this.slam >= 0 ? 6 : 1.2) : 5, dt);
+    if (!this.weighOn) for (let i = 0; i < 2; i++) this.panSw[i] = damp(this.panSw[i], 0, 1.5, dt);
     const n = this.scales.nodes;
     n['beam'].rotation.z = this.tilt;
-    n['pan_l'].rotation.z = -this.tilt;
-    n['pan_r'].rotation.z = -this.tilt;
+    n['pan_l'].rotation.z = -this.tilt + this.panSw[0];
+    n['pan_r'].rotation.z = -this.tilt + this.panSw[1];
     n['plumb'].rotation.z = -this.tilt;
     const beat = Math.pow(Math.max(0, Math.sin(t * 7.2)), 8) + Math.pow(Math.max(0, Math.sin(t * 7.2 - 0.6)), 8) * 0.6;
     n['heart'].scale.setScalar(1 + beat * 0.08);
     this.scales.material.userData.emissiveStrength.value = 0.6 + beat * 0.8 + (this.phase === 'take' ? 1.2 : 0);
     const warm = this.phase === 'judge' || this.phase === 'grant' || this.phase === 'take' ? 1 : 0;
     this.scalesK = damp(this.scalesK, warm, 1.5, dt);
+    if (!this.weighOn && this.seated && this.heart?.root.visible) {
+      this.seatPoint(this.hp);
+      this.heart.root.position.copy(this.hp);
+      this.heart.root.rotation.z = -this.tilt;
+    }
     this.scalesLight.intensity = 5 * this.scalesK * (1 + this.blaze * 0.5);
     copyPose(this.scales, this.scalesMirror);
   }

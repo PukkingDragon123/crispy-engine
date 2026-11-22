@@ -480,7 +480,8 @@ export class MissionPaper {
       else if (n.missing > 2.5) this.finish(n, 'quiet');
     }
     // ---------------------------------------------------- notes, back to front
-    const wind = 0.22 + clamp((pa.speed - 5) / 22, 0, 1) * 1.25;
+    // calm paper: a gentle stir, a little more at full gallop
+    const wind = 0.1 + clamp((pa.speed - 5) / 22, 0, 1) * 0.35;
     let order = 0;
     let bottom = ay;
     const draw: { n: Note; idx: number }[] = [];
@@ -491,7 +492,7 @@ export class MissionPaper {
       n.angT = idx <= 0 ? -0.03 : idx === 1 ? 0.1 : idx === 2 ? -0.13 : 0.16;
       n.ang += (n.angT - n.ang) * Math.min(1, dt * 5);
       this.advance(n, dt, ax, ay, k);
-      if (idx > 2) continue;
+      if (idx > 1) continue;
       draw.push({ n, idx });
       if (!n.ending) bottom = Math.max(bottom, ay + n.h - 7 * (fs / 16) + 6);
     }
@@ -535,13 +536,14 @@ export class MissionPaper {
     const top = ay - Math.round(7 * u) + Math.round(n.oy);
     const left = ax - n.w / 2 + Math.round(n.ox);
     const flying = n.state === 'in' || n.state === 'tear';
-    const amp = (n.state === 'in' ? 1.5 : wind) * 1.6 + n.ruffle * 3 + (n.state === 'tear' ? 5 : 0);
+    // calm paper (user note): a slow, small sway, never a flap
+    const amp = (n.state === 'in' ? 0.45 : wind) * 0.55 + n.ruffle * 0.6 + (n.state === 'tear' ? 1.6 : 0);
     const tilt = Math.tan(n.ang + n.lean);
     const t = this.t + n.seed * 10;
     const alpha = n.state === 'tear' ? clamp01(1.6 - n.st * 0.8) : 1;
     const sway = (r: number) => {
       const hang = clamp01((r - 7 * u) / Math.max(1, n.h));
-      return -(r - 7 * u) * tilt + Math.sin(t * 5.3 + r * 0.16) * amp * Math.pow(hang, 1.3) * (flying ? 1.4 : 1) + Math.sin(t * 8.7 - r * 0.3) * amp * 0.35 * hang * hang;
+      return -(r - 7 * u) * tilt + Math.sin(t * 2.1 + r * 0.08) * amp * Math.pow(hang, 1.3) * (flying ? 1.15 : 1) + Math.sin(t * 3.4 - r * 0.12) * amp * 0.1 * hang * hang;
     };
     // worn paper off the board: its shadow sways with it, further off while it flies (and gone with what burnt)
     const rise = flying ? 9 : 2 + n.ruffle * 3;
@@ -558,7 +560,7 @@ export class MissionPaper {
     if (!r || !n.base) return;
     const cv = scrapCanvas(n);
     const u = n.fs / 16;
-    blitShearObj(c, cv, ax - r.w / 2 + Math.round(sc.ox), ay - Math.round(7 * u) + Math.round(sc.oy), (row) => Math.sin(this.t * 6 + row * 0.5) * wind * 0.8 * (row / r.h), clamp01(4.5 - sc.t), sc.t > 2.6 ? 8 : 2);
+    blitShearObj(c, cv, ax - r.w / 2 + Math.round(sc.ox), ay - Math.round(7 * u) + Math.round(sc.oy), (row) => Math.sin(this.t * 2.4 + row * 0.2) * wind * 0.4 * (row / r.h), clamp01(4.5 - sc.t), sc.t > 2.6 ? 8 : 2);
   }
 
   private advance(n: Note, dt: number, ax: number, ay: number, k: number) {

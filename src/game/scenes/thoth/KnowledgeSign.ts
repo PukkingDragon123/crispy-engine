@@ -721,7 +721,7 @@ export class KnowledgeSign {
     }
     // glyphs and light: a slow pulse, flaring on hover
     const pulse = 0.5 + 0.5 * Math.sin(t * 1.6) * Math.sin(t * 0.43 + 1);
-    (this.mat.userData.emissiveStrength as { value: number }).value = (0.95 + pulse * 0.25 + h * 0.9 + (this.burstT >= 0 ? 0.8 : 0)) * L;
+    (this.mat.userData.emissiveStrength as { value: number }).value = (0.55 + pulse * 0.15 + h * 0.6 + (this.burstT >= 0 ? 0.6 : 0)) * L; // calmer glow (user: less glowing text)
     this.light.intensity = (2.4 + pulse * 0.8 + h * 3.2 + (this.burstT >= 0 ? 3 : 0) + Math.sin(t * 7.3) * 0.08) * L;
     this.spill.intensity = (1.6 + h * 1.6) * L;
     if (L < 1) return;

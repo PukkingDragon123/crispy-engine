@@ -4,7 +4,7 @@ export type Action =
   | 'forward' | 'back' | 'left' | 'right'
   | 'jump' | 'push' | 'drift' | 'boost' | 'grapple'
   | 'fire' | 'aim' | 'reload' | 'melee' | 'grenade'
-  | 'skill1' | 'skill2' | 'ultimate' | 'interact'
+  | 'skill1' | 'skill2' | 'skill3' | 'ultimate' | 'interact'
   | 'item1' | 'item2' | 'stats' | 'pause' | 'trick';
 
 export const DEFAULT_BINDINGS: Record<Action, string[]> = {
@@ -26,7 +26,9 @@ export const DEFAULT_BINDINGS: Record<Action, string[]> = {
   grenade: ['KeyG'],
   skill1: ['KeyE'],
   skill2: ['KeyC'],
-  ultimate: ['KeyZ', 'KeyX'],
+  // X: Guns N' Roses (the fourth tarot skill); Z: the ultimate
+  skill3: ['KeyX'],
+  ultimate: ['KeyZ'],
   interact: ['KeyT', 'Enter'],
   item1: ['Digit1'],
   item2: ['Digit2'],

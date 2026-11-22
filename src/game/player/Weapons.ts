@@ -23,6 +23,7 @@
 //    Dragon's Breath, Drum Fire.
 //
 // Aim assist and ADS work with every gun (Player.magnetize / the shared assist).
+import { fireRateCap } from '../run/Balance';
 import * as THREE from 'three';
 import type { Player } from './Player';
 import type { Ctx, EnemyLike, RayHit } from '../Ctx';
@@ -687,12 +688,12 @@ export class Weapons {
       }
     } else if (inp.hit('reload') && P.ammo < this.mag()) this.startReload();
     // trigger
-    const want = inp.held('fire') && !this.swap;
-    const pressed = inp.hit('fire') && !this.swap;
+    const want = inp.held('fire') && !this.swap && !(P.skillAimLock > 0);
+    const pressed = inp.hit('fire') && !this.swap && !(P.skillAimLock > 0);
     P.firing = want;
     P.fanning = false;
     this.shotBuffer = pressed ? 0.14 : this.shotBuffer - dt;
-    const rate = P.stats.get('fireRate');
+    const rate = fireRateCap(P.stats.get('fireRate'));
     if (!R.active && !this.swap) {
       if (P.ammo <= 0) {
         if (pressed) {

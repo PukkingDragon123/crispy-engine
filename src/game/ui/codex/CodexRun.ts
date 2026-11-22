@@ -1,5 +1,5 @@
 // The Codex during a run: listens to the run's events (kills, alphas, bosses, gear,
-// items), scans for first sightings (enemies in view range, the stretch of desert
+// items; a creature is discovered only when you kill it), scans for first sightings (the stretch of desert
 // you are riding, the critters and folk of the side quests), and THOTH POPS IN to
 // record it (fx/ThothPop.ts): the little ibis god appears beside the hunter on a
 // ring of glyph cartouches in a burst of gold and jade, gasps, runs a lap around a
@@ -15,6 +15,7 @@ import type { Ctx } from '../../Ctx';
 import { Codex, Discovery } from '../../meta/Codex';
 import { Puppet } from './Puppet';
 import { ThothPop, type ThothShow } from '../../fx/ThothPop';
+import { tutorialDone } from '../../run/NewGame';
 
 export class CodexRun {
   private offs: (() => void)[] = [];
@@ -48,14 +49,7 @@ export class CodexRun {
       const h = this.host;
       const p = h?.player?.pos as THREE.Vector3 | undefined;
       if (p) {
-        for (const e of this.ctx.enemies.list as any[]) {
-          if (!e.alive || Math.hypot(e.pos.x - p.x, e.pos.z - p.z) > 30) continue;
-          if (e.def?.id) Codex.discover('bounty', e.def.id, 'sight');
-          else if (e.isBoss) {
-            const id = Codex.bossId(e.name, e.title);
-            if (id) Codex.discover('boss', id, 'sight');
-          }
-        }
+        // creatures are only discovered once killed (Codex.listen: enemyKilled / bossDefeated), never on sight
         const z = this.ctx.world?.zone;
         const area = h?.opts?.area;
         if (z && area) Codex.discover('place', `${area}${z.index}`, 'sight');
@@ -72,7 +66,8 @@ export class CodexRun {
     // ---- Thoth
     const paused = !!this.host?.pausedByUser || this.ctx.engine.paused;
     if (this.pop.busy && (hold || (!paused && this.ctx.engine.input.hit('interact')))) this.pop.skip();
-    if (!hold && !paused && !this.pop.busy && this.queue.length && this.pop.ready) this.show(this.merge());
+    // (Thoth stays away until Serket's tutorial is finished: the finds wait for him)
+    if (!hold && !paused && !this.pop.busy && this.queue.length && this.pop.ready && tutorialDone()) this.show(this.merge());
     this.pop.update(rdt, paused);
   }
 

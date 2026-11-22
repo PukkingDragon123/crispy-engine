@@ -1,5 +1,9 @@
 // THE REAPING — what Sundown sees between the killing blow and the Weighing of the Heart.
 // It plays in the run's own world, on real time, while the world crawls in slow motion:
+//   0. THE FALL    right where he was killed: the blow throws his real body off the board
+//                  (DeathCine's Ragdoll: tumbling, bouncing, limbs flopping on the live sand,
+//                  the hat cartwheeling away) in deep slow motion while the camera orbits
+//                  the body, the killer (or the boss) framed behind it, named in the air.
 //   1. THE HEART   a close, heavy shot through the rib cage: his wrapped heart beats
 //                  (light pulses through the bones from inside, every thump a sound),
 //                  slower and weaker, the linen loosening, until it stops and greys.
@@ -8,11 +12,7 @@
 //   3. THE ARM     the sky darkens; the sand trembles, bulges and bursts: the giant arm
 //                  of Anubis (black skin, gold cuffs, hooked gold claws) erupts behind
 //                  the soul and looms over it.
-//   4. THE PARRY   the hand rears and strikes; a timing ring closes on it. A perfect
-//                  parry is spectacular (the soul's forearm meets the palm in a burst
-//                  of sparks and a ring of light, the hand recoils, time kisses to a
-//                  stop) and changes nothing: the god shakes it off ("Cute.") and
-//                  grabs him anyway.
+//   4. THE STRIKE  the hand rears and comes down on the soul (no prompt: fewer QTEs).
 //   5. THE DRAG    the fingers close round the soul and the arm pulls it down into the
 //                  sand in a sinking vortex; black. (The Weighing of the Heart opens on
 //                  "…the sand gives way.")
@@ -32,6 +32,7 @@ import { anubisArmRig } from '../models/anubis/arm';
 import { spiritNormals } from '../models/anubis/realm';
 import { spiritMaterial, soulShellGeos, type SpiritMat } from './AnubisTrial';
 import type { EnvPreset } from '../world/Env';
+import { Ragdoll, type KillerInfo } from './DeathCine';
 
 export interface ReapBody {
   rig: RigInstance;
@@ -47,6 +48,8 @@ export interface ReapHost {
   handoff?: boolean;
   /** with handoff: the lens stays buried in the sand until this resolves (the realm below is built) */
   ready?: Promise<unknown>;
+  /** what killed him (DeathCine.pickKiller): framed behind the falling body */
+  killer?: KillerInfo | null;
 }
 
 type V3 = THREE.Vector3;
@@ -86,7 +89,13 @@ export class SoulReaping {
   private timeK = 1;
   private kissT = 0;
   private waits: { at: number; res: () => void }[] = [];
-  private phase: 'heart' | 'tear' | 'rise' | 'parry' | 'grab' | 'drag' | 'dive' | 'end' = 'heart';
+  private phase: 'fall' | 'heart' | 'tear' | 'rise' | 'parry' | 'grab' | 'drag' | 'dive' | 'end' = 'fall';
+  private rag: Ragdoll | null = null;
+  private fallT = 0;
+  private fallFrom = V();
+  private orbit = { a0: 0, sweep: 2.4 };
+  private bodyC = V();
+  private caption: FloatText3D | null = null;
   private skipHold = 0;
   private diveT = 0;
   private skipping = false;
@@ -209,11 +218,27 @@ export class SoulReaping {
     if (fwd.lengthSq() < 1e-4) fwd.set(this.body.x - cam.position.x, 0, this.body.z - cam.position.z).negate();
     if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, 1);
     this.away.copy(fwd).normalize().negate();
-    this.side.set(this.away.z, 0, -this.away.x);
-    this.S.copy(this.body).addScaledVector(this.away, -1.15).addScaledVector(this.side, 0.35);
-    this.S.y = ctx.world.groundAt(this.S.x, this.S.z);
-    this.B0.copy(this.body).addScaledVector(this.away, 1.9).addScaledVector(this.side, -0.25);
-    this.B0.y = ctx.world.groundAt(this.B0.x, this.B0.z);
+    this.layout();
+    // the fall: his own body leaves the board, thrown away from whatever killed him
+    const k = this.h.killer;
+    const push = k ? V(this.body.x - k.pos.x, 0, this.body.z - k.pos.z) : fwd.clone().negate();
+    try {
+      this.rag = new Ragdoll(this.h.player.rig, { ground: (x, z) => ctx.world.groundAt(x, z), push, power: k?.boss ? 1.25 : 1, onImpact: (p, kk, what) => this.impact(p, kk, what) });
+      this.rag.flingHat(ctx.scene);
+    } catch (e) {
+      console.warn('[reaping] ragdoll', e);
+      this.rag = null;
+    }
+    // the orbit ends across the body from the killer (it stands framed behind him); it starts 140 degrees
+    // round, on whichever side the run camera was nearer
+    const kz = k ? Math.atan2(k.pos.x - this.body.x, k.pos.z - this.body.z) : Math.atan2(fwd.x, fwd.z);
+    const end = kz + Math.PI + 0.42;
+    const camA = Math.atan2(cam.position.x - this.body.x, cam.position.z - this.body.z);
+    const da = (a: number) => Math.abs(Math.atan2(Math.sin(a - camA), Math.cos(a - camA)));
+    const sw = 2.45;
+    this.orbit = da(end - sw) < da(end + sw) ? { a0: end - sw, sweep: sw } : { a0: end + sw, sweep: -sw };
+    this.bodyC.copy(this.body).add(V(0, 0.8, 0));
+    this.fallFrom.copy(cam.position);
     this.cam.p.copy(cam.position);
     this.cam.l.copy(cam.position).add(cam.getWorldDirection(this.v1));
     this.cam.fov = cam.fov;
@@ -232,19 +257,91 @@ export class SoulReaping {
     this.buildHeart();
   }
 
+  /** where the soul kneels and the arm breaks the sand, around the body (`away`: from the camera through the body) */
+  private layout() {
+    const w = this.ctx.world;
+    this.side.set(this.away.z, 0, -this.away.x);
+    this.S.copy(this.body).addScaledVector(this.away, -1.15).addScaledVector(this.side, 0.35);
+    this.S.y = w.groundAt(this.S.x, this.S.z);
+    this.B0.copy(this.body).addScaledVector(this.away, 1.9).addScaledVector(this.side, -0.25);
+    this.B0.y = w.groundAt(this.B0.x, this.B0.z);
+  }
+
+  /** the body (or the hat) hits the sand: a burst of dust and grains, a thud */
+  private impact(p: V3, k: number, what: 'body' | 'hat') {
+    if (this.skipping) return;
+    const big = what === 'body';
+    this.fx.emit({ pos: p, count: Math.round((big ? 7 : 2) * k) + 1, spread: big ? 1.2 : 0.4, up: 0.5, life: [0.8, 1.7], size: big ? [0.25, 0.8] : [0.12, 0.35], sprite: ['puff0', 'puff1'], color: [0xe6cf9f, 0xd8b98a, 0xc9a77a], alpha: 0.5, drag: 2, rot: 3, rotSpeed: 0.4 });
+    this.fx.emit({ pos: p, count: Math.round((big ? 26 : 6) * k) + 2, spread: big ? 2 : 0.8, up: 2.2, life: [0.4, 0.9], size: [0.03, 0.02], sprite: ['dot3', 'dot4', 'grain0'], color: SAND, gravity: 11, ground: true, jitter: 0.5 });
+    if (big) {
+      this.sfx('sand_burst', 0.35 + 0.4 * k, 0.7);
+      this.sfx('hit_bone', 0.25 + 0.35 * k, 0.6);
+      this.shake = Math.max(this.shake, 0.25 * k);
+      this.ctx.events.emit('groundMark', p.x, p.z, 1.1, 0);
+    } else this.sfx('board_land', 0.3, 1.3);
+  }
+
+  /** the killer's name, hanging in the air over it (floating 3D type, no glow to speak of) */
+  private sayKiller() {
+    const k = this.h.killer;
+    if (!k || this.skipping) return;
+    const ft = new FloatText3D(k.boss ? `Slain by ${k.name}` : `Laid low by ${k.name}`, { size: k.boss ? 0.5 : 0.36, color: '#f4e6c8', glow: '#3a1c0c', cps: 26, wrap: 26, hdr: 1.05, px: 72 });
+    ft.anchor.copy(k.pos).add(V(0, k.height + 0.6, 0));
+    this.ctx.scene.add(ft.mesh);
+    this.caption = ft;
+  }
+
+  /** the fall: a slow orbit round the body, low at the end, the killer framed over it */
+  private shotFall = (t: number) => {
+    const k = sstep(0, 4.4, t);
+    const rag = this.rag;
+    if (rag) this.bodyC.lerp(rag.c, 1 - Math.exp(-6 * 0.016));
+    const c = this.bodyC;
+    const K = this.h.killer;
+    const big = K ? Math.min(1, (K.height - 1.8) / 4) : 0;
+    const a = this.orbit.a0 + this.orbit.sweep * k;
+    const r = lerp(4.6, 2.9, k) + big * 2.2;
+    const y = lerp(2.0, 0.55, k) + big * 0.6;
+    const p = V(c.x + Math.sin(a) * r, Math.max(c.y, this.ctx.world.groundAt(c.x, c.z)) + y, c.z + Math.cos(a) * r);
+    const l = c.clone();
+    if (K) l.lerp(V(K.pos.x, K.pos.y + K.height * 0.6, K.pos.z), lerp(0.12, 0.3, k));
+    return { p, l, fov: lerp(48, 40, k) + big * 8 };
+  };
+
   private async script() {
     const eng = this.ctx.engine;
+    // ---------------------------------------------------------------- 0. the fall, where he died
+    this.phase = 'fall';
+    eng.slowMo(0.12, 14);
+    eng.flash(0xfff0d0, 0.3, 0.25);
+    this.sfx('hit_bone', 1, 0.7);
+    this.sfx('time_slow', 0.8, 1);
+    this.sfx('skeleton_rattle', 0.8, 0.8);
+    this.setShot(this.shotFall, 0);
+    await this.wait(0.15);
+    this.buildSoul();
+    this.buildArm();
+    await this.wait(0.75);
+    this.sayKiller();
+    await this.wait(3.5);
+    this.caption?.show(false);
+    // stage the rest round where the body came to rest, seen from where the orbit left us
+    if (this.rag) {
+      this.rag.rested(this.body);
+      this.away.set(this.body.x - this.cam.p.x, 0, this.body.z - this.cam.p.z);
+      if (this.away.lengthSq() < 1e-4) this.away.set(0, 0, 1);
+      this.away.normalize();
+      this.layout();
+      this.armHolder.position.copy(this.B0);
+      this.armHolder.rotation.y = Math.atan2(-this.away.x, -this.away.z);
+    }
     // ---------------------------------------------------------------- 1. the heart
     this.phase = 'heart';
     eng.slowMo(0.04, 6);
     eng.audio.setMuffle(0.6, 0.8);
-    this.beats = [{ at: 0.45, k: 1 }, { at: 1.45, k: 0.82 }, { at: 2.65, k: 0.58 }, { at: 4.15, k: 0.3 }];
-    this.setShot(this.shotHeart, 0.25);
-    // build the soul and the arm a beat in, while the heart holds the screen
-    await this.wait(0.15);
-    this.buildSoul();
-    this.buildArm();
-    await this.wait(4.75);
+    this.beats = [{ at: this.t + 0.35, k: 1 }, { at: this.t + 1.25, k: 0.7 }, { at: this.t + 2.3, k: 0.35 }];
+    this.setShot(this.shotHeart, 0.35);
+    await this.wait(3.1);
     // ---------------------------------------------------------------- 2. the soul tears loose
     this.phase = 'tear';
     eng.audio.setMuffle(0, 0.5);
@@ -290,41 +387,16 @@ export class SoulReaping {
     this.armMode = 'loom';
     this.armT = 0;
     await this.wait(1.7);
-    // ---------------------------------------------------------------- 4. the strike and the parry
+    // ---------------------------------------------------------------- 4. the strike (no prompt)
     this.phase = 'parry';
     this.setShot(this.shotParry, 0.35);
-    const D = 1.2;
-    this.strikeDur = Qte.ringPerfect(D);
+    this.strikeDur = 0.75;
     this.aimStrike();
     this.armMode = 'strike';
     this.armT = 0;
     this.sfx('whoosh_big', 0.8, 0.55);
     this.sfx('jackal_growl', 0.6, 0.6);
-    let res: QteResult | null = null;
-    if (!this.skipping) void this.h.qte.run({ kind: 'ring', key: 'KeyF', alt: ['Mouse0', 'Space'], label: 'PARRY', duration: D, at: () => this.gripPoint(), noKiss: true }).then((r) => (res = r));
-    while (!this.skipping && res === null && this.armT < this.strikeDur) await this.wait(0.01);
-    const r: QteResult = res ?? 'fail';
-    if (r !== 'fail' && !this.skipping) {
-      this.parry = r;
-      this.doParry(r);
-      await this.wait(r === 'perfect' ? 0.9 : 0.6);
-      // the joke: none of that mattered
-      this.armMode = 'shrug';
-      this.armT = 0;
-      this.setShot(this.shotJoke, 0.5);
-      this.say(r === 'perfect' ? '"Cute."' : '"No."');
-      await this.wait(r === 'perfect' ? 1.6 : 1.1);
-      this.setShot(this.shotParry, 0.25);
-      this.strikeDur = 0.32;
-      this.aimStrike();
-      this.armMode = 'strike';
-      this.armT = 0;
-      this.sfx('whoosh_big', 0.9, 0.7);
-      await this.wait(this.strikeDur);
-    } else {
-      // a miss (or no answer): the blow simply lands
-      while (!this.skipping && this.armT < this.strikeDur) await this.wait(0.01);
-    }
+    while (!this.skipping && this.armT < this.strikeDur) await this.wait(0.01);
     // ---------------------------------------------------------------- 5. the grab and the drag
     this.phase = 'grab';
     this.grab();
@@ -619,6 +691,22 @@ export class SoulReaping {
         w.res();
       }
     }
+    if (this.rag) {
+      // the body: deep slow motion through the throw, easing toward real speed as it settles
+      this.fallT += rdt;
+      const rate = this.phase === 'fall' ? lerp(0.26, 0.8, sstep(0.5, 3.8, this.fallT)) : 1;
+      if (!(window as any).__reapHold) this.rag.step(Math.min(0.05, rdt * rate));
+      this.rag.apply();
+    }
+    if (this.caption) {
+      const k = this.h.killer;
+      if (k) this.caption.anchor.lerp(V(k.pos.x, k.pos.y + k.height + 0.6, k.pos.z), 1 - Math.exp(-4 * rdt));
+      this.caption.update(rdt, this.ctx.camera);
+      if (this.phase !== 'fall' && this.caption.visibleAmount < 0.02) {
+        this.caption.dispose();
+        this.caption = null;
+      }
+    }
     this.updateHeart(dt);
     this.updateSoul(dt);
     this.updateArm(dt);
@@ -742,7 +830,9 @@ export class SoulReaping {
       const wantY = g + lift + (m === 'kneel' ? Math.sin(this.t * 1.7) * 0.012 : 0);
       this.soulPos.y = m === 'inside' ? this.soulPos.y : damp(this.soulPos.y, wantY, m === 'kneel' ? 9 : 6, dt);
       r.position.copy(this.soulPos);
-      if (m !== 'inside') r.quaternion.setFromEuler(new THREE.Euler(0, this.soulYaw, 0, 'YXZ'));
+      // (out of a body lying in the sand: it sits up out of it, pivoting on its heels)
+      if (m === 'tear') r.quaternion.slerp(this.q1.setFromEuler(new THREE.Euler(0, this.soulYaw, 0, 'YXZ')), 1 - Math.exp(-4.5 * dt));
+      else if (m !== 'inside') r.quaternion.setFromEuler(new THREE.Euler(0, this.soulYaw, 0, 'YXZ'));
     } else {
       // held in the god's fist: across the palm, head out of the thumb side
       r.position.x = damp(r.position.x, -0.86, 10, dt);
@@ -1161,6 +1251,10 @@ export class SoulReaping {
     if (this.h.qte.active && !this.h.qte.active.done) this.h.qte.cancel();
     this.line?.dispose();
     this.line = null;
+    this.caption?.dispose();
+    this.caption = null;
+    this.rag?.restore();
+    this.rag = null;
     for (const o of this.objs) o.removeFromParent();
     this.soul?.root.removeFromParent();
     // particle layers belong to this sequence

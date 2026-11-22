@@ -308,7 +308,25 @@ interface Page {
   /** the study cartouche on the page (page px) */
   ink: { x: number; y: number; w: number; h: number; c: InkCircuit } | null;
   study: StudyState | null;
+  /** the page without its type, and the type line by line: the words assemble out of runes and ink */
+  bg?: HTMLCanvasElement;
+  lines?: TextLine[];
+  /** when it first lay open (HallUI.t), for the rune reveal */
+  born?: number;
 }
+/** one set line of a page: where it sits (page px) and each letter's offset */
+interface TextLine {
+  s: string;
+  x: number;
+  y: number;
+  size: number;
+  col: string;
+  xs: number[];
+  w: number;
+}
+/** rune shapes the letters pass through as they assemble (Alagard's own symbols, nothing drawn) */
+const RUNES = 'AEHIKMNRSTVXYZ#%&*+<>=?@^~|/\\';
+const REVEAL = 1.9;
 interface Spark {
   x: number;
   y: number;
@@ -866,12 +884,20 @@ export class HallUI {
     const S = this.S;
     const pad = 22;
     const inner = W - pad * 2;
-    const small = this.narrow ? 13 : 15;
+    const small = this.narrow ? 14 : 16; // (a size up: the user found the hall hard to read)
     const ops: ((c: CanvasRenderingContext2D) => void)[] = [];
+    const tlines: TextLine[] = [];
+    const setText = (s: string, x: number, yy: number, col: string, size: number, align: CanvasTextAlign = 'left') => {
+      const w = this.tw(s, size);
+      const x0 = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
+      const xs: number[] = [];
+      for (let i = 0; i < s.length; i++) xs.push(this.tw(s.slice(0, i), size));
+      tlines.push({ s, x: x0, y: yy, size, col, xs, w });
+    };
     let y = 18;
     const line = (s: string, size: number, col: string, align: CanvasTextAlign = 'left', gap = 4) => {
       const yy = y;
-      ops.push(() => this.ink(s, align === 'center' ? W / 2 : pad, yy, col, size, align));
+      setText(s, align === 'center' ? W / 2 : pad, yy, col, size, align);
       y += size + gap;
     };
     const rule = () => {
@@ -918,10 +944,8 @@ export class HallUI {
             y += small + 3;
           }
           const yy = y, xx = pad + ci * col, cwid = wide ? inner : col;
-          ops.push(() => {
-            this.ink(lab, xx, yy, SEPIA, small - 1);
-            this.ink(val, xx + cwid - 10, yy, INK, small - 1, 'right');
-          });
+          setText(lab, xx, yy, SEPIA, small - 1);
+          setText(val, xx + cwid - 10, yy, INK, small - 1, 'right');
           if (wide || ci === 1) {
             ci = 0;
             y += small + 3;
@@ -982,8 +1006,14 @@ export class HallUI {
     this.c = pc;
     this.blit(papyrus(Math.ceil(W / S), Math.ceil(h / S), 3), 0, 0);
     for (const op of ops) op(pc);
+    // the bare page (for the reveal), then the type set on the full page
+    const bg = document.createElement('canvas');
+    bg.width = cv.width;
+    bg.height = cv.height;
+    bg.getContext('2d')!.drawImage(cv, 0, 0);
+    for (const l of tlines) this.ink(l.s, l.x, l.y, l.col, l.size);
     this.c = keep;
-    return { key: p.key, sig: '', num: p.num, section: p.section, cv, back: null, w: W, h, ink: hold.ink, study: st?.state ?? null };
+    return { key: p.key, sig: '', num: p.num, section: p.section, cv, back: null, w: W, h, ink: hold.ink, study: st?.state ?? null, bg, lines: tlines };
   }
 
   /** returns where the bookmark worm holds on */
@@ -1002,6 +1032,8 @@ export class HallUI {
       const np = this.renderPage(p, W, maxH);
       np.sig = sig;
       const prev = this.page;
+      // the same entry set again (a figure changed): its words are already assembled
+      if (prev && prev.key === np.key) np.born = prev.born;
       if (prev && prev.key !== np.key && prev.section === np.section && a > 0.5) {
         // a new entry in the same wing: the page turns
         const dir: 1 | -1 = this.pend ? this.pend.dir : np.num > prev.num ? 1 : -1;
@@ -1079,8 +1111,11 @@ export class HallUI {
       // the page will not turn past the end: it lifts at the edge and drops back
       this.curl(pg, x, top, Math.sin(this.rubber * Math.PI) * 0.35, true);
     } else {
-      flat(pg, a);
+      pg.born ??= this.t;
+      if (pg.bg && pg.lines && this.t - pg.born < REVEAL) this.drawRunes(pg, Math.round(x), top, a);
+      else flat(pg, a);
       this.drawInk(pg, x, top, a);
+      this.drawLineHover(pg, Math.round(x), top, a);
     }
     this.rect('panel', x, top, W, pg.h);
     const ins = this.inkScreen();
@@ -1092,6 +1127,80 @@ export class HallUI {
       }
     }
     return { x: x + 3, y: top + 10, wall: x };
+  }
+
+  /** the words assemble: each letter turns through a few runes in gold while two drops of ink swirl in
+   *  to it, then settles into its own ink; line after line, top to bottom */
+  private drawRunes(pg: Page, x: number, top: number, a: number) {
+    const c = this.c;
+    c.globalAlpha = a;
+    c.drawImage(pg.bg!, x, top, pg.w, pg.h);
+    const age = this.t - pg.born!;
+    c.textBaseline = 'top';
+    c.textAlign = 'left';
+    let li = 0;
+    for (const L of pg.lines!) {
+      const l0 = li++ * 0.055;
+      c.font = `${L.size}px '${FONT}'`;
+      for (let j = 0; j < L.s.length; j++) {
+        const ch = L.s[j];
+        if (ch === ' ') continue;
+        const u = (age - l0 - j * 0.012) / 0.34;
+        if (u <= 0) continue;
+        const cx = x + L.x + L.xs[j], cy = top + L.y;
+        if (u >= 1) {
+          c.fillStyle = L.col;
+          c.fillText(ch, Math.round(cx), Math.round(cy));
+          continue;
+        }
+        // the rune it passes through, in gold, settling to the letter
+        const rune = u < 0.72 ? RUNES[(j * 7 + li * 3 + Math.floor(u * 9)) % RUNES.length] : ch;
+        c.globalAlpha = a * Math.min(1, u * 3);
+        c.fillStyle = u < 0.72 ? (Math.floor(u * 9) % 2 ? G.m : G.d) : L.col;
+        c.fillText(rune, Math.round(cx), Math.round(cy - (1 - u) * 3));
+        // two drops of ink swirling in
+        const r = (1 - u) * (L.size * 0.9);
+        for (let k = 0; k < 2; k++) {
+          const q = u * 9 + k * Math.PI + j;
+          px(c, Math.round(cx + L.size * 0.3 + Math.cos(q) * r), Math.round(cy + L.size * 0.5 + Math.sin(q) * r * 0.6), 2, 2, k ? INK : '#1f2f66');
+        }
+        c.globalAlpha = a;
+      }
+    }
+    c.globalAlpha = 1;
+  }
+
+  /** the line under the pointer: a gold ink stroke runs in under it and a rune drifts off its end */
+  private hoverLine: { key: string; k: number } = { key: '', k: 0 };
+  private drawLineHover(pg: Page, x: number, top: number, a: number) {
+    const L = pg.lines;
+    if (!L || !this.ptr.has || this.turn) return;
+    const mx = this.ptr.x - x, my = this.ptr.y - top;
+    const hit = mx >= 0 && mx <= pg.w ? L.find((l) => my >= l.y - 2 && my <= l.y + l.size + 2 && mx >= l.x - 8 && mx <= l.x + l.w + 8) : undefined;
+    const key = hit ? pg.key + ':' + hit.y + ':' + hit.x : '';
+    if (key !== this.hoverLine.key) this.hoverLine = { key, k: 0 };
+    if (!hit) return;
+    this.hoverLine.k = Math.min(1, this.hoverLine.k + 1 / 18);
+    const k = this.hoverLine.k;
+    const c = this.c;
+    const uy = Math.round(top + hit.y + hit.size + 1);
+    const w = Math.round(hit.w * (1 - Math.pow(1 - k, 3)));
+    c.globalAlpha = a;
+    for (let i = 0; i < w; i += 2) px(c, Math.round(x + hit.x + i), uy + Math.round(Math.sin(i * 0.25 + this.t * 5) * 0.8), 2, 2, i % 6 < 2 ? G.l : G.m);
+    // the line lifts a hair, re-inked darker
+    c.font = `${hit.size}px '${FONT}'`;
+    c.textBaseline = 'top';
+    c.textAlign = 'left';
+    c.fillStyle = hit.col === INK ? '#140b04' : hit.col;
+    c.fillText(hit.s, Math.round(x + hit.x), Math.round(top + hit.y));
+    if (k >= 1) {
+      const d = (this.t * 0.8) % 1;
+      c.globalAlpha = a * (1 - d);
+      c.fillStyle = G.m;
+      c.font = `${Math.round(hit.size * 0.8)}px '${FONT}'`;
+      c.fillText(RUNES[Math.floor(this.t * 0.8) % RUNES.length], Math.round(x + hit.x + hit.w + 4 + d * 6), Math.round(top + hit.y - d * 10));
+    }
+    c.globalAlpha = 1;
   }
 
   /** the cartouche's living ink over a flat page (and the seal's glow, the stamped ibis) */

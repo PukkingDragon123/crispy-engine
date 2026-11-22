@@ -201,7 +201,7 @@ export interface UpgradeDef {
   lore?: string;
   god?: string;
   /** learning card: taking it unseals this tarot skill (Skills.learn) */
-  learn?: 'E' | 'C' | 'G';
+  learn?: 'E' | 'C' | 'G' | 'X';
   /** only offered once this upgrade has been taken (e.g. Brood Mother needs Scorpion Toss) */
   needs?: string;
   /** what you win: exact numbers at this level (green rows on the card and the ledger) */
@@ -337,6 +337,7 @@ export const UPGRADES: UpgradeDef[] = [
   { id: 'learnScorpionToss', name: 'The Magician', cat: 'insect', rarity: 'rare', maxLv: 1, icon: 'scorp', god: 'Serket', learn: 'E', desc: () => 'LEARN SCORPION TOSS  [E]: hurl a brood of venomous scorpions that hunt down and sting whatever they land near.', lore: 'Serket keeps a few spare scorpions up her sleeve. Now so do you.' },
   { id: 'learnLocustSwarm', name: 'The Tower', cat: 'insect', rarity: 'rare', maxLv: 1, icon: 'scarab', god: 'Khepri', learn: 'C', desc: () => 'LEARN SCARAB SWARM  [C]: whistle, and a carpet of scarabs boils out of the sand and eats whatever you were looking at.', lore: 'Khepri rolls the sun. His children roll everything else.' },
   { id: 'learnDungBomb', name: 'The Sun', cat: 'insect', rarity: 'rare', maxLv: 1, icon: 'dung', god: 'Khepri', learn: 'G', desc: () => 'LEARN DUNG BOMB  [G]: lob a bouncing ball of sacred dung that bursts into a poison stink cloud. Two charges.', lore: 'Khepri rolls the sun across the sky. You roll something else.' },
+  { id: 'learnGunsNRoses', name: 'The Lovers', cat: 'gun', rarity: 'rare', maxLv: 1, icon: 'spark', god: 'Hathor', learn: 'X', desc: () => "LEARN GUNS N' ROSES  [X]: spin and fan a spiral storm of lead while thorned roses burst from the sand, root your prey and bloom in a shower of thorns.", lore: 'Hathor gave her a rose. Sundown gave it a trigger.' },
   // ------------------------------------------------------------- gun
   { id: 'venomRounds', name: 'Venom Rounds', cat: 'gun', rarity: 'common', maxLv: 5, icon: 'bubble', god: 'Serket', desc: (l) => `Bullets apply +${cnt(l)} extra poison stack${cnt(l) > 1 ? 's' : ''}. Poison +${l * 8}% potency.`, mods: (l) => [{ stat: 'statusPower', type: 'pct', value: l * 0.08 }], lore: 'Pinch milks the venom himself. Do not ask how.' },
   { id: 'quickdraw', name: 'Quickdraw', cat: 'gun', rarity: 'common', maxLv: 5, icon: 'bullet', desc: (l) => `Fire rate +${l * 12}%.`, mods: (l) => [{ stat: 'fireRate', type: 'pct', value: l * 0.12 }] },
@@ -392,7 +393,7 @@ export const UPGRADES: UpgradeDef[] = [
 
 export const UPGRADE_BY_ID: Record<string, UpgradeDef> = Object.fromEntries(UPGRADES.map((u) => [u.id, u]));
 /** the three cards that unseal the tarot skills */
-export const LEARN_CARDS = UPGRADES.filter((u): u is UpgradeDef & { learn: 'E' | 'C' | 'G' } => !!u.learn);
+export const LEARN_CARDS = UPGRADES.filter((u): u is UpgradeDef & { learn: 'E' | 'C' | 'G' | 'X' } => !!u.learn);
 
 export interface Offer {
   def: UpgradeDef;

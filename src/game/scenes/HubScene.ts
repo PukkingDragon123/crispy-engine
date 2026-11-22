@@ -56,6 +56,7 @@ import { say3D } from '../fx/WorldSpeech';
 import { touchText } from '../ui/TouchControls';
 import type { HubHost } from './hub/HubKit';
 import { PinchPerch, PINCH_PERCH_SCALE } from '../player/PinchPerch';
+import { ToadWake, WAKE_LEAD } from './hub/ToadWake';
 
 /** how he gets home: normally he walks in from the street; after a death he wakes up on the couch */
 export interface HubArrival {
@@ -506,6 +507,10 @@ export class HubScene implements GameScene {
   // ---- the wake-up (after a death), the WANTED poster on the wall, the Codex book
   private wake: { t: number; days: number; res: PosterData; fc: THREE.Vector3; sy: number; keys: WakeKey[]; posterAt: number; posterDone: number; said: Set<string> } | null = null;
   private wakeCam: { pos: THREE.Vector3; look: THREE.Vector3; fov: number } | null = null;
+  /** Mama Toad's bedside vigil and what she still has to tell him (hub/ToadWake, meta/ToadMemory) */
+  private toadWake: ToadWake | null = null;
+  private toadQ: string[] = [];
+  private toadQT = 0;
   private poster: WantedPoster | null = null;
   private posterShot: { pos: THREE.Vector3; look: THREE.Vector3 } | null = null;
   private futon: THREE.Object3D | null = null;
@@ -2299,6 +2304,15 @@ export class HubScene implements GameScene {
     const m = this.mama;
     const atHearth = this.here.id === 'hearth' && this.atK > 0.5;
     this.mamaCd -= rdt;
+    if (this.toadQ.length && !this.wake && !this.panel) {
+      this.mamaCd = Math.max(this.mamaCd, 8);
+      this.toadQT -= rdt;
+      if (this.toadQT <= 0) {
+        const line = this.toadQ.shift()!;
+        this.say(line);
+        this.toadQT = 2.6 + line.length * 0.06;
+      }
+    }
     const heroHead = this.v4.set(this.pos.x, 1.55, this.pos.y);
     if (this.wake && this.hero?.nodes['head']) this.hero.nodes['head'].getWorldPosition(heroHead).add(this.v5.set(0, 0.12, 0));
     if (m) {
@@ -2581,6 +2595,11 @@ export class HubScene implements GameScene {
       { p: new THREE.Vector3(fc.x - 0.12, 0, fc.z + 0.8), q: q(0, 0, 0), j: W_STAND },
     ];
     this.wake = { t: 0, days, res, fc, sy, keys, posterAt: -1, posterDone: -1, said: new Set() };
+    try {
+      this.toadWake = new ToadWake(this.scene, this.chair?.root ?? null, fc, sy);
+    } catch (e) {
+      console.warn('[hub] toad wake', e);
+    }
     this.intro = true;
     this.idx = Math.max(0, this.stations.findIndex((st) => st.id === 'hearth'));
     // the board stays in the garage while he sleeps; he dozes off with his eyes shut
@@ -2600,8 +2619,9 @@ export class HubScene implements GameScene {
     const eng = this.engine;
     const inp = eng.input;
     w.t += rdt;
-    const t = w.t;
-    if (t > 0.8 && (inp.wasPressed('Space') || inp.wasPressed('Escape') || inp.wasPressed('Enter') || inp.wasPressed('Mouse0') || inp.wasPressed('KeyE'))) {
+    // (a bedside vigil first: Mama in her chair at his head, murmuring over him)
+    const t = w.t - (this.toadWake ? WAKE_LEAD : 0);
+    if (w.t > 0.8 && (inp.wasPressed('Space') || inp.wasPressed('Escape') || inp.wasPressed('Enter') || inp.wasPressed('Mouse0') || inp.wasPressed('KeyE'))) {
       this.endWake();
       return;
     }
@@ -2611,6 +2631,7 @@ export class HubScene implements GameScene {
         fn();
       }
     };
+    once('asleep', -2.3, () => this.toadWake && this.say(this.toadWake.lines.asleep));
     once('twitch', 1.6, () => eng.audio.play('skeleton_rattle', { volume: 0.25, pitch: 1.3 }));
     once('gasp', 2.5, () => {
       this.gasp = 1;
@@ -2624,7 +2645,8 @@ export class HubScene implements GameScene {
       eng.audio.play('skeleton_rattle', { volume: 0.8 });
     });
     once('groggy', 4.2, () => this.hero?.setExpression('hurt'));
-    once('days', 6.3, () => this.say(`${w.days} days you were gone, sugar. The sand brought you home again... like always.`));
+    once('days', 6.3, () => this.say(this.toadWake?.lines.days ?? `${w.days} days you were gone, sugar. The sand brought you home again... like always.`));
+    once('chair', 10.5, () => this.toadWake?.chairHome());
     once('poster', 9.6, () => this.say('Somebody shot that to the wall while you slept.'));
     once('fill', 10.6, () => {
       w.posterAt = t;
@@ -2645,7 +2667,14 @@ export class HubScene implements GameScene {
     // ---- the camera: over the coffee table onto the couch, round to the side as he sits up, then the poster
     const fc = w.fc, sy = w.sy;
     let pos: THREE.Vector3, look: THREE.Vector3, fov: number;
-    if (t < 2.7) {
+    if (t < 0 && this.toadWake) {
+      // the vigil: low at the foot of the couch, Mama knitting at his head in the lamplight
+      const tw = this.toadWake;
+      const u = (t + WAKE_LEAD) / WAKE_LEAD;
+      pos = this.v1.set(fc.x - 0.35 + u * 0.15, 1.12 + u * 0.06, fc.z + 1.85 - u * 0.12);
+      look = this.v2.copy(tw.headAt).lerp(tw.mamaAt, 0.45);
+      fov = 42;
+    } else if (t < 2.7) {
       const u = t / 2.7;
       pos = this.v1.set(fc.x + 0.05, 1.74 - u * 0.1, fc.z + 2.1 - u * 0.22);
       look = this.v2.set(fc.x + 0.25, sy + 0.2, fc.z + 0.05);
@@ -2756,6 +2785,10 @@ export class HubScene implements GameScene {
     this.wake = null;
     this.wakeCam = null;
     this.intro = false;
+    // she keeps talking as he gets his feet under him
+    this.toadQ = this.toadWake?.end() ?? [];
+    this.toadWake = null;
+    this.toadQT = 3.4;
     this.gasp = 0;
     this.title.style.display = '';
     for (const e of [this.hint, this.prompt, this.bank]) e.style.visibility = '';

@@ -3,6 +3,7 @@
 import type { StatusResist } from '../combat/Status';
 import type { HitKind } from '../fx/Fx';
 import { NILE_ARMY, NILE_SONGS } from './NileArmyDefs';
+import { ENEMY_DMG as BAL_DMG, ROSTER, dayMul, waveRamp } from '../run/Balance';
 
 export type AiKind =
   | 'chaser' | 'ranged' | 'tank' | 'leaper' | 'swarm' | 'charger' | 'flyer' | 'rider'
@@ -302,17 +303,35 @@ export function rosterFor(wave: number, stage = 'desert') {
   return Object.values(ENEMIES).filter((d) => d.firstWave <= wave && d.weight > 0 && (d.stage ?? 'desert') === stage);
 }
 
-/** easier fights: every enemy blow is scaled by this (about 28% less damage than before) */
-export const ENEMY_DMG = 0.72;
+/** enemy blows (run/Balance: raised from 0.72, the game was too easy) */
+export const ENEMY_DMG = BAL_DMG;
 
-/** difficulty multipliers per wave (1..100) — a gentle ramp */
+/**
+ * difficulty multipliers per wave (1..100), times the day ramp and the night
+ * (run/Balance.dayMul: the day system calls setDay)
+ */
 export function waveScale(wave: number) {
-  const w = wave - 1;
-  return {
-    hp: 1 + w * 0.075 + Math.pow(w / 24, 2.2),
-    dmg: ENEMY_DMG * (1 + w * 0.024 + Math.pow(w / 46, 2)) * (wave <= 5 ? 0.75 + wave * 0.05 : 1),
-    speed: 1 + Math.min(0.25, w * 0.0035),
-    count: 1 + w * 0.045,
-    alphaChance: Math.min(0.06, 0.003 + w * 0.0008),
-  };
+  const r = waveRamp(wave);
+  const d = dayMul();
+  return { hp: r.hp * d.hp, dmg: r.dmg * d.dmg, speed: r.speed * d.speed, count: r.count * d.count, alphaChance: r.alphaChance };
 }
+
+/**
+ * Readability and difficulty pass over the whole roster (run/Balance.ROSTER):
+ * fewer bullets per volley that each hit harder (a fight you can read), a
+ * little less time between attacks, and no QTE dodge prompts on ordinary
+ * enemies (the board-slide dodge and real movement do that job now).
+ */
+function tuneRoster() {
+  for (const d of Object.values(ENEMIES))
+    for (const a of d.attacks) {
+      if (a.count && a.count > ROSTER.minBullets && a.proj && a.kind !== 'lob') {
+        const n = Math.max(ROSTER.minBullets, Math.round(a.count * ROSTER.bulletCut));
+        a.dmg = Math.round(a.dmg * Math.min(ROSTER.bulletDmg, Math.sqrt(a.count / n)) * 10) / 10;
+        a.count = n;
+      }
+      if (a.cooldown < 50) a.cooldown = Math.round(a.cooldown * ROSTER.cooldown * 100) / 100;
+      a.qte = false;
+    }
+}
+tuneRoster();

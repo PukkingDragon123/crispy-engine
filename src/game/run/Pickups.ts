@@ -1,8 +1,10 @@
-// Gold coins, health bandages, boost: physics pop-out, magnet pull, satisfying
-// pitch-climbing pickup sounds. Bounty (XP) is no longer a pickup: a kill pays
-// it straight onto the bounty meter with a small gold number over the body.
+// Coins are the only drop: full 3D voxel gold coins (CoinRender) that pop out, bounce,
+// stand spinning on edge with a gleam, then swoop to the hunter on a magnet arc with
+// pitch-climbing chimes. Health and boost drops became coins too: one coin of the
+// bundle carries the heal (or the boost) and pays it when it is collected. Bounty (XP)
+// is no pickup: a kill pays it straight onto the bounty meter.
 import * as THREE from 'three';
-import { SpriteBatch } from '../fx/SpriteBatch';
+import { CoinRender } from '../fx/Coins3D';
 import type { Ctx } from '../Ctx';
 import { rnd } from '../../engine/math/rand';
 
@@ -16,19 +18,15 @@ interface Pickup {
   t: number;
   magnet: boolean;
   spin: number;
+  /** a heal / boost riding on this coin, paid out on collection */
+  carry?: { kind: PickupKind; value: number };
+  /** seconds since the magnet caught it */
+  pull: number;
 }
-
-const LOOK: Record<PickupKind, { sprite: string; size: number }> = {
-  bounty: { sprite: 'chip', size: 0.34 },
-  bountyBig: { sprite: 'chip_x2', size: 0.6 },
-  gold: { sprite: 'coinspin0', size: 0.3 },
-  heart: { sprite: 'bandage_x2', size: 0.55 },
-  boost: { sprite: 'bolt', size: 0.4 },
-};
 
 export class Pickups {
   list: Pickup[] = [];
-  batch = new SpriteBatch(1600);
+  private coins: CoinRender;
   private pitchStep = 0;
   private pitchTimer = 0;
   onCollect?: (k: PickupKind, v: number, at: THREE.Vector3) => void;
@@ -39,7 +37,7 @@ export class Pickups {
   private hidden = new THREE.Vector3();
 
   constructor(private ctx: Ctx, private getPlayer: () => { pos: THREE.Vector3; stats: { get(s: string): number }; alive: boolean }) {
-    ctx.scene.add(this.batch.mesh);
+    this.coins = CoinRender.of(ctx.particles);
   }
 
   drop(kind: PickupKind, value: number, at: { x: number; y: number; z: number }, n = 1) {
@@ -47,10 +45,18 @@ export class Pickups {
       this.dropBounty(value * n, at);
       return;
     }
+    // health and boost come as a small bundle of coins; the first carries the effect
+    let carry: Pickup['carry'];
+    if (kind === 'heart' || kind === 'boost') {
+      carry = { kind, value };
+      n = kind === 'heart' ? 3 : 2;
+      kind = 'gold';
+      value = 1;
+    }
     for (let i = 0; i < n; i++) {
       const a = rnd.next() * Math.PI * 2;
       const s = 1.5 + rnd.next() * 3;
-      this.list.push({ kind, value, pos: new THREE.Vector3(at.x, at.y + 0.6, at.z), vel: new THREE.Vector3(Math.cos(a) * s, 4 + rnd.next() * 4, Math.sin(a) * s), t: 0, magnet: false, spin: rnd.next() * 6 });
+      this.list.push({ kind, value, pos: new THREE.Vector3(at.x, at.y + 0.6, at.z), vel: new THREE.Vector3(Math.cos(a) * s, 4 + rnd.next() * 4, Math.sin(a) * s), t: 0, magnet: false, spin: rnd.next() * 6, carry: i === 0 ? carry : undefined, pull: 0 });
     }
     if (this.list.length > 900) this.list.splice(0, this.list.length - 900);
   }
@@ -84,6 +90,10 @@ export class Pickups {
   vacuum() {
     for (const p of this.list) p.magnet = true;
   }
+  /** a visual-only shower of real coins (boss hoards): Fx.coins routes here too */
+  shower(at: { x: number; y: number; z: number }, n: number) {
+    this.coins.burst(at, n);
+  }
 
   update(dt: number) {
     const pl = this.getPlayer();
@@ -93,17 +103,25 @@ export class Pickups {
     this.pitchTimer -= dt;
     if (this.pitchTimer <= 0) this.pitchStep = 0;
     this.bountyPitchT -= dt;
-    this.batch.begin();
+    const C = this.coins;
+    C.begin();
+    const cam = ctx.camera;
     for (let i = this.list.length - 1; i >= 0; i--) {
       const p = this.list[i];
       p.t += dt;
-      p.spin += dt * 5;
+      p.spin += dt * (p.magnet ? 14 : 3.2);
       const dx = ppos.x - p.pos.x, dy = ppos.y + 1 - p.pos.y, dz = ppos.z - p.pos.z;
       const d = Math.hypot(dx, dy, dz);
       if (pl.alive && (d < range || p.magnet) && p.t > 0.35) p.magnet = true;
       if (p.magnet && pl.alive) {
-        const sp = 16 + p.t * 12;
-        p.vel.set((dx / d) * sp, (dy / d) * sp, (dz / d) * sp);
+        // magnet: a quick hop up, then an accelerating swoop that curls in to the hunter
+        p.pull += dt;
+        const sp = 9 + p.pull * 34;
+        const k = Math.min(1, dt * (5 + p.pull * 10));
+        const lift = Math.max(0, 0.35 - p.pull) * 14;
+        p.vel.x += ((dx / d) * sp - dz / d * sp * 0.25 - p.vel.x) * k;
+        p.vel.y += ((dy / d) * sp + lift - p.vel.y) * k;
+        p.vel.z += ((dz / d) * sp + dx / d * sp * 0.25 - p.vel.z) * k;
         p.pos.addScaledVector(p.vel, dt);
         if (d < 0.9) {
           this.collect(p);
@@ -126,12 +144,15 @@ export class Pickups {
           continue;
         }
       }
-      const L = LOOK[p.kind];
-      const bob = p.magnet ? 0 : Math.sin(p.t * 3 + p.spin) * 0.06;
-      const sprite = p.kind === 'gold' ? 'coinspin' + (Math.floor(p.spin) % 4) : L.sprite;
-      this.batch.push(p.pos.x, p.pos.y + bob, p.pos.z, sprite, L.size, L.size, 0);
+      const bob = p.magnet ? 0 : Math.sin(p.t * 2.6 + p.spin * 0.2) * 0.07 + 0.08;
+      // gleam: a flash when a face swings square to the camera, plus the odd rim glint
+      const yaw = Math.atan2(cam.position.x - p.pos.x, cam.position.z - p.pos.z);
+      const face = Math.abs(Math.cos(p.spin - yaw));
+      const gleam = Math.pow(face, 24);
+      C.push(p.pos.x, p.pos.y + bob, p.pos.z, p.spin, p.carry ? 1.18 : 1, gleam + (p.carry ? 0.35 : 0));
+      if (gleam > 0.8 && !p.magnet && rnd.chance(dt * 6)) C.glint(p.pos.x + (rnd.next() - 0.5) * 0.2, p.pos.y + bob + 0.12, p.pos.z, 0.8);
     }
-    this.batch.end(ctx.world.env.fog);
+    C.end();
   }
 
   private collect(p: Pickup) {
@@ -155,6 +176,12 @@ export class Pickups {
         break;
     }
     this.onCollect?.(p.kind, p.value, p.pos);
+    if (p.carry) {
+      if (p.carry.kind === 'heart') ctx.sfx('bandage', null, 0.55);
+      else ctx.sfx('ult_ready', null, 0.35, 1.4);
+      this.onCollect?.(p.carry.kind, p.carry.value, p.pos);
+    }
+    this.coins.glint(p.pos.x, p.pos.y + 0.2, p.pos.z, 1.1);
   }
 
   clear() {

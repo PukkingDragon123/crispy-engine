@@ -7,7 +7,9 @@ type Msg =
   | { type: 'init'; canvas: OffscreenCanvas; w: number; h: number; dpr: number }
   | { type: 'resize'; w: number; h: number; dpr: number }
   | { type: 'run'; on: boolean }
-  | { type: 'progress'; mode: ProgressMode; v?: number };
+  | { type: 'progress'; mode: ProgressMode; v?: number }
+  | { type: 'memory'; on: boolean }
+  | { type: 'pointer'; x: number; y: number; down: boolean };
 
 const scope = self as unknown as {
   postMessage(m: unknown): void;
@@ -42,6 +44,7 @@ function loop(now: number) {
     sentReady = true;
     scope.postMessage({ type: 'ready' });
   }
+  for (const ev of view.drain()) scope.postMessage({ type: 'shard', ...ev });
   if (now - lastPost > 100) {
     lastPost = now;
     scope.postMessage({ type: 'p', v: p });
@@ -72,4 +75,6 @@ scope.onmessage = (e) => {
     running = m.on;
     if (running) start();
   } else if (m.type === 'progress') view?.progress(m.mode, m.v ?? 0);
+  else if (m.type === 'memory') view?.setMemory(m.on);
+  else if (m.type === 'pointer') view?.pointer(m.x, m.y, m.down);
 };
