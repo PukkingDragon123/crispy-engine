@@ -26,8 +26,8 @@
    replies. Use words, Alagard typography or real 3D/sculpted art instead.
 
 ## Current art direction (latest user notes win)
-- Realistic lighting with an anime-painted look: cel light ramp, black ink outlines, and lots of 2D pixel-art particles
-  for dust, sand and trails. "Lighting 100× better, super realistic and anime-painted".
+- Lighting (latest note): detailed, realistic light with an anime-painted feel and only a subtle cel ramp (soft GI-like
+  fill, AO, rim light, atmospheric depth); thin, light ink lines. Bright, clean UI. "Lighting 100× better, super realistic and anime-painted".
 - World not cartoony. Sundown (latest note): a skeletal scorpion-man revenant cowboy remade by Serket: a fully
   animal skeletal scorpion head (carapace, modelled median eyes, chelicerae clamped with a stylish polished iron bear-trap grille),
   hat, no glasses (cool confident eyes), long curly hard-rock hair, cigarette with pixel smoke; four arms (bony humanoid gun and grip arms plus
