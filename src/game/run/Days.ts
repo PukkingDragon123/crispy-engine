@@ -117,7 +117,9 @@ export interface DaysHost {
   opts: { stage?: string };
 }
 
-type Slotted = { reserveSlot?: (id: string, size: { w: number; h: number }) => { x: number; y: number } | null | undefined };
+/** the HUD worker's layout slot (Hud.reserveSlot): a live centre and size in HUD px */
+type HudSlot = { x: number; y: number; w: number; h: number; k: number; visible: boolean };
+type Slotted = { reserveSlot?: (id: string, w?: number, h?: number) => HudSlot; releaseSlot?: (id: string) => void };
 
 export class Days {
   private key: string;
@@ -144,6 +146,8 @@ export class Days {
   private beatShot: unknown = null;
   private beatOffT = -1;
   private t = 0;
+  /** the hourglass's place in the HUD layout (null: the HUD has no slots, Days lays it out itself) */
+  private slot: HudSlot | null = null;
 
   constructor(private r: DaysHost) {
     this.key = r.world.sa.env;
@@ -160,7 +164,13 @@ export class Days {
     this.nightLoop = r.engine.audio.loop('night_loop', 0);
     const hud = r.hud as typeof r.hud & Slotted & { timeHud?: boolean };
     hud.timeHud = true;
-    this.plaque = new DayPlaque(() => this.plaqueState(), () => hud.reserveSlot?.('dayPlaque', { w: 100, h: 90 }) ?? null);
+    // the HUD keeps the hourglass a spot at the top centre (and retires the stopwatch); the plaque hangs to its left
+    this.slot = hud.reserveSlot?.('hourglass', 32, 50) ?? null;
+    this.plaque = new DayPlaque(() => this.plaqueState(), () => {
+      const sl = this.slot;
+      if (!sl || !sl.visible) return null;
+      return { right: Math.round(sl.x - (sl.w / 2) * sl.k - 8), y: Math.max(4, Math.round(sl.y - (sl.h / 2) * sl.k)) };
+    });
     hud.painters.push(this.plaque);
     this.glass = new HourglassHud(r.hud3d.scene, r.hud);
     this.glass.onShake = (a) => r.ctx.shake(a);
@@ -356,11 +366,12 @@ export class Days {
 
   private glassState() {
     const r = this.r, d = r.director, hud = r.hud as typeof r.hud & Slotted;
-    const k = hud.uiK ?? 1;
-    const h = Math.round(48 * Math.min(1, k));
+    const sl = this.slot;
+    const k = sl?.k ?? hud.uiK ?? 1;
+    const h = Math.round((sl?.h ?? 48) * Math.min(1, k));
     const pr = this.plaque.rect;
     const W = Math.ceil(window.innerWidth / hud.scale);
-    let at = hud.reserveSlot?.('hourglass', { w: Math.round(h * 0.7), h }) ?? null;
+    let at: { x: number; y: number } | null = sl && sl.visible ? { x: sl.x, y: sl.y } : null;
     if (!at) at = pr.shown ? { x: pr.x + pr.w + Math.round(h * 0.42) + 4, y: pr.y + Math.round(h / 2) + 2 } : { x: Math.round(W / 2 + Math.min(150, W * 0.275) + 26), y: Math.round(h / 2) + 6 };
     let frac = 1, flowing = false;
     const boss = r.hud.last?.boss;
@@ -400,6 +411,7 @@ export class Days {
     this.nightLoop?.stop(0.5);
     const hud = this.r.hud as typeof this.r.hud & { timeHud?: boolean };
     hud.timeHud = false;
+    (hud as typeof hud & Slotted).releaseSlot?.('hourglass');
     const i = hud.painters.indexOf(this.plaque);
     if (i >= 0) hud.painters.splice(i, 1);
     this.glass.dispose();

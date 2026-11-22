@@ -703,9 +703,7 @@ export class Hud {
       this.outlawBase.plaque = null;
       this.outlawBase.watch = null;
     }
-    if (!s.boss && this.use3D && this.timeHud) {
-      // the day plaque (DayPlaque) and the hourglass (HourglassHud) are painted by run/Days.ts
-    } else if (!s.boss && this.use3D) {
+    if (!s.boss && this.use3D) {
       // the branded leather plaque on its chains (3D layer); the stopwatch hangs under it in the break
       if (s.wave !== this.lastWave) {
         this.lastWave = s.wave;
@@ -716,7 +714,8 @@ export class Hud {
       const tl = Math.ceil(s.waveTime);
       const brk = s.intermission !== undefined && s.intermission > 0;
       const py = 8 + 15 * k;
-      this.outlawBase.plaque = { x: cx, y: py, label: s.waveLabel, time: tl < 900 ? `${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}` : null, drop };
+      // (with the day system on, the day plaque (run/Days.ts, ui/DayPlaque) replaces the leather plaque)
+      this.outlawBase.plaque = this.timeHud ? null : { x: cx, y: py, label: s.waveLabel, time: tl < 900 ? `${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}` : null, drop };
       const glass = this.slots.get('hourglass');
       if (glass) {
         glass.x = cx;

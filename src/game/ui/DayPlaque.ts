@@ -170,7 +170,8 @@ export class DayPlaque implements HudPainter {
   private warnK = 0;
   private lastWarn: PlaqueState['warn'] = null;
 
-  constructor(private state: () => PlaqueState, private slot?: () => { x: number; y: number } | null) {}
+  /** `slot`: where it hangs (HUD px): its top edge `y`, and either its centre `x` or its `right` edge */
+  constructor(private state: () => PlaqueState, private slot?: () => { x?: number; right?: number; y: number } | null) {}
 
   paint(c: CanvasRenderingContext2D, dt: number) {
     this.t += dt;
@@ -194,7 +195,7 @@ export class DayPlaque implements HudPainter {
     this.drop = Math.max(0, this.drop - dt * 2.2);
     const bounce = this.drop > 0 ? Math.round(-Math.pow(this.drop, 2) * 50 + Math.sin(this.drop * 9) * this.drop * 4) : 0;
     const at = this.slot?.() ?? { x: Math.round(W / 2), y: 4 };
-    const x = Math.round(at.x - w / 2), y = Math.round(at.y) + bounce;
+    const x = Math.round(at.right !== undefined ? at.right - w : (at.x ?? W / 2) - w / 2), y = Math.round(at.y) + bounce;
     this.rect = { x, y, w, h, shown: true };
     const cv = cartouche(w, h);
     blitObj(c, cv, x + w / 2, y + h / 2, 3);

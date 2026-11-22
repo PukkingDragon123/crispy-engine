@@ -18,7 +18,7 @@
 // rises out of the sand during a wave break, shows one thing hands-on, and goes:
 //   dodge (the QTE ring: she hurls a spear of sand), guns (switching, 3 / 4 / 5),
 //   tarot (she lends THE SUN: cast it, empower it on its ring), ult (she fills the
-//   soul jar, he unleashes Serket's Wrath), dig (she buries a glint, he digs it up),
+//   XIII card, he unleashes Serket's Wrath), dig (she buries a glint, he digs it up),
 //   and each move as it unlocks: sand kick, wall ride, nose manual, dune surf, the
 //   Neck Slicer. run/Progression queues them and marks them given (meta/Unlocks).
 // Every step can be passed with N (or the "next step" label), and hold BACKSPACE
@@ -64,7 +64,7 @@ const LESSON_INTRO: Record<LessonId, string> = {
   dodge: 'A word before the next wave, bone-rider. The big ones telegraph. Learn to read them.',
   guns: 'Two irons on you now? Then learn to change them without dying.',
   tarot: 'The tarot woke in your hands. Let me show you how to wring more out of a card.',
-  ult: 'Your canopic jar is brimming. Do you know what it is for? Let me show you.',
+  ult: 'Your XIII card is burning. Do you know what it is for? Let me show you.',
   dig: 'The desert hides more than bones. Let me teach you to dig.',
   sand_kick: 'You kicked off thin air back there. Again, properly this time.',
   wall_ride: 'You beat a god. Walls should be easy. Ride one.',
@@ -400,7 +400,7 @@ export class Tutorial {
     this.clearGoals();
     yield* this.line('Lovely form. Very... bony.', 'laugh', 'open');
 
-    // (the dodge ring, guns, the tarot, the soul jar and digging come later, as lessons)
+    // (the dodge ring, guns, the tarot, the ultimate card and digging come later, as lessons)
 
     // 6. grapple the totem
     sp.pose = 'raise';
@@ -648,13 +648,13 @@ export class Tutorial {
   private *ultLesson(): Script {
     const cur = this.ctx.engine.current as unknown as { ult?: { active: boolean } } | null;
     const run = this.ctx.run;
-    yield* this.line('Every kill in a streak pours a soul into your canopic jar. When it brims, I come in person. Let me fill it for you, just this once.', 'happy', 'raise');
+    yield* this.line('Every kill in a streak feeds the XIII card. When it burns, I come in person. Let me light it for you, just this once.', 'happy', 'raise');
     run.ultCharge = 1;
     this.ctx.sfx('ult_ready', null, 0.7);
     spiritMotes(this.ctx.particles, this.player.center(new THREE.Vector3()), 20, 0.8, 2);
-    this.setGoals(TOUCH ? ['SOUL JAR   full', "SERKET'S WRATH   tap the soul jar"] : ['SOUL JAR   full', "SERKET'S WRATH   Z"]);
+    this.setGoals(TOUCH ? ['THE XIII CARD   burning', "SERKET'S WRATH   tap the XIII card"] : ['THE XIII CARD   burning', "SERKET'S WRATH   Z"]);
     this.check(0, true);
-    yield* this.line(say('Now. Press Z.', 'Now. Tap the jar.'), 'stern', 'beckon');
+    yield* this.line(say('Now. Press Z.', 'Now. Tap the card.'), 'stern', 'beckon');
     let seen = false, waited = 0;
     yield this.until(() => {
       waited += this.lastDt;

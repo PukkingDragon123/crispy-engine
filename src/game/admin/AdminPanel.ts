@@ -364,7 +364,7 @@ export class AdminPanel {
     // the footer: the last thing done, else what is under the pointer, else the keys
     const m = this.a.msg;
     const fresh = m.text && this.t - m.at < 3.5;
-    const foot = fresh ? m.text : this.tip || 'F1 or ` opens and closes  .  Esc closes  .  F2 free-fly  .  F3 perf';
+    const foot = fresh ? m.text : this.tip || 'F1, ` or F10 opens and closes  .  Esc closes  .  F2 free-fly  .  F3 perf';
     c.save();
     c.beginPath();
     c.rect(8, H - 19, W - 16, 18);

@@ -86,7 +86,7 @@ export async function playTombIntro(d: TombDeps): Promise<{ skipped: boolean }> 
   sun.position.copy(sunDir).multiplyScalar(90);
   sun.target.position.set(0, 0, 0);
   sun.castShadow = eng.quality.shadows;
-  sun.shadow.mapSize.setScalar(Math.min(4096, eng.quality.shadowSize));
+  sun.shadow.mapSize.setScalar(Math.min(2048, eng.quality.shadowSize));
   Object.assign(sun.shadow.camera, { left: -48, right: 48, top: 48, bottom: -48, near: 1, far: 220 });
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.05;
@@ -131,7 +131,7 @@ export async function playTombIntro(d: TombDeps): Promise<{ skipped: boolean }> 
   mesh(tombPortal(), V(0, 0, DOOR_Z), [0.5, 0, 0]);
   mesh(tombChamber(), V(0, FLOOR_Y, DOOR_Z), [0.5, 0, 1]);
   mesh(tombGround(-42, 42, -6, 42, 0.5), V(0, 0, 0), [0.5, 0, 0.5]);
-  mesh(tombGround(-130, 130, 42.5, 200, 1), V(0, 0, 0), [0.5, 0, 0.5]);
+  mesh(tombGround(-100, 100, 42.5, 160, 1), V(0, 0, 0), [0.5, 0, 0.5]);
   const slab = mesh(tombDoorSlab(), V(0, 9.4, DOOR_Z - 0.55), 'bottom');
   slab.visible = false;
   // torches down both walls (they light themselves as he passes)
@@ -143,9 +143,12 @@ export async function playTombIntro(d: TombDeps): Promise<{ skipped: boolean }> 
       const o = mesh(sc, at, [0.5, 0, 0.5]);
       o.rotation.y = s < 0 ? Math.PI / 2 : -Math.PI / 2;
       const f = new THREE.Vector3(...sc.flame).applyEuler(o.rotation).add(at);
-      const light = new THREE.PointLight(0xff9440, 0, 11, 1.8);
-      light.position.copy(f).add(V(-s * 0.2, 0.3, 0));
-      scene.add(light);
+      let light = torches.find((t) => Math.abs(t.at.z - f.z) < 0.1)?.light;
+      if (!light) {
+        light = new THREE.PointLight(0xff9440, 0, 13, 1.6);
+        light.position.set(0, f.y + 0.3, f.z);
+        scene.add(light);
+      }
       torches.push({ light, at: f, on: 0, ph: Math.random() * 10 });
     }
   const alt = pinchAltar();
@@ -307,7 +310,7 @@ export async function playTombIntro(d: TombDeps): Promise<{ skipped: boolean }> 
     }
     for (const t of torches) {
       const f = 0.82 + 0.12 * Math.sin(T * 13 + t.ph) + 0.08 * Math.sin(T * 29 + t.ph * 2);
-      t.light.intensity = t.on * 2.6 * f;
+      t.light.intensity = t.on * 2.2 * f;
       if (t.on > 0.3 && Math.random() < dt * 22) fx.emit({ pos: { x: t.at.x, y: t.at.y + 0.08, z: t.at.z }, count: 1, spread: 0.12, up: 1.2, life: [0.25, 0.55], size: [0.09, 0.02], sprite: ['glow8', 'spark'], color: [0xffd080, 0xff8a2a], additive: true, drag: 1.5, gravity: -1.5 });
       if (t.on > 0.3 && Math.random() < dt * 3) fx.emit({ pos: { x: t.at.x, y: t.at.y + 0.4, z: t.at.z }, count: 1, spread: 0.1, up: 0.6, life: [1.2, 2.0], size: [0.12, 0.5], sprite: ['puff0', 'puff1'], color: 0x3a2e28, alpha: 0.25, drag: 1, gravity: -0.6, rot: 3 });
     }
@@ -400,7 +403,7 @@ export async function playTombIntro(d: TombDeps): Promise<{ skipped: boolean }> 
       eng.audio.play('whoosh_big', { volume: 0.4, pitch: 0.5 });
       const lore = [
         'The old gods of Egypt never left the desert. They only learned to wear hats.',
-        'In a travellers’ camp a child was born with a stinger for a spine. They left him in the sand.',
+        'In a travellers’ camp a child was born with a scorpion\u2019s tail. At dawn the camp was gone.',
         'The sand raised him. Now he rides it, and he hunts men for money.',
       ];
       const lower = () => camera.position.clone().addScaledVector(camera.getWorldDirection(new THREE.Vector3()), 6).addScaledVector(new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1), -1.15);
@@ -454,7 +457,7 @@ export async function playTombIntro(d: TombDeps): Promise<{ skipped: boolean }> 
     // ahead of him at the foot of the steps, looking up past him at the pylon
     actor.root.position.set(0.3, 0, 12);
     shot(V(-2.6, 0.5, 6.2), V(0.2, 3.2, 14), 44, true);
-    const walk2 = say('sundown', "First bounty of the season. 'Somethin' in the Weeping Wall. Five hundred dollars, no questions asked.'", 0.3);
+    const walk2 = say('sundown', "No name on this bounty. Just a scorpion pressed in green wax, and enough money to buy a town.", 0.3);
     await runFor(2.6, (k) => actor.root.position.set(0.3 - k * 0.3, 0, 12 - k * 5.2));
     await walk2;
     walkAmt = 0;
@@ -500,7 +503,7 @@ export async function playTombIntro(d: TombDeps): Promise<{ skipped: boolean }> 
     await say('pinch', '*click*', 0.3);
     shot(actor.root.position.clone().add(V(1.2, 1.7, 1.6)), ALTAR.clone().add(V(0, 1.2, 0)), 44, true);
     actor.setExpression('smug');
-    await say('sundown', "Well. You don't look like you ate three prospectors.", 0.4);
+    await say('sundown', "You the bounty, little fella?", 0.4);
     // ================================================================ 4. THE DOOR
     phase('slam');
     shot(V(1.6, FLOOR_Y + 1.6, -13.5), V(0, FLOOR_Y + 3.6, DOOR_Z), 46, true);
@@ -603,16 +606,16 @@ export async function playTombIntro(d: TombDeps): Promise<{ skipped: boolean }> 
     const hisShot = () => shot(actor.root.position.clone().add(V(-1.3, 1.55, -2.6)), actor.root.position.clone().add(V(0.3, 1.5, 0)), 42);
     const wide = () => shot(actor.root.position.clone().add(V(2.6, 1.9, 3.4)), sp.clone().add(V(0, soulH * 0.55, 0)), 48);
     wide();
-    await say('serket', 'Hello, little stinger. I have watched you since the night they left you in the sand.', 0.9);
+    await say('serket', 'Hello, little stinger. I have waited for you since that dawn by the cold fire.', 0.9);
     hisShot();
     await say('sundown', '...The scorpion talks.', 0.4);
     herShot();
     spirit.pose = 'present';
     spirit.setExpression('smug');
-    await say('serket', 'The scorpion is a goddess. Serket. Every scorpion in this desert is mine, and you were born one. That makes you mine too.', 0.9);
+    await say('serket', 'The scorpion is a goddess. Serket. I posted your bounty. A child of my sting, all grown up. Good.', 0.9);
     spirit.setExpression('stern');
     spirit.pose = 'open';
-    await say('serket', "Set's storm is eating my sands, and gods may not ride into it. A cursed boy with a bounty habit may.", 0.9);
+    await say('serket', "Set's storm is eating my sands, and gods may not ride into it. I need a new champion, and you are going to earn it.", 0.9);
     hisShot();
     actor.setExpression('smug');
     await say('sundown', "I don't work for free, ma'am.", 0.4);

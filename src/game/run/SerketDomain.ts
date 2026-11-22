@@ -54,15 +54,15 @@ type Script = Generator<Wait, void, number>;
 export type MarkId = 'heart' | 'bullets' | 'cards' | 'ult' | 'bounty' | 'hourglass';
 
 /** where each HUD piece sits when the HUD does not say (fractions of the screen) */
-const MARK_FALLBACK: Record<MarkId, [number, number]> = { heart: [0.08, 0.86], bullets: [0.84, 0.72], cards: [0.8, 0.88], ult: [0.93, 0.86], bounty: [0.5, 0.06], hourglass: [0.92, 0.13] };
+const MARK_FALLBACK: Record<MarkId, [number, number]> = { heart: [0.08, 0.86], bullets: [0.84, 0.72], cards: [0.8, 0.88], ult: [0.93, 0.86], bounty: [0.2, 0.06], hourglass: [0.5, 0.07] };
 /** the hud.anchors keys to try for each piece (HUD and TIME workers' anchors first) */
-const MARK_KEYS: Record<MarkId, string[]> = { heart: ['heart'], bullets: ['bullets', 'cyl'], cards: ['cards', 'tarot', 'deck'], ult: ['ultCard', 'ult'], bounty: ['bounty', 'bountyBar'], hourglass: ['hourglass', 'clock', 'time'] };
+const MARK_KEYS: Record<MarkId, string[]> = { heart: ['heart'], bullets: ['bullets', 'cyl'], cards: ['cards', 'tarot', 'deck'], ult: ['ultCard', 'ult'], bounty: ['bounty', 'bountyBar'], hourglass: ['hourglass', 'glass', 'clock', 'time'] };
 
 const MARKS: { id: MarkId; label: string; line: string }[] = [
   { id: 'heart', label: 'YOUR HEART', line: 'Your heart. While it beats, you ride. Let it run dry and Anubis gets to weigh it.' },
-  { id: 'bullets', label: 'BULLETS', line: 'Six rounds riding on your cards. Count them. The dead will not wait while you fumble.' },
+  { id: 'bullets', label: 'BULLETS', line: 'Six rounds riding on top of your cards. Count them. The dead will not wait while you fumble.' },
   { id: 'cards', label: 'TAROT CARDS', line: 'The tarot. Every card is a skill of yours. More wake when you rank up.' },
-  { id: 'ult', label: 'THE ULTIMATE', line: 'And this card is me. When it burns bright, call me, and I come in person.' },
+  { id: 'ult', label: 'XIII  THE ULTIMATE', line: 'And the thirteenth card is me. When it burns bright, call me, and I come in person.' },
   { id: 'bounty', label: 'BOUNTY', line: 'The bounty bar. Every soul you put down fills it. Fill it and you rank up.' },
   { id: 'hourglass', label: 'THE HOURGLASS', line: 'The hourglass. Days run through it, the waves ride in on it, and the nights bite harder.' },
 ];
@@ -734,7 +734,7 @@ export class SerketDomain {
       const run = this.ctx.run;
       run.ultCharge = 1;
       this.ctx.sfx('ult_ready', null, 0.7);
-      this.showMark('ult', 'THE ULTIMATE');
+      this.showMark('ult', 'XIII  THE ULTIMATE');
       this.ev.ult = 0;
       this.setGoals([tk('ULTIMATE   Z', 'ULTIMATE   tap the burning card')]);
       yield* this.line(tk('The card is burning. Call me. Press Z.', 'The card is burning. Call me. Tap it.'), 'stern', 'beckon', 0.3);

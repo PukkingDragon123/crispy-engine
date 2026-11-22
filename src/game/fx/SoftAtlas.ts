@@ -208,6 +208,10 @@ export function softFor(name: string, additive: boolean): { frame: string; layer
   if (name === 'pebble') return { frame: 'chunk', layer: 4, tint: 0xb48a62 };
   if (name === 'woodchip') return { frame: 'chunk', layer: 4, tint: 0xa6764a };
   if (name === 'drop') return { frame: 'drop', layer: 4 };
+  if (name === 'twig' || name === 'leaf' || name === 'bone' || name === 'linen') return { frame: 'chunk', layer: 4 };
+  if (name === 'bullet') return { frame: 'chunk', layer: 4, tint: 0xe8b850 };
+  if (name === 'splat') return { frame: 'mist', layer: 2, tint: 0xa8180f };
+  if (name === 'venomSplat') return { frame: 'glow', layer: 3, tint: 0x9dff3a };
   if (name === 'mist') return { frame: 'mist', layer: 2 };
   return null;
 }

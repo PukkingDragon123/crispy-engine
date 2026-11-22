@@ -119,14 +119,14 @@ function cliffFace(x: number, y: number) {
 export function tombCliff(): SetModel {
   const m = new VoxelModel('tomb_cliff');
   const stone = sandstone({ seed: 31, tones: CLIFF_TONES, bed: 9, oxide: 0.6, pits: 0.4 });
-  for (let x = -150; x <= 150; x++) {
+  for (let x = -124; x <= 124; x++) {
     const crest = 104 + 18 * noise.n2(x * 0.012, 8.1) + 7 * noise.n2(x * 0.05, 2.2) + 22 * Math.exp(-((x / 52) ** 2)) - (Math.abs(x) / 150) ** 2 * 26;
     for (let y = -4; y <= crest; y++) {
       // the passage into the mountain
       if (Math.abs(x) <= 7 && y >= 0 && y <= 20) continue;
       const f = Math.round(cliffFace(x, y));
       const top = y > crest - 3;
-      const depth = top ? 12 : 4;
+      const depth = top ? 6 : 3;
       for (let z = f - depth; z <= f; z++) {
         let c = stone(x, y, z) ?? CLIFF_TONES[2];
         // desert varnish: dark streaks running down from the crest
@@ -457,7 +457,7 @@ export function tombGround(x0: number, x1: number, z0: number, z1: number, vs: n
       // ripples running across the wind, darker in the troughs
       const rip = Math.sin(x * 2.1 + z * 0.9 + noise.n2(x * 0.1, z * 0.1) * 3);
       const t = 0.5 + 0.35 * noise.n2(x * 0.05, z * 0.05) + (rip > 0.6 ? 0.15 : rip < -0.7 ? -0.18 : 0);
-      for (let y = hy - 2; y <= hy; y++) m.set(ix, y, iz, S[Math.max(0, Math.min(3, Math.floor(t * 4)))]);
+      for (let y = hy - (vs > 0.6 ? 0 : 2); y <= hy; y++) m.set(ix, y, iz, S[Math.max(0, Math.min(3, Math.floor(t * 4)))]);
     }
   return { model: m, voxelSize: vs };
 }

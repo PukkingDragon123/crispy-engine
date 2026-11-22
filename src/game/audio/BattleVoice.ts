@@ -51,7 +51,7 @@ const RULES: Record<string, { cd: number; chance: number; who: VoiceWho }> = {
   line: { cd: 1.5, chance: 1, who: 'sundown' },
   serket: { cd: 0.6, chance: 1, who: 'serket' },
 };
-const GAIN: Record<VoiceWho, number> = { sundown: 0.95, serket: 1.05 };
+const GAIN: Record<VoiceWho, number> = { sundown: 0.75, serket: 0.9 };
 
 const hash = (s: string) => {
   let h = 2166136261;

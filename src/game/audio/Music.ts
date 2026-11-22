@@ -681,6 +681,8 @@ const ORCH_PART: Partial<Record<Exclude<MusicMood, 'off'>, (c: BarCtx, s: Sectio
 };
 /** hall reverb send per mood (the orchestra's room) */
 const HALL: Partial<Record<Exclude<MusicMood, 'off'>, number>> = { menu: 0.75, intro: 0.8, explore: 0.55, night: 0.8, combat: 0.42, boss: 0.45, tension: 0.7, underworld: 0.9, hub: 0.3, victory: 0.55 };
+/** orchestral layer level per mood (measured offline: keeps combat / boss about 3 dB over the calm moods, never clipping) */
+const OGAIN: Partial<Record<Exclude<MusicMood, 'off'>, number>> = { combat: 0.6, boss: 0.68, victory: 0.8 };
 /** per-instrument level, attack, release and hall send */
 const OI: Record<OrchInst, { g: number; att: number; rel: number; hall: number }> = {
   str: { g: 0.62, att: 0.22, rel: 0.9, hall: 0.55 },
@@ -894,7 +896,7 @@ export class Music {
     dl.gain.value = spec.delay;
     lead.connect(dl).connect(this.dlyIn);
     const orch = this.ctx.createGain();
-    orch.gain.value = this.orchLevel;
+    orch.gain.value = this.orchLevel * (OGAIN[m] ?? 1);
     orch.connect(out);
     this.cur = {
       mood: m,
@@ -1318,7 +1320,7 @@ export class Music {
     this.duck(duck, hold, 0.08);
     // stingers route around the duck (straight to the music bus) with their own reverb send
     const out = ctx.createGain();
-    out.gain.value = 0.75;
+    out.gain.value = k === 'ult' || k === 'bossIntro' ? 0.6 : 0.75;
     out.connect(this.audio.buses.music);
     const rv = ctx.createGain();
     rv.gain.value = 0.35;

@@ -43,6 +43,8 @@ import { Qte } from '../ui/Qte';
 import { Skills } from '../player/Skills';
 import { Inventory, ITEMS } from '../player/Items';
 import { Ultimate } from '../player/Ultimate';
+import { ULT as ULT_BAL } from '../run/Balance';
+const ULT_TIME = ULT_BAL.time;
 import { UpgradeManager, UpgradeEffects } from '../run/Upgrades';
 import { registerExtraUpgrades, ExtraUpgradeEffects } from '../run/UpgradesExtra';
 import { CardPicker } from '../ui/CardPicker';
@@ -1000,6 +1002,11 @@ export class CaveScene implements GameScene {
         return b ? { name: b.name, frac: Math.max(0, b.frac), title: b.title } : null;
       })(),
       ult: this.run.ultCharge,
+      ultCard: (() => {
+        // the ultimate card: a long cooldown that fills from time and attacking (player/Ultimate.cardState)
+        const u = this.ult.cardState();
+        return { cd: u.ready ? 0 : u.secsLeft, max: ULT_TIME, ready: u.ready };
+      })(),
       skills: (() => {
         const cd = this.skills.cooldowns();
         return [
