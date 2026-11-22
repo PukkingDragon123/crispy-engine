@@ -136,7 +136,7 @@ export class LoopHandle {
   }
 }
 
-// Audio packs: a build may bundle the audio folder into a few pack-*.bin files with an index
+// Audio packs: a build may bundle the audio folder into a few pack-*.mp3 files with an index
 // (audio/pack.json: path -> [pack file, byte offset, byte length]). Hosts with a file-count cap
 // (the artifact page) serve the packs; every other build falls back to the loose files.
 type PackIndex = Record<string, [string, number, number]>;

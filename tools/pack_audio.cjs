@@ -1,4 +1,4 @@
-// Bundle <dist>/audio into pack-<group>.bin files plus audio/pack.json (path -> [pack, offset, length]).
+// Bundle <dist>/audio into pack-<group>.mp3 files plus audio/pack.json (path -> [pack, offset, length]).
 // Usage: node tools/pack_audio.cjs <dist> [--strip]   (--strip removes the loose files afterwards)
 const fs = require('fs');
 const path = require('path');
@@ -10,14 +10,14 @@ const files = [];
   for (const n of fs.readdirSync(d)) {
     const p = path.join(d, n);
     if (fs.statSync(p).isDirectory()) walk(p);
-    else if (/\.(mp3|ogg|wav|m4a)$/i.test(n)) files.push(path.relative(root, p).split(path.sep).join('/'));
+    else if (/\.(mp3|ogg|wav|m4a)$/i.test(n) && !n.startsWith('pack-')) files.push(path.relative(root, p).split(path.sep).join('/'));
   }
 })(root);
 const groups = {};
 for (const f of files) (groups[f.split('/')[0]] ||= []).push(f);
 const index = {};
 for (const [g, list] of Object.entries(groups)) {
-  const name = `pack-${g}.bin`;
+  const name = `pack-${g}.mp3`; // .mp3 so file hosts serve it; it is just the members' mp3 bytes back to back
   const parts = [];
   let off = 0;
   for (const f of list.sort()) {
