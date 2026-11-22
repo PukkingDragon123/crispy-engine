@@ -39,13 +39,22 @@
   simple 1-pixel 2D dot eyes; cool, funny and alive. His hall is a beautiful library run by worm librarians (bookworms): real eyeless earthworms with physics bodies.
 - Very high voxel counts everywhere. Fluid, procedural animation.
 - Enemy skill names reference Rolling Stones / Guns N' Roses / Beatles songs.
-- UI (latest note): the lower HUD stays live 3D: the soul jar, the heart, the revolver cylinder and bullets, the
-  tarot cards. Never replace those with 2D. The rest (bounty plank, wave plaque, notes, toasts, ledger, codex card,
+- UI (latest note): the lower HUD stays live 3D: the heart (more 3D, with an effect), big revolver bullets on top of the
+  tarot card pile, the tarot cards (the ultimate is one of the cards). The soul jar is removed. Never replace those with 2D. The rest (bounty plank, wave plaque, notes, toasts, ledger, codex card,
   prompts) is detailed, stylized 2D pixel art that reads as UI, not photographed 3D or texture: moderate pixel
   resolution, hand-authored pixel sprites allowed there, polished and consistent.
 - All spoken dialogue and story text is floating 3D text in the world (FloatText3D), never 2D boxes or balloons.
 - Voxel models and environments carry detailed pixel-art surface textures (PixelTex), subtle and crisp.
-- World: near terrain, ruins and buildings read as big blocks with crisp pixel-art textures; pixel-art foliage sprites.
+- World: near terrain, ruins and buildings read as big blocks with crisp pixel-art textures; procedural rock formations.
+- Plants (latest note): trees, bushes and grass are 2D pixel-art sprites with 3D volume (crossed/stacked billboards),
+  moderate pixel resolution but very detailed, bushy and wind-swayed. Water and oases are beautiful, with water physics.
+- No low-res 2D sprite coins, bullets or particles: bullets/projectiles are small voxel models, coins are spinning 3D
+  voxel coins (coins are the only drop), particles are realistic (soft volumetric dust, sparks, spray). More motion blur.
+- Text: much less glow. Important text is 3D, crisp, readable, interactive, with a highlight. Paper physics is calm.
+- Every human (cinematics and world) is a fully black, featureless shadow figure.
+- Theme: tarot plus Egyptian gods and real Egyptian stories; music references (Rolling Stones, Guns N' Roses, Beatles,
+  Metallica and other classic bands) in cards, items, bosses, upgrades, quests and NPCs; Stardust Crusaders homages
+  only as original nods (coffee gum, a scruffy terrier dog NPC), never copies. Days with several waves; nights harder.
 - Guns: very high resolution models.
 - Model details: `src/game/models/CONTRACT.md`.
 
