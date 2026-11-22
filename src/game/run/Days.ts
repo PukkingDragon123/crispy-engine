@@ -177,6 +177,15 @@ export class Days {
     if (typeof window !== 'undefined') (window as any).__days = this; // dev handle: __days.skip(t)
   }
 
+  /** the day being fought (or, in a break, the coming one): RunScene.days.day */
+  get day() {
+    return this.r.director.day;
+  }
+  /** 0 daylight .. 1 night of the wave being fought (Balance.setDay gets night = this >= 1 at each wave start) */
+  get nightFactor() {
+    return nightOf(Math.max(1, this.r.director.wave));
+  }
+
   // ---------------------------------------------------------------- the clock
   /** the time of day now (0..1, may run past 1 in the night-to-dawn break) */
   clock() {

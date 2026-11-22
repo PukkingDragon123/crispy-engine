@@ -1143,6 +1143,8 @@ export class BackstoryScene implements GameScene {
     if (!this.ready) return;
     const dt = Math.min(Math.max(rdt, 0), 1 / 24);
     if (this.o.contact) return;
+    // the film starts once the loading cover (the memory glass's flare) has gone
+    if (this.engine.loader?.shown) return;
     // hold to skip
     this.hintT = Math.max(0, this.hintT - dt);
     this.hold = this.holding ? this.hold + dt : Math.max(0, this.hold - dt * 2);
