@@ -6,10 +6,13 @@ Nothing is synthesized: `tools/build_audio.py` cuts, layers, filters, pitches,
 compresses and reverberates the recordings below into the game's sound set, and
 `tools/audio_provenance.json` lists the exact source file(s) behind every output
 file. The generative score (`src/game/audio/Music.ts`) plays the CC0 Meta guitar and
-piano samples.
+piano samples and, over them, a CC0 orchestra (Versilian Studios) and a CC0 sung choir.
+Serket's whispered words are the one voiced source that is not a recording: they are
+spoken by the Piper text-to-speech engine and turned into whispers.
 
 All sources are **CC0 1.0 (public domain)** except the **Oculus Audio Pack 01**,
-which is **CC BY 4.0** and is credited below as its license requires.
+which is **CC BY 4.0** and is credited below as its license requires, and Piper TTS (MIT,
+public-domain voice data), credited with the orchestral layer below.
 
 ## Required attribution (CC BY 4.0)
 
@@ -82,9 +85,32 @@ Via https://github.com/Mcamento8/open-game-sfx-index and https://github.com/novi
 | Superpowers assets sound effects | medicinestorm | https://opengameart.org/content/superpowers-assets-sound-effects |
 | Swamp environment audio | LokiF | https://opengameart.org/content/swamp-environment-audio |
 
+## Orchestral layer of the score and the battle voices (`tools/build_orchestra.py`)
+Every file under `public/audio/orch/` and `public/audio/vo/` is listed with its exact source
+files and license in `tools/orch_provenance.json`.
+
+| Source | Author | License | Used for |
+|---|---|---|---|
+| VS Chamber Orchestra 2: Community Edition, https://github.com/sgossner/VSCO-2-CE | Versilian Studios (Sam Gossner, Simon Dalzell; cutting by Elan Hickler / Soundemote), http://vis.versilstudios.net/vsco-community.html | CC0 1.0 | violin / viola / cello section sustains, tremolo and spiccato; F horn, trumpet, tenor trombone, tuba sustains; flute (the ney colour); harp; timpani hits and roll; the giant ethnic drum and concert bass drum (layered into the taiko hits) |
+| Versilian Community Sample Library, https://github.com/sgossner/VCSL | Versilian Studios and contributors | CC0 1.0 | darbuka, frame drums, tambourine (riq), finger cymbals, gong, suspended cymbal crash and swells |
+| "CRWDSing_Ahh Vowel Sung Near F 01" (https://freesound.org/s/763909/) and "CRWDSing_Uh Vowel Sung Near F 01" (https://freesound.org/s/763913/), pack "GameSoundCon2024 Walla XY-AKG214-96k" | ShangusBurger (Shane Vincent) | CC0 1.0 | the choir (a sung crowd, re-pitched with formants preserved) |
+| Oculus Audio Pack 01 (credited above) | Oculus VR, LLC | CC BY 4.0 | Sundown's shouts, hurts, laughs, death and ult roar (male efforts, hurts, screams, laughs); Serket's beast roar (female efforts); her wordless whispers (creepy whispers) |
+| Voiceover Pack: Fighter (via open-game-sfx-index) | Kenney (kenney.nl) | CC0 1.0 | Sundown's few spoken lines ("Prepare yourself.", "Sudden death.", "Fight.", "Kill it.", "Ready.") |
+| Piper TTS, https://github.com/rhasspy/piper, with the en_US "ljspeech" high voice (https://huggingface.co/rhasspy/piper-voices) | Rhasspy / Michael Hansen (MIT); voice trained by Bryce Beattie on the LJ Speech dataset (Keith Ito, public domain) | MIT / public domain | the words of Serket's whispered lines (converted to a pure whisper, layered and reverberated) |
+
+dustUP **modified** all of these (trimmed, re-pitched, layered, filtered, compressed,
+reverberated, re-encoded to MP3). The Sonatina Symphonic Orchestra was not used: its
+Creative Commons Sampling Plus 1.0 license is neither CC0 nor CC BY.
+
+Oculus Audio Pack 01 material in the battle voices (CC BY 4.0, see the attribution above):
+`vo/skill_*`, `vo/jump_*`, `vo/trick_*`, `vo/laugh_*`, `vo/hurt_*`, `vo/death_*`, `vo/ult_*`,
+`vo/serket_breath_*`, `vo/serket_roar_*`.
+
 ## Rebuilding
 `python3 tools/build_audio.py` (needs numpy + ffmpeg with libmp3lame). The script's
 header documents where to clone each source; `--list` prints every recipe.
+`python3 tools/build_orchestra.py` rebuilds the orchestral layer and the battle voices
+(needs ffmpeg with rubberband, and Piper for the whispers); its header lists the sources.
 
 ## Font
 - **Alagard** by Hewett Tsoi — pixel font supplied by the project owner (`src/assets/fonts/alagard.ttf`); distributed by its author as free for personal and commercial use. Used for all UI text.

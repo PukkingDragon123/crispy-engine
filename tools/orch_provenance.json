@@ -1,0 +1,2145 @@
+{
+ "_tables": {
+  "orch": {
+   "str": [
+    {
+     "midi": 40,
+     "file": "orch/str/str_40.mp3",
+     "len": 6.5,
+     "ls": 1.0,
+     "le": 6.0
+    },
+    {
+     "midi": 43,
+     "file": "orch/str/str_43.mp3",
+     "len": 6.5,
+     "ls": 1.0,
+     "le": 6.0
+    },
+    {
+     "midi": 47,
+     "file": "orch/str/str_47.mp3",
+     "len": 6.5,
+     "ls": 1.0,
+     "le": 6.0
+    },
+    {
+     "midi": 50,
+     "file": "orch/str/str_50.mp3",
+     "len": 6.5,
+     "ls": 1.0,
+     "le": 6.0
+    },
+    {
+     "midi": 53,
+     "file": "orch/str/str_53.mp3",
+     "len": 6.5,
+     "ls": 1.0,
+     "le": 6.0
+    },
+    {
+     "midi": 57,
+     "file": "orch/str/str_57.mp3",
+     "len": 6.5,
+     "ls": 1.0,
+     "le": 6.0
+    },
+    {
+     "midi": 62,
+     "file": "orch/str/str_62.mp3",
+     "len": 6.5,
+     "ls": 1.0,
+     "le": 6.0
+    },
+    {
+     "midi": 65,
+     "file": "orch/str/str_65.mp3",
+     "len": 6.5,
+     "ls": 1.0,
+     "le": 6.0
+    },
+    {
+     "midi": 69,
+     "file": "orch/str/str_69.mp3",
+     "len": 6.5,
+     "ls": 1.0,
+     "le": 6.0
+    },
+    {
+     "midi": 72,
+     "file": "orch/str/str_72.mp3",
+     "len": 6.5,
+     "ls": 1.0,
+     "le": 6.0
+    },
+    {
+     "midi": 76,
+     "file": "orch/str/str_76.mp3",
+     "len": 6.5,
+     "ls": 1.0,
+     "le": 6.0
+    },
+    {
+     "midi": 79,
+     "file": "orch/str/str_79.mp3",
+     "len": 6.5,
+     "ls": 1.0,
+     "le": 6.0
+    },
+    {
+     "midi": 83,
+     "file": "orch/str/str_83.mp3",
+     "len": 6.5,
+     "ls": 1.0,
+     "le": 6.0
+    },
+    {
+     "midi": 86,
+     "file": "orch/str/str_86.mp3",
+     "len": 6.5,
+     "ls": 1.0,
+     "le": 6.0
+    }
+   ],
+   "trem": [
+    {
+     "midi": 40,
+     "file": "orch/trem/trem_40.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    },
+    {
+     "midi": 43,
+     "file": "orch/trem/trem_43.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    },
+    {
+     "midi": 47,
+     "file": "orch/trem/trem_47.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    },
+    {
+     "midi": 50,
+     "file": "orch/trem/trem_50.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    },
+    {
+     "midi": 53,
+     "file": "orch/trem/trem_53.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    },
+    {
+     "midi": 57,
+     "file": "orch/trem/trem_57.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    },
+    {
+     "midi": 62,
+     "file": "orch/trem/trem_62.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    },
+    {
+     "midi": 69,
+     "file": "orch/trem/trem_69.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    },
+    {
+     "midi": 76,
+     "file": "orch/trem/trem_76.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    },
+    {
+     "midi": 79,
+     "file": "orch/trem/trem_79.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    },
+    {
+     "midi": 83,
+     "file": "orch/trem/trem_83.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    }
+   ],
+   "spic": [
+    {
+     "midi": 40,
+     "file": "orch/spic/spic_40.mp3",
+     "len": 0.9
+    },
+    {
+     "midi": 43,
+     "file": "orch/spic/spic_43.mp3",
+     "len": 0.9
+    },
+    {
+     "midi": 47,
+     "file": "orch/spic/spic_47.mp3",
+     "len": 0.9
+    },
+    {
+     "midi": 50,
+     "file": "orch/spic/spic_50.mp3",
+     "len": 0.9
+    },
+    {
+     "midi": 53,
+     "file": "orch/spic/spic_53.mp3",
+     "len": 0.771
+    },
+    {
+     "midi": 57,
+     "file": "orch/spic/spic_57.mp3",
+     "len": 0.9
+    },
+    {
+     "midi": 62,
+     "file": "orch/spic/spic_62.mp3",
+     "len": 0.876
+    },
+    {
+     "midi": 69,
+     "file": "orch/spic/spic_69.mp3",
+     "len": 0.684
+    },
+    {
+     "midi": 76,
+     "file": "orch/spic/spic_76.mp3",
+     "len": 0.565
+    }
+   ],
+   "horn": [
+    {
+     "midi": 43,
+     "file": "orch/horn/horn_43.mp3",
+     "len": 6.0,
+     "ls": 1.0,
+     "le": 5.5
+    },
+    {
+     "midi": 46,
+     "file": "orch/horn/horn_46.mp3",
+     "len": 6.0,
+     "ls": 1.0,
+     "le": 5.5
+    },
+    {
+     "midi": 50,
+     "file": "orch/horn/horn_50.mp3",
+     "len": 6.0,
+     "ls": 1.0,
+     "le": 5.5
+    },
+    {
+     "midi": 53,
+     "file": "orch/horn/horn_53.mp3",
+     "len": 6.0,
+     "ls": 1.0,
+     "le": 5.5
+    },
+    {
+     "midi": 57,
+     "file": "orch/horn/horn_57.mp3",
+     "len": 6.0,
+     "ls": 1.0,
+     "le": 5.5
+    },
+    {
+     "midi": 60,
+     "file": "orch/horn/horn_60.mp3",
+     "len": 6.0,
+     "ls": 1.0,
+     "le": 5.5
+    },
+    {
+     "midi": 74,
+     "file": "orch/horn/horn_74.mp3",
+     "len": 6.0,
+     "ls": 1.0,
+     "le": 5.5
+    },
+    {
+     "midi": 77,
+     "file": "orch/horn/horn_77.mp3",
+     "len": 6.0,
+     "ls": 1.0,
+     "le": 5.5
+    }
+   ],
+   "lowbr": [
+    {
+     "midi": 41,
+     "file": "orch/lowbr/lowbr_41.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    },
+    {
+     "midi": 46,
+     "file": "orch/lowbr/lowbr_46.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    },
+    {
+     "midi": 50,
+     "file": "orch/lowbr/lowbr_50.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    },
+    {
+     "midi": 53,
+     "file": "orch/lowbr/lowbr_53.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    },
+    {
+     "midi": 60,
+     "file": "orch/lowbr/lowbr_60.mp3",
+     "len": 5.5,
+     "ls": 1.0,
+     "le": 5.0
+    }
+   ],
+   "tpt": [
+    {
+     "midi": 67,
+     "file": "orch/tpt/tpt_67.mp3",
+     "len": 5.0,
+     "ls": 1.0,
+     "le": 4.5
+    },
+    {
+     "midi": 70,
+     "file": "orch/tpt/tpt_70.mp3",
+     "len": 5.0,
+     "ls": 1.0,
+     "le": 4.5
+    },
+    {
+     "midi": 74,
+     "file": "orch/tpt/tpt_74.mp3",
+     "len": 5.0,
+     "ls": 1.0,
+     "le": 4.5
+    },
+    {
+     "midi": 77,
+     "file": "orch/tpt/tpt_77.mp3",
+     "len": 5.0,
+     "ls": 1.0,
+     "le": 4.5
+    },
+    {
+     "midi": 81,
+     "file": "orch/tpt/tpt_81.mp3",
+     "len": 5.0,
+     "ls": 1.0,
+     "le": 4.5
+    },
+    {
+     "midi": 84,
+     "file": "orch/tpt/tpt_84.mp3",
+     "len": 5.0,
+     "ls": 1.0,
+     "le": 4.5
+    }
+   ],
+   "ney": [
+    {
+     "midi": 64,
+     "file": "orch/ney/ney_64.mp3",
+     "len": 4.5,
+     "ls": 1.0,
+     "le": 4.0
+    },
+    {
+     "midi": 69,
+     "file": "orch/ney/ney_69.mp3",
+     "len": 4.5,
+     "ls": 1.0,
+     "le": 4.0
+    },
+    {
+     "midi": 72,
+     "file": "orch/ney/ney_72.mp3",
+     "len": 4.5,
+     "ls": 1.0,
+     "le": 4.0
+    },
+    {
+     "midi": 76,
+     "file": "orch/ney/ney_76.mp3",
+     "len": 4.5,
+     "ls": 1.0,
+     "le": 4.0
+    },
+    {
+     "midi": 81,
+     "file": "orch/ney/ney_81.mp3",
+     "len": 4.5,
+     "ls": 1.0,
+     "le": 4.0
+    },
+    {
+     "midi": 84,
+     "file": "orch/ney/ney_84.mp3",
+     "len": 4.5,
+     "ls": 1.0,
+     "le": 4.0
+    },
+    {
+     "midi": 88,
+     "file": "orch/ney/ney_88.mp3",
+     "len": 4.5,
+     "ls": 1.0,
+     "le": 4.0
+    }
+   ],
+   "harp": [
+    {
+     "midi": 38,
+     "file": "orch/harp/harp_38.mp3",
+     "len": 3.8
+    },
+    {
+     "midi": 41,
+     "file": "orch/harp/harp_41.mp3",
+     "len": 3.8
+    },
+    {
+     "midi": 45,
+     "file": "orch/harp/harp_45.mp3",
+     "len": 3.8
+    },
+    {
+     "midi": 48,
+     "file": "orch/harp/harp_48.mp3",
+     "len": 3.8
+    },
+    {
+     "midi": 52,
+     "file": "orch/harp/harp_52.mp3",
+     "len": 3.8
+    },
+    {
+     "midi": 55,
+     "file": "orch/harp/harp_55.mp3",
+     "len": 3.8
+    },
+    {
+     "midi": 59,
+     "file": "orch/harp/harp_59.mp3",
+     "len": 3.8
+    },
+    {
+     "midi": 62,
+     "file": "orch/harp/harp_62.mp3",
+     "len": 3.8
+    },
+    {
+     "midi": 65,
+     "file": "orch/harp/harp_65.mp3",
+     "len": 3.8
+    },
+    {
+     "midi": 69,
+     "file": "orch/harp/harp_69.mp3",
+     "len": 3.8
+    },
+    {
+     "midi": 72,
+     "file": "orch/harp/harp_72.mp3",
+     "len": 3.8
+    },
+    {
+     "midi": 76,
+     "file": "orch/harp/harp_76.mp3",
+     "len": 3.8
+    }
+   ],
+   "choirA": [
+    {
+     "midi": 48,
+     "file": "orch/choirA/choirA_48.mp3",
+     "len": 7.0,
+     "ls": 1.0,
+     "le": 6.1
+    },
+    {
+     "midi": 50,
+     "file": "orch/choirA/choirA_50.mp3",
+     "len": 7.0,
+     "ls": 1.0,
+     "le": 6.1
+    },
+    {
+     "midi": 52,
+     "file": "orch/choirA/choirA_52.mp3",
+     "len": 7.0,
+     "ls": 1.0,
+     "le": 6.1
+    },
+    {
+     "midi": 55,
+     "file": "orch/choirA/choirA_55.mp3",
+     "len": 7.0,
+     "ls": 1.0,
+     "le": 6.1
+    },
+    {
+     "midi": 57,
+     "file": "orch/choirA/choirA_57.mp3",
+     "len": 7.0,
+     "ls": 1.0,
+     "le": 6.1
+    },
+    {
+     "midi": 60,
+     "file": "orch/choirA/choirA_60.mp3",
+     "len": 7.0,
+     "ls": 1.0,
+     "le": 6.1
+    }
+   ],
+   "choirU": [
+    {
+     "midi": 48,
+     "file": "orch/choirU/choirU_48.mp3",
+     "len": 7.0,
+     "ls": 1.0,
+     "le": 6.1
+    },
+    {
+     "midi": 50,
+     "file": "orch/choirU/choirU_50.mp3",
+     "len": 7.0,
+     "ls": 1.0,
+     "le": 6.1
+    },
+    {
+     "midi": 52,
+     "file": "orch/choirU/choirU_52.mp3",
+     "len": 7.0,
+     "ls": 1.0,
+     "le": 6.1
+    },
+    {
+     "midi": 55,
+     "file": "orch/choirU/choirU_55.mp3",
+     "len": 7.0,
+     "ls": 1.0,
+     "le": 6.1
+    },
+    {
+     "midi": 57,
+     "file": "orch/choirU/choirU_57.mp3",
+     "len": 7.0,
+     "ls": 1.0,
+     "le": 6.1
+    },
+    {
+     "midi": 60,
+     "file": "orch/choirU/choirU_60.mp3",
+     "len": 7.0,
+     "ls": 1.0,
+     "le": 6.1
+    }
+   ]
+  },
+  "perc": {
+   "taiko": [
+    "orch/perc/taiko_1.mp3",
+    "orch/perc/taiko_2.mp3",
+    "orch/perc/taiko_3.mp3"
+   ],
+   "taikoRim": [
+    "orch/perc/taikoRim_1.mp3"
+   ],
+   "timp": [
+    "orch/perc/timp_1.mp3",
+    "orch/perc/timp_2.mp3",
+    "orch/perc/timp_3.mp3",
+    "orch/perc/timp_4.mp3",
+    "orch/perc/timp_5.mp3"
+   ],
+   "timpRoll": [
+    "orch/perc/timpRoll_1.mp3"
+   ],
+   "dum": [
+    "orch/perc/dum_1.mp3",
+    "orch/perc/dum_2.mp3"
+   ],
+   "tek": [
+    "orch/perc/tek_1.mp3",
+    "orch/perc/tek_2.mp3",
+    "orch/perc/tek_3.mp3"
+   ],
+   "ka": [
+    "orch/perc/ka_1.mp3"
+   ],
+   "frame": [
+    "orch/perc/frame_1.mp3",
+    "orch/perc/frame_2.mp3"
+   ],
+   "frameHi": [
+    "orch/perc/frameHi_1.mp3",
+    "orch/perc/frameHi_2.mp3",
+    "orch/perc/frameHi_3.mp3"
+   ],
+   "riq": [
+    "orch/perc/riq_1.mp3",
+    "orch/perc/riq_2.mp3",
+    "orch/perc/riq_3.mp3"
+   ],
+   "fcym": [
+    "orch/perc/fcym_1.mp3"
+   ],
+   "gong": [
+    "orch/perc/gong_1.mp3"
+   ],
+   "crash": [
+    "orch/perc/crash_1.mp3"
+   ],
+   "swell": [
+    "orch/perc/swell_1.mp3",
+    "orch/perc/swell_2.mp3"
+   ]
+  },
+  "vo": {
+   "skill": [
+    "vo/skill_1.mp3",
+    "vo/skill_2.mp3",
+    "vo/skill_3.mp3",
+    "vo/skill_4.mp3",
+    "vo/skill_5.mp3",
+    "vo/skill_6.mp3",
+    "vo/skill_7.mp3"
+   ],
+   "jump": [
+    "vo/jump_1.mp3",
+    "vo/jump_2.mp3"
+   ],
+   "trick": [
+    "vo/trick_1.mp3",
+    "vo/trick_2.mp3",
+    "vo/trick_3.mp3"
+   ],
+   "laugh": [
+    "vo/laugh_1.mp3",
+    "vo/laugh_2.mp3"
+   ],
+   "hurt": [
+    "vo/hurt_1.mp3",
+    "vo/hurt_2.mp3",
+    "vo/hurt_3.mp3",
+    "vo/hurt_4.mp3",
+    "vo/hurt_5.mp3",
+    "vo/hurt_6.mp3"
+   ],
+   "death": [
+    "vo/death_1.mp3",
+    "vo/death_2.mp3"
+   ],
+   "ult": [
+    "vo/ult_1.mp3",
+    "vo/ult_2.mp3"
+   ],
+   "line:prepare": [
+    "vo/line_prepare_1.mp3"
+   ],
+   "line:sudden": [
+    "vo/line_sudden_1.mp3"
+   ],
+   "line:fight": [
+    "vo/line_fight_1.mp3"
+   ],
+   "line:killit": [
+    "vo/line_killit_1.mp3"
+   ],
+   "line:ready": [
+    "vo/line_ready_1.mp3"
+   ],
+   "serket:rise": [
+    "vo/serket_rise_1.mp3"
+   ],
+   "serket:wake": [
+    "vo/serket_wake_1.mp3"
+   ],
+   "serket:ultname": [
+    "vo/serket_ultname_1.mp3"
+   ],
+   "serket:strike": [
+    "vo/serket_strike_1.mp3"
+   ],
+   "serket:again": [
+    "vo/serket_again_1.mp3"
+   ],
+   "serket:good": [
+    "vo/serket_good_1.mp3"
+   ],
+   "serket:behind": [
+    "vo/serket_behind_1.mp3"
+   ],
+   "serket:jump": [
+    "vo/serket_jump_1.mp3"
+   ],
+   "serket:hold": [
+    "vo/serket_hold_1.mp3"
+   ],
+   "serket:flip": [
+    "vo/serket_flip_1.mp3"
+   ],
+   "serket:balance": [
+    "vo/serket_balance_1.mp3"
+   ],
+   "serket:getup": [
+    "vo/serket_getup_1.mp3"
+   ],
+   "serket:heart": [
+    "vo/serket_heart_1.mp3"
+   ],
+   "serket:shoot": [
+    "vo/serket_shoot_1.mp3"
+   ],
+   "serket:domain": [
+    "vo/serket_domain_1.mp3"
+   ],
+   "serket:trapped": [
+    "vo/serket_trapped_1.mp3"
+   ],
+   "serket:kill": [
+    "vo/serket_kill_1.mp3"
+   ],
+   "serket:hunger": [
+    "vo/serket_hunger_1.mp3"
+   ],
+   "serket:mine": [
+    "vo/serket_mine_1.mp3"
+   ],
+   "serket:night": [
+    "vo/serket_night_1.mp3"
+   ],
+   "serket:boss": [
+    "vo/serket_boss_1.mp3"
+   ],
+   "serket:well": [
+    "vo/serket_well_1.mp3"
+   ],
+   "serket:breath": [
+    "vo/serket_breath_1.mp3"
+   ],
+   "serket:roar": [
+    "vo/serket_roar_1.mp3",
+    "vo/serket_roar_2.mp3"
+   ]
+  },
+  "vo_text": {
+   "line:prepare": "Prepare yourself.",
+   "line:sudden": "Sudden death.",
+   "line:fight": "Fight.",
+   "line:killit": "Kill it.",
+   "line:ready": "Ready.",
+   "serket:rise": "Rise, my little hunter.",
+   "serket:wake": "Wake... and devour.",
+   "serket:ultname": "Serket... ascendant.",
+   "serket:strike": "Strike.",
+   "serket:again": "Again.",
+   "serket:good": "Good. Very good.",
+   "serket:behind": "Behind you.",
+   "serket:jump": "Jump.",
+   "serket:hold": "Hold... and fly.",
+   "serket:flip": "Now. Turn in the air.",
+   "serket:balance": "Mind your balance.",
+   "serket:getup": "Get up, child.",
+   "serket:heart": "Guard your heart.",
+   "serket:shoot": "Let them hear your gun.",
+   "serket:domain": "Welcome to my domain.",
+   "serket:trapped": "There is no way out, little one.",
+   "serket:kill": "Kill it.",
+   "serket:hunger": "I hunger.",
+   "serket:mine": "They are mine.",
+   "serket:night": "The night is hungry.",
+   "serket:boss": "This one is old. Be careful.",
+   "serket:well": "You have done well."
+  }
+ },
+ "files": {
+  "orch/str/str_40.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/susvib/susvib_E1_v3_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/str/str_45.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Solo Contrabass/SusVib/BKCtbss_SusVib_A1_v3_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/str/str_43.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/susvib/susvib_G1_v3_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/str/str_47.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/susvib/susvib_B1_v3_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/str/str_50.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/susvib/susvib_D2_v3_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/str/str_53.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/susvib/susvib_F2_v3_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/str/str_57.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/susvib/susvib_A2_v3_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/str/str_62.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Viola Section/susvib/ViolaEns_susvib_D3_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/str/str_65.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Viola Section/susvib/ViolaEns_susvib_F3_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/str/str_69.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Viola Section/susvib/ViolaEns_susvib_A3_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/str/str_72.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Viola Section/susvib/ViolaEns_susvib_C4_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/str/str_76.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Violin Section/susVib/VlnEns_susVib_E4_v2.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/str/str_79.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Violin Section/susVib/VlnEns_susVib_G4_v2.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/str/str_83.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Violin Section/susVib/VlnEns_susVib_B4_v2.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/str/str_86.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Violin Section/susVib/VlnEns_susVib_D5_v2.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/trem/trem_40.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/trem/trem_E1_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/trem/trem_43.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/trem/trem_G1_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/trem/trem_59.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/trem/trem_B2_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/trem/trem_50.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/trem/trem_D2_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/trem/trem_53.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/trem/trem_F2_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/trem/trem_57.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/trem/trem_A2_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/trem/trem_76.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Violin Section/Trem/VlnEns_Trem_E4_v2.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/trem/trem_79.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Violin Section/Trem/VlnEns_Trem_G4_v2.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/trem/trem_83.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Violin Section/Trem/VlnEns_Trem_B4_v2.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/spic/spic_40.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/spic/spic_E1_v2_RR1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/spic/spic_43.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/spic/spic_G1_v2_RR1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/spic/spic_47.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/spic/spic_B1_v2_RR1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/spic/spic_50.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/spic/spic_D2_v2_RR1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/spic/spic_53.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/spic/spic_F2_v2_RR1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/spic/spic_57.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/spic/spic_A2_v2_RR1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/spic/spic_62.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Viola Section/spic/Violas_spic_D3_v2_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/spic/spic_69.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Viola Section/spic/Violas_spic_A3_v2_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/spic/spic_76.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Violin Section/Spic/VlnEns_Spic_E4_v2_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/horn/horn_43.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/F Horn/sus/MOHorn_sus_G1_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/horn/horn_46.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/F Horn/sus/MOHorn_sus_A#1_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/horn/horn_50.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/F Horn/sus/MOHorn_sus_D2_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/horn/horn_53.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/F Horn/sus/MOHorn_sus_F2_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/horn/horn_57.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/F Horn/sus/MOHorn_sus_A2_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/horn/horn_60.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/F Horn/sus/MOHorn_sus_C3_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/horn/horn_77.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/F Horn/sus/MOHorn_sus_F4_v1_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/lowbr/lowbr_41.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/Tuba/sus/Tuba3_sus_F1_v2_rr1_Mid.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/lowbr/lowbr_46.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/Tuba/sus/Tuba3_sus_A#1_v2_rr1_Mid.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/lowbr/lowbr_50.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/Tuba/sus/Tuba3_sus_D2_v2_rr1_Mid.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/lowbr/lowbr_53.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/Tenor Trombone/sus/tenortbn_sus_F2_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/lowbr/lowbr_60.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/Tenor Trombone/sus/tenortbn_sus_C3_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/tpt/tpt_67.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/Trumpet/sus/Sum_SHTrumpet_sus_G3_v3_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/tpt/tpt_70.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/Trumpet/sus/Sum_SHTrumpet_sus_A#3_v3_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/tpt/tpt_74.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/Trumpet/sus/Sum_SHTrumpet_sus_D4_v3_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/tpt/tpt_77.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/Trumpet/sus/Sum_SHTrumpet_sus_F4_v3_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/tpt/tpt_81.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/Trumpet/sus/Sum_SHTrumpet_sus_A4_v3_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/tpt/tpt_84.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/Trumpet/sus/Sum_SHTrumpet_sus_C5_v3_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/ney/ney_64.mp3": {
+   "sources": [
+    "VSCO-2-CE:Woodwinds/Flute/susNV/LDFlute_susNV_E3_v1_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/ney/ney_69.mp3": {
+   "sources": [
+    "VSCO-2-CE:Woodwinds/Flute/susNV/LDFlute_susNV_A3_v1_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/ney/ney_72.mp3": {
+   "sources": [
+    "VSCO-2-CE:Woodwinds/Flute/susNV/LDFlute_susNV_C4_v1_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/ney/ney_76.mp3": {
+   "sources": [
+    "VSCO-2-CE:Woodwinds/Flute/susNV/LDFlute_susNV_E4_v1_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/ney/ney_81.mp3": {
+   "sources": [
+    "VSCO-2-CE:Woodwinds/Flute/susNV/LDFlute_susNV_A4_v1_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/ney/ney_84.mp3": {
+   "sources": [
+    "VSCO-2-CE:Woodwinds/Flute/susNV/LDFlute_susNV_C5_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/ney/ney_88.mp3": {
+   "sources": [
+    "VSCO-2-CE:Woodwinds/Flute/susNV/LDFlute_susNV_E5_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/harp/harp_38.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Harp/KSHarp_D2_mf.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/harp/harp_41.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Harp/KSHarp_F2_mf.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/harp/harp_45.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Harp/KSHarp_A2_mf.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/harp/harp_48.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Harp/KSHarp_C3_mf.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/harp/harp_52.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Harp/KSHarp_E3_mf.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/harp/harp_55.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Harp/KSHarp_G3_mf.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/harp/harp_59.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Harp/KSHarp_B3_mf.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/harp/harp_62.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Harp/KSHarp_D4_mf.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/harp/harp_65.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Harp/KSHarp_F4_mf.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/harp/harp_69.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Harp/KSHarp_A4_mf.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/harp/harp_72.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Harp/KSHarp_C5_mf.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/harp/harp_76.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Harp/KSHarp_E5_mf.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/choirA/choirA_48.mp3": {
+   "sources": [
+    "freesound:763909 (ShangusBurger, CC0)"
+   ],
+   "license": [
+    "CC0 1.0 - Freesound, ShangusBurger (Shane Vincent), GameSoundCon2024 Walla"
+   ]
+  },
+  "orch/choirA/choirA_50.mp3": {
+   "sources": [
+    "freesound:763909 (ShangusBurger, CC0)"
+   ],
+   "license": [
+    "CC0 1.0 - Freesound, ShangusBurger (Shane Vincent), GameSoundCon2024 Walla"
+   ]
+  },
+  "orch/choirA/choirA_52.mp3": {
+   "sources": [
+    "freesound:763909 (ShangusBurger, CC0)"
+   ],
+   "license": [
+    "CC0 1.0 - Freesound, ShangusBurger (Shane Vincent), GameSoundCon2024 Walla"
+   ]
+  },
+  "orch/choirA/choirA_55.mp3": {
+   "sources": [
+    "freesound:763909 (ShangusBurger, CC0)"
+   ],
+   "license": [
+    "CC0 1.0 - Freesound, ShangusBurger (Shane Vincent), GameSoundCon2024 Walla"
+   ]
+  },
+  "orch/choirA/choirA_57.mp3": {
+   "sources": [
+    "freesound:763909 (ShangusBurger, CC0)"
+   ],
+   "license": [
+    "CC0 1.0 - Freesound, ShangusBurger (Shane Vincent), GameSoundCon2024 Walla"
+   ]
+  },
+  "orch/choirA/choirA_60.mp3": {
+   "sources": [
+    "freesound:763909 (ShangusBurger, CC0)"
+   ],
+   "license": [
+    "CC0 1.0 - Freesound, ShangusBurger (Shane Vincent), GameSoundCon2024 Walla"
+   ]
+  },
+  "orch/choirU/choirU_48.mp3": {
+   "sources": [
+    "freesound:763913 (ShangusBurger, CC0)"
+   ],
+   "license": [
+    "CC0 1.0 - Freesound, ShangusBurger (Shane Vincent), GameSoundCon2024 Walla"
+   ]
+  },
+  "orch/choirU/choirU_50.mp3": {
+   "sources": [
+    "freesound:763913 (ShangusBurger, CC0)"
+   ],
+   "license": [
+    "CC0 1.0 - Freesound, ShangusBurger (Shane Vincent), GameSoundCon2024 Walla"
+   ]
+  },
+  "orch/choirU/choirU_52.mp3": {
+   "sources": [
+    "freesound:763913 (ShangusBurger, CC0)"
+   ],
+   "license": [
+    "CC0 1.0 - Freesound, ShangusBurger (Shane Vincent), GameSoundCon2024 Walla"
+   ]
+  },
+  "orch/choirU/choirU_55.mp3": {
+   "sources": [
+    "freesound:763913 (ShangusBurger, CC0)"
+   ],
+   "license": [
+    "CC0 1.0 - Freesound, ShangusBurger (Shane Vincent), GameSoundCon2024 Walla"
+   ]
+  },
+  "orch/choirU/choirU_57.mp3": {
+   "sources": [
+    "freesound:763913 (ShangusBurger, CC0)"
+   ],
+   "license": [
+    "CC0 1.0 - Freesound, ShangusBurger (Shane Vincent), GameSoundCon2024 Walla"
+   ]
+  },
+  "orch/choirU/choirU_60.mp3": {
+   "sources": [
+    "freesound:763913 (ShangusBurger, CC0)"
+   ],
+   "license": [
+    "CC0 1.0 - Freesound, ShangusBurger (Shane Vincent), GameSoundCon2024 Walla"
+   ]
+  },
+  "orch/perc/taiko_1.mp3": {
+   "sources": [
+    "VSCO-2-CE:VSCO 1 Percussion/drums/other/ethnic/giant/mallet/EthnicLargeMallet_hit_ff_1.wav",
+    "VSCO-2-CE:VSCO 1 Percussion/drums/bass/bdrum_fff_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/perc/taiko_2.mp3": {
+   "sources": [
+    "VSCO-2-CE:VSCO 1 Percussion/drums/other/ethnic/giant/mallet/EthnicLargeMallet_hit_ff_2.wav",
+    "VSCO-2-CE:VSCO 1 Percussion/drums/bass/bdrum3_fff_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/perc/taiko_3.mp3": {
+   "sources": [
+    "VSCO-2-CE:VSCO 1 Percussion/drums/other/ethnic/giant/hand/EthnicLargeHand_hit_ff_1.wav",
+    "VSCO-2-CE:VSCO 1 Percussion/drums/bass/bdrum_fff_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/perc/taikoRim_1.mp3": {
+   "sources": [
+    "VSCO-2-CE:VSCO 1 Percussion/drums/other/ethnic/giant/EthnicLargeStick_rimshot_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/perc/timp_1.mp3": {
+   "sources": [
+    "VSCO-2-CE:Percussion/Timpani/Timpani1_Hit_v3_rr1_Sum.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/perc/timp_2.mp3": {
+   "sources": [
+    "VSCO-2-CE:Percussion/Timpani/Timpani2_Hit_v4_rr1_Sum.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/perc/timp_3.mp3": {
+   "sources": [
+    "VSCO-2-CE:Percussion/Timpani/Timpani3_Hit_v4_rr1_Sum.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/perc/timp_4.mp3": {
+   "sources": [
+    "VSCO-2-CE:Percussion/Timpani/Timpani4_Hit_v4_rr1_Sum.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/perc/timp_5.mp3": {
+   "sources": [
+    "VSCO-2-CE:Percussion/Timpani/Timpani5_Hit_v4_rr1_Sum.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/perc/timpRoll_1.mp3": {
+   "sources": [
+    "VSCO-2-CE:Percussion/Timpani/Rolls/Timpani1_Roll_v5_rr1_Sum.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/perc/dum_1.mp3": {
+   "sources": [
+    "VCSL:Membranophones/Struck Membranophones/Darbuka/Darbuka_1_hit_vl2_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/dum_2.mp3": {
+   "sources": [
+    "VCSL:Membranophones/Struck Membranophones/Darbuka/Darbuka_1_hit_vl1_rr2.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/tek_1.mp3": {
+   "sources": [
+    "VCSL:Membranophones/Struck Membranophones/Darbuka/Darbuka_3_hit_vl2_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/tek_2.mp3": {
+   "sources": [
+    "VCSL:Membranophones/Struck Membranophones/Darbuka/Darbuka_5_hit_vl2_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/tek_3.mp3": {
+   "sources": [
+    "VCSL:Membranophones/Struck Membranophones/Darbuka/Darbuka_4_hit_vl2_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/ka_1.mp3": {
+   "sources": [
+    "VCSL:Membranophones/Struck Membranophones/Darbuka/Darbuka_2_hit_vl2_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/frame_1.mp3": {
+   "sources": [
+    "VCSL:Membranophones/Struck Membranophones/Frame Drum/HDrumL_Hit_v3_rr1_Sum.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/frame_2.mp3": {
+   "sources": [
+    "VCSL:Membranophones/Struck Membranophones/Frame Drum/HDrumL_Hit_v3_rr2_Sum.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/frameHi_1.mp3": {
+   "sources": [
+    "VCSL:Membranophones/Struck Membranophones/Frame Drum/HDrumS_Hit_v3_rr1_Sum.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/frameHi_2.mp3": {
+   "sources": [
+    "VCSL:Membranophones/Struck Membranophones/Frame Drum/HDrumS_HitMuted_v3_rr1_Sum.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/frameHi_3.mp3": {
+   "sources": [
+    "VCSL:Membranophones/Struck Membranophones/Frame Drum/HDrumL_Hand_rr1_Sum.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/riq_1.mp3": {
+   "sources": [
+    "VCSL:Idiophones/Struck Idiophones/Tambourine 1/Tamb1_Hit_v2_rr1_Mid.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/riq_2.mp3": {
+   "sources": [
+    "VCSL:Idiophones/Struck Idiophones/Tambourine 1/Tamb1_Hit_v1_rr1_Mid.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/riq_3.mp3": {
+   "sources": [
+    "VCSL:Idiophones/Struck Idiophones/Tambourine 1/Tamb1_Shake_rr1_Mid.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/fcym_1.mp3": {
+   "sources": [
+    "VCSL:Idiophones/Struck Idiophones/Finger Cymbals/Fing_Cymb.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/gong_1.mp3": {
+   "sources": [
+    "VCSL:Idiophones/Struck Idiophones/Gong 1/gong_fff.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/crash_1.mp3": {
+   "sources": [
+    "VCSL:Idiophones/Struck Idiophones/Suspended Cymbal 1/susCymb1_hit_fff1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/swell_1.mp3": {
+   "sources": [
+    "VCSL:Idiophones/Struck Idiophones/Suspended Cymbal 1/susCymb1_cresc_4s.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/perc/swell_2.mp3": {
+   "sources": [
+    "VCSL:Idiophones/Struck Idiophones/Suspended Cymbal 1/susCymb1_cresc_2s.wav"
+   ],
+   "license": [
+    "CC0 1.0 - Versilian Community Sample Library (Versilian Studios)"
+   ]
+  },
+  "orch/trem/trem_47.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Cello Section/trem/trem_B2_v2_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/trem/trem_62.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Viola Section/trem/Violas_trem_D3_v2_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "orch/trem/trem_69.mp3": {
+   "sources": [
+    "VSCO-2-CE:Strings/Viola Section/trem/Violas_trem_A3_v2_rr1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  },
+  "vo/skill_1.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXEfrt_Male01Effort_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/skill_2.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXEfrt_Male01Effort_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/skill_3.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXEfrt_Male02Effort_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/skill_4.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXEfrt_Male02Effort_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/skill_5.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXScrm_MaleScream_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/skill_6.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXScrm_MaleScream_OS_02.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/skill_7.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXScrm_MaleScream_OS_03.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/jump_1.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXEfrt_Male01Effort_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/jump_2.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXEfrt_Male02Effort_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/trick_1.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXLaff_Male02Laugh_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/trick_2.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXLaff_Male02Laugh_OS_03.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/trick_3.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXLaff_Male01Laugh_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/laugh_1.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXLaff_EvilLaugh_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/laugh_2.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXLaff_EvilLaugh_OS_02.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/hurt_1.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXMale_Male01Hurt_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/hurt_2.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXMale_Male01Hurt_OS_02.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/hurt_3.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXMale_Male01Hurt_OS_03.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/hurt_4.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXMale_Male02Hurt_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/hurt_5.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXMale_Male02Hurt_OS_02.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/hurt_6.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXMale_Male02Hurt_OS_03.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/death_1.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXMale_Male01DeathScream_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/death_2.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXMale_Male02DeathScream_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/ult_1.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXScrm_MaleScream_OS_02.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/ult_2.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXScrm_MaleScream_OS_03.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/line_prepare_1.mp3": {
+   "sources": [
+    "Kenney Voiceover Pack Fighter:prepare_yourself.ogg"
+   ],
+   "license": [
+    "CC0 1.0 - Kenney, Voiceover Pack: Fighter"
+   ]
+  },
+  "vo/line_sudden_1.mp3": {
+   "sources": [
+    "Kenney Voiceover Pack Fighter:sudden_death.ogg"
+   ],
+   "license": [
+    "CC0 1.0 - Kenney, Voiceover Pack: Fighter"
+   ]
+  },
+  "vo/line_fight_1.mp3": {
+   "sources": [
+    "Kenney Voiceover Pack Fighter:fight.ogg"
+   ],
+   "license": [
+    "CC0 1.0 - Kenney, Voiceover Pack: Fighter"
+   ]
+  },
+  "vo/line_killit_1.mp3": {
+   "sources": [
+    "Kenney Voiceover Pack Fighter:kill_it.ogg"
+   ],
+   "license": [
+    "CC0 1.0 - Kenney, Voiceover Pack: Fighter"
+   ]
+  },
+  "vo/line_ready_1.mp3": {
+   "sources": [
+    "Kenney Voiceover Pack Fighter:ready.ogg"
+   ],
+   "license": [
+    "CC0 1.0 - Kenney, Voiceover Pack: Fighter"
+   ]
+  },
+  "vo/serket_rise_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Rise, my little hunter.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_wake_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Wake... and devour.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_ultname_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Serket... ascendant.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_strike_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Strike.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_again_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Again.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_good_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Good. Very good.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_behind_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Behind you.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_jump_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Jump.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_hold_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Hold... and fly.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_flip_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Now. Turn in the air.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_balance_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Mind your balance.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_getup_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Get up, child.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_heart_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Guard your heart.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_shoot_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Let them hear your gun.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_domain_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Welcome to my domain.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_trapped_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"There is no way out, little one.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_kill_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"Kill it.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_hunger_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"I hunger.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_mine_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"They are mine.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_night_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"The night is hungry.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_boss_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"This one is old. Be careful.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_well_1.mp3": {
+   "sources": [
+    "piper:ljspeech:\"You have done well.\""
+   ],
+   "license": [
+    "Piper TTS (MIT), en_US ljspeech voice (LJ Speech dataset, public domain)"
+   ]
+  },
+  "vo/serket_breath_1.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXWhsp_WhispersCreepy_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/serket_roar_1.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXEfrt_Female01Effort_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "vo/serket_roar_2.mp3": {
+   "sources": [
+    "OculusAudioPack01:VOXEfrt_Female02Effort_OS_01.ogg"
+   ],
+   "license": [
+    "CC BY 4.0 - Oculus Audio Pack 01 (Oculus VR, LLC)"
+   ]
+  },
+  "orch/horn/horn_74.mp3": {
+   "sources": [
+    "VSCO-2-CE:Brass/F Horn/sus/MOHorn_sus_D4_v1_1.wav"
+   ],
+   "license": [
+    "CC0 1.0 - VS Chamber Orchestra 2: Community Edition (Versilian Studios)"
+   ]
+  }
+ }
+}

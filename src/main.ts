@@ -1,3 +1,4 @@
+import { Ultimate } from './game/player/Ultimate';
 import './style.css';
 import type { StageId, HeroId } from './game/meta/Stage';
 import { Engine } from './engine/Engine';
@@ -33,6 +34,7 @@ engine.loader = loading;
 export const music = new Music(engine.audio, 'audio/');
 (window as any).__music = music;
 voice.attach(engine.audio, 'audio/');
+Ultimate.onVoice = (cue) => { if (cue === 'cast') voice.play('ult'); };
 engine.onAfterUpdate.push((dt, rdt) => music.update(rdt));
 engine.start();
 applySettings(engine);

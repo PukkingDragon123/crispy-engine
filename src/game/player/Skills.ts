@@ -433,7 +433,7 @@ export class Skills {
       this.empower(k, combo >= this.hotStreak * 2.5, aim ?? this.player.aimPoint.clone());
       this.ctx.events.emit('hotCast', k, combo);
     }
-    this.ctx.events.emit('skillCast', k);
+    this.ctx.events.emit('skillCast', k); (window as any).__voice?.play?.(`skill:${k}`);
     if (this.echo) this.ctx.engine.tweens.after(0.3, () => this.echoCast(k));
   }
 
